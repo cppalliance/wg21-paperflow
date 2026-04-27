@@ -230,7 +230,8 @@ async def run_download(
             try:
                 on_progress(result)
             except Exception:
-                logger.warning("on_progress progress hook raised; continuing", exc_info=True)
+                logger.warning("on_progress progress hook raised; disabling for remainder of run", exc_info=True)
+                on_progress = None
 
     return {"succeeded": succeeded, "skipped": skipped_papers, "failed": failed}
 
