@@ -178,7 +178,10 @@ async def run_download(
         to_process = [p for p in all_papers if p.get("url")]
 
     if on_total is not None:
-        on_total(len(to_process))
+        try:
+            on_total(len(to_process))
+        except Exception:
+            logger.warning("on_total progress hook raised; continuing", exc_info=True)
 
     semaphore = asyncio.Semaphore(concurrency)
 
@@ -224,7 +227,10 @@ async def run_download(
         else:
             failed.append(result)
         if on_progress is not None:
-            on_progress(result)
+            try:
+                on_progress(result)
+            except Exception:
+                logger.warning("on_progress progress hook raised; continuing", exc_info=True)
 
     return {"succeeded": succeeded, "skipped": skipped_papers, "failed": failed}
 
