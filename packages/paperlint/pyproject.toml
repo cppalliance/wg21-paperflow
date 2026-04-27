@@ -12,6 +12,7 @@ dependencies = [
     "openai",
     "python-dotenv",
     "requests",
+    "rich",
 ]
 
 [project.scripts]
