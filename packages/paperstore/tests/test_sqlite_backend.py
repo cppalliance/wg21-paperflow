@@ -146,6 +146,51 @@ def test_put_source_rejects_suffix_without_dot(store: SqliteBackend):
         store.put_source("P1", b"x", suffix="pdf")
 
 
+def test_atomic_write_bytes_cleans_partial_on_failure(
+    store: SqliteBackend, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """A rename failure must remove the .partial file, not the (absent) target."""
+    from paperstore import sqlite_backend as backend_mod
+
+    def _boom(src, dst):
+        raise OSError("simulated rename failure")
+
+    monkeypatch.setattr(backend_mod, "_atomic_replace", _boom)
+    target = tmp_path / "p1.pdf"
+    with pytest.raises(OSError, match="simulated rename"):
+        store._atomic_write_bytes(target, b"data")
+    assert not target.exists()
+    assert not (tmp_path / "p1.pdf.partial").exists()
+
+
+def test_atomic_write_text_cleans_partial_on_failure(
+    store: SqliteBackend, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """Same cleanup contract for the text variant."""
+    from paperstore import sqlite_backend as backend_mod
+
+    def _boom(src, dst):
+        raise OSError("simulated rename failure")
+
+    monkeypatch.setattr(backend_mod, "_atomic_replace", _boom)
+    target = tmp_path / "p1.md"
+    with pytest.raises(OSError, match="simulated rename"):
+        store._atomic_write_text(target, "body")
+    assert not target.exists()
+    assert not (tmp_path / "p1.md.partial").exists()
+
+
+def test_writers_do_not_leave_temp_files_after_success(
+    store: SqliteBackend, tmp_path: Path
+):
+    """No .partial or legacy .tmp.* siblings should linger after a successful write."""
+    store.put_source("P1", b"x", suffix=".pdf")
+    store.write_paper_md("P1", "body")
+    store.write_evaluation_json("P1", {"summary": "ok"})
+    leftovers = list(tmp_path.glob("*.partial")) + list(tmp_path.glob("*.tmp.*"))
+    assert leftovers == []
+
+
 def test_list_papers_for_year_missing_raises(store: SqliteBackend):
     with pytest.raises(MissingMailingIndexError):
         store.list_papers_for_year("9999")

@@ -126,6 +126,39 @@ class SqliteBackend(StorageBackend):
         self._conn.execute(f"UPDATE papers SET {cols} WHERE paper_id = ?", vals)
         self._conn.commit()
 
+    def _atomic_write_bytes(self, path: Path, content: bytes) -> Path:
+        """Write ``content`` to ``path`` via a sibling ``.partial`` file.
+
+        Uses ``<name>.partial`` (not ``<stem>.tmp.<suffix>``) so a stale
+        temp file isn't mistaken for a real artifact by workspace-scanning
+        callers. Cleans up the temp file on failure.
+        """
+        temp_path = path.with_name(path.name + ".partial")
+        try:
+            temp_path.write_bytes(content)
+            _atomic_replace(temp_path, path)
+        except Exception:
+            try:
+                temp_path.unlink()
+            except OSError:
+                pass
+            raise
+        return path
+
+    def _atomic_write_text(self, path: Path, content: str) -> Path:
+        """UTF-8 text counterpart to :meth:`_atomic_write_bytes`."""
+        temp_path = path.with_name(path.name + ".partial")
+        try:
+            temp_path.write_text(content, encoding="utf-8")
+            _atomic_replace(temp_path, path)
+        except Exception:
+            try:
+                temp_path.unlink()
+            except OSError:
+                pass
+            raise
+        return path
+
     def _row_to_dict(self, row: sqlite3.Row) -> dict:
         d = dict(row)
         # Decode JSON-encoded authors back to a list.
@@ -240,13 +273,9 @@ class SqliteBackend(StorageBackend):
                 f"put_source: suffix must start with '.' (got {suffix!r})"
             )
         pid = paper_id.strip().upper()
-        final_path = self._workspace / f"{pid.lower()}{suffix}"
-        temp_path = final_path.with_stem(final_path.stem + ".tmp")
-        if temp_path.exists():
-            temp_path.unlink()
-        temp_path.write_bytes(content)
-        _atomic_replace(temp_path, final_path)
-        # Ensure row exists before patching.
+        final_path = self._atomic_write_bytes(
+            self._workspace / f"{pid.lower()}{suffix}", content
+        )
         self._conn.execute(
             "INSERT OR IGNORE INTO papers (paper_id) VALUES (?)", (pid,)
         )
@@ -257,12 +286,9 @@ class SqliteBackend(StorageBackend):
     def write_paper_md(self, paper_id: str, markdown: str) -> Path:
         """Write markdown atomically and record the path in the DB."""
         pid = paper_id.strip().upper()
-        final_path = self._workspace / f"{pid.lower()}.md"
-        temp_path = final_path.with_stem(final_path.stem + ".tmp")
-        if temp_path.exists():
-            temp_path.unlink()
-        temp_path.write_text(markdown, encoding="utf-8")
-        _atomic_replace(temp_path, final_path)
+        final_path = self._atomic_write_text(
+            self._workspace / f"{pid.lower()}.md", markdown
+        )
         self._conn.execute(
             "INSERT OR IGNORE INTO papers (paper_id) VALUES (?)", (pid,)
         )
@@ -311,14 +337,10 @@ class SqliteBackend(StorageBackend):
     def write_evaluation_json(self, paper_id: str, evaluation: dict) -> Path:
         """Write eval JSON to disk and upsert summary into evals table."""
         pid = paper_id.strip().upper()
-        final_path = self._workspace / f"{pid.lower()}.eval.json"
-        temp_path = final_path.with_stem(final_path.stem + ".tmp")
-        if temp_path.exists():
-            temp_path.unlink()
-        temp_path.write_text(
-            json.dumps(evaluation, indent=2, ensure_ascii=False), encoding="utf-8"
+        final_path = self._atomic_write_text(
+            self._workspace / f"{pid.lower()}.eval.json",
+            json.dumps(evaluation, indent=2, ensure_ascii=False),
         )
-        _atomic_replace(temp_path, final_path)
 
         self._conn.execute(
             """
