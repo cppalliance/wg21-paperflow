@@ -156,18 +156,17 @@ def main() -> int:
     )
 
     args = parser.parse_args()
-    backend = SqliteBackend(args.workspace_dir)
-
-    if args.command == "list-years":
-        return _cmd_list_years(backend)
-    if args.command == "show-year":
-        return _cmd_show_year(backend, args.year)
-    if args.command == "ls-papers":
-        return _cmd_ls_papers(backend, args.year)
-    if args.command == "show-paper":
-        return _cmd_show_paper(backend, args.paper_id)
-    if args.command == "reconcile":
-        return _cmd_reconcile(backend)
+    with SqliteBackend(args.workspace_dir) as backend:
+        if args.command == "list-years":
+            return _cmd_list_years(backend)
+        if args.command == "show-year":
+            return _cmd_show_year(backend, args.year)
+        if args.command == "ls-papers":
+            return _cmd_ls_papers(backend, args.year)
+        if args.command == "show-paper":
+            return _cmd_show_paper(backend, args.paper_id)
+        if args.command == "reconcile":
+            return _cmd_reconcile(backend)
     parser.print_help()
     return 1
 
