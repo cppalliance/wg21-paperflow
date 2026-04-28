@@ -125,15 +125,6 @@ class SqliteBackend(StorageBackend):
 
     # ---- internal helpers -------------------------------------------------
 
-    def _patch_fields(self, paper_id: str, fields: dict) -> None:
-        """Update specific columns on the papers row for ``paper_id``."""
-        if not fields:
-            return
-        cols = ", ".join(f"{k} = ?" for k in fields)
-        vals = list(fields.values()) + [paper_id.upper()]
-        self._conn.execute(f"UPDATE papers SET {cols} WHERE paper_id = ?", vals)
-        self._conn.commit()
-
     def _atomic_write_bytes(self, path: Path, content: bytes) -> Path:
         """Write ``content`` to ``path`` via a sibling ``.partial`` file.
 
@@ -284,14 +275,7 @@ class SqliteBackend(StorageBackend):
         final_path = self._atomic_write_bytes(
             self._workspace / f"{pid.lower()}{suffix}", content
         )
-        with self._conn:
-            self._conn.execute(
-                "INSERT OR IGNORE INTO papers (paper_id) VALUES (?)", (pid,)
-            )
-            self._conn.execute(
-                "UPDATE papers SET source_file = ? WHERE paper_id = ?",
-                (str(final_path), pid),
-            )
+        self.record_source(pid, final_path)
         return final_path
 
     def write_paper_md(self, paper_id: str, markdown: str) -> Path:
@@ -300,14 +284,7 @@ class SqliteBackend(StorageBackend):
         final_path = self._atomic_write_text(
             self._workspace / f"{pid.lower()}.md", markdown
         )
-        with self._conn:
-            self._conn.execute(
-                "INSERT OR IGNORE INTO papers (paper_id) VALUES (?)", (pid,)
-            )
-            self._conn.execute(
-                "UPDATE papers SET markdown_path = ? WHERE paper_id = ?",
-                (str(final_path), pid),
-            )
+        self.record_markdown(pid, final_path)
         return final_path
 
     def write_meta_json(self, paper_id: str, meta: dict) -> Path:
@@ -389,6 +366,39 @@ class SqliteBackend(StorageBackend):
             self._workspace / f"{pid.lower()}.{name}.json",
             json.dumps(payload, indent=2, ensure_ascii=False),
         )
+
+    def record_source(self, paper_id: str, path: Path | str) -> None:
+        """Stamp ``path`` as ``source_file`` for ``paper_id``."""
+        pid = paper_id.strip().upper()
+        with self._conn:
+            self._conn.execute(
+                "INSERT OR IGNORE INTO papers (paper_id) VALUES (?)", (pid,)
+            )
+            self._conn.execute(
+                "UPDATE papers SET source_file = ? WHERE paper_id = ?",
+                (str(path), pid),
+            )
+
+    def record_markdown(
+        self, paper_id: str, path: Path | str, *, intent: str | None = None
+    ) -> None:
+        """Stamp ``path`` as ``markdown_path`` (and optionally ``intent``)."""
+        pid = paper_id.strip().upper()
+        with self._conn:
+            self._conn.execute(
+                "INSERT OR IGNORE INTO papers (paper_id) VALUES (?)", (pid,)
+            )
+            if intent:
+                self._conn.execute(
+                    "UPDATE papers SET markdown_path = ?, intent = ? "
+                    "WHERE paper_id = ?",
+                    (str(path), intent, pid),
+                )
+            else:
+                self._conn.execute(
+                    "UPDATE papers SET markdown_path = ? WHERE paper_id = ?",
+                    (str(path), pid),
+                )
 
     # ---- reads ------------------------------------------------------------
 

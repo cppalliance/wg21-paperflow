@@ -75,11 +75,7 @@ def _cmd_convert(
             md_path, intent = convert_paper(
                 pid, source_path, meta, write_prompts=write_prompts
             )
-            # Record markdown path and intent in DB
-            backend._patch_fields(pid.strip().upper(), {
-                "markdown_path": str(md_path),
-                **({"intent": intent} if intent else {}),
-            })
+            backend.record_markdown(pid, md_path, intent=intent or None)
             print(f"Converted {pid} -> {md_path}")
         except (MissingSourceError, MissingMetaError) as e:
             print(f"Skipping {pid}: {e}", file=sys.stderr)

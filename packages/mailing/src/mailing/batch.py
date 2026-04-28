@@ -97,7 +97,7 @@ def stage_mailing(
 
         path = do_download(pid, store.workspace_dir, source_url=url)
         if path is not None:
-            store._patch_fields(pid.upper(), {"source_file": str(path)})
+            store.record_source(pid, path)
             counts["downloaded"] += 1
 
     return counts

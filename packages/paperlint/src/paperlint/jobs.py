@@ -220,7 +220,7 @@ async def run_download(
     for coro in asyncio.as_completed(tasks):
         result = await coro
         if result["status"] == "ok":
-            backend._patch_fields(result["paper_id"], {"source_file": result["source_file"]})
+            backend.record_source(result["paper_id"], result["source_file"])
             succeeded.append(result["paper_id"])
         elif result["status"] == "skipped":
             skipped_papers.append(result)
@@ -316,10 +316,11 @@ async def run_convert(
     for coro in asyncio.as_completed(tasks):
         result = await coro
         if result["status"] == "ok":
-            backend._patch_fields(result["paper_id"], {
-                "markdown_path": result["markdown_path"],
-                "intent": result["intent"],
-            })
+            backend.record_markdown(
+                result["paper_id"],
+                result["markdown_path"],
+                intent=result["intent"] or None,
+            )
             succeeded.append(result["paper_id"])
         elif result["status"] == "skipped":
             skipped.append(result)

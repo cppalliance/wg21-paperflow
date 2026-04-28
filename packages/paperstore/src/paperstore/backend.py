@@ -105,6 +105,26 @@ class StorageBackend(ABC):
         Returns the file path.
         """
 
+    @abstractmethod
+    def record_source(self, paper_id: str, path: Path | str) -> None:
+        """Stamp ``path`` as the staged source file for ``paper_id`` in the index.
+
+        For callers that already wrote the file by other means (e.g., a
+        download worker that returns a Path). Atomically inserts the row
+        if absent and sets ``source_file``. Does not touch the filesystem.
+        """
+
+    @abstractmethod
+    def record_markdown(
+        self, paper_id: str, path: Path | str, *, intent: str | None = None
+    ) -> None:
+        """Stamp ``path`` as the converted markdown for ``paper_id`` in the index.
+
+        Optionally also records ``intent`` (the YAML-front-matter signal
+        from tomd). See :meth:`record_source` for the file-already-written
+        use case.
+        """
+
     # ---- reads ------------------------------------------------------------
 
     @abstractmethod

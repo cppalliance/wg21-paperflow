@@ -38,7 +38,7 @@ def _convert_and_read(store: SqliteBackend, paper_id: str) -> str:
     source_path = store.get_source_path(paper_id)
     meta = store.get_meta(paper_id)
     md_path, _intent = api.convert_paper(paper_id, source_path, meta)
-    store._patch_fields(paper_id.strip().upper(), {"markdown_path": str(md_path)})
+    store.record_markdown(paper_id, md_path)
     return md_path.read_text(encoding="utf-8")
 
 

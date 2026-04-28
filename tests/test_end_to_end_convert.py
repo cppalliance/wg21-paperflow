@@ -71,11 +71,11 @@ def test_end_to_end_convert(store):
             source_url="https://www.open-std.org/jtc1/sc22/wg21/docs/papers/2026/p1112r4.pdf",
         )
     # Record source_file in DB (normally done by run_download)
-    store._patch_fields(paper_id, {"source_file": str(source_path)})
+    store.record_source(paper_id, source_path)
 
     meta = store.get_meta(paper_id)
     md_path, _intent = convert_paper(paper_id, source_path, meta)
-    store._patch_fields(paper_id, {"markdown_path": str(md_path)})
+    store.record_markdown(paper_id, md_path)
 
     workspace = store.workspace_dir
     stem = paper_id.lower()
