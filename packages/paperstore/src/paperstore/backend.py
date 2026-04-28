@@ -125,6 +125,22 @@ class StorageBackend(ABC):
         use case.
         """
 
+    @abstractmethod
+    def reconcile(self) -> dict[str, int]:
+        """Backfill DB rows from on-disk artifacts. Non-destructive.
+
+        Scans the workspace for known artifact filenames (sources,
+        markdowns, evaluations) and fills the corresponding DB columns
+        for any file that isn't currently indexed. Existing non-empty
+        values are preserved.
+
+        Returns counts of newly-indexed artifacts:
+        ``{"sources": N, "markdowns": M, "evaluations": K}``.
+        Useful as a recovery tool when the DB is lost or out of sync
+        with the workspace, and as the basis for an admin/management
+        command.
+        """
+
     # ---- reads ------------------------------------------------------------
 
     @abstractmethod

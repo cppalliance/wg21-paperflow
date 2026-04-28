@@ -112,6 +112,16 @@ def _cmd_show_paper(backend: SqliteBackend, paper_id: str) -> int:
     return 0
 
 
+def _cmd_reconcile(backend: SqliteBackend) -> int:
+    counts = backend.reconcile()
+    print(
+        f"Backfilled: {counts['sources']} sources, "
+        f"{counts['markdowns']} markdowns, "
+        f"{counts['evaluations']} evaluations."
+    )
+    return 0
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(
         prog="paperstore",
@@ -140,6 +150,11 @@ def main() -> int:
     show_p = sub.add_parser("show-paper", help="Print a paper's metadata JSON.")
     show_p.add_argument("paper_id")
 
+    sub.add_parser(
+        "reconcile",
+        help="Backfill DB rows from on-disk artifacts (non-destructive).",
+    )
+
     args = parser.parse_args()
     backend = SqliteBackend(args.workspace_dir)
 
@@ -151,6 +166,8 @@ def main() -> int:
         return _cmd_ls_papers(backend, args.year)
     if args.command == "show-paper":
         return _cmd_show_paper(backend, args.paper_id)
+    if args.command == "reconcile":
+        return _cmd_reconcile(backend)
     parser.print_help()
     return 1
 

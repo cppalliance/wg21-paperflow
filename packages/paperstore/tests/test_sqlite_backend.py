@@ -281,6 +281,62 @@ def test_write_evaluation_json_rolls_back_on_sql_failure(
         store.get_evaluation("P1")
 
 
+def test_reconcile_empty_workspace(store: SqliteBackend):
+    """Empty workspace is a clean no-op."""
+    assert store.reconcile() == {"sources": 0, "markdowns": 0, "evaluations": 0}
+
+
+def test_reconcile_backfills_orphan_artifacts(
+    store: SqliteBackend, tmp_path: Path
+):
+    """Files dropped into the workspace get indexed without re-writing them."""
+    (tmp_path / "p1.pdf").write_bytes(b"%PDF-1.7\n")
+    (tmp_path / "p2.html").write_text("<html/>")
+    (tmp_path / "p3.md").write_text("# body\n")
+    (tmp_path / "p4.eval.json").write_text('{"summary": "ok"}')
+
+    counts = store.reconcile()
+    assert counts == {"sources": 2, "markdowns": 1, "evaluations": 1}
+    assert store.get_source_path("P1") == tmp_path / "p1.pdf"
+    assert store.get_source_path("P2") == tmp_path / "p2.html"
+    assert store.get_paper_md("P3") == "# body\n"
+    assert store.get_evaluation("P4") == {"summary": "ok"}
+
+
+def test_reconcile_preserves_existing_values(store: SqliteBackend, tmp_path: Path):
+    """Reconcile fills empties only; it does not overwrite indexed paths."""
+    real_path = store.put_source("P1", b"x", suffix=".pdf")
+    # Drop a sibling file with the same pid (e.g., an unrelated .html stray);
+    # source_file is already set, so reconcile should not touch it.
+    (tmp_path / "p1.html").write_text("<html/>")
+    counts = store.reconcile()
+    # The .pdf stem matches an indexed row; the .html stem hits the same row
+    # which already has a non-empty source_file, so neither updates.
+    assert counts["sources"] == 0
+    assert store.get_source_path("P1") == real_path
+
+
+def test_reconcile_skips_intermediates_partials_and_db(
+    store: SqliteBackend, tmp_path: Path
+):
+    """Non-artifact files (intermediates, .partial, papers.db) are ignored."""
+    (tmp_path / "p1.meta.json").write_text("{}")
+    (tmp_path / "p1.1-findings.json").write_text("[]")
+    (tmp_path / "p1.prompts.json").write_text("[]")
+    (tmp_path / "p1.pdf.partial").write_bytes(b"in-flight")
+    counts = store.reconcile()
+    assert counts == {"sources": 0, "markdowns": 0, "evaluations": 0}
+    assert store.list_all_paper_ids() == []
+
+
+def test_reconcile_is_idempotent(store: SqliteBackend, tmp_path: Path):
+    (tmp_path / "p1.pdf").write_bytes(b"x")
+    first = store.reconcile()
+    second = store.reconcile()
+    assert first == {"sources": 1, "markdowns": 0, "evaluations": 0}
+    assert second == {"sources": 0, "markdowns": 0, "evaluations": 0}
+
+
 def test_list_papers_for_year_missing_raises(store: SqliteBackend):
     with pytest.raises(MissingMailingIndexError):
         store.list_papers_for_year("9999")

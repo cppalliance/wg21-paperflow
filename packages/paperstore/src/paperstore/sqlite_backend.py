@@ -400,6 +400,74 @@ class SqliteBackend(StorageBackend):
                     (str(path), pid),
                 )
 
+    _SOURCE_SUFFIXES = (".pdf", ".html", ".htm")
+
+    def reconcile(self) -> dict[str, int]:
+        """Backfill DB rows from on-disk artifacts. See ABC for semantics."""
+        sources: list[tuple[str, Path]] = []
+        markdowns: list[tuple[str, Path]] = []
+        evaluations: list[tuple[str, Path]] = []
+
+        for path in sorted(self._workspace.iterdir()):
+            if not path.is_file():
+                continue
+            name = path.name
+            if name == "papers.db" or name.startswith("papers.db-"):
+                continue
+            if name.endswith(".partial"):
+                continue
+            if name.endswith(".eval.json"):
+                evaluations.append((name[: -len(".eval.json")].upper(), path))
+                continue
+            if name.endswith(".json"):
+                # .meta.json, .prompts.json, .1-findings.json, .2-gate.json,
+                # .2c-suppressed.json -- intermediates, not indexed.
+                continue
+            if name.endswith(".md"):
+                markdowns.append((name[: -len(".md")].upper(), path))
+                continue
+            for suffix in self._SOURCE_SUFFIXES:
+                if name.endswith(suffix):
+                    sources.append((name[: -len(suffix)].upper(), path))
+                    break
+
+        counts = {"sources": 0, "markdowns": 0, "evaluations": 0}
+        with self._conn:
+            for pid, path in sources:
+                self._conn.execute(
+                    "INSERT OR IGNORE INTO papers (paper_id) VALUES (?)", (pid,)
+                )
+                cursor = self._conn.execute(
+                    "UPDATE papers SET source_file = ? "
+                    "WHERE paper_id = ? AND source_file = ''",
+                    (str(path), pid),
+                )
+                if cursor.rowcount > 0:
+                    counts["sources"] += 1
+            for pid, path in markdowns:
+                self._conn.execute(
+                    "INSERT OR IGNORE INTO papers (paper_id) VALUES (?)", (pid,)
+                )
+                cursor = self._conn.execute(
+                    "UPDATE papers SET markdown_path = ? "
+                    "WHERE paper_id = ? AND markdown_path = ''",
+                    (str(path), pid),
+                )
+                if cursor.rowcount > 0:
+                    counts["markdowns"] += 1
+            for pid, path in evaluations:
+                self._conn.execute(
+                    "INSERT OR IGNORE INTO papers (paper_id) VALUES (?)", (pid,)
+                )
+                cursor = self._conn.execute(
+                    "INSERT OR IGNORE INTO evals (paper_id, eval_json_path) "
+                    "VALUES (?, ?)",
+                    (pid, str(path)),
+                )
+                if cursor.rowcount > 0:
+                    counts["evaluations"] += 1
+        return counts
+
     # ---- reads ------------------------------------------------------------
 
     def get_meta(self, paper_id: str) -> dict:
