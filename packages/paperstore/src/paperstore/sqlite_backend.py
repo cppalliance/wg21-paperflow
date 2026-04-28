@@ -87,6 +87,14 @@ class SqliteBackend(StorageBackend):
     Constructor creates ``workspace_dir`` and ``papers.db`` on first use.
     All read/write methods are synchronous and not thread-safe; call only
     from the main event-loop coroutine.
+
+    Atomicity model: files are the source of truth, the DB is an index.
+    Each writer first lands the artifact via an atomic ``.partial`` rename,
+    then commits the matching DB row inside a single transaction
+    (``with self._conn:``). The window between those two steps is brief but
+    non-zero: a crash there leaves a complete file with a stale or absent
+    row. Recovery is simply to re-run the operation; the pipeline is
+    idempotent and the next call rewrites both file and row cleanly.
     """
 
     def __init__(self, workspace_dir: Path) -> None:
@@ -276,11 +284,14 @@ class SqliteBackend(StorageBackend):
         final_path = self._atomic_write_bytes(
             self._workspace / f"{pid.lower()}{suffix}", content
         )
-        self._conn.execute(
-            "INSERT OR IGNORE INTO papers (paper_id) VALUES (?)", (pid,)
-        )
-        self._conn.commit()
-        self._patch_fields(pid, {"source_file": str(final_path)})
+        with self._conn:
+            self._conn.execute(
+                "INSERT OR IGNORE INTO papers (paper_id) VALUES (?)", (pid,)
+            )
+            self._conn.execute(
+                "UPDATE papers SET source_file = ? WHERE paper_id = ?",
+                (str(final_path), pid),
+            )
         return final_path
 
     def write_paper_md(self, paper_id: str, markdown: str) -> Path:
@@ -289,11 +300,14 @@ class SqliteBackend(StorageBackend):
         final_path = self._atomic_write_text(
             self._workspace / f"{pid.lower()}.md", markdown
         )
-        self._conn.execute(
-            "INSERT OR IGNORE INTO papers (paper_id) VALUES (?)", (pid,)
-        )
-        self._conn.commit()
-        self._patch_fields(pid, {"markdown_path": str(final_path)})
+        with self._conn:
+            self._conn.execute(
+                "INSERT OR IGNORE INTO papers (paper_id) VALUES (?)", (pid,)
+            )
+            self._conn.execute(
+                "UPDATE papers SET markdown_path = ? WHERE paper_id = ?",
+                (str(final_path), pid),
+            )
         return final_path
 
     def write_meta_json(self, paper_id: str, meta: dict) -> Path:
@@ -304,9 +318,6 @@ class SqliteBackend(StorageBackend):
         previously set by ``put_source`` / ``write_paper_md``.
         """
         pid = paper_id.strip().upper()
-        self._conn.execute(
-            "INSERT OR IGNORE INTO papers (paper_id) VALUES (?)", (pid,)
-        )
         column_map = {
             "year": "year",
             "title": "title",
@@ -328,10 +339,16 @@ class SqliteBackend(StorageBackend):
             fields["authors"] = (
                 json.dumps(authors) if isinstance(authors, list) else str(authors)
             )
-        if fields:
-            self._patch_fields(pid, fields)
-        else:
-            self._conn.commit()
+        with self._conn:
+            self._conn.execute(
+                "INSERT OR IGNORE INTO papers (paper_id) VALUES (?)", (pid,)
+            )
+            if fields:
+                cols = ", ".join(f"{k} = ?" for k in fields)
+                vals = list(fields.values()) + [pid]
+                self._conn.execute(
+                    f"UPDATE papers SET {cols} WHERE paper_id = ?", vals
+                )
         return self._workspace / f"{pid.lower()}.meta.json"  # compat path
 
     def write_evaluation_json(self, paper_id: str, evaluation: dict) -> Path:
@@ -342,27 +359,27 @@ class SqliteBackend(StorageBackend):
             json.dumps(evaluation, indent=2, ensure_ascii=False),
         )
 
-        self._conn.execute(
-            """
-            INSERT OR REPLACE INTO evals
-                (paper_id, pipeline_status, model,
-                 findings_discovered, findings_passed, findings_rejected,
-                 summary, generated, eval_json_path)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                pid,
-                evaluation.get("pipeline_status") or "",
-                evaluation.get("model") or "",
-                evaluation.get("findings_discovered"),
-                evaluation.get("findings_passed"),
-                evaluation.get("findings_rejected"),
-                evaluation.get("summary") or "",
-                evaluation.get("generated") or "",
-                str(final_path),
-            ),
-        )
-        self._conn.commit()
+        with self._conn:
+            self._conn.execute(
+                """
+                INSERT OR REPLACE INTO evals
+                    (paper_id, pipeline_status, model,
+                     findings_discovered, findings_passed, findings_rejected,
+                     summary, generated, eval_json_path)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    pid,
+                    evaluation.get("pipeline_status") or "",
+                    evaluation.get("model") or "",
+                    evaluation.get("findings_discovered"),
+                    evaluation.get("findings_passed"),
+                    evaluation.get("findings_rejected"),
+                    evaluation.get("summary") or "",
+                    evaluation.get("generated") or "",
+                    str(final_path),
+                ),
+            )
         return final_path
 
     def write_intermediate(self, paper_id: str, name: str, payload: Any) -> Path:

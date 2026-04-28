@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import json
+import sqlite3
 from pathlib import Path
 
 import pytest
@@ -26,6 +27,30 @@ from paperstore.errors import (
 @pytest.fixture
 def store(tmp_path: Path) -> SqliteBackend:
     return SqliteBackend(tmp_path)
+
+
+class _FailingConn:
+    """Proxy a sqlite3.Connection, raising OperationalError on the Nth execute()."""
+
+    def __init__(self, real: sqlite3.Connection, fail_on_nth: int) -> None:
+        self._real = real
+        self._fail_on = fail_on_nth
+        self._calls = 0
+
+    def execute(self, *args, **kwargs):
+        self._calls += 1
+        if self._calls == self._fail_on:
+            raise sqlite3.OperationalError("simulated SQL failure")
+        return self._real.execute(*args, **kwargs)
+
+    def __enter__(self):
+        return self._real.__enter__()
+
+    def __exit__(self, *args):
+        return self._real.__exit__(*args)
+
+    def __getattr__(self, name):
+        return getattr(self._real, name)
 
 
 def test_put_source_and_get_source_path(store: SqliteBackend, tmp_path: Path):
@@ -189,6 +214,69 @@ def test_writers_do_not_leave_temp_files_after_success(
     store.write_evaluation_json("P1", {"summary": "ok"})
     leftovers = list(tmp_path.glob("*.partial")) + list(tmp_path.glob("*.tmp.*"))
     assert leftovers == []
+
+
+def test_put_source_rolls_back_on_sql_failure(
+    store: SqliteBackend, tmp_path: Path
+):
+    """If the UPDATE step fails, the file remains but the row is rolled back."""
+    real = store._conn
+    store._conn = _FailingConn(real, fail_on_nth=2)  # 1=INSERT, 2=UPDATE
+    try:
+        with pytest.raises(sqlite3.OperationalError, match="simulated"):
+            store.put_source("P1", b"data", suffix=".pdf")
+    finally:
+        store._conn = real
+    assert (tmp_path / "p1.pdf").exists()
+    with pytest.raises(MissingMetaError):
+        store.get_meta("P1")
+
+
+def test_write_paper_md_rolls_back_on_sql_failure(
+    store: SqliteBackend, tmp_path: Path
+):
+    """File on disk, no DB row, when the UPDATE step fails."""
+    real = store._conn
+    store._conn = _FailingConn(real, fail_on_nth=2)
+    try:
+        with pytest.raises(sqlite3.OperationalError, match="simulated"):
+            store.write_paper_md("P1", "body")
+    finally:
+        store._conn = real
+    assert (tmp_path / "p1.md").exists()
+    with pytest.raises(MissingMetaError):
+        store.get_meta("P1")
+
+
+def test_write_meta_json_rolls_back_on_sql_failure(store: SqliteBackend):
+    """A failed UPDATE leaves the row's prior values intact."""
+    store.upsert_year("2026", [{"paper_id": "P1", "title": "original"}])
+    real = store._conn
+    store._conn = _FailingConn(real, fail_on_nth=2)
+    try:
+        with pytest.raises(sqlite3.OperationalError, match="simulated"):
+            store.write_meta_json("P1", {"title": "updated", "year": "2027"})
+    finally:
+        store._conn = real
+    meta = store.get_meta("P1")
+    assert meta["title"] == "original"
+    assert meta["year"] == "2026"
+
+
+def test_write_evaluation_json_rolls_back_on_sql_failure(
+    store: SqliteBackend, tmp_path: Path
+):
+    """File written to disk, but evals row absent if the INSERT fails."""
+    real = store._conn
+    store._conn = _FailingConn(real, fail_on_nth=1)  # only one execute in this writer
+    try:
+        with pytest.raises(sqlite3.OperationalError, match="simulated"):
+            store.write_evaluation_json("P1", {"summary": "ok"})
+    finally:
+        store._conn = real
+    assert (tmp_path / "p1.eval.json").exists()
+    with pytest.raises(MissingEvaluationError):
+        store.get_evaluation("P1")
 
 
 def test_list_papers_for_year_missing_raises(store: SqliteBackend):
