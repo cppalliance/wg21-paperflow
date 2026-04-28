@@ -17,8 +17,7 @@ new papers (and no ``refetch=True``) does no network work.
 from __future__ import annotations
 
 import logging
-from pathlib import Path
-from typing import Callable, Iterable
+from typing import Callable
 
 from paperstore import StorageBackend
 from paperstore.errors import MissingSourceError
@@ -36,7 +35,7 @@ def stage_mailing(
     refetch: bool = False,
     papers: set[str] | None = None,
     fetch_papers: Callable[[str], list[dict]] | None = None,
-    download: Callable[..., Path | None] | None = None,
+    download: Callable[..., tuple[bytes, str] | None] | None = None,
 ) -> dict:
     """Fetch a mailing's index and stage every paper's source.
 
@@ -95,9 +94,10 @@ def stage_mailing(
             except MissingSourceError:
                 pass
 
-        path = do_download(pid, store.workspace_dir, source_url=url)
-        if path is not None:
-            store.record_source(pid, path)
+        fetched = do_download(pid, source_url=url)
+        if fetched is not None:
+            content, suffix = fetched
+            store.put_source(pid, content, suffix=suffix)
             counts["downloaded"] += 1
 
     return counts

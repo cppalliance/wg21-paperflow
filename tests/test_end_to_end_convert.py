@@ -65,13 +65,13 @@ def test_end_to_end_convert(store):
     )
 
     with patch("mailing.download.httpx.Client", return_value=_make_mock_client(pdf_bytes)):
-        source_path = mailing_download.download_paper(
+        fetched = mailing_download.download_paper(
             paper_id,
-            store.workspace_dir,
             source_url="https://www.open-std.org/jtc1/sc22/wg21/docs/papers/2026/p1112r4.pdf",
         )
-    # Record source_file in DB (normally done by run_download)
-    store.record_source(paper_id, source_path)
+    assert fetched is not None
+    content, suffix = fetched
+    source_path = store.put_source(paper_id, content, suffix=suffix)
 
     meta = store.get_meta(paper_id)
     md_path, _intent = convert_paper(paper_id, source_path, meta)

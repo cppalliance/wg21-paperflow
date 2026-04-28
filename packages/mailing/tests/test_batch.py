@@ -11,8 +11,6 @@
 
 from __future__ import annotations
 
-from pathlib import Path
-
 from mailing.batch import stage_mailing
 from paperstore.testing import store  # noqa: F401  (pytest fixture)
 
@@ -32,12 +30,10 @@ def _rows(*paper_ids: str) -> list[dict]:
 
 
 def _fake_download(download_calls: list[str]):
-    """Return a fake download function that records calls and writes a stub file."""
-    def _download(pid: str, workspace_dir: Path, *, source_url: str) -> Path:
+    """Return a fake download function that records calls and yields stub bytes."""
+    def _download(pid: str, *, source_url: str) -> tuple[bytes, str]:
         download_calls.append(pid)
-        path = workspace_dir / f"{pid.lower()}.pdf"
-        path.write_bytes(b"%PDF-1.7\n")
-        return path
+        return b"%PDF-1.7\n", ".pdf"
     return _download
 
 
@@ -132,7 +128,7 @@ def test_stage_mailing_no_papers_in_mailing(store):
     counts = stage_mailing(
         "2026-01", store,
         fetch_papers=lambda mid: [],
-        download=lambda pid, wdir, *, source_url: Path("/dev/null"),
+        download=lambda pid, *, source_url: (b"", ".pdf"),
     )
     assert counts == {
         "papers_in_index": 0,

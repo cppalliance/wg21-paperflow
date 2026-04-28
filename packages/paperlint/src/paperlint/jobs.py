@@ -185,8 +185,6 @@ async def run_download(
 
     semaphore = asyncio.Semaphore(concurrency)
 
-    workspace_dir = backend.workspace_dir
-
     async def _one(paper: dict) -> dict:
         pid = paper["paper_id"]
         url = paper.get("url", "")
@@ -200,13 +198,18 @@ async def run_download(
                     if existing.exists() and existing.stat().st_size == cl:
                         return {"paper_id": pid, "status": "skipped", "reason": "verified_match"}
             try:
-                # Pass workspace_dir (not backend) - worker must not touch SQLite
-                path = await asyncio.to_thread(
-                    download_paper, pid, workspace_dir, source_url=url, refetch=refetch
+                fetched = await asyncio.to_thread(
+                    download_paper, pid, source_url=url
                 )
-                if path is None:
+                if fetched is None:
                     return {"paper_id": pid, "status": "skipped", "reason": "no_url"}
-                return {"paper_id": pid, "source_file": str(path), "status": "ok"}
+                content, suffix = fetched
+                return {
+                    "paper_id": pid,
+                    "content": content,
+                    "suffix": suffix,
+                    "status": "ok",
+                }
             except Exception as exc:
                 logger.exception("Download failed for %s", pid)
                 return {"paper_id": pid, "status": "error", "error": str(exc)}
@@ -220,7 +223,9 @@ async def run_download(
     for coro in asyncio.as_completed(tasks):
         result = await coro
         if result["status"] == "ok":
-            backend.record_source(result["paper_id"], result["source_file"])
+            backend.put_source(
+                result["paper_id"], result["content"], suffix=result["suffix"]
+            )
             succeeded.append(result["paper_id"])
         elif result["status"] == "skipped":
             skipped_papers.append(result)

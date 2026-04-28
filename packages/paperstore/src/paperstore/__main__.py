@@ -7,11 +7,7 @@
 # Official repository: https://github.com/cppalliance/paperlint
 #
 
-"""Paperstore CLI: inspect what's stored under a workspace.
-
-Read-only. Useful during development to confirm what mailing, tomd, and
-paperlint have written. No network calls, no writes.
-"""
+"""Paperstore CLI: inspect (and reconcile) what's stored under a workspace."""
 
 from __future__ import annotations
 
@@ -125,7 +121,11 @@ def _cmd_reconcile(backend: SqliteBackend) -> int:
 def main() -> int:
     parser = argparse.ArgumentParser(
         prog="paperstore",
-        description="Inspect paperflow artifacts in a workspace directory.",
+        description=(
+            "Inspect paperflow artifacts in a workspace directory. "
+            "The 'reconcile' subcommand backfills DB rows from on-disk "
+            "artifacts (non-destructive); all other commands are read-only."
+        ),
     )
     parser.add_argument(
         "--workspace-dir",

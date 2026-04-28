@@ -459,10 +459,13 @@ class SqliteBackend(StorageBackend):
                 self._conn.execute(
                     "INSERT OR IGNORE INTO papers (paper_id) VALUES (?)", (pid,)
                 )
+                self._conn.execute(
+                    "INSERT OR IGNORE INTO evals (paper_id) VALUES (?)", (pid,)
+                )
                 cursor = self._conn.execute(
-                    "INSERT OR IGNORE INTO evals (paper_id, eval_json_path) "
-                    "VALUES (?, ?)",
-                    (pid, str(path)),
+                    "UPDATE evals SET eval_json_path = ? "
+                    "WHERE paper_id = ? AND eval_json_path = ''",
+                    (str(path), pid),
                 )
                 if cursor.rowcount > 0:
                     counts["evaluations"] += 1

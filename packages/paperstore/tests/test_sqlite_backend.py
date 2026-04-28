@@ -163,8 +163,8 @@ def test_close_is_idempotent(tmp_path: Path):
 def test_context_manager_closes_connection(tmp_path: Path):
     with SqliteBackend(tmp_path) as backend:
         backend.upsert_year("2026", [{"paper_id": "P1"}])
-    # Subsequent queries should fail because the connection is closed.
-    with pytest.raises(Exception):
+    # AttributeError if close() nulled _conn; ProgrammingError if it left a closed handle.
+    with pytest.raises((AttributeError, sqlite3.ProgrammingError)):
         backend.list_all_paper_ids()
 
 
@@ -335,6 +335,23 @@ def test_reconcile_is_idempotent(store: SqliteBackend, tmp_path: Path):
     second = store.reconcile()
     assert first == {"sources": 1, "markdowns": 0, "evaluations": 0}
     assert second == {"sources": 0, "markdowns": 0, "evaluations": 0}
+
+
+def test_reconcile_backfills_empty_eval_json_path(
+    store: SqliteBackend, tmp_path: Path
+):
+    """An evals row with empty eval_json_path is repaired from disk."""
+    store._conn.execute("INSERT INTO papers (paper_id) VALUES (?)", ("P1",))
+    store._conn.execute(
+        "INSERT INTO evals (paper_id, eval_json_path) VALUES (?, ?)",
+        ("P1", ""),
+    )
+    store._conn.commit()
+    (tmp_path / "p1.eval.json").write_text('{"summary": "ok"}')
+
+    counts = store.reconcile()
+    assert counts["evaluations"] == 1
+    assert store.get_evaluation("P1") == {"summary": "ok"}
 
 
 def test_list_papers_for_year_missing_raises(store: SqliteBackend):

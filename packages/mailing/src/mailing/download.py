@@ -7,13 +7,11 @@
 # Official repository: https://github.com/cppalliance/paperlint
 #
 
-"""Download staged paper sources into a paperstore-backed workspace."""
+"""Fetch paper source bytes over HTTP. Pure network I/O, no storage."""
 
 from __future__ import annotations
 
 import logging
-import os
-import time
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -62,32 +60,21 @@ def content_length(url: str, *, timeout: float = 30.0) -> int | None:
 
 def download_paper(
     paper_id: str,
-    workspace_dir: Path,
     *,
     source_url: str,
     timeout: float = _FETCH_TIMEOUT_SEC,
-    refetch: bool = False,
-) -> Path | None:
-    """Download a paper's source file to ``workspace_dir``.
+) -> tuple[bytes, str] | None:
+    """Fetch a paper's source over HTTP.
 
-    Writes via a ``<pid>.tmp.<suffix>`` temp file then ``os.replace`` to the
-    final path. ``os.replace`` is atomic on POSIX; on Windows the rename can
-    transiently raise ``PermissionError`` if the destination is held open by
-    another process, so we retry up to ten times at 100 ms intervals before
-    re-raising. Does NOT touch the database - the caller is responsible for
-    persisting the returned path to storage.
-
-    Returns the local path on success, or ``None`` if ``source_url`` is empty.
+    Returns ``(content, suffix)`` on success; ``None`` if ``source_url``
+    is empty. Suffix is normalized (``.htm`` becomes ``.html``).
+    Threadsafe: performs no storage I/O.
     """
     if not source_url:
         logger.warning("No source URL for %s - skipping download", paper_id)
         return None
 
     suffix = _suffix_from_url(source_url)
-    pid_lower = paper_id.strip().upper().lower()
-    final_path = Path(workspace_dir) / f"{pid_lower}{suffix}"
-    temp_path = final_path.with_stem(final_path.stem + ".tmp")
-
     logger.info("Downloading %s from %s", paper_id, source_url)
 
     with httpx.Client(
@@ -98,23 +85,4 @@ def download_paper(
         resp = client.get(source_url)
         resp.raise_for_status()
 
-    if temp_path.exists():
-        temp_path.unlink()
-
-    try:
-        temp_path.write_bytes(resp.content)
-        for attempt in range(10):
-            try:
-                os.replace(temp_path, final_path)
-                break
-            except PermissionError:
-                if attempt == 9:
-                    raise
-                time.sleep(0.1)
-    except BaseException:
-        if temp_path.exists():
-            temp_path.unlink()
-        raise
-
-    logger.info("Staged %s at %s", paper_id, final_path)
-    return final_path
+    return resp.content, suffix
