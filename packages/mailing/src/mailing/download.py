@@ -12,6 +12,8 @@
 from __future__ import annotations
 
 import logging
+import os
+import time
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -68,9 +70,12 @@ def download_paper(
 ) -> Path | None:
     """Download a paper's source file to ``workspace_dir``.
 
-    Writes atomically via a temp file (``P3642R4.tmp.pdf`` → ``P3642R4.pdf``).
-    Does NOT touch the database - the caller is responsible for persisting
-    the returned path to storage.
+    Writes via a ``<pid>.tmp.<suffix>`` temp file then ``os.replace`` to the
+    final path. ``os.replace`` is atomic on POSIX; on Windows the rename can
+    transiently raise ``PermissionError`` if the destination is held open by
+    another process, so we retry up to ten times at 100 ms intervals before
+    re-raising. Does NOT touch the database - the caller is responsible for
+    persisting the returned path to storage.
 
     Returns the local path on success, or ``None`` if ``source_url`` is empty.
     """
@@ -95,17 +100,21 @@ def download_paper(
 
     if temp_path.exists():
         temp_path.unlink()
-    temp_path.write_bytes(resp.content)
 
-    import os, time
-    for _ in range(10):
-        try:
-            os.replace(temp_path, final_path)
-            break
-        except PermissionError:
-            time.sleep(0.1)
-    else:
-        os.replace(temp_path, final_path)
+    try:
+        temp_path.write_bytes(resp.content)
+        for attempt in range(10):
+            try:
+                os.replace(temp_path, final_path)
+                break
+            except PermissionError:
+                if attempt == 9:
+                    raise
+                time.sleep(0.1)
+    except BaseException:
+        if temp_path.exists():
+            temp_path.unlink()
+        raise
 
     logger.info("Staged %s at %s", paper_id, final_path)
     return final_path

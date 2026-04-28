@@ -36,7 +36,7 @@ def stage_mailing(
     refetch: bool = False,
     papers: set[str] | None = None,
     fetch_papers: Callable[[str], list[dict]] | None = None,
-    download: Callable[..., Path] | None = None,
+    download: Callable[..., Path | None] | None = None,
 ) -> dict:
     """Fetch a mailing's index and stage every paper's source.
 
@@ -98,6 +98,6 @@ def stage_mailing(
         path = do_download(pid, store.workspace_dir, source_url=url)
         if path is not None:
             store._patch_fields(pid.upper(), {"source_file": str(path)})
-        counts["downloaded"] += 1
+            counts["downloaded"] += 1
 
     return counts

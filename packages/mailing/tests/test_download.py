@@ -15,6 +15,7 @@ download_paper now takes workspace_dir (Path) instead of a StorageBackend.
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -74,3 +75,56 @@ def test_download_paper_returns_none_for_empty_url(tmp_path: Path):
 def test_download_paper_rejects_unknown_suffix(tmp_path: Path):
     with pytest.raises(ValueError, match="must end with"):
         md.download_paper("p1", tmp_path, source_url="https://x/paper.docx")
+
+
+def test_download_paper_retries_replace_on_permission_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    pdf_bytes = b"%PDF-1.7\nretry"
+    real_replace = os.replace
+    calls = {"n": 0}
+
+    def flaky_replace(src, dst):
+        calls["n"] += 1
+        if calls["n"] < 3:
+            raise PermissionError("Windows says no")
+        real_replace(src, dst)
+
+    monkeypatch.setattr(md.os, "replace", flaky_replace)
+    monkeypatch.setattr(md.time, "sleep", lambda _s: None)
+
+    with patch("mailing.download.httpx.Client", return_value=_make_mock_client(pdf_bytes)):
+        path = md.download_paper(
+            "p9999r0",
+            tmp_path,
+            source_url="https://www.open-std.org/.../p9999r0.pdf",
+        )
+
+    assert calls["n"] == 3
+    assert path == tmp_path / "p9999r0.pdf"
+    assert path.read_bytes() == pdf_bytes
+
+
+def test_download_paper_raises_after_retries_exhausted(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    pdf_bytes = b"%PDF-1.7\nblocked"
+    calls = {"n": 0}
+
+    def always_blocked(src, dst):
+        calls["n"] += 1
+        raise PermissionError("Windows says no")
+
+    monkeypatch.setattr(md.os, "replace", always_blocked)
+    monkeypatch.setattr(md.time, "sleep", lambda _s: None)
+
+    with patch("mailing.download.httpx.Client", return_value=_make_mock_client(pdf_bytes)):
+        with pytest.raises(PermissionError):
+            md.download_paper(
+                "p9998r0",
+                tmp_path,
+                source_url="https://www.open-std.org/.../p9998r0.pdf",
+            )
+
+    assert calls["n"] == 10
+    assert not (tmp_path / "p9998r0.tmp.pdf").exists()
