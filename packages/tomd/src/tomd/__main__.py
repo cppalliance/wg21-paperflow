@@ -72,10 +72,12 @@ def _cmd_convert(
         try:
             source_path = backend.get_source_path(pid)
             meta = backend.get_meta(pid)
-            md_path, intent = convert_paper(
-                pid, source_path, meta, write_prompts=write_prompts
-            )
-            backend.record_markdown(pid, md_path, intent=intent or None)
+            markdown, prompts, intent = convert_paper(pid, source_path, meta)
+            md_path = backend.write_paper_md(pid, markdown)
+            if write_prompts and prompts:
+                backend.write_intermediate(pid, "prompts", prompts)
+            if intent:
+                backend.record_markdown(pid, md_path, intent=intent)
             print(f"Converted {pid} -> {md_path}")
         except (MissingSourceError, MissingMetaError) as e:
             print(f"Skipping {pid}: {e}", file=sys.stderr)

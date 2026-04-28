@@ -74,8 +74,8 @@ def test_end_to_end_convert(store):
     source_path = store.put_source(paper_id, content, suffix=suffix)
 
     meta = store.get_meta(paper_id)
-    md_path, _intent = convert_paper(paper_id, source_path, meta)
-    store.record_markdown(paper_id, md_path)
+    markdown, _prompts, _intent = convert_paper(paper_id, source_path, meta)
+    md_path = store.write_paper_md(paper_id, markdown)
 
     workspace = store.workspace_dir
     stem = paper_id.lower()

@@ -37,9 +37,9 @@ def _patch_pdf(monkeypatch, md: str, prompts: list[str] | None = None):
 def _convert_and_read(store: SqliteBackend, paper_id: str) -> str:
     source_path = store.get_source_path(paper_id)
     meta = store.get_meta(paper_id)
-    md_path, _intent = api.convert_paper(paper_id, source_path, meta)
-    store.record_markdown(paper_id, md_path)
-    return md_path.read_text(encoding="utf-8")
+    markdown, _prompts, _intent = api.convert_paper(paper_id, source_path, meta)
+    store.write_paper_md(paper_id, markdown)
+    return markdown
 
 
 class TestDispatch:
@@ -164,5 +164,5 @@ class TestErrors:
         source_path = store.get_source_path("P1")
         meta = store.get_meta("P1")
         _patch_pdf(monkeypatch, "# Body\n\ntext\n")
-        md_path, _intent = api.convert_paper("P1", source_path, meta)
-        assert md_path.exists()
+        markdown, _prompts, _intent = api.convert_paper("P1", source_path, meta)
+        assert "text" in markdown

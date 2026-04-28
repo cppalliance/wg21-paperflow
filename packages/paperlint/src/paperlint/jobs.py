@@ -297,11 +297,13 @@ async def run_convert(
         async with semaphore:
             try:
                 paper = _make_paper(paper_row)
-                # No backend passed - convert_one_paper does no SQLite access
+                # Worker reads the source but does no backend writes;
+                # the main coroutine persists through the backend below.
                 result = await asyncio.to_thread(convert_one_paper, paper)
                 return {
                     "paper_id": pid,
-                    "markdown_path": result.markdown_path,
+                    "markdown": result.markdown,
+                    "prompts": result.prompts,
                     "intent": result.intent,
                     "title": result.title,
                     "status": "ok",
@@ -326,12 +328,13 @@ async def run_convert(
     for coro in asyncio.as_completed(tasks):
         result = await coro
         if result["status"] == "ok":
-            backend.record_markdown(
-                result["paper_id"],
-                result["markdown_path"],
-                intent=result["intent"] or None,
-            )
-            succeeded.append(result["paper_id"])
+            pid = result["paper_id"]
+            md_path = backend.write_paper_md(pid, result["markdown"])
+            if result["prompts"]:
+                backend.write_intermediate(pid, "prompts", result["prompts"])
+            if result["intent"]:
+                backend.record_markdown(pid, md_path, intent=result["intent"])
+            succeeded.append(pid)
         elif result["status"] == "skipped":
             skipped.append(result)
         else:

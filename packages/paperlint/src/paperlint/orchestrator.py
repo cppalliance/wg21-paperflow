@@ -87,11 +87,13 @@ def _resolve_storage(
 
 
 def convert_one_paper(paper: "Paper") -> "ConvertResult":
-    """Convert a staged paper source to markdown. No LLM, no database access.
+    """Convert a staged paper source to markdown. No LLM, no I/O beyond
+    reading the source file.
 
-    Takes a :class:`Paper` object with ``source_file`` populated. Writes the
-    markdown to disk atomically. Returns a :class:`ConvertResult` - the caller
-    (``jobs.run_convert``) is responsible for persisting the result to the DB.
+    Takes a :class:`Paper` object with ``source_file`` populated. Returns
+    a :class:`ConvertResult` carrying the markdown and any tomd prompts;
+    the caller (``jobs.run_convert``) is responsible for persisting the
+    result through the storage backend.
 
     Raises:
         RuntimeError: source_file is empty - run ``paperflow download`` first.
@@ -116,14 +118,17 @@ def convert_one_paper(paper: "Paper") -> "ConvertResult":
         "url": paper.url,
     }
 
-    md_path, extracted_intent = tomd_convert_paper(paper_id, source_path, meta)
+    markdown, prompts, extracted_intent = tomd_convert_paper(
+        paper_id, source_path, meta
+    )
 
     # tomd front-matter intent wins over scraper-derived intent
     intent = extracted_intent if extracted_intent else paper.intent
 
     return ConvertResult(
         paper_id=paper_id,
-        markdown_path=str(md_path),
+        markdown=markdown,
+        prompts=prompts,
         intent=intent,
         title=paper.title,
         status="ok",

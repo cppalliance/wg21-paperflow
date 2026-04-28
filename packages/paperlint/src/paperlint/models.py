@@ -124,12 +124,14 @@ class Paper:
 class ConvertResult:
     """Output of a single tomd conversion pass for one paper.
 
-    Returned by :func:`paperlint.orchestrator.convert_one_paper`. The main
-    coroutine writes the fields back to the database; the worker itself
-    never touches the storage backend.
+    Returned by :func:`paperlint.orchestrator.convert_one_paper`. The
+    worker performs no I/O beyond reading the source file; the main
+    coroutine persists ``markdown`` and ``prompts`` through the storage
+    backend.
     """
     paper_id: str
-    markdown_path: str
+    markdown: str
+    prompts: list[str] | None
     intent: str
     title: str
     status: str         # "ok" | "error"

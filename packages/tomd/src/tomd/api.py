@@ -7,13 +7,14 @@
 # Official repository: https://github.com/cppalliance/paperlint
 #
 
-"""Public tomd API: convert a staged paper in paperstore to markdown.
+"""Public tomd API: convert a staged paper source to markdown.
 
-``convert_paper(paper_id, store)`` is the only supported entry point.
-The converter looks up the source file and metadata in ``store`` (errors
-if either is absent), converts, then writes the paper's markdown (and an
-optional ``<pid>.prompts.json`` intermediate of LLM reconcile prompts)
-back through the store. Returns the path of the written markdown.
+``convert_paper(paper_id, source_path, meta)`` is the only supported
+entry point. The function is pure: it reads the source file from disk,
+converts to markdown, and returns the markdown plus any optional LLM
+reconcile prompts. Persisting the result is the caller's job, done
+through a :class:`paperstore.StorageBackend` so non-filesystem backends
+work without changes here.
 
 YAML front-matter fallback lives here: whatever tomd could not extract
 from the source paper is filled in from the mailing-index row for the
@@ -156,24 +157,28 @@ def convert_paper(
     paper_id: str,
     source_path: Path,
     meta: dict,
-    *,
-    write_prompts: bool = True,
-) -> tuple[Path, str]:
-    """Convert a staged source file to markdown. No database access.
+) -> tuple[str, list[str] | None, str]:
+    """Convert a staged source file to markdown. Pure: no database or
+    filesystem writes.
 
-    All inputs are pre-fetched by the caller. Writes the markdown and
-    optional prompts file directly to disk (same directory as source_path).
-    The caller is responsible for recording the returned path in the database.
+    All inputs are pre-fetched by the caller. Reads ``source_path`` from
+    disk, runs the appropriate converter, applies YAML front-matter
+    fallback from ``meta``, strips TOC blocks, and returns the result.
+    The caller is responsible for persisting the markdown (and optional
+    prompts) through the storage backend.
 
-    Returns ``(md_path, extracted_intent)`` where ``extracted_intent`` is the
-    ``intent`` value from the paper's YAML front matter (``""`` if absent).
+    Returns ``(markdown, prompts, extracted_intent)``:
+
+    * ``markdown`` is the converted markdown text.
+    * ``prompts`` is the JSON-serializable list of LLM reconcile prompts
+      tomd produced for uncertain regions, or ``None`` when there are
+      none.
+    * ``extracted_intent`` is the ``intent`` value from the markdown's
+      YAML front matter (``""`` if absent).
 
     Raises:
         RuntimeError: tomd produced no usable markdown.
     """
-    workspace_dir = source_path.parent
-    pid_lower = paper_id.strip().upper().lower()
-
     md, prompts = _convert_with_tomd(source_path)
 
     if prompts:
@@ -191,28 +196,5 @@ def convert_paper(
     md = _apply_metadata_fallback(md, meta)
     md = _strip_toc(md)
 
-    # Atomic write: temp → rename
-    import os, time as _time
-    final_path = workspace_dir / f"{pid_lower}.md"
-    temp_path = final_path.with_stem(final_path.stem + ".tmp")
-    if temp_path.exists():
-        temp_path.unlink()
-    temp_path.write_text(md, encoding="utf-8")
-    for _ in range(10):
-        try:
-            os.replace(temp_path, final_path)
-            break
-        except PermissionError:
-            _time.sleep(0.1)
-    else:
-        os.replace(temp_path, final_path)
-
-    if write_prompts and prompts:
-        prompts_path = workspace_dir / f"{pid_lower}.prompts.json"
-        import json as _json
-        prompts_path.write_text(
-            _json.dumps(prompts, indent=2, ensure_ascii=False), encoding="utf-8"
-        )
-
     extracted_intent = _extract_intent_from_front_matter(md)
-    return final_path, extracted_intent
+    return md, prompts, extracted_intent
