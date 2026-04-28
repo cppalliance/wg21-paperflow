@@ -23,6 +23,7 @@ import json
 import os
 import sqlite3
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -58,7 +59,6 @@ CREATE TABLE IF NOT EXISTS years (
 CREATE TABLE IF NOT EXISTS evals (
     paper_id            TEXT PRIMARY KEY REFERENCES papers(paper_id),
     pipeline_status     TEXT DEFAULT '',
-    eval_timestamp      TEXT DEFAULT '',
     model               TEXT DEFAULT '',
     findings_discovered INTEGER,
     findings_passed     INTEGER,
@@ -102,6 +102,19 @@ class SqliteBackend(StorageBackend):
     def workspace_dir(self) -> Path:
         return self._workspace
 
+    def close(self) -> None:
+        """Close the underlying sqlite3 connection. Idempotent."""
+        conn = getattr(self, "_conn", None)
+        if conn is not None:
+            conn.close()
+            self._conn = None  # type: ignore[assignment]
+
+    def __enter__(self) -> "SqliteBackend":
+        return self
+
+    def __exit__(self, exc_type, exc, tb) -> None:
+        self.close()
+
     # ---- internal helpers -------------------------------------------------
 
     def _patch_fields(self, paper_id: str, fields: dict) -> None:
@@ -136,7 +149,6 @@ class SqliteBackend(StorageBackend):
 
     def upsert_year(self, year: str, papers: list[dict]) -> list[dict]:
         """Insert or update all papers for year. Returns merged list."""
-        from datetime import datetime, timezone
         now = datetime.now(timezone.utc).isoformat()
         self._conn.execute(
             "INSERT OR IGNORE INTO years (year, added) VALUES (?, ?)",
@@ -223,6 +235,10 @@ class SqliteBackend(StorageBackend):
 
     def put_source(self, paper_id: str, content: bytes, *, suffix: str) -> Path:
         """Write source bytes atomically and record the path in the DB."""
+        if not suffix.startswith("."):
+            raise ValueError(
+                f"put_source: suffix must start with '.' (got {suffix!r})"
+            )
         pid = paper_id.strip().upper()
         final_path = self._workspace / f"{pid.lower()}{suffix}"
         temp_path = final_path.with_stem(final_path.stem + ".tmp")
@@ -255,35 +271,41 @@ class SqliteBackend(StorageBackend):
         return final_path
 
     def write_meta_json(self, paper_id: str, meta: dict) -> Path:
-        """Upsert paper metadata into the papers table."""
+        """Merge ``meta`` into the papers row, leaving omitted columns untouched.
+
+        Only columns explicitly present in ``meta`` are written, so callers
+        that omit ``source_file`` / ``markdown_path`` will not clobber values
+        previously set by ``put_source`` / ``write_paper_md``.
+        """
         pid = paper_id.strip().upper()
-        authors = meta.get("authors") or []
-        if isinstance(authors, list):
-            authors_json = json.dumps(authors)
-        else:
-            authors_json = str(authors)
         self._conn.execute(
-            """
-            INSERT OR REPLACE INTO papers
-                (paper_id, year, title, authors, target_group, intent,
-                 url, document_date, mailing_date, source_file, markdown_path)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                pid,
-                meta.get("year") or "",
-                meta.get("title") or "",
-                authors_json,
-                meta.get("target_group") or "",
-                meta.get("intent") or "",
-                meta.get("url") or "",
-                meta.get("document_date") or "",
-                meta.get("mailing_date") or "",
-                meta.get("source_file") or "",
-                meta.get("markdown_path") or "",
-            ),
+            "INSERT OR IGNORE INTO papers (paper_id) VALUES (?)", (pid,)
         )
-        self._conn.commit()
+        column_map = {
+            "year": "year",
+            "title": "title",
+            "target_group": "target_group",
+            "intent": "intent",
+            "url": "url",
+            "document_date": "document_date",
+            "mailing_date": "mailing_date",
+            "source_file": "source_file",
+            "markdown_path": "markdown_path",
+        }
+        fields: dict[str, Any] = {}
+        for key, col in column_map.items():
+            if key in meta:
+                value = meta[key]
+                fields[col] = "" if value is None else value
+        if "authors" in meta:
+            authors = meta.get("authors") or []
+            fields["authors"] = (
+                json.dumps(authors) if isinstance(authors, list) else str(authors)
+            )
+        if fields:
+            self._patch_fields(pid, fields)
+        else:
+            self._conn.commit()
         return self._workspace / f"{pid.lower()}.meta.json"  # compat path
 
     def write_evaluation_json(self, paper_id: str, evaluation: dict) -> Path:
@@ -301,15 +323,14 @@ class SqliteBackend(StorageBackend):
         self._conn.execute(
             """
             INSERT OR REPLACE INTO evals
-                (paper_id, pipeline_status, eval_timestamp, model,
+                (paper_id, pipeline_status, model,
                  findings_discovered, findings_passed, findings_rejected,
                  summary, generated, eval_json_path)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 pid,
                 evaluation.get("pipeline_status") or "",
-                evaluation.get("generated") or "",
                 evaluation.get("model") or "",
                 evaluation.get("findings_discovered"),
                 evaluation.get("findings_passed"),

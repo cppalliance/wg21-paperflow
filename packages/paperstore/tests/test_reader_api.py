@@ -85,3 +85,14 @@ def test_from_uri_file_and_none(tmp_path: Path):
 def test_from_uri_rejects_unsupported_scheme(tmp_path: Path):
     with pytest.raises(ValueError, match="unsupported URI scheme"):
         from_uri("postgres://localhost/x", workspace_dir=tmp_path)
+
+
+def test_from_uri_file_rejects_non_localhost_authority(tmp_path: Path):
+    with pytest.raises(ValueError, match="empty or 'localhost' authority"):
+        from_uri(f"file://example.com{tmp_path}")
+
+
+def test_from_uri_file_allows_localhost_authority(tmp_path: Path):
+    backend = from_uri(f"file://localhost{tmp_path}")
+    assert isinstance(backend, SqliteBackend)
+    assert backend.workspace_dir == tmp_path

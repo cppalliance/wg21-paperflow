@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+from urllib.parse import unquote, urlparse
 
 from paperstore.backend import StorageBackend
 from paperstore.errors import (
@@ -53,9 +54,16 @@ def from_uri(
                 f"(got uri={uri!r}, workspace_dir=None)."
             )
         return SqliteBackend(workspace_dir)
-    if uri.startswith("file://"):
-        path = uri[len("file://"):] or workspace_dir
-        if path is None:
+    parsed = urlparse(uri)
+    if parsed.scheme == "file":
+        # RFC 8089: only an empty or "localhost" authority is permitted.
+        if parsed.netloc and parsed.netloc.lower() != "localhost":
+            raise ValueError(
+                "paperstore.from_uri: file:// URIs must have an empty or "
+                f"'localhost' authority (uri={uri!r})."
+            )
+        path: Path | str | None = unquote(parsed.path) or workspace_dir
+        if not path:
             raise ValueError(
                 f"paperstore.from_uri: file:// URI has no path and no workspace_dir "
                 f"fallback (uri={uri!r})."

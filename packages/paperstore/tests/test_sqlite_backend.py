@@ -103,10 +103,47 @@ def test_upsert_year_and_list_papers(store: SqliteBackend):
 def test_upsert_year_preserves_source_file(store: SqliteBackend):
     """Re-upsert must not clobber source_file set by download."""
     store.upsert_year("2026", [{"paper_id": "P1", "title": "T"}])
-    store.put_source("P1", b"bytes", suffix=".pdf")
+    source_path = store.put_source("P1", b"bytes", suffix=".pdf")
     store.upsert_year("2026", [{"paper_id": "P1", "title": "Updated"}])
     meta = store.get_meta("P1")
-    assert meta["source_file"] != ""  # not clobbered
+    assert meta["source_file"] == str(source_path)
+
+
+def test_write_meta_json_preserves_source_and_markdown(store: SqliteBackend):
+    """write_meta_json must not clobber source_file/markdown_path on omission."""
+    source_path = store.put_source("P1", b"bytes", suffix=".pdf")
+    md_path = store.write_paper_md("P1", "# body\n")
+    store.write_meta_json("P1", {"title": "T", "year": "2026"})
+    meta = store.get_meta("P1")
+    assert meta["title"] == "T"
+    assert meta["source_file"] == str(source_path)
+    assert meta["markdown_path"] == str(md_path)
+
+
+def test_write_meta_json_can_set_source_file_when_provided(store: SqliteBackend):
+    """write_meta_json still writes columns the caller explicitly supplies."""
+    store.write_meta_json("P1", {"title": "T", "source_file": "/tmp/explicit.pdf"})
+    meta = store.get_meta("P1")
+    assert meta["source_file"] == "/tmp/explicit.pdf"
+
+
+def test_close_is_idempotent(tmp_path: Path):
+    backend = SqliteBackend(tmp_path)
+    backend.close()
+    backend.close()
+
+
+def test_context_manager_closes_connection(tmp_path: Path):
+    with SqliteBackend(tmp_path) as backend:
+        backend.upsert_year("2026", [{"paper_id": "P1"}])
+    # Subsequent queries should fail because the connection is closed.
+    with pytest.raises(Exception):
+        backend.list_all_paper_ids()
+
+
+def test_put_source_rejects_suffix_without_dot(store: SqliteBackend):
+    with pytest.raises(ValueError, match="must start with '.'"):
+        store.put_source("P1", b"x", suffix="pdf")
 
 
 def test_list_papers_for_year_missing_raises(store: SqliteBackend):

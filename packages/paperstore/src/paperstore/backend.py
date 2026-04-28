@@ -36,7 +36,19 @@ class StorageBackend(ABC):
 
     @abstractmethod
     def upsert_year(self, year: str, papers: list[dict]) -> list[dict]:
-        """Insert or update all ``papers`` for ``year``. Returns merged list."""
+        """Insert or update all ``papers`` for ``year``.
+
+        Each entry is matched by uppercased ``paper_id``. New rows are
+        inserted; existing rows have their metadata fields overwritten
+        (title, authors, target_group, url, document_date, mailing_date),
+        while completion-state columns set by ``put_source`` /
+        ``write_paper_md`` (``source_file``, ``markdown_path``) are
+        preserved. Rows already present for ``year`` but absent from
+        ``papers`` are retained, not deleted.
+
+        Returns the full set of paper rows for ``year`` after merging,
+        in unspecified order.
+        """
 
     @abstractmethod
     def list_papers_for_year(self, year: str) -> list[dict]:
@@ -73,16 +85,25 @@ class StorageBackend(ABC):
         """Persist the converted markdown. Atomic write. Returns path."""
 
     @abstractmethod
-    def write_meta_json(self, paper_id: str, meta: dict) -> Any:
-        """Persist per-paper metadata (upsert)."""
+    def write_meta_json(self, paper_id: str, meta: dict) -> Path:
+        """Merge ``meta`` into the paper row.
+
+        Only keys present in ``meta`` are written; columns set by
+        ``put_source`` / ``write_paper_md`` are preserved when omitted.
+        Returns a local path callers can use for legacy on-disk meta.json
+        compatibility.
+        """
 
     @abstractmethod
-    def write_evaluation_json(self, paper_id: str, evaluation: dict) -> Any:
-        """Persist the per-paper evaluation deliverable."""
+    def write_evaluation_json(self, paper_id: str, evaluation: dict) -> Path:
+        """Persist the per-paper evaluation deliverable. Returns the file path."""
 
     @abstractmethod
-    def write_intermediate(self, paper_id: str, name: str, payload: Any) -> Any:
-        """Persist a labeled intermediate artifact (e.g. ``1-findings``)."""
+    def write_intermediate(self, paper_id: str, name: str, payload: Any) -> Path:
+        """Persist a labeled intermediate artifact (e.g. ``1-findings``).
+
+        Returns the file path.
+        """
 
     # ---- reads ------------------------------------------------------------
 
