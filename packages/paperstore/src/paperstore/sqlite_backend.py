@@ -383,13 +383,12 @@ class SqliteBackend(StorageBackend):
         return final_path
 
     def write_intermediate(self, paper_id: str, name: str, payload: Any) -> Path:
-        """Write an intermediate artifact JSON to disk."""
+        """Write an intermediate artifact JSON to disk atomically."""
         pid = paper_id.strip().upper()
-        path = self._workspace / f"{pid.lower()}.{name}.json"
-        path.write_text(
-            json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8"
+        return self._atomic_write_text(
+            self._workspace / f"{pid.lower()}.{name}.json",
+            json.dumps(payload, indent=2, ensure_ascii=False),
         )
-        return path
 
     # ---- reads ------------------------------------------------------------
 

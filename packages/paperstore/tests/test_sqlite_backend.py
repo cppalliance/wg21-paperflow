@@ -112,6 +112,8 @@ def test_write_intermediate(store: SqliteBackend, tmp_path: Path):
     path = tmp_path / "p1.1-findings.json"
     assert path.exists()
     assert json.loads(path.read_text())  == [{"n": 1}]
+    # No leftover .partial files; the helper handles temp cleanup.
+    assert list(tmp_path.glob("*.partial")) == []
 
 
 def test_upsert_year_and_list_papers(store: SqliteBackend):
