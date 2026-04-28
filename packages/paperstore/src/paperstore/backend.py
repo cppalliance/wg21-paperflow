@@ -175,6 +175,15 @@ class StorageBackend(ABC):
             paperstore.MissingEvaluationError: evaluation not written.
         """
 
+    @abstractmethod
+    def get_eval_status(self, paper_id: str) -> str | None:
+        """Return ``pipeline_status`` for ``paper_id`` without reading the JSON.
+
+        Returns ``None`` if no evals row exists. Cheap relative to
+        :meth:`get_evaluation`: a single column read, no file I/O. Use
+        for idempotency filters that only need to know completeness.
+        """
+
     # ---- legacy aliases (JsonBackend compat; removed in SqliteBackend) ----
 
     def upsert_mailing_index(

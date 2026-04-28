@@ -194,8 +194,11 @@ async def run_download(
             if verify and paper.get("source_file"):
                 cl = content_length(url)
                 if cl is not None:
-                    existing = Path(paper["source_file"])
-                    if existing.exists() and existing.stat().st_size == cl:
+                    try:
+                        existing_size = Path(paper["source_file"]).stat().st_size
+                    except FileNotFoundError:
+                        existing_size = None
+                    if existing_size == cl:
                         return {"paper_id": pid, "status": "skipped", "reason": "verified_match"}
             try:
                 fetched = await asyncio.to_thread(
@@ -217,8 +220,9 @@ async def run_download(
     tasks = [asyncio.create_task(_one(p)) for p in to_process]
     succeeded = []
     failed = []
+    to_process_ids = {p["paper_id"] for p in to_process}
     skipped_papers = [{"paper_id": p["paper_id"], "reason": "already_staged"}
-                      for p in all_papers if p not in to_process]
+                      for p in all_papers if p["paper_id"] not in to_process_ids]
 
     for coro in asyncio.as_completed(tasks):
         result = await coro
@@ -316,7 +320,8 @@ async def run_convert(
     tasks = [asyncio.create_task(_one(p)) for p in to_process]
     succeeded = []
     failed = []
-    skipped = [p["paper_id"] for p in all_papers if p not in to_process]
+    to_process_ids = {p["paper_id"] for p in to_process}
+    skipped = [p["paper_id"] for p in all_papers if p["paper_id"] not in to_process_ids]
 
     for coro in asyncio.as_completed(tasks):
         result = await coro
@@ -355,17 +360,11 @@ async def run_eval(
 
     # Filter: only papers with markdown; skip already-complete unless refetch.
     if not refetch:
-        to_process = []
-        for p in all_papers:
-            if not p.get("markdown_path"):
-                continue
-            try:
-                ev = backend.get_evaluation(p["paper_id"])
-                if ev.get("pipeline_status") == "complete":
-                    continue
-            except Exception:
-                pass
-            to_process.append(p)
+        to_process = [
+            p for p in all_papers
+            if p.get("markdown_path")
+            and backend.get_eval_status(p["paper_id"]) != "complete"
+        ]
     else:
         to_process = [p for p in all_papers if p.get("markdown_path")]
 
@@ -390,7 +389,8 @@ async def run_eval(
     tasks = [asyncio.create_task(_one(p)) for p in to_process]
     succeeded = []
     failed = []
-    skipped = [p["paper_id"] for p in all_papers if p not in to_process]
+    to_process_ids = {p["paper_id"] for p in to_process}
+    skipped = [p["paper_id"] for p in all_papers if p["paper_id"] not in to_process_ids]
 
     for coro in asyncio.as_completed(tasks):
         result = await coro

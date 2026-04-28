@@ -107,6 +107,15 @@ def test_get_evaluation_missing_raises(store: SqliteBackend):
         store.get_evaluation("NOPE")
 
 
+def test_get_eval_status_returns_pipeline_status(store: SqliteBackend):
+    store.upsert_year("2026", [{"paper_id": "P1"}, {"paper_id": "P2"}])
+    store.write_evaluation_json("P1", {"summary": "ok", "pipeline_status": "complete"})
+    store.write_evaluation_json("P2", {"summary": "x", "pipeline_status": "partial"})
+    assert store.get_eval_status("P1") == "complete"
+    assert store.get_eval_status("P2") == "partial"
+    assert store.get_eval_status("NOPE") is None
+
+
 def test_write_intermediate(store: SqliteBackend, tmp_path: Path):
     store.write_intermediate("P1", "1-findings", [{"n": 1}])
     path = tmp_path / "p1.1-findings.json"

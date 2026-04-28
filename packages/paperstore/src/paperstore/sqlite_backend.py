@@ -532,6 +532,15 @@ class SqliteBackend(StorageBackend):
             )
         return json.loads(path.read_text(encoding="utf-8"))
 
+    def get_eval_status(self, paper_id: str) -> str | None:
+        row = self._conn.execute(
+            "SELECT pipeline_status FROM evals WHERE paper_id = ?",
+            (paper_id.strip().upper(),),
+        ).fetchone()
+        if row is None:
+            return None
+        return row["pipeline_status"] or None
+
     def list_years(self) -> list[tuple[str, int]]:
         """Return ``[(year, paper_count)]`` sorted by year."""
         rows = self._conn.execute(
