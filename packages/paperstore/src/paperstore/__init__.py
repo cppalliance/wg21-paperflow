@@ -13,7 +13,8 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from urllib.parse import unquote, urlparse
+from urllib.parse import urlparse
+from urllib.request import url2pathname
 
 from paperstore.backend import StorageBackend
 from paperstore.errors import (
@@ -62,7 +63,11 @@ def from_uri(
                 "paperstore.from_uri: file:// URIs must have an empty or "
                 f"'localhost' authority (uri={uri!r})."
             )
-        path: Path | str | None = unquote(parsed.path) or workspace_dir
+        # url2pathname handles platform-specific decoding: on Windows,
+        # "/C:/Users/foo" becomes "C:\\Users\\foo"; on POSIX it is identity
+        # for unencoded paths. unquote-then-Path would silently drop the
+        # drive on Windows.
+        path: Path | str | None = url2pathname(parsed.path) if parsed.path else workspace_dir
         if not path:
             raise ValueError(
                 f"paperstore.from_uri: file:// URI has no path and no workspace_dir "

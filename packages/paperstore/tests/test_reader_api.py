@@ -77,7 +77,7 @@ def test_from_uri_file_and_none(tmp_path: Path):
     assert isinstance(b1, SqliteBackend)
     assert b1.workspace_dir == tmp_path
 
-    b2 = from_uri(f"file://{tmp_path}")
+    b2 = from_uri(tmp_path.as_uri())
     assert isinstance(b2, SqliteBackend)
     assert b2.workspace_dir == tmp_path
 
@@ -88,11 +88,15 @@ def test_from_uri_rejects_unsupported_scheme(tmp_path: Path):
 
 
 def test_from_uri_file_rejects_non_localhost_authority(tmp_path: Path):
+    # Inject an authority into the canonical empty-authority URI so the
+    # resulting string is well-formed on both POSIX and Windows.
+    bad_uri = tmp_path.as_uri().replace("file://", "file://example.com", 1)
     with pytest.raises(ValueError, match="empty or 'localhost' authority"):
-        from_uri(f"file://example.com{tmp_path}")
+        from_uri(bad_uri)
 
 
 def test_from_uri_file_allows_localhost_authority(tmp_path: Path):
-    backend = from_uri(f"file://localhost{tmp_path}")
+    localhost_uri = tmp_path.as_uri().replace("file://", "file://localhost", 1)
+    backend = from_uri(localhost_uri)
     assert isinstance(backend, SqliteBackend)
     assert backend.workspace_dir == tmp_path
