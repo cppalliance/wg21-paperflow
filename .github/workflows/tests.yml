@@ -34,13 +34,14 @@ jobs:
         run: uv run ruff check packages tests
 
   package-tests:
-    name: ${{ matrix.package }} tests
-    runs-on: ubuntu-latest
+    name: ${{ matrix.package }} tests (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 10
     strategy:
       fail-fast: false
       matrix:
         package: [paperstore, mailing, tomd, paperlint]
+        os: [ubuntu-latest, windows-latest]
     steps:
       - uses: actions/checkout@v4
 
