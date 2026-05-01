@@ -287,7 +287,7 @@ wheels = [
 
 [[package]]
 name = "mailing"
-version = "0.1.0"
+version = "0.2.1"
 source = { editable = "packages/mailing" }
 dependencies = [
     { name = "beautifulsoup4" },
@@ -364,7 +364,7 @@ wheels = [
 
 [[package]]
 name = "paperlint"
-version = "0.2.0"
+version = "0.2.1"
 source = { editable = "packages/paperlint" }
 dependencies = [
     { name = "mailing" },
@@ -387,7 +387,7 @@ requires-dist = [
 
 [[package]]
 name = "paperstore"
-version = "0.1.0"
+version = "0.2.1"
 source = { editable = "packages/paperstore" }
 
 [[package]]
@@ -612,7 +612,7 @@ wheels = [
 
 [[package]]
 name = "tomd"
-version = "0.2.0"
+version = "0.2.1"
 source = { editable = "packages/tomd" }
 dependencies = [
     { name = "beautifulsoup4" },

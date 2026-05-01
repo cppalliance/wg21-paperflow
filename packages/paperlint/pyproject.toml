@@ -1,6 +1,6 @@
 [project]
 name = "paperlint"
-version = "0.2.0"
+version = "0.2.1"
 description = "LLM pipeline for WG21 paper defect discovery"
 requires-python = ">=3.12"
 license = {text = "BSL-1.0"}
