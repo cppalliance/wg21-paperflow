@@ -24,6 +24,24 @@ rather than rendered as ``null``.
 from dataclasses import asdict, dataclass, field
 from typing import Any
 
+__all__ = [
+    "SCHEMA_VERSION",
+    "Evidence",
+    "Finding",
+    "GatedFinding",
+    "PaperMeta",
+    "Paper",
+    "ConvertResult",
+    "Reference",
+    "OutputFinding",
+    "Evaluation",
+    "RoomEntry",
+    "IndexPaperEntry",
+    "FailureEntry",
+    "MailingIndex",
+    "to_dict",
+]
+
 SCHEMA_VERSION = "1"
 
 

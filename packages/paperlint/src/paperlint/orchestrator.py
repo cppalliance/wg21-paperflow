@@ -52,6 +52,14 @@ from paperstore import SqliteBackend, StorageBackend
 from paperstore.errors import MissingMetaError, MissingPaperMdError
 from tomd.api import convert_paper as tomd_convert_paper
 
+__all__ = [
+    "convert_one_paper",
+    "git_sha",
+    "load_converted_paper",
+    "prompt_hash",
+    "run_paper_eval",
+]
+
 _PKG_ROOT = Path(__file__).resolve().parent
 
 

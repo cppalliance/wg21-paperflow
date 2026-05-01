@@ -35,6 +35,16 @@ from paperlint.llm import (
 )
 from paperlint.models import Evidence, Finding, GatedFinding, PaperMeta
 
+__all__ = [
+    "PROMPTS_DIR",
+    "RUBRIC_PATH",
+    "normalized_char_offset_map",
+    "step_discovery",
+    "step_gate",
+    "step_summary_writer",
+    "step_verify_quotes",
+]
+
 _PKG_ROOT = Path(__file__).resolve().parent
 PROMPTS_DIR = _PKG_ROOT / "prompts"
 RUBRIC_PATH = _PKG_ROOT / "rubric.md"
