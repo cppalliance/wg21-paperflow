@@ -35,3 +35,14 @@ testpaths = [
     "packages/paperlint/tests",
     "tests",
 ]
+
+[tool.ruff.lint.per-file-ignores]
+# Tests intentionally:
+#   F811: re-export pytest fixtures with `from x import store  # noqa: F401`
+#         then take `store` as a parameter, which ruff reads as redefinition.
+#   F841: assign to a variable to call a function for its side effects, then
+#         assert on the side-effected object instead of the return value.
+#   E741: use single-letter `l` as a stand-in for `line` in tight scopes.
+#   E402: insert sys.path before importing the package under test when run
+#         as a script (test_suppress, test_emit).
+"**/tests/**" = ["F811", "F841", "E741", "E402"]

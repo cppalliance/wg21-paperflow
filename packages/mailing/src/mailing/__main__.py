@@ -28,7 +28,7 @@ from pathlib import Path
 
 from paperstore import WORKSPACE_ENV_VAR, SqliteBackend, default_workspace_dir
 
-from mailing.scrape import discover_years, fetch_all_mailings_for_year, fetch_papers_for_year
+from mailing.scrape import discover_years, fetch_all_mailings_for_year
 
 _EARLIEST_YEAR = 2011
 

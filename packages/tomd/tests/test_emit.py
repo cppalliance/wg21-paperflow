@@ -155,7 +155,6 @@ def test_front_matter_unknown_keys_keep_reply_to_last():
 
 
 def test_emit_list():
-    from tomd.lib.pdf.types import Span, Line
     span = make_span("- item one")
     line = make_line(["- item one"])
     sec = make_section("- item one", kind=SectionKind.LIST)
@@ -164,7 +163,7 @@ def test_emit_list():
 
 
 def test_emit_table():
-    from tomd.lib.pdf.types import Span, Line, Section
+    from tomd.lib.pdf.types import Section
     sec = Section(
         kind=SectionKind.TABLE,
         text="",
@@ -181,7 +180,7 @@ def test_emit_table():
 
 
 def test_emit_wording_section():
-    from tomd.lib.pdf.types import Span, Line, Section
+    from tomd.lib.pdf.types import Section
     span = make_span("added text")
     span.wording_role = "ins"
     line = make_line(["added text"])

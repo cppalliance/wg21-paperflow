@@ -1,7 +1,7 @@
 """Tests for lib.toc."""
 
 from tomd.lib.toc import find_toc_indices
-from tomd.lib.pdf.types import Span, Line, Block, Section, SectionKind
+from tomd.lib.pdf.types import Span, Line, Section, SectionKind
 
 
 def test_find_toc_strips_dot_leaders():

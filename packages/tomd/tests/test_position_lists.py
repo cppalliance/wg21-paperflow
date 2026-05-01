@@ -2,10 +2,9 @@
 """Tests for position-based list detection in lib.pdf.structure."""
 from tomd.lib.pdf.structure import (
     _detect_lists_by_position,
-    _split_section_by_position,
     _join_bullet_marker_lines,
 )
-from tomd.lib.pdf.types import Section, SectionKind, Line, Span, Block
+from tomd.lib.pdf.types import Section, SectionKind, Line, Span
 
 
 def _bullet_line(text, x0, y=100.0):

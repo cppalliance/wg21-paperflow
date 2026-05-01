@@ -2,7 +2,7 @@
 """Tests for header/footer detection and stripping in lib.pdf.cleanup."""
 from tomd.lib.pdf.cleanup import get_edge_items, detect_repeating, strip_repeating
 from tomd.lib.pdf.types import (
-    Block, Line, Span, PageEdgeItem, Y_TOLERANCE, EDGE_ITEMS_PER_PAGE,
+    Block, Line, Span, PageEdgeItem, EDGE_ITEMS_PER_PAGE,
 )
 
 

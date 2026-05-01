@@ -1,5 +1,6 @@
 """Shared text utilities and constants for PDF and HTML converters."""
 
+import logging as _logging
 import re
 import unicodedata
 
@@ -52,8 +53,6 @@ def strip_format_chars(text: str) -> str:
     """Remove Unicode format characters (category Cf)."""
     return "".join(c for c in text if c not in FORMAT_CHARS)
 
-
-import logging as _logging
 
 _dedup_log = _logging.getLogger(__name__)
 
@@ -406,7 +405,8 @@ def parse_author_lines(lines, clean_line=None, skip_line=None):
     if clean_line is None:
         clean_line = str.strip
     if skip_line is None:
-        skip_line = lambda _: False
+        def skip_line(_):
+            return False
 
     authors = []
     pending_name = None

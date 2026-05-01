@@ -1,6 +1,6 @@
 """Tests for lib.pdf.mono."""
 
-from conftest import make_span, make_line, make_block
+from conftest import make_block
 from tomd.lib.pdf.mono import classify_monospace, propagate_monospace
 from tomd.lib.pdf.types import Span, Line, Block
 

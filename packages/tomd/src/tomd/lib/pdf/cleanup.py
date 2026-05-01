@@ -7,7 +7,7 @@ from dataclasses import replace
 
 from .. import strip_format_chars, DOC_NUM_RE
 from .types import (
-    Block, Line, Span, PageEdgeItem,
+    Block, Line, PageEdgeItem,
     Y_TOLERANCE, REPEATING_THRESHOLD, EDGE_ITEMS_PER_PAGE,
     TERMINAL_PUNCTUATION,
     PAGE_NUM_RE, COMPOUND_PREFIXES,

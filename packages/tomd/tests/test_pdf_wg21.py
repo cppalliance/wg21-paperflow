@@ -4,7 +4,6 @@
 
 """Unit tests for PDF metadata extraction fixes in wg21.py and pdf/__init__.py."""
 
-import pytest
 
 from tomd.lib.pdf.types import Span, Line, Block
 from tomd.lib.pdf.wg21 import _store_field

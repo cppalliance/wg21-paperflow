@@ -10,7 +10,6 @@ from __future__ import annotations
 
 from mailing.scrape import (
     discover_years,
-    fetch_all_mailings_for_year,
     fetch_papers_for_year,
     parse_all_mailings,
 )

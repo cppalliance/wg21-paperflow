@@ -22,7 +22,7 @@ at the last same-page row and the orphan appears in an uncertain region.
 import logging
 from collections import Counter, defaultdict
 
-from .types import Block, Line, Section, SectionKind, Confidence
+from .types import Block, Section, SectionKind, Confidence
 
 _log = logging.getLogger(__name__)
 

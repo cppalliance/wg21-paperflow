@@ -62,11 +62,9 @@ def _toc_structural_hints(sections) -> list[bool]:
     wording papers where find_toc_indices would otherwise get an empty
     headings set.
     """
-    from .types import Section as _Section  # local to avoid circular at module level
-
     candidates: list[tuple[int, float | None]] = []
     for i, sec in enumerate(sections):
-        lines = [l.strip() for l in sec.text.split("\n") if l.strip()]
+        lines = [ln.strip() for ln in sec.text.split("\n") if ln.strip()]
         if len(lines) >= 2 and _STANDALONE_PAGE_RE.match(lines[1]):
             x = None
             non_empty = [ln for ln in sec.lines if ln.text.strip()]

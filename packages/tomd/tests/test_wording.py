@@ -1,7 +1,7 @@
 """Tests for lib.pdf.wording."""
 
 from unittest.mock import MagicMock
-from conftest import make_span, make_line, make_block
+from conftest import make_block
 from tomd.lib.pdf.types import Span, Line, Block
 from tomd.lib.pdf.wording import classify_wording, collect_line_drawings
 

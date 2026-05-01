@@ -26,13 +26,12 @@ import json
 import logging
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Callable
+from typing import Callable
 
 from paperstore.backend import StorageBackend
 from paperstore.errors import (
     MissingMailingIndexError,
     MissingPaperMdError,
-    MissingSourceError,
 )
 
 logger = logging.getLogger(__name__)

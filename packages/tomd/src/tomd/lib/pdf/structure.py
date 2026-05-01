@@ -573,7 +573,6 @@ def _join_bullet_marker_lines(lines: list) -> list:
                 and i + 1 < len(lines)):
             next_line = lines[i + 1]
             bullet = strip_format_chars(text).rstrip()
-            combined_text = bullet + " " + next_line.text.lstrip()
             bullet_span = Span(
                 text=bullet + " ",
                 font_name=line.spans[0].font_name if line.spans else "",

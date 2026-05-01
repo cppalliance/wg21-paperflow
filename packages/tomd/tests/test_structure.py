@@ -1,6 +1,6 @@
 """Tests for lib.pdf.structure."""
 
-from conftest import make_block, make_line, make_section, make_span
+from conftest import make_block, make_section, make_span
 from tomd.lib.pdf.types import (
     Block, Line, Span, Section, SectionKind, Confidence,
 )

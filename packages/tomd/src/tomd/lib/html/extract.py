@@ -194,7 +194,7 @@ def _parse_mpark_authors(cell: Tag) -> list[str]:
     return parse_author_lines(
         lines,
         clean_line=_clean_author,
-        skip_line=lambda l: bool(DOC_NUM_RE.match(l)),
+        skip_line=lambda line: bool(DOC_NUM_RE.match(line)),
     )
 
 
@@ -635,8 +635,6 @@ def _enrich_reply_to(soup: BeautifulSoup, metadata: dict) -> None:
                    if e.startswith("<") and e.endswith(">") and "@" in e]
     if bare_names and bare_emails and len(bare_names) == len(bare_emails):
         merged_entries: list[str] = []
-        name_iter = iter(bare_names)
-        email_iter = iter(bare_emails)
         used_names: set[str] = set()
         used_emails: set[str] = set()
         for name, email_entry in zip(bare_names, bare_emails):
