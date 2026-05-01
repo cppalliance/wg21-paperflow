@@ -101,9 +101,9 @@ paperflow convert (no LLM):
 
 paperflow eval (LLM):
   Step 0: load paper.md + meta.json
-  Step 1: DISCOVERY  (Opus 4.6, JSON + thinking, multi-pass)
+  Step 1: DISCOVERY  (Opus 4.7, JSON + thinking, multi-pass)
   Step 1b: QUOTE VERIFICATION  (pure Python, substring match)
-  Step 2: GATE  (Opus 4.6, JSON + thinking)
+  Step 2: GATE  (Opus 4.7, JSON + thinking)
   Step 2c: KNOWN-FP SUPPRESSION  (pure Python, post-gate)
   Step 3: SUMMARY WRITER  (Sonnet 4.6, JSON)
   Step 4: ASSEMBLY  (pure Python)
@@ -114,9 +114,11 @@ paperflow eval (LLM):
 
 | Step | Model | Provider | Mode |
 |------|-------|----------|------|
-| Discovery | Opus 4.6 | OpenRouter | JSON + thinking |
-| Gate | Opus 4.6 | OpenRouter | JSON + thinking |
+| Discovery | Opus 4.7 | OpenRouter | JSON + thinking |
+| Gate | Opus 4.7 | OpenRouter | JSON + thinking |
 | Summary | Sonnet 4.6 | OpenRouter | JSON |
+
+Slugs are pinned in `paperlint/llm.py` and overridable per process via `PAPERLINT_DISCOVERY_MODEL` (Discovery + Gate) and `PAPERLINT_SUMMARY_MODEL` (Summary).
 
 ### Output: `eval.json`
 

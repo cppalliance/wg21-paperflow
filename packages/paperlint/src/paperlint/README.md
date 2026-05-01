@@ -18,16 +18,18 @@ See `CLAUDE.md` in this directory for invariants and the LLM contract.
 
 ## Models
 
-Pinned in `paperlint/llm.py`:
+Defaults set in `paperlint/llm.py`:
 
-- Discovery + Gate: `anthropic/claude-opus-4.6`, JSON mode, extended thinking enabled.
+- Discovery + Gate: `anthropic/claude-opus-4.7`, JSON mode, extended thinking enabled.
 - Summary: `anthropic/claude-sonnet-4.6`, JSON mode, no thinking.
 
-Routing is OpenRouter via the `openai` SDK.
+Override either at process start with `PAPERLINT_DISCOVERY_MODEL` or `PAPERLINT_SUMMARY_MODEL`. Routing is OpenRouter via the `openai` SDK.
 
 ## Environment
 
 - `OPENROUTER_API_KEY` (required for `eval` / `full`; loaded from `.env` / `.env.local` automatically).
+- `PAPERLINT_DISCOVERY_MODEL` - override the OpenRouter slug for the discovery and gate stages.
+- `PAPERLINT_SUMMARY_MODEL` - override the OpenRouter slug for the summary stage.
 - `PAPERLINT_LOG_FILE=/path/to/log` - append structured logs there.
 - `PAPERLINT_LOG_TO_WORKSPACE=1` - append to `<workspace>/paperlint.log` instead.
 - `PAPERLINT_ERROR_TRACEBACK=1` - embed tracebacks in `<pid>.eval.json` on partial runs.

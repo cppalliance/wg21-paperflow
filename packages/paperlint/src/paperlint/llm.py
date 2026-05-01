@@ -20,8 +20,8 @@ import openai
 
 from paperlint.credentials import resolve_openrouter_base_url
 
-OPENROUTER_MODEL = "anthropic/claude-opus-4.6"
-OPENROUTER_SONNET = "anthropic/claude-sonnet-4.6"
+OPENROUTER_MODEL = os.environ.get("PAPERLINT_DISCOVERY_MODEL", "anthropic/claude-opus-4.7")
+OPENROUTER_SONNET = os.environ.get("PAPERLINT_SUMMARY_MODEL", "anthropic/claude-sonnet-4.6")
 
 THINKING_BUDGET = {
     "discovery": 128_000,
