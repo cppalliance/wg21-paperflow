@@ -2,33 +2,19 @@
 
 The LLM pipeline that finds mechanically verifiable defects in WG21 C++ standards papers. Misspelled identifiers, broken cross-references, code samples that don't match their prose, contradictions. PaperLint points at things; the committee decides the rest.
 
-## Two-step flow
+User-facing CLI documentation lives in the [root README](../../../../README.md). This file documents the paperlint package itself for contributors. The CLI binary is `paperflow`, not `paperlint`.
 
-After `uv sync && source .venv/bin/activate` from the workspace root (or prefix any command with `uv run`). Workspace dir defaults to `$PAPERFLOW_WORKSPACE` or `./data`; override per command with `--workspace-dir` (alias `--output-dir`).
+## Pipeline
 
-Conversion is separated from evaluation so eval/run never duplicate fetch + tomd work.
+`paperlint.orchestrator.run_paper_eval` is the per-paper entry point. It loads `<pid>.md` and `<pid>.meta.json` via the storage backend (no fetch, no tomd), then runs:
 
-```bash
-# 1) Convert: fetch sources, build paper.md + meta.json. No LLM, no API key.
-paperlint convert 2026-04 --paper P3642R4
+1. `step_discovery` (LLM, multi-pass) -> `<pid>.1-findings.json`
+2. `step_verify_quotes` (pure Python, drops findings whose evidence is not a substring of the paper)
+3. `step_gate` (LLM) -> `<pid>.2-gate.json`
+4. `step_suppress_known_fps` -> `<pid>.2c-suppressed.json`
+5. `step_summary_writer` (LLM) -> assembled into `<pid>.eval.json`
 
-# 2) Evaluate: load the converted artifacts, run the LLM pipeline.
-export OPENROUTER_API_KEY=sk-or-...
-paperlint eval 2026-04/P3642R4
-```
-
-`run` is the batch form of `eval`. Bare paper ids (`eval P3642R4`) and local file paths are not accepted; every invocation names the mailing explicitly so the open-std.org index stays authoritative.
-
-## CLI
-
-| Subcommand | Purpose |
-|---|---|
-| `mailing` | Fetch and persist `mailings/<id>.json` |
-| `convert` | Fetch + tomd; writes `paper.md` + `meta.json` per paper |
-| `eval`    | Run the LLM pipeline on one converted paper |
-| `run`     | Batch `eval` over a mailing |
-
-`--workspace-dir` (alias `--output-dir`) is both input and output for the JSON storage backend. `--papers A,B`, `--paper X`, `--max-cap`, and `--max-workers` filter and parallelize. `--discovery-passes` (default 3) controls the multi-pass discovery stage.
+See `CLAUDE.md` in this directory for invariants and the LLM contract.
 
 ## Models
 
@@ -41,10 +27,10 @@ Routing is OpenRouter via the `openai` SDK.
 
 ## Environment
 
-- `OPENROUTER_API_KEY` (required for `eval` / `run`; loaded from `.env` / `.env.local` automatically).
+- `OPENROUTER_API_KEY` (required for `eval` / `full`; loaded from `.env` / `.env.local` automatically).
 - `PAPERLINT_LOG_FILE=/path/to/log` - append structured logs there.
 - `PAPERLINT_LOG_TO_WORKSPACE=1` - append to `<workspace>/paperlint.log` instead.
-- `PAPERLINT_ERROR_TRACEBACK=1` - embed tracebacks in `evaluation.json` on partial runs.
+- `PAPERLINT_ERROR_TRACEBACK=1` - embed tracebacks in `<pid>.eval.json` on partial runs.
 
 ## Tests
 

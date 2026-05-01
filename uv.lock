@@ -371,7 +371,6 @@ dependencies = [
     { name = "openai" },
     { name = "paperstore" },
     { name = "python-dotenv" },
-    { name = "requests" },
     { name = "rich" },
     { name = "tomd" },
 ]
@@ -382,7 +381,6 @@ requires-dist = [
     { name = "openai" },
     { name = "paperstore", editable = "packages/paperstore" },
     { name = "python-dotenv" },
-    { name = "requests" },
     { name = "rich" },
     { name = "tomd", editable = "packages/tomd" },
 ]
