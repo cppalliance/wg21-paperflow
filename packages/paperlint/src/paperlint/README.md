@@ -9,7 +9,7 @@ User-facing CLI documentation lives in the [root README](../../../../README.md).
 `paperlint.orchestrator.run_paper_eval` is the per-paper entry point. It loads `<pid>.md` and `<pid>.meta.json` via the storage backend (no fetch, no tomd), then runs:
 
 1. `step_discovery` (LLM, multi-pass) -> `<pid>.1-findings.json`
-2. `step_verify_quotes` (pure Python, drops findings whose evidence is not a substring of the paper)
+2. `step_verify_quotes` (pure Python; for each evidence quote, first tries a literal substring match against the paper markdown, falling back to a whitespace-normalized match. Findings with any unverifiable evidence are dropped before the gate sees them.)
 3. `step_gate` (LLM) -> `<pid>.2-gate.json`
 4. `step_suppress_known_fps` -> `<pid>.2c-suppressed.json`
 5. `step_summary_writer` (LLM) -> assembled into `<pid>.eval.json`
