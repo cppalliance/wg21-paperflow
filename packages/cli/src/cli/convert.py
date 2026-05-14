@@ -22,8 +22,8 @@ _DEFAULT_QA_TIMEOUT = 120
 
 
 def command(args: argparse.Namespace, backend: StorageBackend) -> int:
-    if args.qa or args.qa_json:
-        return _qa_command(args, backend)
+    if args.qa or args.qa_json or args.check_content or args.check_content_json:
+        return _report_command(args, backend)
     return _convert_command(args, backend)
 
 
@@ -55,24 +55,63 @@ def _convert_command(args: argparse.Namespace, backend: StorageBackend) -> int:
     return 0
 
 
-def _qa_command(args: argparse.Namespace, backend: StorageBackend) -> int:
-    from cli.jobs import run_qa
+def _report_command(args: argparse.Namespace, backend: StorageBackend) -> int:
+    """Dispatch report-only modes (--qa and / or --check-content).
 
-    result = run_qa(
-        args.targets,
-        backend,
-        json_path=args.qa_json,
-        workers=args.workers or _DEFAULT_QA_WORKERS,
-        timeout=args.timeout or _DEFAULT_QA_TIMEOUT,
-    )
+    Both flags may be set in one invocation; the report sections print
+    back-to-back. Returns non-zero only if no work could be performed at
+    all (no markdown to score on either side).
+    """
+    from cli.jobs import run_content_check, run_qa
 
-    for entry in result["skipped"]:
-        print(
-            f"Skipping {entry['paper_id']}: no paper markdown. Run 'paperflow convert' first.",
-            file=sys.stderr,
+    workers = args.workers or _DEFAULT_QA_WORKERS
+    timeout = args.timeout or _DEFAULT_QA_TIMEOUT
+    qa_requested = args.qa or args.qa_json
+    cc_requested = args.check_content or args.check_content_json
+
+    succeeded_anything = False
+
+    if qa_requested:
+        qa_result = run_qa(
+            args.targets,
+            backend,
+            json_path=args.qa_json,
+            workers=workers,
+            timeout=timeout,
         )
+        for entry in qa_result["skipped"]:
+            print(
+                f"Skipping {entry['paper_id']}: no paper markdown. "
+                f"Run 'paperflow convert' first.",
+                file=sys.stderr,
+            )
+        if qa_result["succeeded"]:
+            succeeded_anything = True
+        elif not cc_requested:
+            print("No markdown available for QA.", file=sys.stderr)
 
-    if not result["succeeded"]:
-        print("No markdown available for QA.", file=sys.stderr)
+    if cc_requested:
+        cc_result = run_content_check(
+            args.targets,
+            backend,
+            json_path=args.check_content_json,
+            workers=workers,
+            timeout=timeout,
+        )
+        for entry in cc_result["skipped"]:
+            print(
+                f"Skipping {entry['paper_id']}: {entry['reason']}.",
+                file=sys.stderr,
+            )
+        if cc_result["succeeded"]:
+            succeeded_anything = True
+        elif not qa_requested:
+            print(
+                "No papers available for content check. Run "
+                "'paperflow convert' to produce markdown first.",
+                file=sys.stderr,
+            )
+
+    if not succeeded_anything:
         return 1
     return 0

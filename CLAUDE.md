@@ -55,6 +55,13 @@ paperflow download all
 paperflow convert  all
 paperflow full     all
 paperflow          all
+
+# Report-only modes - short-circuit conversion to score existing markdown
+paperflow convert all --qa                              # tomd QA scorer (markdown only)
+paperflow convert all --qa --qa-json out.json
+paperflow convert all --check-content                   # source-vs-markdown coverage
+paperflow convert all --check-content --check-content-json out.json
+paperflow convert all --qa --check-content              # both reports back-to-back
 ```
 
 **Argument rules:**

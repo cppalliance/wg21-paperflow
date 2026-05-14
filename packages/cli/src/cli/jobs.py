@@ -34,6 +34,7 @@ from paperstore.errors import (
     MissingSourceError,
 )
 from paperstore.progress import ProgressCallback, ProgressEvent
+from tomd.lib.check_content import run_content_check_report
 
 logger = logging.getLogger(__name__)
 
@@ -446,6 +447,55 @@ def run_qa(
         return {"succeeded": [], "skipped": skipped, "failed": []}
 
     run_qa_report(items, json_path=json_path, workers=workers, timeout=timeout)
+    return {
+        "succeeded": [pid for pid, _ in items],
+        "skipped": skipped,
+        "failed": [],
+    }
+
+
+# ---------------------------------------------------------------------------
+# run_content_check
+# ---------------------------------------------------------------------------
+
+def run_content_check(
+    targets: list[str],
+    backend: StorageBackend,
+    *,
+    json_path: Path | None = None,
+    workers: int = 1,
+    timeout: int = 120,
+) -> dict:
+    """Compare source text against converted markdown for the given targets.
+
+    Synchronous. ``run_content_check_report`` does its own
+    ``ProcessPoolExecutor`` parallelism; workers re-open the backend
+    from the workspace path. Skips papers missing either source or
+    markdown. Returns the same type of ouput as :func:`run_qa`.
+    """
+    workers = max(1, workers)
+    target_type = _validate_targets(targets)
+    rows = _papers_from_scope(targets, target_type, backend)
+
+    items: list[tuple[str, Path]] = []
+    skipped: list[dict] = []
+    workspace_dir = backend.workspace_dir
+    for row in rows:
+        pid = row.paper_id
+        if not row.source_file:
+            skipped.append({"paper_id": pid, "reason": "no_source"})
+            continue
+        if not row.markdown_path:
+            skipped.append({"paper_id": pid, "reason": "no_markdown"})
+            continue
+        items.append((pid, workspace_dir))
+
+    if not items:
+        return {"succeeded": [], "skipped": skipped, "failed": []}
+
+    run_content_check_report(
+        items, json_path=json_path, workers=workers, timeout=timeout,
+    )
     return {
         "succeeded": [pid for pid, _ in items],
         "skipped": skipped,
