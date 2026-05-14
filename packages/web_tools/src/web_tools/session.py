@@ -14,6 +14,7 @@ import json
 import logging
 import re
 from abc import ABC, abstractmethod
+from collections.abc import Callable
 from dataclasses import dataclass
 
 import httpx
@@ -27,6 +28,14 @@ _DEFAULT_USER_AGENT = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
     "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36"
 )
+
+# Hard cap on response body size. WG21 papers are < 5 MB; the largest
+# scanned proceedings observed is ~22 MB. The cap aborts oversized
+# responses mid-stream before any extractor runs.
+_MAX_FETCH_BYTES = 25 * 1024 * 1024
+
+# (raw bytes, max_length) -> extracted text or None.
+BinaryExtractor = Callable[[bytes, int], "str | None"]
 
 _trafilatura_config = trafilatura.settings.use_config()
 
@@ -105,12 +114,20 @@ class WebResearcher:
             page = await researcher.fetch("https://example.com")
     """
 
-    def __init__(self, *, backend: SearchBackend | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        backend: SearchBackend | None = None,
+        binary_extractors: dict[str, BinaryExtractor] | None = None,
+    ) -> None:
         from web_tools.backends import get_default_backend
 
         self._backend = backend or get_default_backend()
         self._owns_backend = backend is None
         self._client = httpx.AsyncClient(timeout=60.0)
+        self._binary_extractors: dict[str, BinaryExtractor] = (
+            dict(binary_extractors) if binary_extractors else {}
+        )
         self._closed = False
 
     async def __aenter__(self) -> WebResearcher:
@@ -158,7 +175,23 @@ class WebResearcher:
         extract: bool = True,
         max_length: int = _DEFAULT_MAX_FETCH_LENGTH,
     ) -> FetchResponse:
-        """Fetch a URL and optionally extract article content."""
+        """Fetch a URL and optionally extract article content.
+
+        The response body is read with a hard cap of ``_MAX_FETCH_BYTES``
+        (25 MB). Oversized responses are aborted mid-stream and return an
+        error message without buffering the full body.
+
+        When ``extract=True`` (default): HTML is run through trafilatura;
+        binary content types matching a registered extractor are routed
+        through it; otherwise the standard extraction-failed error is
+        returned.
+
+        When ``extract=False``: HTML is returned as the raw decoded
+        response body. Binary content types matching a registered
+        extractor return an empty string; binary bodies have no
+        meaningful raw text form for LLM tools, and the registry is the
+        entry point for getting useful text out of them.
+        """
         if self._closed:
             raise RuntimeError("Researcher is closed.")
         if not url:
@@ -167,12 +200,45 @@ class WebResearcher:
         url = _normalize_open_std_url(url)
 
         try:
-            resp = await self._client.get(
-                url,
+            async with self._client.stream(
+                "GET", url,
                 headers={"User-Agent": _DEFAULT_USER_AGENT},
                 timeout=_DEFAULT_FETCH_TIMEOUT,
                 follow_redirects=True,
-            )
+            ) as resp:
+                if resp.status_code != 200:
+                    logger.warning(
+                        "Fetch got HTTP %d for %r", resp.status_code, url,
+                    )
+                    return FetchResponse(
+                        status_code=resp.status_code,
+                        content=f"Error: HTTP {resp.status_code} for {url}",
+                    )
+
+                chunks: list[bytes] = []
+                total = 0
+                async for chunk in resp.aiter_bytes():
+                    total += len(chunk)
+                    if total > _MAX_FETCH_BYTES:
+                        logger.warning(
+                            "Fetch aborted at %d bytes (cap %d) for %r",
+                            total, _MAX_FETCH_BYTES, url,
+                        )
+                        return FetchResponse(
+                            status_code=resp.status_code,
+                            content=(
+                                f"Error: Response exceeded "
+                                f"{_MAX_FETCH_BYTES} bytes for {url}"
+                            ),
+                        )
+                    chunks.append(chunk)
+                body = b"".join(chunks)
+                content_type = (
+                    resp.headers.get("content-type", "")
+                    .split(";")[0].strip().lower()
+                )
+                charset = resp.charset_encoding or "utf-8"
+                status_code = resp.status_code
         except httpx.HTTPError as exc:
             logger.warning("Fetch failed for %r: %s", url, exc)
             return FetchResponse(
@@ -180,22 +246,34 @@ class WebResearcher:
                 content=f"Error: Failed to fetch URL: {exc}",
             )
 
-        if resp.status_code != 200:
-            logger.warning("Fetch got HTTP %d for %r", resp.status_code, url)
-            return FetchResponse(
-                status_code=resp.status_code,
-                content=f"Error: HTTP {resp.status_code} for {url}",
-            )
+        extractor = (
+            self._binary_extractors.get(content_type) if content_type else None
+        )
 
-        html = resp.text
+        if extractor is not None:
+            if not extract:
+                # Binary responses have no meaningful raw form for an LLM
+                # tool; the registry is the only way to get useful text out.
+                return FetchResponse(status_code=status_code, content="")
+            text = await asyncio.to_thread(extractor, body, max_length)
+            if not text:
+                return FetchResponse(
+                    status_code=status_code,
+                    content="Error: Could not extract content from page",
+                )
+            if len(text) > max_length:
+                text = text[:max_length] + "\n\n[Content truncated]"
+            return FetchResponse(status_code=status_code, content=text)
+
+        html = body.decode(charset, errors="replace")
         if not html:
             return FetchResponse(
-                status_code=resp.status_code,
+                status_code=status_code,
                 content="Error: No content retrieved from URL",
             )
 
         if not extract:
-            return FetchResponse(status_code=resp.status_code, content=html)
+            return FetchResponse(status_code=status_code, content=html)
 
         text = await asyncio.to_thread(
             trafilatura.extract,
@@ -208,14 +286,14 @@ class WebResearcher:
             )
         if not text:
             return FetchResponse(
-                status_code=resp.status_code,
+                status_code=status_code,
                 content="Error: Could not extract content from page",
             )
 
         if len(text) > max_length:
             text = text[:max_length] + "\n\n[Content truncated]"
 
-        return FetchResponse(status_code=resp.status_code, content=text)
+        return FetchResponse(status_code=status_code, content=text)
 
     async def web_search(self, query: str) -> str:
         """Search the web. Returns JSON for LLM tool registration.

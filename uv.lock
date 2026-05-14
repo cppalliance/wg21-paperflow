@@ -673,6 +673,7 @@ dependencies = [
     { name = "paperstore" },
     { name = "pydantic" },
     { name = "pydantic-ai" },
+    { name = "pymupdf" },
     { name = "web-tools" },
 ]
 
@@ -681,6 +682,7 @@ requires-dist = [
     { name = "paperstore", editable = "packages/paperstore" },
     { name = "pydantic", specifier = ">=2.0" },
     { name = "pydantic-ai" },
+    { name = "pymupdf", specifier = "~=1.27.0" },
     { name = "web-tools", editable = "packages/web_tools" },
 ]
 

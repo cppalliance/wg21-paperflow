@@ -39,3 +39,18 @@ as the sole backend. `WebResearcher` is the user-facing object.
   construction time, not at first search call.
 - **No global state.** The researcher is an explicit object. Create
   it, pass it around, close it.
+- **`fetch` reads bodies via streaming with a hard cap.** Bodies are
+  consumed through `client.stream(...)` + `aiter_bytes()`, and any
+  response whose accumulated size exceeds `_MAX_FETCH_BYTES` (25 MB)
+  is aborted mid-read. The cap is enforced before any extractor runs,
+  so neither trafilatura nor any binary extractor ever sees an
+  oversized body.
+- **Binary content is routed through `binary_extractors`.** Passed at
+  construction, keyed on the response's `Content-Type` (lowercased,
+  charset stripped). If no extractor matches the content type, the
+  body falls through to the trafilatura HTML path. Detection is
+  Content-Type only: no URL-suffix fallback, no magic-byte sniffing.
+- **`web_tools` ships no binary extractors.** The package keeps a
+  permissive dep set (httpx + trafilatura). Consumers register
+  extractors at the `WebResearcher` construction site; this keeps
+  AGPL or other restrictively licensed libraries out of `web_tools`.
