@@ -97,7 +97,6 @@ Every converted paper gets this YAML block. Field order is fixed.
 ---
 title: "Paper Title"
 document: P2583R3
-revision: 3
 date: 2024-01-15
 intent: info
 audience: SG1, LEWG
@@ -108,7 +107,6 @@ reply-to:
 
 - `title`: double-quoted. Extracted from source metadata or first heading.
 - `document`: unquoted paper number (e.g. `P4036R0`).
-- `revision`: integer from PID (`PxxxxRy` -> `y`). Omit for N-papers.
 - `date`: unquoted ISO 8601.
 - `intent`: `info` or `ask`. Default `info` for external papers.
 - `audience`: unquoted, comma-separated (e.g. `SG1, LEWG`).
