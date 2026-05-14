@@ -59,6 +59,7 @@ from dissect.harness import (
 from dissect.models import (
     CaputCausaeOutput,
     Chunk,
+    CitationRef,
     CitationTaskOutput,
     DedupGroupingOutput,
     ExtractAllOutput,
@@ -679,6 +680,29 @@ async def _pure_dedup_factual(state: PipelineState, ctx: StepContext) -> None:
     state.claims = normative + factual
 
 
+def _known_paper_urls(
+    citations: list[CitationRef],
+    backend: StorageBackend | None,
+) -> dict[str, str]:
+    """Map citation paper_id -> canonical URL, when paperstore knows it.
+
+    Returns an empty dict when ``backend`` is None or no citation has a
+    matching paperstore row. Missing citations are silently omitted; the
+    agent falls back to the cascade for those.
+    """
+    if backend is None:
+        return {}
+    out: dict[str, str] = {}
+    for cit in citations:
+        result = backend.resolve_year_for_paper(cit.paper_id)
+        if result is None:
+            continue
+        _, row = result
+        if row.url:
+            out[cit.paper_id] = row.url
+    return out
+
+
 async def _pure_verify_citations(state: PipelineState, ctx: StepContext) -> None:
     """Spawn a run_task per citation in parallel to verify and collect evidence."""
     assert state.citations is not None and state.claims is not None
@@ -700,14 +724,25 @@ async def _pure_verify_citations(state: PipelineState, ctx: StepContext) -> None
     alive_claims = [c for c in state.claims if c.merged_into is None]
     alive_evidence = [e for e in (state.evidence or []) if e.merged_into is None]
 
+    known_urls = await asyncio.to_thread(
+        _known_paper_urls, state.citations, ctx.backend,
+    )
+
     async def _one_citation(cit) -> CitationTaskOutput:
         pid_num = cit.paper_id
         primary_claims = [c for c in alive_claims if pid_num in c.text]
         primary_evidence = [e for e in alive_evidence if pid_num in e.text]
         secondary_questions = [c.question for c in alive_claims]
 
+        known_url = known_urls.get(cit.paper_id)
+        known_url_block = (
+            f"## Known URL\n\n{known_url}\n\n"
+            if known_url
+            else ""
+        )
         user_msg = (
             f"## Citation\n\nPaper: {cit.paper_id} (cited {cit.count} times)\n\n"
+            f"{known_url_block}"
             f"## Primary Claims\n\n"
             f"{json.dumps([c.model_dump() for c in primary_claims], ensure_ascii=False)}\n\n"
             f"## Primary Evidence\n\n"
@@ -1024,8 +1059,28 @@ async def _dispatch(
                 ctx.backend.store_evidence(ctx.pid, state.evidence)
             elif step_name == _STEP_6_VERIFY and state.support_map and state.claims:
                 ctx.backend.store_questions(ctx.pid, state.claims, state.support_map)
+            elif step_name == _STEP_8_VERIFY_CITATIONS and state.citation_audit:
+                # CitationAuditEntry calls the cited paper number `paper_id`,
+                # but store_citation_audit (and the DB column) expect
+                # `cited_paper_id`. Adapt at the boundary so the LLM-facing
+                # field name stays simple and the storage schema stays
+                # explicit about what kind of paper_id it stores.
+                from types import SimpleNamespace
+                ctx.backend.store_citation_audit(ctx.pid, [
+                    SimpleNamespace(
+                        cited_paper_id=e.paper_id,
+                        resolution_method=e.resolution_method,
+                        resolved=e.resolved,
+                        source_url=e.source_url,
+                        quote_match=e.quote_match,
+                        discrepancy=e.discrepancy,
+                    )
+                    for e in state.citation_audit
+                ])
             elif step_name == _STEP_9_WEB_SEARCH and state.external_evidence:
                 ctx.backend.store_external_citations(ctx.pid, state.external_evidence)
+            elif step_name == _STEP_11_CAPUT_CAUSAE and state.caput_causae:
+                ctx.backend.store_caput_causae(ctx.pid, state.caput_causae.thesis)
 
     if on_progress is not None:
         on_progress(ProgressEvent(
@@ -1122,7 +1177,7 @@ async def dissect_paper(
             tool_registry=tool_reg,
         )
 
-        debug_path = backend.get_paper_md_path(pid).with_suffix(".debug.md")
+        debug_path = backend.get_debug_md_path(pid, "dissect")
         if debug:
             debug_path.unlink(missing_ok=True)
 
@@ -1143,7 +1198,7 @@ async def dissect_paper(
 
     if trace:
         last_step = len(pipeline) - 1
-        trace_path = backend.get_paper_md_path(pid).with_suffix(".trace.md")
+        trace_path = backend.get_trace_md_path(pid, "dissect")
         trace_path.write_text(
             render_trace(state, meta, last_step), encoding="utf-8",
         )

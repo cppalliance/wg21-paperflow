@@ -11,6 +11,8 @@ dependencies = [
     "tomd",
     "web_tools",
     "dissect",
+    "advocatus",
+    "agora",
     "cli",
     "preview",
 ]
@@ -30,6 +32,8 @@ mailing      = {workspace = true}
 tomd         = {workspace = true}
 web_tools    = {workspace = true}
 dissect      = {workspace = true}
+advocatus    = {workspace = true}
+agora        = {workspace = true}
 cli          = {workspace = true}
 preview      = {workspace = true}
 scrivener  = {git = "https://github.com/gregjkal/wg21-scrivener.git"}
@@ -41,6 +45,8 @@ testpaths = [
     "packages/tomd/tests",
     "packages/web_tools/tests",
     "packages/dissect/tests",
+    "packages/advocatus/tests",
+    "packages/agora/tests",
     "packages/cli/tests",
     "packages/preview/tests",
     "tests",

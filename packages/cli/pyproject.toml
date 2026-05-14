@@ -10,6 +10,8 @@ dependencies = [
     "mailing",
     "tomd",
     "dissect",
+    "advocatus",
+    "agora",
     "rich",
 ]
 

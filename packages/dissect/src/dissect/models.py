@@ -19,6 +19,8 @@ from typing import Literal, Optional
 
 from pydantic import BaseModel, Field
 
+from paperstore import SourceLoc
+
 Stance = Literal["supports", "contradicts"]
 ClaimKind = Literal["normative", "factual"]
 ContradictionKind = Literal["evidence_vs_claim", "claim_vs_claim"]
@@ -26,16 +28,10 @@ ContradictionKind = Literal["evidence_vs_claim", "claim_vs_claim"]
 
 # -- Domain models -----------------------------------------------------------
 
-
-class SourceLoc(BaseModel, frozen=True):
-    """Position of an extracted item in the source paper."""
-
-    line: int = Field(description="1-based line number in the paper markdown.")
-    start_char: int = Field(
-        description="Ordinal disambiguator when multiple items share a line. "
-        "Not a character offset; the Nth item on the same line gets start_char=N-1.",
-    )
-    end_char: int = Field(description="Character count of the source line.")
+# SourceLoc is re-exported from paperstore (canonical home for the loc
+# type at the storage layer). The LLM contract for ``line`` /
+# ``start_char`` / ``end_char`` is documented in dissect.md's Global
+# Directives "SourceLoc protocol" section.
 
 
 class Chunk(BaseModel, frozen=True):
@@ -252,8 +248,14 @@ class CitationAuditEntry(BaseModel, frozen=True):
     """
 
     paper_id: str = Field(description="Cited paper number, e.g. 'P1928R15'.")
-    resolution_method: str = Field(
-        description="How the citation was resolved: 'wg21_link', 'isocpp', 'not_found'.",
+    resolution_method: Literal[
+        "local_index", "wg21_link", "open_std", "not_found"
+    ] = Field(
+        description=(
+            "How the citation was resolved: 'local_index' (paperstore-known "
+            "URL), 'wg21_link' (wg21.link redirect), 'open_std' "
+            "(open-std.org cascade), or 'not_found'."
+        ),
     )
     resolved: bool = Field(description="True if the cited source was successfully fetched.")
     source_url: str = Field(default="", description="URL where the source was found.")

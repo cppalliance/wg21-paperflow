@@ -88,6 +88,8 @@ class PaperRow:
     source_file: str = ""
     markdown_path: str = ""
     dissect_path: str = ""
+    advocatus_path: str = ""
+    agora_path: str = ""
     line_count: int = 0
 
 
@@ -164,6 +166,43 @@ class StorageBackend(ABC):
 
         Called at the start of a dissect run so a crash does not leave
         a stale dissect from a previous run.
+        """
+
+    @abstractmethod
+    def write_advocatus_md(self, paper_id: str, markdown: str) -> Path:
+        """Persist the advocatus markdown (Relatio). Atomic write. Returns path."""
+
+    @abstractmethod
+    def clear_advocatus(self, paper_id: str) -> None:
+        """Delete the advocatus file and clear its path in the store.
+
+        Called at the start of an advocatus run so a crash does not leave
+        a stale Relatio from a previous run.
+        """
+
+    @abstractmethod
+    def write_agora_json(self, paper_id: str, payload: Any) -> Path:
+        """Persist the agora thread blueprint as JSON. Atomic write. Returns path.
+
+        ``payload`` is serialised with ``json.dumps(..., indent=2,
+        ensure_ascii=False)``. Pass a ``Thread.model_dump(mode='json')``
+        dict.
+        """
+
+    @abstractmethod
+    def read_agora_json(self, paper_id: str) -> Any:
+        """Return the agora JSON as a parsed Python object.
+
+        Raises:
+            paperstore.MissingAgoraError: no agora JSON stored.
+        """
+
+    @abstractmethod
+    def clear_agora(self, paper_id: str) -> None:
+        """Delete the agora file and clear its path in the store.
+
+        Called at the start of an agora run so a crash does not leave
+        a stale thread blueprint from a previous run.
         """
 
     @abstractmethod
@@ -252,6 +291,41 @@ class StorageBackend(ABC):
 
         Raises:
             paperstore.MissingDissectError: no dissect for ``paper_id``.
+        """
+
+    @abstractmethod
+    def get_advocatus_path(self, paper_id: str) -> Path:
+        """Return the local path to the advocatus file (Relatio).
+
+        Raises:
+            paperstore.MissingAdvocatusError: no advocatus for ``paper_id``.
+        """
+
+    @abstractmethod
+    def get_agora_path(self, paper_id: str) -> Path:
+        """Return the local path to the agora JSON (thread blueprint).
+
+        Raises:
+            paperstore.MissingAgoraError: no agora JSON for ``paper_id``.
+        """
+
+    @abstractmethod
+    def get_debug_md_path(self, paper_id: str, tool: str) -> Path:
+        """Return the canonical path for a tool's per-paper debug transcript.
+
+        File: ``paperstore/<pid>.<tool>.debug.md``. The path is returned
+        whether or not the file exists; callers write to it or check
+        ``.exists()`` themselves. ``tool`` is normalized to lowercase
+        (e.g. ``"dissect"``, ``"advocatus"``); empty / whitespace-only
+        ``tool`` raises ``ValueError``.
+        """
+
+    @abstractmethod
+    def get_trace_md_path(self, paper_id: str, tool: str) -> Path:
+        """Return the canonical path for a tool's per-paper pipeline trace.
+
+        File: ``paperstore/<pid>.<tool>.trace.md``. Same semantics as
+        :meth:`get_debug_md_path`.
         """
 
     @abstractmethod
