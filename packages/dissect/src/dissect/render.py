@@ -7,161 +7,46 @@
 
 """Rendering functions for pipeline output.
 
-Produces three output formats from ``PipelineState``:
+Produces two output formats from ``PipelineState``:
 
 - ``render_report`` -- the final dissection markdown (unsupported/supported
   claims + external resources).
 - ``render_trace`` -- diagnostic trace of pipeline state up to a given step.
-- ``render_debug_md`` -- full LLM interaction transcript for debugging.
 """
 
 from __future__ import annotations
 
-import json
-import re
 from typing import Any
 
 from paperstore.backend import PaperRow
+from pipeline import sanitize_md
 
-from dissect.models import PipelineState, SourceLoc
+from dissect.models import PipelineState
 
 _STATUS_DIRECTLY = "directly_supported"
 _STATUS_TRANSITIVELY = "transitively_supported"
 _STATUS_UNSUPPORTED = "unsupported"
 _SUPPORTED_STATUSES = (_STATUS_DIRECTLY, _STATUS_TRANSITIVELY)
 
-_CODE_SPAN_RE = re.compile(r'``.+?``|`[^`]+`')
 
-
-def render_debug_md(result: Any, step_name: str) -> str:
-    """Render an agent run result as a markdown debug section."""
-    parts: list[str] = [f"# {step_name}\n"]
-    for msg in result.all_messages():
-        kind = msg.kind
-        if kind == "request":
-            for part in msg.parts:
-                if hasattr(part, "content") and part.part_kind == "system-prompt":
-                    parts.append(f"## System Prompt\n\n{part.content}\n")
-                elif hasattr(part, "content") and part.part_kind == "user-prompt":
-                    parts.append(f"## User Message\n\n{part.content}\n")
-                elif part.part_kind == "tool-return":
-                    tool_name = getattr(part, "tool_name", "")
-                    content = getattr(part, "content", "")
-                    parts.append(
-                        f"### Tool Return: {tool_name}\n\n{content}\n"
-                    )
-        elif kind == "response":
-            for part in msg.parts:
-                if part.part_kind == "text":
-                    parts.append(f"## Model Response\n\n{part.content}\n")
-                elif part.part_kind == "tool-call":
-                    tool_name = getattr(part, "tool_name", "")
-                    args = getattr(part, "args", "")
-                    args_str = json.dumps(args) if not isinstance(args, str) else args
-                    parts.append(
-                        f"### Tool Call: {tool_name}\n\n```json\n{args_str}\n```\n"
-                    )
-    if hasattr(result, "output"):
-        output = result.output
-        if hasattr(output, "model_dump"):
-            output_str = json.dumps(
-                output.model_dump(), indent=2, ensure_ascii=False,
-            )
-        else:
-            output_str = str(output)
-        parts.append(f"## Final Output\n\n```json\n{output_str}\n```\n")
-    return "\n".join(parts)
-
-
-def _escape_md_chars(text: str) -> str:
-    """Escape markdown-sensitive characters in prose text."""
-    text = text.replace('<', r'\<').replace('>', r'\>')
-    text = text.replace('|', r'\|')
-    text = re.sub(r'^(\s*)(#)', r'\1\\\2', text, flags=re.MULTILINE)
-    for double in ('**', '__'):
-        if text.count(double) % 2 != 0:
-            text = text.replace(double, '\\' + double)
-    for single in ('*', '_'):
-        double = single * 2
-        esc_double = '\\' + double
-        temp = text.replace(esc_double, '\x00\x00\x00')
-        temp = temp.replace(double, '\x00\x00')
-        temp = temp.replace('\\' + single, '\x00\x00')
-        count = temp.count(single)
-        if count % 2 != 0:
-            parts: list[str] = []
-            i = 0
-            while i < len(text):
-                if text[i:i + 3] == esc_double:
-                    parts.append(text[i:i + 3])
-                    i += 3
-                elif text[i:i + 2] == double:
-                    parts.append(text[i:i + 2])
-                    i += 2
-                elif text[i:i + 2] == '\\' + single:
-                    parts.append(text[i:i + 2])
-                    i += 2
-                elif text[i] == single:
-                    parts.append('\\' + single)
-                    i += 1
-                else:
-                    parts.append(text[i])
-                    i += 1
-            text = ''.join(parts)
-    return text
-
-
-def _sanitize_inline(text: str) -> str:
-    """Escape prose segments while preserving inline code spans."""
-    segments: list[str] = []
-    last = 0
-    for m in _CODE_SPAN_RE.finditer(text):
-        if m.start() > last:
-            segments.append(_escape_md_chars(text[last:m.start()]))
-        segments.append(m.group())
-        last = m.end()
-    if last < len(text):
-        segments.append(_escape_md_chars(text[last:]))
-    return ''.join(segments)
-
-
-def sanitize_md(text: str) -> str:
-    """Sanitize text for safe markdown embedding.
-
-    Splits on balanced inline code spans and triple-backtick fences.
-    Code spans pass through unchanged.  Prose segments get ``<``, ``>``,
-    ``|``, leading ``#``, and unbalanced emphasis markers escaped.
-    """
-    if '```' in text:
-        parts = text.split('```')
-        result = _sanitize_inline(parts[0].rstrip())
-        for i in range(1, len(parts), 2):
-            code = parts[i].strip()
-            result += f'\n\n```\n{code}\n```'
-            if i + 1 < len(parts) and parts[i + 1].strip():
-                result += f'\n\n{_sanitize_inline(parts[i + 1].strip())}'
-        return result
-    return _sanitize_inline(text)
-
-
-def _loc_text(
-    index: dict[SourceLoc, str],
-    loc: SourceLoc,
+def _uid_text(
+    index: dict[int, str],
+    uid: int,
 ) -> str:
-    """Look up display text for a loc, with fallback."""
-    text = index.get(loc)
+    """Look up display text for a uid, with fallback."""
+    text = index.get(uid)
     if text is not None:
         return text
-    return f"(loc {loc.line}:{loc.start_char})"
+    return f"(uid {uid})"
 
 
-def _build_loc_index(items: list[Any], alive_only: bool = True) -> dict[SourceLoc, str]:
-    """Build a loc -> text dict from claims or evidence."""
-    index: dict[SourceLoc, str] = {}
+def _build_uid_index(items: list[Any], alive_only: bool = True) -> dict[int, str]:
+    """Build a uid -> text dict from claims or evidence."""
+    index: dict[int, str] = {}
     for item in items:
         if alive_only and item.merged_into is not None:
             continue
-        index[item.loc] = item.text
+        index[item.uid] = item.text
     return index
 
 
@@ -178,20 +63,20 @@ def render_report(state: PipelineState, pid: str, title: str) -> str:
     external_evidence = state.external_evidence or []
     evidence = state.evidence or []
 
-    ev_by_loc = {e.loc: e for e in evidence if e.merged_into is None}
+    ev_by_uid = {e.uid: e for e in evidence if e.merged_into is None}
 
-    supported_locs = {
-        s.claim_loc for s in support_map
+    supported_uids = {
+        s.claim_uid for s in support_map
         if s.status in _SUPPORTED_STATUSES
     }
-    unsupported_locs = {
-        s.claim_loc for s in support_map if s.status == _STATUS_UNSUPPORTED
+    unsupported_uids = {
+        s.claim_uid for s in support_map if s.status == _STATUS_UNSUPPORTED
     }
 
     lines.append("## Unsupported Claims\n")
     unsupported = [
         c for c in claims
-        if c.merged_into is None and c.loc in unsupported_locs
+        if c.merged_into is None and c.uid in unsupported_uids
     ]
     if not unsupported:
         lines.append("None identified.\n")
@@ -214,15 +99,15 @@ def render_report(state: PipelineState, pid: str, title: str) -> str:
     lines.append("## Supported Claims\n")
     supported = [
         c for c in claims
-        if c.merged_into is None and c.loc in supported_locs
+        if c.merged_into is None and c.uid in supported_uids
     ]
     if not supported:
         lines.append("None identified.\n")
     else:
-        loc_to_evidence_locs: dict[SourceLoc, list[SourceLoc]] = {}
+        uid_to_evidence_uids: dict[int, list[int]] = {}
         for s in support_map:
             if s.status in _SUPPORTED_STATUSES:
-                loc_to_evidence_locs[s.claim_loc] = s.evidence_locs
+                uid_to_evidence_uids[s.claim_uid] = s.evidence_uids
 
         has_normative = any(c.kind == "normative" for c in supported)
         has_factual = any(c.kind == "factual" for c in supported)
@@ -233,16 +118,16 @@ def render_report(state: PipelineState, pid: str, title: str) -> str:
                     lines.append(f"### {kind_label}\n")
                     for c in sorted(kind_claims, key=lambda x: (x.loc.line, x.loc.start_char)):
                         lines.append(f"- {c.question}")
-                        for eloc in loc_to_evidence_locs.get(c.loc, []):
-                            ev = ev_by_loc.get(eloc)
+                        for euid in uid_to_evidence_uids.get(c.uid, []):
+                            ev = ev_by_uid.get(euid)
                             if ev:
                                 lines.append(f"  - {sanitize_md(ev.text)} ({ev.section})")
                     lines.append("")
         else:
             for c in sorted(supported, key=lambda x: (x.loc.line, x.loc.start_char)):
                 lines.append(f"- {c.question}")
-                for eloc in loc_to_evidence_locs.get(c.loc, []):
-                    ev = ev_by_loc.get(eloc)
+                for euid in uid_to_evidence_uids.get(c.uid, []):
+                    ev = ev_by_uid.get(euid)
                     if ev:
                         lines.append(f"  - {sanitize_md(ev.text)} ({ev.section})")
             lines.append("")
@@ -301,8 +186,8 @@ def render_trace(state: PipelineState, meta: PaperRow | None, stop_step: int) ->
         lines.append("## 1. Extract Normative\n")
         raw_claims = state.raw_claims or []
         raw_evidence = state.raw_evidence or []
-        markers = state.markers or []
-        lines.append(f"{len(raw_claims)} claims, {len(raw_evidence)} evidence, {len(markers)} markers extracted:\n")
+        rhetoric = state.rhetoric or []
+        lines.append(f"{len(raw_claims)} claims, {len(raw_evidence)} evidence, {len(rhetoric)} markers extracted:\n")
 
         if raw_claims:
             lines.append("### Claims\n")
@@ -330,9 +215,9 @@ def render_trace(state: PipelineState, meta: PaperRow | None, stop_step: int) ->
                 lines.append(f'   - Supports: "{supports_str}"{flag_str}')
             lines.append("")
 
-        if markers:
+        if rhetoric:
             lines.append("### Rhetorical Markers\n")
-            for i, m in enumerate(markers, 1):
+            for i, m in enumerate(rhetoric, 1):
                 lines.append(f'{i}. [{m.marker_type}] "{sanitize_md(m.text)}" ({m.section})')
                 lines.append(f"   - Target: {m.target} | Intensity: {m.intensity}")
             lines.append("")
@@ -386,8 +271,8 @@ def render_trace(state: PipelineState, meta: PaperRow | None, stop_step: int) ->
 
     claims = state.claims or []
     evidence = state.evidence or []
-    claim_index = _build_loc_index(claims)
-    ev_index = _build_loc_index(evidence)
+    claim_index = _build_uid_index(claims)
+    ev_index = _build_uid_index(evidence)
 
     if stop_step >= 6:
         lines.append("## 6. Verify\n")
@@ -404,34 +289,34 @@ def render_trace(state: PipelineState, meta: PaperRow | None, stop_step: int) ->
         if claim_vs_claim:
             lines.append(f"### Claim-vs-Claim Contradictions ({len(claim_vs_claim)})\n")
             for ic in claim_vs_claim:
-                lines.append(f'- Claim: "{_loc_text(claim_index, ic.claim_loc)}"')
-                lines.append(f'  - Contradicted by: "{_loc_text(claim_index, ic.source_loc)}"')
+                lines.append(f'- Claim: "{_uid_text(claim_index, ic.claim_uid)}"')
+                lines.append(f'  - Contradicted by: "{_uid_text(claim_index, ic.source_uid)}"')
             lines.append("")
 
         if ev_vs_claim:
             lines.append(f"### Evidence-vs-Claim Contradictions ({len(ev_vs_claim)})\n")
             for ic in ev_vs_claim:
-                lines.append(f'- Claim: "{_loc_text(claim_index, ic.claim_loc)}"')
-                lines.append(f'  - Contradicted by: "{_loc_text(ev_index, ic.source_loc)}"')
+                lines.append(f'- Claim: "{_uid_text(claim_index, ic.claim_uid)}"')
+                lines.append(f'  - Contradicted by: "{_uid_text(ev_index, ic.source_uid)}"')
             lines.append("")
 
         if unsupported:
             lines.append(f"### Unsupported ({len(unsupported)})\n")
             for s in unsupported:
-                lines.append(f'- "{_loc_text(claim_index, s.claim_loc)}"')
+                lines.append(f'- "{_uid_text(claim_index, s.claim_uid)}"')
             lines.append("")
 
         if transitively:
             lines.append(f"### Transitively Supported ({len(transitively)})\n")
             for s in transitively:
-                lines.append(f'- "{_loc_text(claim_index, s.claim_loc)}"')
+                lines.append(f'- "{_uid_text(claim_index, s.claim_uid)}"')
             lines.append("")
 
         lines.append(f"### Directly Supported ({len(directly)})\n")
         for s in directly:
-            lines.append(f'- "{_loc_text(claim_index, s.claim_loc)}"')
-            for eloc in s.evidence_locs:
-                lines.append(f'  - <- "{_loc_text(ev_index, eloc)}"')
+            lines.append(f'- "{_uid_text(claim_index, s.claim_uid)}"')
+            for euid in s.evidence_uids:
+                lines.append(f'  - <- "{_uid_text(ev_index, euid)}"')
         lines.append("")
 
     if stop_step >= 7:
@@ -444,7 +329,7 @@ def render_trace(state: PipelineState, meta: PaperRow | None, stop_step: int) ->
             for cls, items in sorted(by_cls.items(), key=lambda kv: -len(kv[1])):
                 lines.append(f"### {cls} ({len(items)})\n")
                 for item in items:
-                    lines.append(f'- "{_loc_text(claim_index, item.claim_loc)}"')
+                    lines.append(f'- "{_uid_text(claim_index, item.claim_uid)}"')
                 lines.append("")
         else:
             lines.append("No classifications.")
@@ -484,7 +369,7 @@ def render_trace(state: PipelineState, meta: PaperRow | None, stop_step: int) ->
             for wr in resolutions:
                 lines.append(f"- [{wr.finding}]({wr.source_url}) - {wr.stance}")
                 for cl in wr.resolved_claims:
-                    lines.append(f'  - Resolved: "{_loc_text(claim_index, cl)}"')
+                    lines.append(f'  - Resolved: "{_uid_text(claim_index, cl)}"')
         else:
             lines.append("No resolutions.")
         lines.append("")
@@ -494,10 +379,10 @@ def render_trace(state: PipelineState, meta: PaperRow | None, stop_step: int) ->
         cc = state.caput_causae
         if cc:
             lines.append(f"**Thesis:** {cc.thesis}\n")
-            if cc.anchored_claim_locs:
-                lines.append(f"Anchored claims ({len(cc.anchored_claim_locs)}):\n")
-                for loc in cc.anchored_claim_locs:
-                    lines.append(f'- "{_loc_text(claim_index, loc)}"')
+            if cc.anchored_claim_uids:
+                lines.append(f"Anchored claims ({len(cc.anchored_claim_uids)}):\n")
+                for uid in cc.anchored_claim_uids:
+                    lines.append(f'- "{_uid_text(claim_index, uid)}"')
             lines.append("")
         else:
             lines.append("Not computed.")
@@ -511,18 +396,18 @@ def render_trace(state: PipelineState, meta: PaperRow | None, stop_step: int) ->
                 lines.append(f"### Asymmetries ({len(patterns.asymmetries)})\n")
                 for a in patterns.asymmetries:
                     lines.append(f'- {a.description}')
-                    lines.append(f'  - Marker: "{_loc_text(claim_index, a.marker_loc)}"')
-                    lines.append(f'  - Claim: "{_loc_text(claim_index, a.claim_loc)}"')
+                    lines.append(f'  - Marker: "{_uid_text(claim_index, a.marker_uid)}"')
+                    lines.append(f'  - Claim: "{_uid_text(claim_index, a.claim_uid)}"')
                 lines.append("")
             if patterns.concession_clusters:
                 lines.append(f"### Concession Clusters ({len(patterns.concession_clusters)})\n")
                 for cc in patterns.concession_clusters:
-                    lines.append(f"- Topic: {cc.topic} ({len(cc.marker_locs)} markers)")
+                    lines.append(f"- Topic: {cc.topic} ({len(cc.marker_uids)} markers)")
                 lines.append("")
             if patterns.scope_chains:
                 lines.append(f"### Scope Chains ({len(patterns.scope_chains)})\n")
                 for sc in patterns.scope_chains:
-                    lines.append(f"- {sc.paper_id} ({len(sc.marker_locs)} deflections)")
+                    lines.append(f"- {sc.paper_id} ({len(sc.marker_uids)} deflections)")
                 lines.append("")
         else:
             lines.append("No patterns detected.")

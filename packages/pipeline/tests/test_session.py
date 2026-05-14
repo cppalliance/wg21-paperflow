@@ -15,7 +15,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import httpx
 import pytest
 
-from web_tools.session import (
+from pipeline.session import (
     FetchResponse,
     SearchBackend,
     SearchResponse,
@@ -182,7 +182,7 @@ async def test_close_is_idempotent():
 @pytest.mark.anyio
 async def test_owns_backend_closes_it():
     """When no backend is passed, the researcher owns and closes it."""
-    with patch("web_tools.backends.get_default_backend") as mock_get:
+    with patch("pipeline.backends.get_default_backend") as mock_get:
         mock_backend = AsyncMock(spec=SearchBackend)
         mock_backend.name = "mock"
         mock_get.return_value = mock_backend
@@ -220,7 +220,7 @@ def test_fetch_response_frozen():
 
 
 def test_brave_missing_key_raises():
-    from web_tools.backends.brave import BraveBackend
+    from pipeline.backends.brave import BraveBackend
     with patch.dict("os.environ", {}, clear=True):
         with pytest.raises(ValueError, match="BRAVE_API_KEY"):
             BraveBackend()

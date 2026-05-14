@@ -10,8 +10,8 @@
 Closes the gap that the WebResearcher PDF-fetch bug fix exposed: when
 ``web_fetch`` returns extracted PDF text (rather than an error string),
 the resulting citation_audit row must report ``Resolved: Yes`` with an
-empty ``Discrepancy``. This test exercises ``_pure_verify_citations``
-end-to-end with the LLM call stubbed and verifies both the in-memory
+empty ``Discrepancy``. This test exercises Step 8's custom hook with
+the LLM call stubbed and verifies both the in-memory
 ``state.citation_audit`` entries and the rendered Citation Audit row.
 """
 
@@ -20,6 +20,7 @@ from __future__ import annotations
 from unittest.mock import MagicMock
 
 import pytest
+from pipeline import StepContext
 
 from dissect import pipeline
 from dissect.models import (
@@ -28,7 +29,7 @@ from dissect.models import (
     CitationTaskOutput,
     PipelineState,
 )
-from dissect.pipeline import StepContext, _pure_verify_citations
+from dissect.pipeline import _custom_verify_citations
 from dissect.render import render_report
 
 
@@ -52,7 +53,7 @@ async def test_successful_pdf_fetch_yields_resolved_audit_row(monkeypatch):
     # LLM then produces an audit row reporting successful resolution.
     successful_entry = CitationAuditEntry(
         paper_id="N5032",
-        resolution_method="open_std",
+        resolution_method="local_index",
         resolved=True,
         source_url="https://www.open-std.org/jtc1/sc22/wg21/docs/papers/2025/n5032.pdf",
         quote_match="exact",
@@ -61,7 +62,7 @@ async def test_successful_pdf_fetch_yields_resolved_audit_row(monkeypatch):
 
     # web_fetch result content doesn't matter to this test — the stub
     # run_task returns a fixed audit regardless. We just need it present
-    # in tool_registry so _pure_verify_citations can hand it through.
+    # in tool_registry so _custom_verify_citations can hand it through.
     async def fake_web_fetch(url: str) -> str:
         return "Extracted text from N5032 PDF."
 
@@ -83,7 +84,7 @@ async def test_successful_pdf_fetch_yields_resolved_audit_row(monkeypatch):
         pipeline, "run_task", _fake_run_task_returning(successful_entry),
     )
 
-    await _pure_verify_citations(state, ctx)
+    await _custom_verify_citations(state, ctx)
 
     assert state.citation_audit is not None
     assert len(state.citation_audit) == 1
@@ -101,7 +102,7 @@ def test_citation_audit_renders_resolved_row_as_yes_with_empty_discrepancy():
         citation_audit=[
             CitationAuditEntry(
                 paper_id="N5032",
-                resolution_method="open_std",
+                resolution_method="local_index",
                 resolved=True,
                 source_url="https://example.org/n5032.pdf",
                 quote_match="exact",
