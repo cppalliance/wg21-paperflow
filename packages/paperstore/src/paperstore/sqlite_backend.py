@@ -34,7 +34,7 @@ from paperstore.extract_rows import (
     ClaimRow,
     EvidenceRow,
     ExternalCitationRow,
-    MarkerRow,
+    RhetoricRow,
     PaperCitationRow,
     QuestionRow,
 )
@@ -64,7 +64,15 @@ CREATE TABLE IF NOT EXISTS papers (
     dissect_path   TEXT DEFAULT '',
     advocatus_path TEXT DEFAULT '',
     agora_path     TEXT DEFAULT '',
-    line_count     INTEGER DEFAULT 0
+    line_count     INTEGER DEFAULT 0,
+    status         INTEGER NOT NULL DEFAULT 0,
+    error          TEXT DEFAULT '',
+    updated_at     TEXT DEFAULT ''
+);
+
+CREATE TABLE IF NOT EXISTS settings (
+    key   TEXT PRIMARY KEY,
+    value TEXT NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS years (
@@ -74,6 +82,7 @@ CREATE TABLE IF NOT EXISTS years (
 
 CREATE TABLE IF NOT EXISTS claims (
     paper_id         TEXT NOT NULL,
+    uid              INTEGER NOT NULL,
     loc_line         INTEGER NOT NULL,
     loc_start        INTEGER NOT NULL,
     loc_end          INTEGER NOT NULL,
@@ -81,14 +90,13 @@ CREATE TABLE IF NOT EXISTS claims (
     section          TEXT DEFAULT '',
     question         TEXT DEFAULT '',
     kind             TEXT DEFAULT 'normative',
-    merged_into_line INTEGER,
-    merged_into_start INTEGER,
-    merged_into_end  INTEGER,
-    PRIMARY KEY (paper_id, loc_line, loc_start, loc_end)
+    merged_into      INTEGER,
+    PRIMARY KEY (paper_id, uid)
 );
 
 CREATE TABLE IF NOT EXISTS evidence (
     paper_id         TEXT NOT NULL,
+    uid              INTEGER NOT NULL,
     loc_line         INTEGER NOT NULL,
     loc_start        INTEGER NOT NULL,
     loc_end          INTEGER NOT NULL,
@@ -99,10 +107,8 @@ CREATE TABLE IF NOT EXISTS evidence (
     cited            INTEGER DEFAULT 0,
     verifiable       INTEGER DEFAULT 0,
     normative        INTEGER DEFAULT 0,
-    merged_into_line INTEGER,
-    merged_into_start INTEGER,
-    merged_into_end  INTEGER,
-    PRIMARY KEY (paper_id, loc_line, loc_start, loc_end)
+    merged_into      INTEGER,
+    PRIMARY KEY (paper_id, uid)
 );
 
 CREATE TABLE IF NOT EXISTS paper_citations (
@@ -124,6 +130,7 @@ CREATE TABLE IF NOT EXISTS external_citations (
 
 CREATE TABLE IF NOT EXISTS questions (
     paper_id         TEXT NOT NULL,
+    uid              INTEGER NOT NULL,
     loc_line         INTEGER NOT NULL,
     loc_start        INTEGER NOT NULL,
     loc_end          INTEGER NOT NULL,
@@ -131,11 +138,12 @@ CREATE TABLE IF NOT EXISTS questions (
     section          TEXT DEFAULT '',
     question         TEXT NOT NULL,
     kind             TEXT DEFAULT 'normative',
-    PRIMARY KEY (paper_id, loc_line, loc_start, loc_end)
+    PRIMARY KEY (paper_id, uid)
 );
 
-CREATE TABLE IF NOT EXISTS rhetorical_markers (
+CREATE TABLE IF NOT EXISTS rhetoric (
     paper_id         TEXT NOT NULL,
+    uid              INTEGER NOT NULL,
     loc_line         INTEGER NOT NULL,
     loc_start        INTEGER NOT NULL,
     loc_end          INTEGER NOT NULL,
@@ -144,7 +152,7 @@ CREATE TABLE IF NOT EXISTS rhetorical_markers (
     marker_type      TEXT DEFAULT '',
     target           TEXT DEFAULT '',
     intensity        TEXT DEFAULT 'moderate',
-    PRIMARY KEY (paper_id, loc_line, loc_start, loc_end)
+    PRIMARY KEY (paper_id, uid)
 );
 
 CREATE TABLE IF NOT EXISTS caput_causae (
@@ -180,32 +188,68 @@ def _migrate(conn: sqlite3.Connection) -> None:
     if "line_count" not in cols:
         conn.execute("ALTER TABLE papers ADD COLUMN line_count INTEGER DEFAULT 0")
 
+    if "status" not in cols:
+        conn.execute(
+            "ALTER TABLE papers ADD COLUMN status INTEGER NOT NULL DEFAULT 0"
+        )
+        conn.execute(
+            "ALTER TABLE papers ADD COLUMN error TEXT DEFAULT ''"
+        )
+        conn.execute(
+            "ALTER TABLE papers ADD COLUMN updated_at TEXT DEFAULT ''"
+        )
+        conn.execute("""
+            UPDATE papers SET status =
+                CASE
+                    WHEN agora_path != ''     THEN 5
+                    WHEN advocatus_path != '' THEN 4
+                    WHEN dissect_path != ''   THEN 3
+                    WHEN markdown_path != ''  THEN 2
+                    WHEN source_file != ''    THEN 1
+                    ELSE 0
+                END
+        """)
+
+    conn.executescript(
+        "CREATE TABLE IF NOT EXISTS settings ("
+        "    key   TEXT PRIMARY KEY,"
+        "    value TEXT NOT NULL"
+        ");"
+    )
+    if not conn.execute(
+        "SELECT 1 FROM settings WHERE key = 'process_since'"
+    ).fetchone():
+        conn.execute(
+            "INSERT INTO settings (key, value) VALUES ('process_since', '2020-01')"
+        )
+
     claim_cols = {r[1] for r in conn.execute("PRAGMA table_info(claims)").fetchall()}
     if "kind" not in claim_cols:
         conn.execute("ALTER TABLE claims ADD COLUMN kind TEXT DEFAULT 'normative'")
 
-    # questions: re-keyed from (paper_id, claim_text, kind) to the loc
-    # triple to match the other extract tables. Drop and recreate -
-    # the data is rebuilt by the next dissect run, so no migration is
-    # needed beyond that.
-    question_cols = {
-        r[1] for r in conn.execute("PRAGMA table_info(questions)").fetchall()
-    }
-    if question_cols and "loc_line" not in question_cols:
-        conn.execute("DROP TABLE questions")
-        conn.execute("""
-            CREATE TABLE questions (
-                paper_id         TEXT NOT NULL,
-                loc_line         INTEGER NOT NULL,
-                loc_start        INTEGER NOT NULL,
-                loc_end          INTEGER NOT NULL,
-                claim_text       TEXT NOT NULL,
-                section          TEXT DEFAULT '',
-                question         TEXT NOT NULL,
-                kind             TEXT DEFAULT 'normative',
-                PRIMARY KEY (paper_id, loc_line, loc_start, loc_end)
-            )
-        """)
+    # SourceLoc-to-uid migration: PK changes from the loc triple to
+    # (paper_id, uid). Data is rebuilt by the next dissect run.
+    def _needs_uid(table: str) -> bool:
+        cols = {r[1] for r in conn.execute(
+            f"PRAGMA table_info({table})"
+        ).fetchall()}
+        return bool(cols) and "uid" not in cols
+
+    for tbl in ("claims", "evidence", "questions"):
+        if _needs_uid(tbl):
+            conn.execute(f"DROP TABLE {tbl}")
+
+    tables = {r[0] for r in conn.execute(
+        "SELECT name FROM sqlite_master WHERE type='table'"
+    ).fetchall()}
+    if "rhetorical_markers" in tables:
+        conn.execute("DROP TABLE rhetorical_markers")
+
+    conn.executescript(_SCHEMA)
+
+
+def _now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
 
 
 def _atomic_replace(src: Path, dst: Path) -> None:
@@ -218,11 +262,6 @@ def _atomic_replace(src: Path, dst: Path) -> None:
             time.sleep(0.1)
     os.replace(src, dst)
 
-
-def _merged_triple(merged_into: object) -> tuple[int | None, int | None, int | None]:
-    if merged_into is not None:
-        return merged_into.line, merged_into.start_char, merged_into.end_char  # type: ignore[union-attr]
-    return None, None, None
 
 
 class SqliteBackend(StorageBackend):
@@ -253,6 +292,7 @@ class SqliteBackend(StorageBackend):
         # built SERIALIZED, so concurrent reads are safe; writes still go
         # through `with self._conn:` blocks and a single process.
         self._conn = sqlite3.connect(str(db_path), check_same_thread=False)
+        self._conn.execute("PRAGMA busy_timeout = 5000")
         self._conn.row_factory = sqlite3.Row
         self._conn.executescript(_SCHEMA)
         _migrate(self._conn)
@@ -340,6 +380,8 @@ class SqliteBackend(StorageBackend):
             advocatus_path=d.get("advocatus_path", ""),
             agora_path=d.get("agora_path", ""),
             line_count=d.get("line_count", 0),
+            status=d.get("status", 0),
+            error=d.get("error", ""),
         )
 
     # ---- year-based mailing index -----------------------------------------
@@ -423,6 +465,30 @@ class SqliteBackend(StorageBackend):
             return None
         paper = self._row_to_paper(row)
         return paper.year, paper
+
+    def find_latest_revision(self, base_id: str) -> str | None:
+        """Find the latest revision for a paper number without revision suffix.
+
+        ``base_id`` is e.g. ``P4003`` (no R suffix). Returns the full
+        paper_id of the highest revision (e.g. ``P4003R3``), or None.
+        """
+        import re
+        base = base_id.strip().upper()
+        rows = self._conn.execute(
+            "SELECT paper_id FROM papers WHERE paper_id LIKE ?",
+            (f"{base}R%",),
+        ).fetchall()
+        if not rows:
+            return None
+        rev_re = re.compile(rf"^{re.escape(base)}R(\d+)$")
+        best_pid = None
+        best_rev = -1
+        for row in rows:
+            m = rev_re.match(row["paper_id"])
+            if m and int(m.group(1)) > best_rev:
+                best_rev = int(m.group(1))
+                best_pid = row["paper_id"]
+        return best_pid
 
     # ---- writes -----------------------------------------------------------
 
@@ -829,24 +895,13 @@ class SqliteBackend(StorageBackend):
             )
         return path
 
-    def get_debug_md_path(self, paper_id: str, tool: str) -> Path:
-        return self._tool_artifact_path(paper_id, tool, ".debug.md")
-
-    def get_trace_md_path(self, paper_id: str, tool: str) -> Path:
-        return self._tool_artifact_path(paper_id, tool, ".trace.md")
-
-    def _tool_artifact_path(self, paper_id: str, tool: str, suffix: str) -> Path:
-        """Compose ``paperstore/<pid>.<tool><suffix>``.
-
-        ``tool`` is normalized to lowercase. Empty / whitespace-only ``tool``
-        raises ``ValueError`` to keep the convention enforceable across
-        every consuming pipeline.
-        """
-        normalized_tool = tool.strip().lower()
-        if not normalized_tool:
-            raise ValueError("tool must be a non-empty identifier")
+    def get_debug_md_path(self, paper_id: str) -> Path:
         pid = paper_id.strip().upper().lower()
-        return self._papers_dir / f"{pid}.{normalized_tool}{suffix}"
+        return self._papers_dir / f"{pid}.debug.md"
+
+    def get_trace_md_path(self, paper_id: str) -> Path:
+        pid = paper_id.strip().upper().lower()
+        return self._papers_dir / f"{pid}.trace.md"
 
     def list_years(self) -> list[tuple[str, int]]:
         """Return ``[(year, paper_count)]`` sorted by year."""
@@ -863,46 +918,74 @@ class SqliteBackend(StorageBackend):
         ).fetchall()
         return [self._row_to_paper(r) for r in rows]
 
+    # ---- status / settings ------------------------------------------------
+
+    def advance_status(self, paper_id: str, from_status: int, to_status: int) -> bool:
+        """CAS: advance only if current status matches from_status. Clears error."""
+        with self._conn:
+            cur = self._conn.execute(
+                "UPDATE papers SET status = ?, error = '', updated_at = ? "
+                "WHERE paper_id = ? AND status = ?",
+                (to_status, _now_iso(), paper_id.strip().upper(), from_status),
+            )
+            return cur.rowcount == 1
+
+    def fail_paper(self, paper_id: str, stage: int, error: str) -> None:
+        """Mark paper as failed at the given stage."""
+        with self._conn:
+            self._conn.execute(
+                "UPDATE papers SET status = ?, error = ?, updated_at = ? WHERE paper_id = ?",
+                (-(stage + 1), error, _now_iso(), paper_id.strip().upper()),
+            )
+
+    def get_setting(self, key: str) -> str | None:
+        row = self._conn.execute(
+            "SELECT value FROM settings WHERE key = ?", (key,)
+        ).fetchone()
+        return row["value"] if row else None
+
+    def set_setting(self, key: str, value: str) -> None:
+        with self._conn:
+            self._conn.execute(
+                "INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)",
+                (key, value),
+            )
+
     # ---- extract writes ---------------------------------------------------
 
     def store_claims(self, paper_id: str, claims) -> None:
         pid = paper_id.strip().upper()
-        rows = []
-        for c in claims:
-            ml, ms, me = _merged_triple(c.merged_into)
-            rows.append((
-                pid, c.loc.line, c.loc.start_char, c.loc.end_char,
-                c.text, c.section, c.question,
-                getattr(c, "kind", "normative"), ml, ms, me,
-            ))
+        rows = [
+            (pid, c.uid, c.loc.line, c.loc.start_char, c.loc.end_char,
+             c.text, c.section, c.question,
+             getattr(c, "kind", "normative"), c.merged_into)
+            for c in claims
+        ]
         with self._conn:
             self._conn.execute("DELETE FROM claims WHERE paper_id = ?", (pid,))
             self._conn.executemany(
-                "INSERT INTO claims (paper_id, loc_line, loc_start, loc_end, "
-                "text, section, question, kind, merged_into_line, "
-                "merged_into_start, merged_into_end) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "INSERT INTO claims (paper_id, uid, loc_line, loc_start, loc_end, "
+                "text, section, question, kind, merged_into) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 rows,
             )
 
     def store_evidence(self, paper_id: str, evidence) -> None:
         pid = paper_id.strip().upper()
-        rows = []
-        for e in evidence:
-            ml, ms, me = _merged_triple(e.merged_into)
-            rows.append((
-                pid, e.loc.line, e.loc.start_char, e.loc.end_char,
-                e.text, e.section, json.dumps(e.supports),
-                int(e.quantitative), int(e.cited),
-                int(e.verifiable), int(e.normative), ml, ms, me,
-            ))
+        rows = [
+            (pid, e.uid, e.loc.line, e.loc.start_char, e.loc.end_char,
+             e.text, e.section, json.dumps(e.supports),
+             int(e.quantitative), int(e.cited),
+             int(e.verifiable), int(e.normative), e.merged_into)
+            for e in evidence
+        ]
         with self._conn:
             self._conn.execute("DELETE FROM evidence WHERE paper_id = ?", (pid,))
             self._conn.executemany(
-                "INSERT INTO evidence (paper_id, loc_line, loc_start, loc_end, "
+                "INSERT INTO evidence (paper_id, uid, loc_line, loc_start, loc_end, "
                 "text, section, supports, quantitative, cited, verifiable, "
-                "normative, merged_into_line, merged_into_start, merged_into_end) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "normative, merged_into) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 rows,
             )
 
@@ -934,41 +1017,41 @@ class SqliteBackend(StorageBackend):
 
     def store_questions(self, paper_id: str, claims, support_map) -> None:
         pid = paper_id.strip().upper()
-        unsupported_locs = {
-            s.claim_loc for s in support_map if s.status == "unsupported"
+        unsupported_uids = {
+            s.claim_uid for s in support_map if s.status == "unsupported"
         }
         rows = [
             (
-                pid,
+                pid, c.uid,
                 c.loc.line, c.loc.start_char, c.loc.end_char,
                 c.text, c.section, c.question,
                 getattr(c, "kind", "normative"),
             )
             for c in claims
-            if c.merged_into is None and c.loc in unsupported_locs
+            if c.merged_into is None and c.uid in unsupported_uids
         ]
         with self._conn:
             self._conn.execute("DELETE FROM questions WHERE paper_id = ?", (pid,))
             self._conn.executemany(
-                "INSERT INTO questions (paper_id, loc_line, loc_start, loc_end, "
+                "INSERT INTO questions (paper_id, uid, loc_line, loc_start, loc_end, "
                 "claim_text, section, question, kind) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 rows,
             )
 
-    def store_markers(self, paper_id: str, markers) -> None:
+    def store_rhetoric(self, paper_id: str, markers) -> None:
         pid = paper_id.strip().upper()
         rows = [
-            (pid, m.loc.line, m.loc.start_char, m.loc.end_char,
+            (pid, m.uid, m.loc.line, m.loc.start_char, m.loc.end_char,
              m.text, m.section, m.marker_type, m.target, m.intensity)
             for m in markers
         ]
         with self._conn:
-            self._conn.execute("DELETE FROM rhetorical_markers WHERE paper_id = ?", (pid,))
+            self._conn.execute("DELETE FROM rhetoric WHERE paper_id = ?", (pid,))
             self._conn.executemany(
-                "INSERT INTO rhetorical_markers (paper_id, loc_line, loc_start, loc_end, "
+                "INSERT INTO rhetoric (paper_id, uid, loc_line, loc_start, loc_end, "
                 "text, section, marker_type, target, intensity) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 rows,
             )
 
@@ -1005,12 +1088,11 @@ class SqliteBackend(StorageBackend):
             "SELECT * FROM claims WHERE paper_id = ?", (pid,)
         ).fetchall()
         return [ClaimRow(
-            paper_id=r["paper_id"], loc_line=r["loc_line"],
+            paper_id=r["paper_id"], uid=r["uid"],
+            loc_line=r["loc_line"],
             loc_start=r["loc_start"], loc_end=r["loc_end"],
             text=r["text"], section=r["section"], question=r["question"],
-            kind=r["kind"], merged_into_line=r["merged_into_line"],
-            merged_into_start=r["merged_into_start"],
-            merged_into_end=r["merged_into_end"],
+            kind=r["kind"], merged_into=r["merged_into"],
         ) for r in rows]
 
     def get_evidence(self, paper_id: str) -> list[EvidenceRow]:
@@ -1019,14 +1101,13 @@ class SqliteBackend(StorageBackend):
             "SELECT * FROM evidence WHERE paper_id = ?", (pid,)
         ).fetchall()
         return [EvidenceRow(
-            paper_id=r["paper_id"], loc_line=r["loc_line"],
+            paper_id=r["paper_id"], uid=r["uid"],
+            loc_line=r["loc_line"],
             loc_start=r["loc_start"], loc_end=r["loc_end"],
             text=r["text"], section=r["section"], supports=r["supports"],
             quantitative=bool(r["quantitative"]), cited=bool(r["cited"]),
             verifiable=bool(r["verifiable"]), normative=bool(r["normative"]),
-            merged_into_line=r["merged_into_line"],
-            merged_into_start=r["merged_into_start"],
-            merged_into_end=r["merged_into_end"],
+            merged_into=r["merged_into"],
         ) for r in rows]
 
     def get_paper_citations(self, paper_id: str) -> list[PaperCitationRow]:
@@ -1057,7 +1138,7 @@ class SqliteBackend(StorageBackend):
             "SELECT * FROM questions WHERE paper_id = ?", (pid,)
         ).fetchall()
         return [QuestionRow(
-            paper_id=r["paper_id"],
+            paper_id=r["paper_id"], uid=r["uid"],
             loc_line=r["loc_line"],
             loc_start=r["loc_start"],
             loc_end=r["loc_end"],
@@ -1066,13 +1147,14 @@ class SqliteBackend(StorageBackend):
             kind=r["kind"],
         ) for r in rows]
 
-    def get_markers(self, paper_id: str) -> list[MarkerRow]:
+    def get_rhetoric(self, paper_id: str) -> list[RhetoricRow]:
         pid = paper_id.strip().upper()
         rows = self._conn.execute(
-            "SELECT * FROM rhetorical_markers WHERE paper_id = ?", (pid,)
+            "SELECT * FROM rhetoric WHERE paper_id = ?", (pid,)
         ).fetchall()
-        return [MarkerRow(
-            paper_id=r["paper_id"], loc_line=r["loc_line"],
+        return [RhetoricRow(
+            paper_id=r["paper_id"], uid=r["uid"],
+            loc_line=r["loc_line"],
             loc_start=r["loc_start"], loc_end=r["loc_end"],
             text=r["text"], section=r["section"],
             marker_type=r["marker_type"], target=r["target"],

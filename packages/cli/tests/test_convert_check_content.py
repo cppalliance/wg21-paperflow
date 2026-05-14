@@ -7,8 +7,8 @@
 
 """Smoke tests for `paperflow convert --check-content`.
 
-The flag short-circuits conversion (same as --qa); it must read the
-staged source plus the converted markdown and emit a coverage report.
+The flag short-circuits conversion: it must read the staged source
+plus the converted markdown and emit a coverage report.
 """
 
 from __future__ import annotations
@@ -30,8 +30,10 @@ _BODY = (
 )
 
 
-def _stage(store, pid: str, body: str, md: str) -> None:
-    store.upsert_year("2026", [{"paper_id": pid, "title": "Sample"}])
+def _stage(store, pid: str, body: str, md: str, mailing_date: str = "2026-04-01") -> None:
+    store.upsert_year("2026", [{
+        "paper_id": pid, "title": "Sample", "mailing_date": mailing_date,
+    }])
     html = f"<html><body>{body}</body></html>"
     store.put_source(pid, html.encode("utf-8"), suffix=".html")
     store.write_paper_md(pid, md)
@@ -61,37 +63,25 @@ def test_check_content_writes_json(store, tmp_path: Path):
     assert payload["papers"][0]["coverage"] > 0.9
 
 
-def test_check_content_combined_with_qa(store, tmp_path: Path):
-    body = _BODY * 4
-    md = (
-        "---\n"
-        "title: \"Sample\"\n"
-        "document: P1001R0\n"
-        "date: 2026-04-01\n"
-        "audience: LEWG\n"
-        "---\n\n"
-        "## 1 Body\n\n"
-        + body
-        + "\n"
-    )
-    _stage(store, "P1001R0", body, md)
+def test_check_content_accepts_year_month_target(store, tmp_path: Path):
+    """Regression: year-month must route through list_papers_since.
 
-    qa_json = tmp_path / "qa.json"
-    cc_json = tmp_path / "check.json"
+    Prior bug: `2011-01` was classified as a paper id and produced
+    'Paper 2011-01 not found in database.'
+    """
+    body = _BODY * 4
+    _stage(store, "P2000R0", body, body, mailing_date="2026-04-01")
+
     result = subprocess.run(
         [
             sys.executable, "-m", "cli", "--workspace-dir", str(tmp_path),
-            "convert", "2026",
-            "--qa", "--qa-json", str(qa_json),
-            "--check-content", "--check-content-json", str(cc_json),
+            "convert", "2011-01", "--check-content",
         ],
         capture_output=True, text=True, check=False,
     )
     assert result.returncode == 0, (result.stdout, result.stderr)
-    assert qa_json.exists()
-    assert cc_json.exists()
-    assert "tomd QA Report" in result.stdout
-    assert "tomd Content-Check Report" in result.stdout
+    assert "not found in database" not in result.stderr
+    assert "P2000R0" in result.stdout
 
 
 def test_check_content_skips_papers_without_source(store, tmp_path: Path):

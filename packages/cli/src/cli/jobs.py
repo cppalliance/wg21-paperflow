@@ -458,6 +458,51 @@ def run_qa(
 # run_content_check
 # ---------------------------------------------------------------------------
 
+def _rows_for_content_check_targets(
+    targets: list[str], backend: StorageBackend,
+) -> list[PaperRow]:
+    """Resolve CLI targets (paper id, year, year-month) to paper rows.
+
+    Mirrors the dispatch in :func:`cli._process.run_process_command` so
+    every target shape `paperflow convert` advertises (paper id, year,
+    year-month) reaches :func:`run_content_check`. The older
+    :func:`_papers_from_scope` predates year-month targets.
+    """
+    from cli.targets import MONTH_RE, resolve_pid
+
+    seen: set[str] = set()
+    rows: list[PaperRow] = []
+
+    def _add(row: PaperRow) -> None:
+        if row.paper_id in seen:
+            return
+        seen.add(row.paper_id)
+        rows.append(row)
+
+    for target in targets:
+        if MONTH_RE.match(target):
+            for row in backend.list_papers_since(target):
+                _add(row)
+        elif target.isdigit() and len(target) == 4:
+            try:
+                for row in backend.list_papers_for_year(target):
+                    _add(row)
+            except MissingMailingIndexError:
+                logger.warning(
+                    "No papers found for year %s; run 'paperflow mailing' first.",
+                    target,
+                )
+        else:
+            pid = resolve_pid(target, backend)
+            result = backend.resolve_year_for_paper(pid)
+            if result is None:
+                logger.warning("Paper %s not found in database.", target)
+                continue
+            _add(result[1])
+
+    return rows
+
+
 def run_content_check(
     targets: list[str],
     backend: StorageBackend,
@@ -474,8 +519,7 @@ def run_content_check(
     markdown. Returns the same type of ouput as :func:`run_qa`.
     """
     workers = max(1, workers)
-    target_type = _validate_targets(targets)
-    rows = _papers_from_scope(targets, target_type, backend)
+    rows = _rows_for_content_check_targets(targets, backend)
 
     items: list[tuple[str, Path]] = []
     skipped: list[dict] = []

@@ -87,11 +87,11 @@ authority for tone, calibration tiers, and structural rules.
 - **Model:** none
 - **Execution:** main
 - **Reads:** paper_id
-- **Writes:** paper_source, paper_title, paper_authors, paper_audience, paper_date, paper_url, paper_number, paper_revision, subreddit, prior_revision, revision_case, dissect_claims, dissect_evidence, dissect_markers, dissect_caput_causae, dissect_citation_audit, dissect_external_citations
+- **Writes:** paper_source, paper_title, paper_authors, paper_audience, paper_date, paper_url, paper_number, paper_revision, subreddit, prior_revision, revision_case, dissect_claims, dissect_evidence, dissect_rhetoric, dissect_caput_causae, dissect_citation_audit, dissect_external_citations
 
 Pure-Python load step. Reads paper metadata and converted markdown
 from paperstore. Loads every dissect artifact (claims, evidence,
-markers, caput causae, citation audit, external citations) as raw
+rhetoric, caput causae, citation audit, external citations) as raw
 row dicts; later steps convert what they need into typed models.
 
 Routes the paper to a subreddit by first target group: ``EWG`` /
@@ -112,7 +112,7 @@ can call out the delta.
 
 - **Model:** default
 - **Execution:** main
-- **Reads:** paper_source, paper_title, paper_authors, paper_audience, paper_date, dissect_claims, dissect_evidence, dissect_markers, dissect_caput_causae
+- **Reads:** paper_source, paper_title, paper_authors, paper_audience, paper_date, dissect_claims, dissect_evidence, dissect_rhetoric, dissect_caput_causae
 - **Writes:** paper_type, technical_anchors, hot_takes, tangent_magnets, misconception_traps, design_tensions
 
 Read the dissected paper end to end. Decide what makes this paper
@@ -170,7 +170,7 @@ sections), 1.4g (feature test macro relevance).
 
 - **Model:** default
 - **Execution:** parallel
-- **Tools:** web_search, web_fetch
+- **Tools:** deep_search, web_fetch
 - **Reads:** paper_id, paper_title, paper_authors, paper_audience, paper_number, paper_revision, technical_anchors
 - **Writes:** research_summary
 
@@ -192,8 +192,7 @@ their results into a ``ResearchSummary``. The three sub-agents are:
 
 Each sub-agent receives only the paper identifying metadata and the
 list of technical anchors. They do not see each other. They do not
-see the paper source. They use ``web_search`` to find leads and
-``web_fetch`` to confirm one or two of the most promising. Their
+see the paper source. They use ``deep_search`` as the primary search tool, which searches multiple angles simultaneously and includes fetched content from top results. Only use ``web_fetch`` for specific URLs not found in the search results. Their
 findings are paraphrased prose; they never quote pages verbatim.
 
 Heat signal uses the ``cold | warm | hot | thermonuclear`` ladder

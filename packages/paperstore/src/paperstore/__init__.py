@@ -27,15 +27,16 @@ from paperstore.extract_rows import (
     ClaimRow,
     EvidenceRow,
     ExternalCitationRow,
-    MarkerRow,
     PaperCitationRow,
     QuestionRow,
+    RhetoricRow,
 )
 from paperstore.factory import WORKSPACE_ENV_VAR, default_workspace_dir, from_uri
-from paperstore.locs import SourceLoc, loc_from_row, merged_into_loc
+from paperstore.locs import SourceLoc, loc_from_row
 from paperstore.progress import ProgressCallback as ProgressCallback
 from paperstore.progress import ProgressEvent as ProgressEvent
 from paperstore.sqlite_backend import SqliteBackend
+from paperstore.stages import STAGES, STAGE_NAMES, failed_status, failed_stage
 from paperstore.tools import PaperstoreTools
 
 __all__ = [
@@ -60,13 +61,16 @@ __all__ = [
     "ProgressEvent",
     "SourceLoc",
     "loc_from_row",
-    "merged_into_loc",
+    "STAGES",
+    "STAGE_NAMES",
+    "failed_status",
+    "failed_stage",
     "CaputCausaeRow",
     "CitationAuditRow",
     "ClaimRow",
     "EvidenceRow",
     "ExternalCitationRow",
-    "MarkerRow",
     "PaperCitationRow",
     "QuestionRow",
+    "RhetoricRow",
 ]

@@ -45,7 +45,7 @@ def test_verb_in_constants_module():
 
     assert "advocatus" in _VERB_NAMES
     assert "advocatus" in _COMMANDS
-    assert _VERB_FLAGS["advocatus"] == {"debug", "trace"}
+    assert _VERB_FLAGS["advocatus"] == {"debug", "trace", "force"}
 
 
 def test_advocatus_rejects_year_target():

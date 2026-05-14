@@ -8,52 +8,45 @@
 """Async examination pipeline for WG21 papers (Advocatus Diaboli).
 
 All LLM-facing text comes from ``advocatus.md`` at runtime. This module
-contains structural orchestration: hook definitions, the generic
-runner, and the dispatch loop. ``advocatus.md`` is the upstream
-authority for pipeline structure; this module conforms to it.
+contains structural orchestration: hook definitions, step functions,
+and the public API. ``advocatus.md`` is the upstream authority for
+pipeline structure; this module conforms to it.
 
-One-shot, fully batch. No human-in-the-loop. Concurrency for parallel
-sub-agents is capped at ``_TASK_CONCURRENCY`` (5) by a single
-module-level semaphore.
+One-shot, fully batch. No human-in-the-loop.
 """
 
 from __future__ import annotations
 
 import asyncio
-import functools
-import importlib.resources
 import json
 import logging
 from collections.abc import Callable
-from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, TypeVar
+from typing import Any
 
 from paperstore import (
-    SourceLoc,
     StorageBackend,
     loc_from_row,
 )
 from paperstore.errors import MissingMetaError, MissingPaperMdError
-from paperstore.progress import ProgressCallback, ProgressEvent
-from pydantic import BaseModel
-from pydantic_ai import Agent
-from pydantic_ai.exceptions import (
-    ModelHTTPError,
-    UnexpectedModelBehavior,
-    UsageLimitExceeded,
-)
-from pydantic_ai.settings import ModelSettings
-from pydantic_ai.usage import UsageLimits
+from paperstore.progress import ProgressCallback
 
-from advocatus.errors import (
-    HookMismatchError,
+from pipeline import (
+    DEFAULT_MODEL_SLOTS,
+    StepContext,
+    StepHooks,
+    StepSpec,
+    WebResearcher,
+    build_pipeline,
+    dispatch,
+    load_sections,
+    run_agent,
+    run_task,
+)
+from pipeline.errors import (
     PaperNotConvertedError,
     PaperNotDissectedError,
     PaperNotFoundError,
     PromptFileError,
-    StepError,
-    TransientStepError,
-    ValidationStepError,
 )
 from advocatus.models import (
     Articulus,
@@ -75,42 +68,9 @@ from advocatus.models import (
     TabulaFontiumEntry,
     WeighCauseOutput,
 )
-from advocatus.parse import sections
-from advocatus.prompt import StepHooks, StepSpec, build_pipeline
-from advocatus.render import render_debug_md, render_relatio, render_trace
-
-if TYPE_CHECKING:
-    from web_tools import WebResearcher
+from advocatus.render import render_relatio, render_trace
 
 logger = logging.getLogger(__name__)
-
-T = TypeVar("T", bound=BaseModel)
-
-# -- Concurrency cap ---------------------------------------------------------
-
-_TASK_CONCURRENCY = 5
-_task_semaphore = asyncio.Semaphore(_TASK_CONCURRENCY)
-
-
-# -- Model slots and limits --------------------------------------------------
-
-_DEFAULT_MODEL_SLOTS = {
-    "fast": "anthropic:claude-haiku-4-5-20251001",
-    "default": "anthropic:claude-opus-4-6",
-}
-
-_MODEL_SETTINGS_BY_SLOT = {
-    "fast": ModelSettings(max_tokens=64000),
-    "default": ModelSettings(max_tokens=80000),
-}
-_DEFAULT_MODEL_SETTINGS = ModelSettings(max_tokens=80000)
-
-_SECTION_SYSTEM_PROMPT = "System Prompt"
-_REQUEST_LIMIT = 200
-_REQUEST_LIMIT_PER_TASK = 36
-_RETRIES_SINGLE = 3
-_RETRIES_EMPTY_OUTPUT = 3
-_DEBUG_SEPARATOR = "\n\n---\n\n"
 
 # Step name constants - must match exactly the ## headers in advocatus.md.
 _STEP_0_LOAD = "Step 0 - Load"
@@ -124,194 +84,6 @@ _STEP_7_DEFENSOR = "Step 7 - Defensor Cross-Examination"
 _STEP_8_MOTIVATIO = "Step 8 - Motivatio"
 _STEP_9_WEIGH = "Step 9 - Weigh the Cause"
 _STEP_10_RENDER = "Step 10 - Render Relatio"
-
-
-# -- Sub-agent isolation -----------------------------------------------------
-
-
-async def run_task(
-    system_prompt: str,
-    user_message: str,
-    output_type: type[T],
-    *,
-    label: str = "run_task",
-    debug_log: list[str] | None = None,
-    tools: dict[str, Callable] | None = None,
-    model: str | None = None,
-    request_limit: int = _REQUEST_LIMIT_PER_TASK,
-) -> T:
-    """Run an isolated sub-agent and return structured output.
-
-    Mirrors dissect's ``run_task``: focused mission, tight budget,
-    one-way data flow. Raw content stays inside the task. Concurrency
-    is capped at ``_TASK_CONCURRENCY`` (5) to avoid hitting API rate
-    limits when many tasks run in parallel.
-
-    When ``debug_log`` is provided, the agent run is rendered to a
-    markdown debug entry and appended to the list under the given
-    ``label``. This is a divergence from dissect's ``run_task``: most
-    advocatus LLM work happens through sub-agents (Steps 2, 3, 5, 7);
-    without per-task debug threading, the debug transcript would be
-    almost empty. Concurrent appends are GIL-atomic; final ordering
-    is non-deterministic but no entries are lost.
-    """
-    async with _task_semaphore:
-        agent: Agent[None, T] = Agent(
-            model or _DEFAULT_MODEL_SLOTS["default"],
-            output_type=output_type,
-            system_prompt=system_prompt,
-        )
-        if tools:
-            for name, fn in tools.items():
-                agent.tool_plain(fn)
-        result = await agent.run(
-            user_message,
-            usage_limits=UsageLimits(request_limit=request_limit),
-        )
-        if debug_log is not None:
-            debug_log.append(render_debug_md(result, label))
-        return result.output
-
-
-# -- Step context ------------------------------------------------------------
-
-
-@dataclass
-class StepContext:
-    """Shared resources available to every step."""
-
-    sections: dict[str, str]
-    model_slots: dict[str, str]
-    researcher: "WebResearcher | None" = None
-    backend: StorageBackend | None = None
-    debug: bool = False
-    pid: str = ""
-    debug_log: list[str] | None = None
-    tool_registry: dict[str, Callable[..., Any]] = field(default_factory=dict)
-    _current_spec: StepSpec | None = None
-
-    def __post_init__(self) -> None:
-        if self.debug and self.debug_log is None:
-            self.debug_log = []
-
-
-@functools.cache
-def load_sections() -> dict[str, str]:
-    """Load and parse advocatus.md once per process."""
-    try:
-        resource = importlib.resources.files("advocatus").joinpath("advocatus.md")
-        return sections(resource.read_text(encoding="utf-8"))
-    except (FileNotFoundError, OSError) as exc:
-        raise PromptFileError(
-            f"Failed to read advocatus.md: {exc}"
-        ) from exc
-
-
-# -- Generic LLM runner ------------------------------------------------------
-
-
-_TRANSIENT_EXCEPTIONS = (ModelHTTPError,)
-_VALIDATION_EXCEPTIONS = (UnexpectedModelBehavior, UsageLimitExceeded)
-
-
-def _resolve_model(spec: StepSpec, ctx: StepContext) -> str:
-    slot = spec.meta.model_slot
-    return ctx.model_slots.get(slot) or _DEFAULT_MODEL_SLOTS.get(slot, slot)
-
-
-async def _run_agent(
-    ctx: StepContext,
-    spec: StepSpec,
-    user_msg: str,
-    *,
-    request_limit: int = _REQUEST_LIMIT,
-    retries: int = _RETRIES_SINGLE,
-) -> Any:
-    """Build an Agent, run it, classify exceptions."""
-    system = ctx.sections.get(_SECTION_SYSTEM_PROMPT, "")
-    resolved = _resolve_model(spec, ctx)
-    slot = spec.meta.model_slot
-
-    agent: Agent[None, Any] = Agent(
-        model=resolved,
-        output_type=spec.hooks.output_type or str,
-        system_prompt=system,
-        retries=retries,
-        model_settings=_MODEL_SETTINGS_BY_SLOT.get(slot, _DEFAULT_MODEL_SETTINGS),
-    )
-
-    for tool_name in spec.meta.tools:
-        if tool_name not in ctx.tool_registry:
-            raise HookMismatchError(
-                f"Step '{spec.meta.name}' declares tool '{tool_name}' "
-                f"but no callable is registered. "
-                f"Available tools: {sorted(ctx.tool_registry)}"
-            )
-        fn = ctx.tool_registry[tool_name]
-        if ctx.debug:
-            fn = _wrap_tool_debug(fn, tool_name)
-        agent.tool_plain(fn)
-
-    try:
-        result = await agent.run(
-            user_msg, usage_limits=UsageLimits(request_limit=request_limit),
-        )
-    except (*_TRANSIENT_EXCEPTIONS, *_VALIDATION_EXCEPTIONS, StepError, PromptFileError):
-        raise
-    except Exception as exc:
-        _classify_and_raise(exc, spec)
-
-    if ctx.debug and ctx.debug_log is not None:
-        ctx.debug_log.append(render_debug_md(result, spec.meta.name))
-
-    return result
-
-
-def _wrap_tool_debug(fn: Callable[..., Any], name: str) -> Callable[..., Any]:
-    """Wrap a tool function to log calls when debugging."""
-    @functools.wraps(fn)
-    async def wrapper(*args: Any, **kwargs: Any) -> Any:
-        args_str = ", ".join(
-            [repr(a) for a in args] +
-            [f"{k}={repr(v)}" for k, v in kwargs.items()]
-        )
-        logger.debug("[tool] %s(%s)", name, args_str)
-        result = fn(*args, **kwargs)
-        if asyncio.iscoroutine(result):
-            return await result
-        return result
-    return wrapper
-
-
-async def _run_agent_with_retry(
-    ctx: StepContext,
-    spec: StepSpec,
-    user_msg: str,
-    *,
-    request_limit: int = _REQUEST_LIMIT,
-    retries: int = _RETRIES_SINGLE,
-) -> Any:
-    """Run agent with retry-on-empty logic."""
-    for attempt in range(_RETRIES_EMPTY_OUTPUT):
-        result = await _run_agent(
-            ctx, spec, user_msg,
-            request_limit=request_limit, retries=retries,
-        )
-        if spec.hooks.retry_empty is None or not spec.hooks.retry_empty(result.output):
-            return result
-        logger.warning(
-            "%s: empty output on attempt %d, retrying",
-            spec.meta.name, attempt + 1,
-        )
-    return result
-
-
-def _classify_and_raise(exc: Exception, spec: StepSpec) -> None:
-    if isinstance(exc, _TRANSIENT_EXCEPTIONS):
-        raise TransientStepError(spec.meta.number, spec.meta.name, exc) from exc
-    if isinstance(exc, _VALIDATION_EXCEPTIONS):
-        raise ValidationStepError(spec.meta.number, spec.meta.name, exc) from exc
-    raise StepError(spec.meta.number, spec.meta.name, exc) from exc
 
 
 # -- Guards ------------------------------------------------------------------
@@ -363,7 +135,7 @@ async def _pure_load(state: PipelineState, ctx: StepContext) -> None:
 
     claim_rows = await asyncio.to_thread(ctx.backend.get_claims, pid)
     evidence_rows = await asyncio.to_thread(ctx.backend.get_evidence, pid)
-    marker_rows = await asyncio.to_thread(ctx.backend.get_markers, pid)
+    marker_rows = await asyncio.to_thread(ctx.backend.get_rhetoric, pid)
     citation_audit_rows = await asyncio.to_thread(ctx.backend.get_citation_audit, pid)
     external_rows = await asyncio.to_thread(ctx.backend.get_external_citations, pid)
     caput = await asyncio.to_thread(ctx.backend.get_caput_causae, pid)
@@ -371,9 +143,10 @@ async def _pure_load(state: PipelineState, ctx: StepContext) -> None:
     # Articuli seed: alive claims (skip tombstones)
     articuli_seed: list[Articulus] = []
     for row in claim_rows:
-        if row.merged_into_line is not None:
+        if row.merged_into is not None:
             continue
         articuli_seed.append(Articulus(
+            uid=row.uid,
             loc=loc_from_row(row),
             text=row.text,
             section=row.section,
@@ -386,7 +159,7 @@ async def _pure_load(state: PipelineState, ctx: StepContext) -> None:
     # paper's own evidence, not from independent web search).
     dissect_evidence: list[DossierEntry] = []
     for row in evidence_rows:
-        if row.merged_into_line is not None:
+        if row.merged_into is not None:
             continue
         dissect_evidence.append(DossierEntry(
             label="operator_provided",
@@ -401,6 +174,7 @@ async def _pure_load(state: PipelineState, ctx: StepContext) -> None:
     dissect_markers: list[Articulus] = []
     for row in marker_rows:
         dissect_markers.append(Articulus(
+            uid=row.uid,
             loc=loc_from_row(row),
             text=row.text,
             section=row.section,
@@ -479,14 +253,15 @@ async def _pure_public_record(state: PipelineState, ctx: StepContext) -> None:
     """Spawn parallel sub-agents for public-record search."""
     assert ctx._current_spec is not None
     body = ctx.sections.get(_STEP_2_PUBLIC_RECORD, "")
-    web_search = ctx.tool_registry.get("web_search")
+    deep_search = ctx.tool_registry.get("deep_search")
     web_fetch = ctx.tool_registry.get("web_fetch")
-    if web_search is None or web_fetch is None:
-        logger.warning("Step 2 skipped: web_search/web_fetch not available")
+    if deep_search is None or web_fetch is None:
+        logger.warning("Step 2 skipped: deep_search/web_fetch not available")
         state.dossier = list(state.dissect_external_evidence or [])
         return
 
-    model = _resolve_model(ctx._current_spec, ctx)
+    slot = ctx._current_spec.meta.model_slot
+    model = ctx.model_slots.get(slot) or DEFAULT_MODEL_SLOTS.get(slot, slot)
     domains = _public_record_domains(state)
 
     system = (
@@ -510,7 +285,7 @@ async def _pure_public_record(state: PipelineState, ctx: StepContext) -> None:
             output_type=PublicRecordOutput,
             label=f"Step 2 - Survey Public Record ({domain})",
             debug_log=ctx.debug_log if ctx.debug else None,
-            tools={"web_search": web_search, "web_fetch": web_fetch},
+            tools={"deep_search": deep_search, "web_fetch": web_fetch},
             model=model,
         )
 
@@ -551,13 +326,14 @@ def _public_record_domains(state: PipelineState) -> list[str]:
 async def _pure_stakeholders(state: PipelineState, ctx: StepContext) -> None:
     assert ctx._current_spec is not None
     body = ctx.sections.get(_STEP_3_STAKEHOLDERS, "")
-    web_search = ctx.tool_registry.get("web_search")
+    deep_search = ctx.tool_registry.get("deep_search")
     web_fetch = ctx.tool_registry.get("web_fetch")
-    if web_search is None or web_fetch is None:
+    if deep_search is None or web_fetch is None:
         state.stakeholders = []
         return
 
-    model = _resolve_model(ctx._current_spec, ctx)
+    slot = ctx._current_spec.meta.model_slot
+    model = ctx.model_slots.get(slot) or DEFAULT_MODEL_SLOTS.get(slot, slot)
     targets = _stakeholder_targets(state)
     if not targets:
         state.stakeholders = []
@@ -584,7 +360,7 @@ async def _pure_stakeholders(state: PipelineState, ctx: StepContext) -> None:
             output_type=StakeholdersOutput,
             label=f"Step 3 - Map Stakeholders ({target})",
             debug_log=ctx.debug_log if ctx.debug else None,
-            tools={"web_search": web_search, "web_fetch": web_fetch},
+            tools={"deep_search": deep_search, "web_fetch": web_fetch},
             model=model,
         )
 
@@ -630,7 +406,8 @@ async def _pure_examine(state: PipelineState, ctx: StepContext) -> None:
         return
 
     body = ctx.sections.get(_STEP_5_EXAMINE, "")
-    model = _resolve_model(ctx._current_spec, ctx)
+    slot = ctx._current_spec.meta.model_slot
+    model = ctx.model_slots.get(slot) or DEFAULT_MODEL_SLOTS.get(slot, slot)
     dossier = state.dossier or []
     dossier_json = json.dumps(
         [d.model_dump(mode="json") for d in dossier],
@@ -663,7 +440,7 @@ async def _pure_examine(state: PipelineState, ctx: StepContext) -> None:
             system_prompt=system,
             user_message=user_msg,
             output_type=ExamenOutput,
-            label=f"Step 5 - Examine Articuli (line {articulus.loc.line})",
+            label=f"Step 5 - Examine Articuli (uid {articulus.uid})",
             debug_log=ctx.debug_log if ctx.debug else None,
             model=model,
         )
@@ -676,11 +453,11 @@ async def _pure_examine(state: PipelineState, ctx: StepContext) -> None:
     exams: list[ArticulusExam] = []
     for a, r in zip(articuli, results):
         if isinstance(r, Exception):
-            logger.warning("Examen failed for articulus at line %d: %s", a.loc.line, r)
+            logger.warning("Examen failed for articulus uid %d: %s", a.uid, r)
             continue
-        # Force the loc to the articulus's loc (defensive: the LLM might echo
+        # Force the uid to the articulus's uid (defensive: the LLM might echo
         # something different).
-        exam = r.exam.model_copy(update={"articulus_loc": a.loc})
+        exam = r.exam.model_copy(update={"articulus_uid": a.uid})
         exams.append(exam)
     state.exams = exams
 
@@ -692,17 +469,17 @@ def _prepare_file_charges(state: PipelineState, ctx: StepContext) -> str:
     body = ctx.sections.get(_STEP_6_FILE_CHARGES, "")
     articuli = state.articuli or []
     exams = state.exams or []
-    failed_locs = {
-        e.articulus_loc for e in exams
+    failed_uids = {
+        e.articulus_uid for e in exams
         if not (e.veritas.passed and e.ratio.passed and e.auctoritas.passed)
     }
-    failed = [a for a in articuli if a.loc in failed_locs]
+    failed = [a for a in articuli if a.uid in failed_uids]
     failed_json = json.dumps(
         [a.model_dump(mode="json") for a in failed],
         ensure_ascii=False, default=str,
     )
     exams_json = json.dumps(
-        [e.model_dump(mode="json") for e in exams if e.articulus_loc in failed_locs],
+        [e.model_dump(mode="json") for e in exams if e.articulus_uid in failed_uids],
         ensure_ascii=False, default=str,
     )
     dossier_json = json.dumps(
@@ -736,7 +513,8 @@ async def _pure_defensor(state: PipelineState, ctx: StepContext) -> None:
         return
 
     body = ctx.sections.get(_STEP_7_DEFENSOR, "")
-    model = _resolve_model(ctx._current_spec, ctx)
+    slot = ctx._current_spec.meta.model_slot
+    model = ctx.model_slots.get(slot) or DEFAULT_MODEL_SLOTS.get(slot, slot)
     boundaries_json = json.dumps(
         [b.model_dump(mode="json") for b in (state.boundaries or [])],
         ensure_ascii=False, default=str,
@@ -783,7 +561,7 @@ async def _pure_defensor(state: PipelineState, ctx: StepContext) -> None:
             system_prompt=system,
             user_message=user_msg,
             output_type=DefensorChargeOutput,
-            label=f"Step 7 - Defensor (charge at line {charge.articulus_loc.line})",
+            label=f"Step 7 - Defensor (charge uid {charge.articulus_uid})",
             debug_log=ctx.debug_log if ctx.debug else None,
             model=model,
         )
@@ -800,16 +578,16 @@ async def _pure_defensor(state: PipelineState, ctx: StepContext) -> None:
 
     for charge, r in zip(charges, results):
         if isinstance(r, Exception):
-            logger.warning("Defensor sub-agent failed for charge at line %d: %s",
-                           charge.articulus_loc.line, r)
+            logger.warning("Defensor sub-agent failed for charge uid %d: %s",
+                           charge.articulus_uid, r)
             continue
-        # Force charge_loc to the articulus loc.
-        result = r.model_copy(update={"charge_loc": charge.articulus_loc})
+        # Force charge_uid to the articulus uid.
+        result = r.model_copy(update={"charge_uid": charge.articulus_uid})
         defensor_results.append(result)
 
         if result.final == "survived":
             surviving.append(SurvivingCharge(
-                articulus_loc=charge.articulus_loc,
+                articulus_uid=charge.articulus_uid,
                 charge=charge,
                 defensor_chain=list(result.challenges),
             ))
@@ -817,14 +595,14 @@ async def _pure_defensor(state: PipelineState, ctx: StepContext) -> None:
             killing_challenge = result.challenges[-1].challenge if result.challenges else "humanitas"
             killing_reasoning = result.challenges[-1].reasoning if result.challenges else ""
             probationes.append(Probatio(
-                articulus_loc=charge.articulus_loc,
+                articulus_uid=charge.articulus_uid,
                 killed_charge=charge,
                 killing_challenge=killing_challenge,
                 explanation=killing_reasoning,
             ))
         elif result.final == "relegated":
             notae.append(NotaMinor(
-                loc=charge.articulus_loc,
+                uid=charge.articulus_uid,
                 text=charge.gravamen,
             ))
 
@@ -942,7 +720,7 @@ async def _pure_render(state: PipelineState, ctx: StepContext) -> None:
 
 # Step names must match exactly the ## headers in advocatus.md.
 _HOOKS: dict[str, StepHooks] = {
-    _STEP_0_LOAD: StepHooks(pure=_pure_load),
+    _STEP_0_LOAD: StepHooks(custom=_pure_load),
     _STEP_1_READ_SCRIPTA: StepHooks(
         output_type=ScriptaOutput,
         prepare=_prepare_read_scripta,
@@ -950,19 +728,19 @@ _HOOKS: dict[str, StepHooks] = {
         guard=_guard_not_sine_causa,
     ),
     _STEP_2_PUBLIC_RECORD: StepHooks(
-        pure=_pure_public_record,
+        custom=_pure_public_record,
         guard=_guard_not_sine_causa,
     ),
     _STEP_3_STAKEHOLDERS: StepHooks(
-        pure=_pure_stakeholders,
+        custom=_pure_stakeholders,
         guard=_guard_not_sine_causa,
     ),
     _STEP_4_VERIFY_CITATIONS: StepHooks(
-        pure=_pure_verify_citations,
+        custom=_pure_verify_citations,
         guard=_guard_not_sine_causa,
     ),
     _STEP_5_EXAMINE: StepHooks(
-        pure=_pure_examine,
+        custom=_pure_examine,
         guard=_guard_not_sine_causa,
     ),
     _STEP_6_FILE_CHARGES: StepHooks(
@@ -972,7 +750,7 @@ _HOOKS: dict[str, StepHooks] = {
         guard=_guard_not_sine_causa,
     ),
     _STEP_7_DEFENSOR: StepHooks(
-        pure=_pure_defensor,
+        custom=_pure_defensor,
         guard=_guard_not_sine_causa,
     ),
     _STEP_8_MOTIVATIO: StepHooks(
@@ -987,73 +765,8 @@ _HOOKS: dict[str, StepHooks] = {
         extract=_extract_weigh,
         guard=_guard_not_sine_causa,
     ),
-    _STEP_10_RENDER: StepHooks(pure=_pure_render),
+    _STEP_10_RENDER: StepHooks(custom=_pure_render),
 }
-
-
-# -- Dispatch ----------------------------------------------------------------
-
-
-async def _dispatch(
-    pipeline: list[StepSpec],
-    state: PipelineState,
-    ctx: StepContext,
-    *,
-    stop_after: int | None = None,
-    on_progress: ProgressCallback | None = None,
-) -> None:
-    """Execute the pipeline step by step.
-
-    When ``stop_after`` is set, processing stops *after* completing step
-    ``stop_after`` (inclusive). Useful for diagnostic trace runs.
-    """
-    total = len(pipeline)
-    for i, spec in enumerate(pipeline):
-        if stop_after is not None and i > stop_after:
-            break
-
-        if on_progress is not None:
-            on_progress(ProgressEvent(
-                step=i, total=total, name=spec.meta.name, pct=i / total,
-            ))
-
-        if spec.hooks.guard and not spec.hooks.guard(state):
-            logger.info("Step %d: %s (skipped by guard)", i, spec.meta.name)
-            continue
-
-        logger.info("Step %d: %s", i, spec.meta.name)
-        ctx._current_spec = spec
-
-        try:
-            if spec.hooks.pure:
-                await spec.hooks.pure(state, ctx)
-            else:
-                assert spec.hooks.prepare is not None
-                user_msg = spec.hooks.prepare(state, ctx)
-                result = await _run_agent_with_retry(
-                    ctx, spec, user_msg,
-                    request_limit=spec.hooks.request_limit or _REQUEST_LIMIT,
-                )
-                if spec.hooks.extract:
-                    spec.hooks.extract(state, result.output)
-        except (
-            StepError,
-            PromptFileError,
-            PaperNotFoundError,
-            PaperNotConvertedError,
-            PaperNotDissectedError,
-        ):
-            raise
-        except Exception as exc:
-            logger.error(
-                "Step %d (%s) failed: %s", i, spec.meta.name, exc, exc_info=True,
-            )
-            raise StepError(i, spec.meta.name, exc) from exc
-
-    if on_progress is not None:
-        on_progress(ProgressEvent(
-            step=total, total=total, name="done", pct=1.0,
-        ))
 
 
 # -- Public API --------------------------------------------------------------
@@ -1077,11 +790,11 @@ async def advocatus_paper(
 
     With ``debug=True``, every LLM call (top-level + every sub-agent)
     is rendered to a debug transcript at
-    ``backend.get_debug_md_path(pid, "advocatus")``. The file is
+    ``backend.get_debug_md_path(pid)``. The file is
     cleared before dispatch so reruns do not append to stale logs.
 
     With ``trace=True``, a full per-step state dump is written to
-    ``backend.get_trace_md_path(pid, "advocatus")`` after dispatch
+    ``backend.get_trace_md_path(pid)`` after dispatch
     completes; ``state.relatio`` is still returned.
 
     With ``stop_after=N``, dispatch halts after pipeline step ``N`` and
@@ -1094,12 +807,10 @@ async def advocatus_paper(
     :class:`PaperNotConvertedError`, or :class:`PaperNotDissectedError`
     if the prerequisite paperstore artifacts are missing.
     """
-    from web_tools import WebResearcher
+    slots = {**DEFAULT_MODEL_SLOTS, **(model_slots or {})}
+    secs = load_sections("advocatus", "advocatus.md")
 
-    slots = {**_DEFAULT_MODEL_SLOTS, **(model_slots or {})}
-    secs = load_sections()
-
-    if _SECTION_SYSTEM_PROMPT not in secs:
+    if "System Prompt" not in secs:
         raise PromptFileError(
             "'System Prompt' section not found in advocatus.md. "
             f"Available sections: {sorted(secs)}"
@@ -1111,6 +822,7 @@ async def advocatus_paper(
 
     async with WebResearcher() as researcher:
         tool_reg: dict[str, Callable[..., Any]] = {
+            "deep_search": researcher.deep_search,
             "web_search": researcher.web_search,
             "web_fetch": researcher.web_fetch,
         }
@@ -1125,31 +837,24 @@ async def advocatus_paper(
             tool_registry=tool_reg,
         )
 
-        debug_path = backend.get_debug_md_path(pid, "advocatus")
+        debug_path = backend.get_debug_md_path(pid)
         if debug:
             debug_path.unlink(missing_ok=True)
 
-        try:
-            await _dispatch(
-                pipeline, state, ctx,
-                stop_after=stop_after,
-                on_progress=on_progress,
-            )
-        finally:
-            if debug and ctx.debug_log:
-                debug_path.write_text(
-                    _DEBUG_SEPARATOR.join(ctx.debug_log), encoding="utf-8",
-                )
+        trace_path = backend.get_trace_md_path(pid) if (trace or stop_after is not None) else None
+        dp = debug_path if debug else None
+
+        await dispatch(
+            pipeline, state, ctx,
+            stop_after=stop_after,
+            on_progress=on_progress,
+            trace_path=trace_path,
+            debug_path=dp,
+            render_trace_fn=lambda st, step: render_trace(st, step),
+        )
 
     if stop_after is not None:
         return render_trace(state, stop_after)
-
-    if trace:
-        last_step = len(pipeline) - 1
-        trace_path = backend.get_trace_md_path(pid, "advocatus")
-        trace_path.write_text(
-            render_trace(state, last_step), encoding="utf-8",
-        )
 
     return state.relatio or ""
 

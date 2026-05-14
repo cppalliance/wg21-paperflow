@@ -33,7 +33,7 @@ from paperstore.extract_rows import (
     ClaimRow,
     EvidenceRow,
     ExternalCitationRow,
-    MarkerRow,
+    RhetoricRow,
     PaperCitationRow,
     QuestionRow,
 )
@@ -91,6 +91,8 @@ class PaperRow:
     advocatus_path: str = ""
     agora_path: str = ""
     line_count: int = 0
+    status: int = 0
+    error: str = ""
 
 
 class StorageBackend(ABC):
@@ -310,21 +312,19 @@ class StorageBackend(ABC):
         """
 
     @abstractmethod
-    def get_debug_md_path(self, paper_id: str, tool: str) -> Path:
-        """Return the canonical path for a tool's per-paper debug transcript.
+    def get_debug_md_path(self, paper_id: str) -> Path:
+        """Return the canonical path for a paper's unified debug transcript.
 
-        File: ``paperstore/<pid>.<tool>.debug.md``. The path is returned
+        File: ``paperstore/<pid>.debug.md``. The path is returned
         whether or not the file exists; callers write to it or check
-        ``.exists()`` themselves. ``tool`` is normalized to lowercase
-        (e.g. ``"dissect"``, ``"advocatus"``); empty / whitespace-only
-        ``tool`` raises ``ValueError``.
+        ``.exists()`` themselves.
         """
 
     @abstractmethod
-    def get_trace_md_path(self, paper_id: str, tool: str) -> Path:
-        """Return the canonical path for a tool's per-paper pipeline trace.
+    def get_trace_md_path(self, paper_id: str) -> Path:
+        """Return the canonical path for a paper's unified pipeline trace.
 
-        File: ``paperstore/<pid>.<tool>.trace.md``. Same semantics as
+        File: ``paperstore/<pid>.trace.md``. Same semantics as
         :meth:`get_debug_md_path`.
         """
 
@@ -335,6 +335,24 @@ class StorageBackend(ABC):
     @abstractmethod
     def list_papers_since(self, month: str) -> list[PaperRow]:
         """Return papers where ``mailing_date`` >= ``month``."""
+
+    # ---- status / settings ------------------------------------------------
+
+    @abstractmethod
+    def advance_status(self, paper_id: str, from_status: int, to_status: int) -> bool:
+        """CAS: advance only if current status matches from_status. Clears error."""
+
+    @abstractmethod
+    def fail_paper(self, paper_id: str, stage: int, error: str) -> None:
+        """Mark paper as failed at the given stage."""
+
+    @abstractmethod
+    def get_setting(self, key: str) -> str | None:
+        """Return the value for ``key`` from the settings table, or None."""
+
+    @abstractmethod
+    def set_setting(self, key: str, value: str) -> None:
+        """Insert or replace a setting value."""
 
     # ---- extract writes ---------------------------------------------------
 
@@ -359,8 +377,8 @@ class StorageBackend(ABC):
         """Store questions for unsupported claims of ``paper_id``."""
 
     @abstractmethod
-    def store_markers(self, paper_id: str, markers) -> None:
-        """Replace rhetorical markers for ``paper_id``."""
+    def store_rhetoric(self, paper_id: str, rhetoric) -> None:
+        """Replace rhetoric items for ``paper_id``."""
 
     @abstractmethod
     def store_caput_causae(self, paper_id: str, thesis: str) -> None:
@@ -393,8 +411,8 @@ class StorageBackend(ABC):
         """Return all questions for ``paper_id``."""
 
     @abstractmethod
-    def get_markers(self, paper_id: str) -> list[MarkerRow]:
-        """Return all rhetorical markers for ``paper_id``."""
+    def get_rhetoric(self, paper_id: str) -> list[RhetoricRow]:
+        """Return all rhetoric items for ``paper_id``."""
 
     @abstractmethod
     def get_caput_causae(self, paper_id: str) -> CaputCausaeRow | None:
