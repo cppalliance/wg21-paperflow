@@ -29,7 +29,6 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, TypeVar
 
 from paperstore import (
-    SourceLoc,
     StorageBackend,
     loc_from_row,
 )
@@ -60,7 +59,6 @@ from advocatus.models import (
     ArticulusExam,
     CandidateCharge,
     ChargesOutput,
-    DefensorChallenge,
     DefensorChargeOutput,
     DossierEntry,
     ExamenOutput,
