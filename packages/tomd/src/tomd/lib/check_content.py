@@ -21,6 +21,10 @@ paragraph vs code) is QA's job, not this module's.
 
 The "markdown-only" rule in ``lib.pdf.qa`` is QA-specific. This
 sibling reads both source and Markdown by design.
+
+See ``check_content_arch.md`` (colocated) for the algorithm
+walkthrough: pipeline steps, techniques by layer, named constants,
+edge cases, and the calibration plan for ``_COVERAGE_NEEDS_REVIEW``.
 """
 
 from __future__ import annotations
