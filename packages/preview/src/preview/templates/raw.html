@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="color-scheme" content="light">
+  <title>{{ paper_id }} - raw markdown</title>
+  <style>
+    html, body {
+      background: #ffffff;
+      color: #1f2328;
+      margin: 0;
+      padding: 0;
+      height: 100%;
+    }
+    pre.raw {
+      margin: 0;
+      padding: 24px;
+      font: 13px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+  </style>
+</head>
+<body>
+  <pre class="raw">{{ body_text }}</pre>
+</body>
+</html>

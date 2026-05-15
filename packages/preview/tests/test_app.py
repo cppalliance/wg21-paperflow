@@ -68,9 +68,50 @@ def test_markdown_returns_not_yet_placeholder(backend, watcher):
     client = app.test_client()
     resp = client.get("/markdown")
     assert resp.status_code == 200
+    assert resp.mimetype == "text/html"
     body = resp.get_data(as_text=True)
     assert "not converted" in body.lower()
     assert PID in body
+
+
+def test_markdown_raw_returns_file_contents(backend, watcher):
+    backend.write_paper_md(PID, "# Hello <world> & </pre>\n\nbody\n")
+    app = create_app(backend, PID, watcher)
+    client = app.test_client()
+    resp = client.get("/markdown/raw")
+    assert resp.status_code == 200
+    assert resp.mimetype == "text/html"
+    body = resp.get_data(as_text=True)
+    # Jinja autoescape: <, >, &, and a literal </pre> in the markdown
+    # all come through escaped. The </pre> assertion is the load-bearing
+    # one: it proves the wrapping <pre> element can't be broken out of
+    # by content.
+    assert "&lt;world&gt;" in body
+    assert "&amp;" in body
+    assert "&lt;/pre&gt;" in body
+    assert "# Hello" in body
+    assert "<pre" in body
+
+
+def test_markdown_raw_returns_not_yet_placeholder(backend, watcher):
+    app = create_app(backend, PID, watcher)
+    client = app.test_client()
+    resp = client.get("/markdown/raw")
+    assert resp.status_code == 200
+    assert resp.mimetype == "text/html"
+    body = resp.get_data(as_text=True)
+    assert "not converted" in body.lower()
+    assert PID in body
+
+
+def test_index_exposes_toggle_buttons(backend, watcher):
+    app = create_app(backend, PID, watcher)
+    client = app.test_client()
+    resp = client.get("/")
+    assert resp.status_code == 200
+    body = resp.get_data(as_text=True)
+    assert 'data-mode="rendered"' in body
+    assert 'data-mode="raw"' in body
 
 
 def test_markdown_renders_when_converted(backend, watcher, monkeypatch):

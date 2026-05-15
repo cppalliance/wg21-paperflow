@@ -17,22 +17,59 @@
       <iframe class="frame" src="/source" title="Original source"></iframe>
     </section>
     <section class="pane">
-      <div class="label">Rendered Markdown</div>
+      <div class="label md-toggle" role="group" aria-label="Markdown view">
+        <button type="button" data-mode="rendered" aria-pressed="true">Rendered</button>
+        <button type="button" data-mode="raw" aria-pressed="false">Markdown</button>
+      </div>
       <iframe class="frame" id="md-frame" src="/markdown" title="Rendered markdown"></iframe>
     </section>
   </main>
   <script>
     (function () {
+      const MODE_URLS = { rendered: "/markdown", raw: "/markdown/raw" };
+      const STORAGE_KEY = "preview.mdMode";
       const frame = document.getElementById("md-frame");
       const status = document.getElementById("status");
+      const buttons = document.querySelectorAll(".md-toggle button");
       const setStatus = (label, state) => {
         status.textContent = label;
         status.dataset.state = state;
       };
+      // Closure-scoped mode is the source of truth; aria-pressed is a
+      // projection. Avoids a null-deref if the DOM ever lands with no
+      // pressed button.
+      let mode = "rendered";
+      const setMode = (next) => {
+        mode = next;
+        buttons.forEach((b) => {
+          b.setAttribute("aria-pressed", b.dataset.mode === next ? "true" : "false");
+        });
+      };
+      const currentModeUrl = () => MODE_URLS[mode];
+
+      // Template default is rendered + frame.src=/markdown; only diverge
+      // when stored mode is raw, so first paint doesn't reassign the
+      // iframe to the same URL and trigger a redundant scrivener fetch.
+      const stored = sessionStorage.getItem(STORAGE_KEY);
+      if (stored && MODE_URLS[stored] && stored !== "rendered") {
+        setMode(stored);
+        frame.src = MODE_URLS[stored];
+      }
+
+      buttons.forEach((b) => {
+        b.addEventListener("click", () => {
+          const next = b.dataset.mode;
+          if (next === mode) return;
+          setMode(next);
+          sessionStorage.setItem(STORAGE_KEY, next);
+          frame.src = MODE_URLS[next];
+        });
+      });
+
       const es = new EventSource("/events");
       es.addEventListener("open", () => setStatus("live", "live"));
       es.addEventListener({{ reload_event | tojson }}, () => {
-        frame.contentWindow.location.reload();
+        frame.contentWindow.location.replace(currentModeUrl());
         const t = new Date().toLocaleTimeString();
         setStatus("reloaded " + t, "live");
       });

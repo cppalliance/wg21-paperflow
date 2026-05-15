@@ -51,8 +51,9 @@ def _build_parser() -> argparse.ArgumentParser:
         prog="preview",
         description=(
             "Side-by-side preview of a WG21 paper: original PDF/HTML on the "
-            "left, scrivener-rendered markdown on the right, with hot reload "
-            "when paperflow convert rewrites the markdown."
+            "left, scrivener-rendered markdown on the right, with a Rendered "
+            "/ Markdown toggle for the right pane and hot reload when "
+            "paperflow convert rewrites the markdown."
         ),
     )
     parser.add_argument(

@@ -84,6 +84,14 @@ def create_app(
             return render_template("not_yet.html", paper_id=pid), 200
         return Response(html, mimetype="text/html")
 
+    @app.get("/markdown/raw")
+    def markdown_raw():
+        try:
+            text = backend.get_paper_md(pid)
+        except MissingPaperMdError:
+            return render_template("not_yet.html", paper_id=pid), 200
+        return render_template("raw.html", paper_id=pid, body_text=text)
+
     @app.get("/events")
     def events() -> Response:
         resp = Response(_sse_stream(watcher), mimetype="text/event-stream")
