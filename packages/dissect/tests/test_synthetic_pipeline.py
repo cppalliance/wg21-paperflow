@@ -27,6 +27,7 @@ exact counts, uids, or claim texts.
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Callable
 
@@ -51,7 +52,13 @@ from dissect.pdf_extract import extract_pdf_text
 from dissect.pipeline import _build_hooks
 
 
-pytestmark = pytest.mark.network
+pytestmark = [
+    pytest.mark.network,
+    pytest.mark.skipif(
+        not os.environ.get("BRAVE_API_KEY"),
+        reason="BRAVE_API_KEY not set",
+    ),
+]
 
 PAPER_ID = "P9999R0"
 FIXTURES = Path(__file__).parent / "fixtures"

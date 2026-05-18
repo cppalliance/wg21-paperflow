@@ -24,7 +24,7 @@ def _make_test_hooks():
 
 
 def test_load_sections_returns_all_step_headers():
-    secs = load_sections("advocatus", "advocatus.md")
+    secs = dict(load_sections("advocatus", "advocatus.md"))
     step_keys = sorted(k for k in secs if k.startswith("Step "))
     assert len(step_keys) == 11
     assert step_keys[0] == "Step 0 - Load"
@@ -34,13 +34,13 @@ def test_load_sections_returns_all_step_headers():
 
 
 def test_load_sections_has_system_prompt():
-    secs = load_sections("advocatus", "advocatus.md")
+    secs = dict(load_sections("advocatus", "advocatus.md"))
     assert "System Prompt" in secs
     assert secs["System Prompt"].strip()
 
 
 def test_build_pipeline_returns_11_specs_in_order():
-    secs = load_sections("advocatus", "advocatus.md")
+    secs = dict(load_sections("advocatus", "advocatus.md"))
     specs = build_pipeline(secs, _make_test_hooks())
     assert len(specs) == 11
     assert [s.meta.number for s in specs] == list(range(11))
@@ -61,12 +61,13 @@ Some narrative.
     assert meta.tools == ["web_search"]
 
 
-def test_parse_step_meta_missing_field_raises():
+def test_parse_step_meta_defaults_missing_model_to_none():
     body = """
 - **Execution:** main
 """
-    with pytest.raises(MissingMetadataError):
-        parse_step_meta("Step 1 - Foo", body)
+    meta = parse_step_meta("Step 1 - Foo", body)
+    assert meta.model_slot == "none"
+    assert meta.execution == "main"
 
 
 def test_parse_step_meta_bad_header_raises():
@@ -105,7 +106,7 @@ def test_steps_that_spawn_subagents_declare_a_real_model_slot():
     """Steps whose pure hook calls run_task internally must declare a
     real model slot (not 'none'), otherwise the sub-agent dispatch
     fails at runtime with 'Unknown model: none'."""
-    secs = load_sections("advocatus", "advocatus.md")
+    secs = dict(load_sections("advocatus", "advocatus.md"))
     specs = build_pipeline(secs, _make_test_hooks())
     by_name = {s.meta.name: s for s in specs}
     subagent_steps = (
