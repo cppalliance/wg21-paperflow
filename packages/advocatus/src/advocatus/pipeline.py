@@ -31,13 +31,15 @@ from paperstore.errors import MissingMetaError, MissingPaperMdError
 from paperstore.progress import ProgressCallback
 
 from pipeline import (
-    DEFAULT_MODEL_SLOTS,
+    AgentBackend,
     StepContext,
     StepHooks,
     WebResearcher,
     build_pipeline,
     dispatch,
     load_sections,
+    load_services,
+    resolve_slots,
     run_task,
 )
 from pipeline.errors import (
@@ -132,7 +134,7 @@ async def _pure_load(state: PipelineState, ctx: StepContext) -> None:
 
     claim_rows = await asyncio.to_thread(ctx.backend.get_claims, pid)
     evidence_rows = await asyncio.to_thread(ctx.backend.get_evidence, pid)
-    marker_rows = await asyncio.to_thread(ctx.backend.get_rhetoric, pid)
+    rhetoric_rows = await asyncio.to_thread(ctx.backend.get_rhetoric, pid)
     citation_audit_rows = await asyncio.to_thread(ctx.backend.get_citation_audit, pid)
     external_rows = await asyncio.to_thread(ctx.backend.get_external_citations, pid)
     caput = await asyncio.to_thread(ctx.backend.get_caput_causae, pid)
@@ -166,11 +168,11 @@ async def _pure_load(state: PipelineState, ctx: StepContext) -> None:
         ))
     state.dissect_evidence = dissect_evidence
 
-    # Markers (kept as Articulus-shaped objects for convenience; the field is
+    # Rhetoric (kept as Articulus-shaped objects for convenience; the field is
     # only used by the Defensor's Confessio challenge).
-    dissect_markers: list[Articulus] = []
-    for row in marker_rows:
-        dissect_markers.append(Articulus(
+    dissect_rhetoric: list[Articulus] = []
+    for row in rhetoric_rows:
+        dissect_rhetoric.append(Articulus(
             uid=row.uid,
             loc=loc_from_row(row),
             text=row.text,
@@ -178,7 +180,7 @@ async def _pure_load(state: PipelineState, ctx: StepContext) -> None:
             kind="normative",
             question=f"[{row.marker_type}] target: {row.target}",
         ))
-    state.dissect_markers = dissect_markers
+    state.dissect_rhetoric = dissect_rhetoric
 
     # Citation audit -> tabula fontium entries
     state.dissect_citation_audit = [
@@ -248,7 +250,6 @@ def _extract_read_scripta(state: PipelineState, output: ScriptaOutput) -> None:
 
 async def _pure_public_record(state: PipelineState, ctx: StepContext) -> None:
     """Spawn parallel sub-agents for public-record search."""
-    assert ctx._current_spec is not None
     body = ctx.sections.get(_STEP_2_PUBLIC_RECORD, "")
     deep_search = ctx.tool_registry.get("deep_search")
     web_fetch = ctx.tool_registry.get("web_fetch")
@@ -257,8 +258,7 @@ async def _pure_public_record(state: PipelineState, ctx: StepContext) -> None:
         state.dossier = list(state.dissect_external_evidence or [])
         return
 
-    slot = ctx._current_spec.meta.model_slot
-    model = ctx.model_slots.get(slot) or DEFAULT_MODEL_SLOTS.get(slot, slot)
+    research_agent = ctx.agents["tool"]
     domains = _public_record_domains(state)
 
     system = (
@@ -277,13 +277,13 @@ async def _pure_public_record(state: PipelineState, ctx: StepContext) -> None:
             f"## Instructions\n\n{body}"
         )
         return await run_task(
-            system_prompt=system,
-            user_message=user_msg,
-            output_type=PublicRecordOutput,
+            research_agent,
+            system,
+            user_msg,
+            PublicRecordOutput,
             label=f"Step 2 - Survey Public Record ({domain})",
             debug_log=ctx.debug_log if ctx.debug else None,
             tools={"deep_search": deep_search, "web_fetch": web_fetch},
-            model=model,
         )
 
     if not domains:
@@ -298,7 +298,6 @@ async def _pure_public_record(state: PipelineState, ctx: StepContext) -> None:
     dossier = list(state.dissect_external_evidence or [])
     for r in results:
         if isinstance(r, Exception):
-            # Broad catch: a single sub-agent failure should not kill the run.
             logger.warning("Public record sub-agent failed: %s", r)
             continue
         dossier.extend(r.dossier_entries)
@@ -321,7 +320,6 @@ def _public_record_domains(state: PipelineState) -> list[str]:
 
 
 async def _pure_stakeholders(state: PipelineState, ctx: StepContext) -> None:
-    assert ctx._current_spec is not None
     body = ctx.sections.get(_STEP_3_STAKEHOLDERS, "")
     deep_search = ctx.tool_registry.get("deep_search")
     web_fetch = ctx.tool_registry.get("web_fetch")
@@ -329,8 +327,7 @@ async def _pure_stakeholders(state: PipelineState, ctx: StepContext) -> None:
         state.stakeholders = []
         return
 
-    slot = ctx._current_spec.meta.model_slot
-    model = ctx.model_slots.get(slot) or DEFAULT_MODEL_SLOTS.get(slot, slot)
+    research_agent = ctx.agents["tool"]
     targets = _stakeholder_targets(state)
     if not targets:
         state.stakeholders = []
@@ -352,13 +349,13 @@ async def _pure_stakeholders(state: PipelineState, ctx: StepContext) -> None:
             f"## Instructions\n\n{body}"
         )
         return await run_task(
-            system_prompt=system,
-            user_message=user_msg,
-            output_type=StakeholdersOutput,
+            research_agent,
+            system,
+            user_msg,
+            StakeholdersOutput,
             label=f"Step 3 - Map Stakeholders ({target})",
             debug_log=ctx.debug_log if ctx.debug else None,
             tools={"deep_search": deep_search, "web_fetch": web_fetch},
-            model=model,
         )
 
     results = await asyncio.gather(
@@ -396,15 +393,13 @@ async def _pure_verify_citations(state: PipelineState, ctx: StepContext) -> None
 
 async def _pure_examine(state: PipelineState, ctx: StepContext) -> None:
     """One LLM call per articulus, in parallel via run_task + semaphore."""
-    assert ctx._current_spec is not None
     articuli = state.articuli or []
     if not articuli:
         state.exams = []
         return
 
     body = ctx.sections.get(_STEP_5_EXAMINE, "")
-    slot = ctx._current_spec.meta.model_slot
-    model = ctx.model_slots.get(slot) or DEFAULT_MODEL_SLOTS.get(slot, slot)
+    synthesis_agent = ctx.agents["default"]
     dossier = state.dossier or []
     dossier_json = json.dumps(
         [d.model_dump(mode="json") for d in dossier],
@@ -434,12 +429,12 @@ async def _pure_examine(state: PipelineState, ctx: StepContext) -> None:
             f"## Instructions\n\n{body}"
         )
         return await run_task(
-            system_prompt=system,
-            user_message=user_msg,
-            output_type=ExamenOutput,
+            synthesis_agent,
+            system,
+            user_msg,
+            ExamenOutput,
             label=f"Step 5 - Examine Articuli (uid {articulus.uid})",
             debug_log=ctx.debug_log if ctx.debug else None,
-            model=model,
         )
 
     results = await asyncio.gather(
@@ -492,7 +487,36 @@ def _prepare_file_charges(state: PipelineState, ctx: StepContext) -> str:
 
 
 def _extract_file_charges(state: PipelineState, output: ChargesOutput) -> None:
-    state.candidate_charges = list(output.candidate_charges)
+    state.candidate_charges = _dedup_charges(list(output.candidate_charges))
+
+
+def _dedup_charges(charges: list[CandidateCharge]) -> list[CandidateCharge]:
+    """Deduplicate candidate charges by (quoted_text, gravamen).
+
+    Positioned after Step 6 (File Charges) and before Step 7 (Defensor)
+    because the cost asymmetry favors late dedup:
+
+    - A missed dedup at the claim stage (dissect) permanently loses a
+      claim the Advocatus can never examine. Unrecoverable.
+    - A missed dedup here costs one extra Defensor sub-agent call
+      (~tokens + seconds). Recoverable by deduping objections in the
+      Relatio if needed.
+    - A bad dedup here loses a charge before the Defensor speaks.
+      Safer than losing it before the Examen, but still a loss.
+
+    Exact-match on (quoted_text, gravamen) means only true duplicates
+    collapse. Two charges with different gravamens about the same quote
+    survive (genuinely different objections). Two charges with the same
+    gravamen about different quotes survive (different claims targeted).
+    """
+    seen: set[tuple[str, str]] = set()
+    result: list[CandidateCharge] = []
+    for c in charges:
+        key = (c.quoted_text.strip(), c.gravamen.strip())
+        if key not in seen:
+            seen.add(key)
+            result.append(c)
+    return result
 
 
 # -- Step 7 - Defensor Cross-Examination -------------------------------------
@@ -500,7 +524,6 @@ def _extract_file_charges(state: PipelineState, output: ChargesOutput) -> None:
 
 async def _pure_defensor(state: PipelineState, ctx: StepContext) -> None:
     """One sub-agent per candidate charge. Isolated context."""
-    assert ctx._current_spec is not None
     charges = state.candidate_charges or []
     if not charges:
         state.defensor_results = []
@@ -510,14 +533,13 @@ async def _pure_defensor(state: PipelineState, ctx: StepContext) -> None:
         return
 
     body = ctx.sections.get(_STEP_7_DEFENSOR, "")
-    slot = ctx._current_spec.meta.model_slot
-    model = ctx.model_slots.get(slot) or DEFAULT_MODEL_SLOTS.get(slot, slot)
+    synthesis_agent = ctx.agents["default"]
     boundaries_json = json.dumps(
         [b.model_dump(mode="json") for b in (state.boundaries or [])],
         ensure_ascii=False, default=str,
     )
-    markers_json = json.dumps(
-        [m.model_dump(mode="json") for m in (state.dissect_markers or [])],
+    rhetoric_json = json.dumps(
+        [m.model_dump(mode="json") for m in (state.dissect_rhetoric or [])],
         ensure_ascii=False, default=str,
     )
     stakeholders_json = json.dumps(
@@ -539,8 +561,6 @@ async def _pure_defensor(state: PipelineState, ctx: StepContext) -> None:
             charge.model_dump(mode="json"),
             ensure_ascii=False, default=str,
         )
-        # Provide only the relevant dossier slice: entries whose text
-        # mentions the contradicting evidence or the quoted text.
         dossier_slice = _dossier_slice_for_charge(state, charge)
         slice_json = json.dumps(
             [d.model_dump(mode="json") for d in dossier_slice],
@@ -550,17 +570,17 @@ async def _pure_defensor(state: PipelineState, ctx: StepContext) -> None:
             f"## Candidate Charge\n\n{charge_json}\n\n"
             f"## Relevant Dossier Slice\n\n{slice_json}\n\n"
             f"## Boundaries\n\n{boundaries_json}\n\n"
-            f"## Markers (concessions, scope deflections)\n\n{markers_json}\n\n"
+            f"## Concession Rhetoric\n\n{rhetoric_json}\n\n"
             f"## Stakeholders\n\n{stakeholders_json}\n\n"
             f"## Instructions\n\n{body}"
         )
         return await run_task(
-            system_prompt=system,
-            user_message=user_msg,
-            output_type=DefensorChargeOutput,
+            synthesis_agent,
+            system,
+            user_msg,
+            DefensorChargeOutput,
             label=f"Step 7 - Defensor (charge uid {charge.articulus_uid})",
             debug_log=ctx.debug_log if ctx.debug else None,
-            model=model,
         )
 
     results = await asyncio.gather(
@@ -715,55 +735,67 @@ async def _pure_render(state: PipelineState, ctx: StepContext) -> None:
 
 # -- Hook registry -----------------------------------------------------------
 
-# Step names must match exactly the ## headers in advocatus.md.
-_HOOKS: dict[str, StepHooks] = {
-    _STEP_0_LOAD: StepHooks(custom=_pure_load),
-    _STEP_1_READ_SCRIPTA: StepHooks(
-        output_type=ScriptaOutput,
-        prepare=_prepare_read_scripta,
-        extract=_extract_read_scripta,
-        guard=_guard_not_sine_causa,
-    ),
-    _STEP_2_PUBLIC_RECORD: StepHooks(
-        custom=_pure_public_record,
-        guard=_guard_not_sine_causa,
-    ),
-    _STEP_3_STAKEHOLDERS: StepHooks(
-        custom=_pure_stakeholders,
-        guard=_guard_not_sine_causa,
-    ),
-    _STEP_4_VERIFY_CITATIONS: StepHooks(
-        custom=_pure_verify_citations,
-        guard=_guard_not_sine_causa,
-    ),
-    _STEP_5_EXAMINE: StepHooks(
-        custom=_pure_examine,
-        guard=_guard_not_sine_causa,
-    ),
-    _STEP_6_FILE_CHARGES: StepHooks(
-        output_type=ChargesOutput,
-        prepare=_prepare_file_charges,
-        extract=_extract_file_charges,
-        guard=_guard_not_sine_causa,
-    ),
-    _STEP_7_DEFENSOR: StepHooks(
-        custom=_pure_defensor,
-        guard=_guard_not_sine_causa,
-    ),
-    _STEP_8_MOTIVATIO: StepHooks(
-        output_type=MotivatioOutput,
-        prepare=_prepare_motivatio,
-        extract=_extract_motivatio,
-        guard=_guard_not_sine_causa,
-    ),
-    _STEP_9_WEIGH: StepHooks(
-        output_type=WeighCauseOutput,
-        prepare=_prepare_weigh,
-        extract=_extract_weigh,
-        guard=_guard_not_sine_causa,
-    ),
-    _STEP_10_RENDER: StepHooks(custom=_pure_render),
-}
+def _build_hooks(
+    synthesis_agent: AgentBackend,
+    research_agent: AgentBackend,
+) -> dict[str, StepHooks]:
+    """Build the step hooks dict with agents assigned."""
+    return {
+        _STEP_0_LOAD: StepHooks(custom=_pure_load),
+        _STEP_1_READ_SCRIPTA: StepHooks(
+            agent=synthesis_agent,
+            output_type=ScriptaOutput,
+            prepare=_prepare_read_scripta,
+            extract=_extract_read_scripta,
+            guard=_guard_not_sine_causa,
+        ),
+        _STEP_2_PUBLIC_RECORD: StepHooks(
+            agent=research_agent,
+            custom=_pure_public_record,
+            guard=_guard_not_sine_causa,
+        ),
+        _STEP_3_STAKEHOLDERS: StepHooks(
+            agent=research_agent,
+            custom=_pure_stakeholders,
+            guard=_guard_not_sine_causa,
+        ),
+        _STEP_4_VERIFY_CITATIONS: StepHooks(
+            custom=_pure_verify_citations,
+            guard=_guard_not_sine_causa,
+        ),
+        _STEP_5_EXAMINE: StepHooks(
+            agent=synthesis_agent,
+            custom=_pure_examine,
+            guard=_guard_not_sine_causa,
+        ),
+        _STEP_6_FILE_CHARGES: StepHooks(
+            agent=synthesis_agent,
+            output_type=ChargesOutput,
+            prepare=_prepare_file_charges,
+            extract=_extract_file_charges,
+            guard=_guard_not_sine_causa,
+        ),
+        _STEP_7_DEFENSOR: StepHooks(
+            agent=synthesis_agent,
+            custom=_pure_defensor,
+            guard=_guard_not_sine_causa,
+        ),
+        _STEP_8_MOTIVATIO: StepHooks(
+            agent=synthesis_agent,
+            output_type=MotivatioOutput,
+            prepare=_prepare_motivatio,
+            extract=_extract_motivatio,
+            guard=_guard_not_sine_causa,
+        ),
+        _STEP_9_WEIGH: StepHooks(
+            agent=synthesis_agent,
+            output_type=WeighCauseOutput,
+            prepare=_prepare_weigh,
+            extract=_extract_weigh,
+            guard=_guard_not_sine_causa,
+        ),
+        _STEP_10_RENDER: StepHooks(custom=_pure_render),
+    }
 
 
 # -- Public API --------------------------------------------------------------
@@ -773,7 +805,7 @@ async def advocatus_paper(
     pid: str,
     backend: StorageBackend,
     *,
-    model_slots: dict[str, str] | None = None,
+    service_overrides: dict[str, str] | None = None,
     on_progress: ProgressCallback | None = None,
     stop_after: int | None = None,
     debug: bool = False,
@@ -781,31 +813,37 @@ async def advocatus_paper(
 ) -> str:
     """Examine a WG21 paper and return the Relatio markdown.
 
-    Loads the paper and dissect data from paperstore, runs the 11-step
-    examination pipeline, and returns the Relatio. One-shot; no human
-    input.
+    Loads services from SERVICES.toml, builds agents, runs the
+    11-step examination pipeline, and returns the Relatio. One-shot;
+    no human input. Pass ``service_overrides`` to bind slots to
+    specific services (e.g. ``{"default": "b200-r1"}``).
 
-    With ``debug=True``, every LLM call (top-level + every sub-agent)
-    is rendered to a debug transcript at
-    ``backend.get_debug_md_path(pid)``. The file is
-    cleared before dispatch so reruns do not append to stale logs.
+    With ``debug=True``, every LLM call is rendered to a debug
+    transcript at ``backend.get_debug_md_path(pid)``.
 
     With ``trace=True``, a full per-step state dump is written to
-    ``backend.get_trace_md_path(pid)`` after dispatch
-    completes; ``state.relatio`` is still returned.
+    ``backend.get_trace_md_path(pid)`` after dispatch completes.
 
-    With ``stop_after=N``, dispatch halts after pipeline step ``N`` and
-    the partial trace string is **returned** in place of the Relatio
-    (the CLI is responsible for writing it). ``stop_after`` and bare
-    ``trace`` are mutually exclusive write paths.
+    With ``stop_after=N``, dispatch halts after pipeline step ``N``
+    and the partial trace string is returned in place of the Relatio.
 
     Raises :class:`PromptFileError` if ``advocatus.md`` has structural
     problems. Raises :class:`PaperNotFoundError`,
     :class:`PaperNotConvertedError`, or :class:`PaperNotDissectedError`
     if the prerequisite paperstore artifacts are missing.
     """
-    slots = {**DEFAULT_MODEL_SLOTS, **(model_slots or {})}
-    secs = load_sections("advocatus", "advocatus.md")
+    services, defaults = load_services()
+    slots = resolve_slots(services, defaults, service_overrides)
+
+    synthesis_agent = AgentBackend(slots["default"], thinking_budget=4096)
+    research_agent = AgentBackend(slots.get("tool", slots["default"]))
+
+    agents = {
+        "default": synthesis_agent,
+        "tool": research_agent,
+    }
+
+    secs = dict(load_sections("advocatus", "advocatus.md"))
 
     if "System Prompt" not in secs:
         raise PromptFileError(
@@ -813,12 +851,9 @@ async def advocatus_paper(
             f"Available sections: {sorted(secs)}"
         )
 
-    pipeline = build_pipeline(secs, _HOOKS)
+    hooks = _build_hooks(synthesis_agent, research_agent)
+    pipeline = build_pipeline(secs, hooks)
 
-    # Preflight prerequisite checks before constructing WebResearcher,
-    # which requires BRAVE_API_KEY at __init__ time. Step 0 re-runs these
-    # checks during dispatch; doing them here surfaces the actionable
-    # "missing prerequisite" error before any environment dependency.
     try:
         meta = await asyncio.to_thread(backend.get_meta, pid)
     except MissingMetaError as exc:
@@ -850,7 +885,7 @@ async def advocatus_paper(
 
         ctx = StepContext(
             sections=secs,
-            model_slots=slots,
+            agents=agents,
             researcher=researcher,
             backend=backend,
             debug=debug,
@@ -884,7 +919,7 @@ async def advocatus_since(
     month: str,
     backend: StorageBackend,
     *,
-    model_slots: dict[str, str] | None = None,
+    service_overrides: dict[str, str] | None = None,
     on_progress: ProgressCallback | None = None,
     stop_after: int | None = None,
     debug: bool = False,
@@ -906,7 +941,7 @@ async def advocatus_since(
         try:
             relatio = await advocatus_paper(
                 pid, backend,
-                model_slots=model_slots,
+                service_overrides=service_overrides,
                 on_progress=on_progress,
                 stop_after=stop_after,
                 debug=debug,
