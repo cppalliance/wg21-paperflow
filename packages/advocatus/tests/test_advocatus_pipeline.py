@@ -86,13 +86,17 @@ def test_load_sections_caches_result():
 
 
 def test_step_names_match_advocatus_md_to_hooks():
-    from advocatus.pipeline import _HOOKS, load_sections
+    from advocatus.pipeline import _build_hooks, load_sections
+    from pipeline.agents import AgentBackend
+    from pipeline.model_backends import Llama3Backend
+    stub = AgentBackend(Llama3Backend(base_url="", api_key="", model=""))
+    hooks = _build_hooks(stub, stub)
     secs = load_sections("advocatus", "advocatus.md")
     step_keys = {k for k in secs if k.startswith("Step ")}
-    assert step_keys == set(_HOOKS), (
-        f"Mismatch between advocatus.md and _HOOKS:\n"
-        f"  in advocatus.md, not in _HOOKS: {step_keys - set(_HOOKS)}\n"
-        f"  in _HOOKS, not in advocatus.md: {set(_HOOKS) - step_keys}"
+    assert step_keys == set(hooks), (
+        f"Mismatch between advocatus.md and registered hooks:\n"
+        f"  in advocatus.md, not in hooks: {step_keys - set(hooks)}\n"
+        f"  in hooks, not in advocatus.md: {set(hooks) - step_keys}"
     )
 
 

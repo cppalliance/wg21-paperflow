@@ -12,8 +12,15 @@ import pytest
 
 from pipeline import HookMismatchError, MissingMetadataError
 from pipeline import sections
-from advocatus.pipeline import _HOOKS, load_sections
+from advocatus.pipeline import _build_hooks, load_sections
 from pipeline import StepHooks, build_pipeline, parse_step_meta
+from pipeline.agents import AgentBackend
+from pipeline.model_backends import Llama3Backend
+
+
+def _make_test_hooks():
+    stub = AgentBackend(Llama3Backend(base_url="", api_key="", model=""))
+    return _build_hooks(stub, stub)
 
 
 def test_load_sections_returns_all_step_headers():
@@ -23,7 +30,7 @@ def test_load_sections_returns_all_step_headers():
     assert step_keys[0] == "Step 0 - Load"
     assert step_keys[-1].startswith("Step 9")  # alphabetical sort puts 9 last
     # All 11 step names match the registered hooks exactly.
-    assert set(step_keys) == set(_HOOKS)
+    assert set(step_keys) == set(_make_test_hooks())
 
 
 def test_load_sections_has_system_prompt():
@@ -34,7 +41,7 @@ def test_load_sections_has_system_prompt():
 
 def test_build_pipeline_returns_11_specs_in_order():
     secs = load_sections("advocatus", "advocatus.md")
-    specs = build_pipeline(secs, _HOOKS)
+    specs = build_pipeline(secs, _make_test_hooks())
     assert len(specs) == 11
     assert [s.meta.number for s in specs] == list(range(11))
 
@@ -99,7 +106,7 @@ def test_steps_that_spawn_subagents_declare_a_real_model_slot():
     real model slot (not 'none'), otherwise the sub-agent dispatch
     fails at runtime with 'Unknown model: none'."""
     secs = load_sections("advocatus", "advocatus.md")
-    specs = build_pipeline(secs, _HOOKS)
+    specs = build_pipeline(secs, _make_test_hooks())
     by_name = {s.meta.name: s for s in specs}
     subagent_steps = (
         "Step 2 - Survey Public Record",

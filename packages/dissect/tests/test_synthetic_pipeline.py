@@ -7,9 +7,9 @@
 
 """End-to-end pipeline test against a live LLM using a minimal synthetic paper.
 
-Requires an LLM backend configured via environment variables (see
-``packages/pipeline/src/pipeline/runner.py::_build_default_slots``).
-Marked ``network`` so the default test run skips it; opt in with::
+Requires an LLM backend configured via ``SERVICES.toml`` (see
+``packages/pipeline/src/pipeline/services.py``). Marked ``network`` so
+the default test run skips it; opt in with::
 
     uv run pytest packages/dissect/tests/test_synthetic_pipeline.py -v -m network
 
@@ -36,17 +36,19 @@ from paperstore import SqliteBackend
 from paperstore.tools import PaperstoreTools
 
 from pipeline import (
-    DEFAULT_MODEL_SLOTS,
+    AgentBackend,
     StepContext,
     WebResearcher,
     build_pipeline,
     dispatch,
     load_sections,
+    load_services,
+    resolve_slots,
 )
 
 from dissect.models import PipelineState
 from dissect.pdf_extract import extract_pdf_text
-from dissect.pipeline import _HOOKS
+from dissect.pipeline import _build_hooks
 
 
 pytestmark = pytest.mark.network
@@ -83,9 +85,22 @@ async def _run_full_pipeline(
     ``PipelineState`` reachable for assertions; ``dissect_paper``
     returns only the rendered report string.
     """
-    slots = dict(DEFAULT_MODEL_SLOTS)
+    services, defaults = load_services()
+    slots = resolve_slots(services, defaults)
+    extraction_agent = AgentBackend(
+        slots.get("fast", slots["default"]), thinking_budget=2048,
+    )
+    synthesis_agent = AgentBackend(slots["default"], thinking_budget=4096)
+    research_agent = AgentBackend(slots.get("tool", slots["default"]))
+    agents = {
+        "fast": extraction_agent,
+        "default": synthesis_agent,
+        "tool": research_agent,
+    }
+
     secs = dict(load_sections("dissect", "dissect.md"))
-    pipeline = build_pipeline(secs, _HOOKS)
+    hooks = _build_hooks(extraction_agent, synthesis_agent, research_agent)
+    pipeline = build_pipeline(secs, hooks)
 
     paper_md = backend.get_paper_md(PAPER_ID)
     backend.clear_dissect(PAPER_ID)
@@ -107,7 +122,7 @@ async def _run_full_pipeline(
 
         ctx = StepContext(
             sections=secs,
-            model_slots=slots,
+            agents=agents,
             researcher=researcher,
             backend=backend,
             debug=False,
