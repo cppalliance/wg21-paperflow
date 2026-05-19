@@ -175,3 +175,31 @@ def test_image_data_url_invalidates_when_mtime_changes(
 def test_image_data_url_returns_none_for_missing_file(tmp_path: Path):
     missing = tmp_path / "no-such-file.png"
     assert _image_data_url(missing) is None
+
+
+# ---- caption-duplication gate (plan section 6) ------------------------------
+
+
+def test_rewrite_produces_bare_img_not_figure(backend: SqliteBackend):
+    """Caption-duplication gate. The rewrite emits a bare ``<img>``
+    tag, NOT a ``<figure><figcaption>`` wrap.
+
+    The "keep both" decision in plan section 1.2 (caption appears as
+    image alt text AND as a body paragraph) relies on ``<img alt>``
+    being invisible to the browser - the user sees the caption
+    exactly once via the body paragraph. A ``<figure><figcaption>``
+    wrap would render the alt text visibly below the image,
+    duplicating the body paragraph in the rendered output and
+    forcing dedupe-at-emit instead.
+
+    Verified once visually for P3556R0 ("Figure 1: Hello World!"
+    rendered once in the preview iframe). This test pins the
+    invariant against accidental regressions.
+    """
+    backend.write_paper_image("P1", 3, 1, "png", _PNG_BYTES)
+    md = "![Figure 1: Hello World!](p1-fig3-1.png)"
+    out = _rewrite_paper_image_refs(md, backend, "P1")
+    assert "<figure" not in out
+    assert "<figcaption" not in out
+    assert out.startswith('<img src="data:image/png;base64,')
+    assert 'alt="Figure 1: Hello World!"' in out
