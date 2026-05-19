@@ -61,6 +61,30 @@ Both produce the same intermediate format. Agreement = confident. Disagreement =
 
 When paths disagree: MuPDF version goes in the output (it's more battle-tested). Both versions go in the LLM prompt for reconciliation. The prompt must require all data verbatim - the LLM fixes structure, never content.
 
+## Image Extraction (Resource-Dictionary path)
+
+PDFs and HTML papers with embedded raster images get those images extracted to `paperstore/<pid>-fig{page}-{n}.{ext}` and referenced in the converted markdown as `![alt](file)`.
+
+The PDF path is a fourth API surface independent of the MuPDF dict and spatial rawdict text-extraction paths. It runs per-page inside step 1 (while the document is open) via `page.get_images(full=True)` + `page.get_image_rects(xref)` + `doc.extract_image(xref)`. After step 1 walks every page, `finalize_extraction` dedupes by xref globally (a logo in an inherited resource dictionary collapses to one IMAGE at its first occurrence), picks the smallest `(y0, x0)` rect when a single xref renders multiple positions on its chosen page, and caps to `_MAX_IMAGES_PER_PAPER`. Alt text comes from a regex over spatial-path text blocks near each image's bbox: `^\s*(Figure|Fig\.?|Listing|Diagram|Image|Source code)\s+\d+\s*[:.\-–—]\s*(.+)$` searched 60pt below then 30pt above. `Table N:` is intentionally absent from that regex - tables own their captions structurally via `SectionKind.TABLE`.
+
+The HTML path is downloaded at mailing time, not convert time, so `convert` stays offline-pure. The mailing-side `fetch_html_images` walks `<img>` / `<figure><img>` and persists each via `backend.write_paper_image(pid, page=0, index=document_order, ...)` and a typed `<pid>.html-images.json` manifest. The tomd-side reader (`tomd/lib/html/images.py`) parses the manifest, applies the same 20-image cap, and the HTML renderer rewrites `<img>` src and alt attributes before emit.
+
+Named constants live in `tomd/lib/pdf/images.py`: `_MAX_IMAGES_PER_PAPER` (20), `_CAPTION_SEARCH_RADIUS_BELOW_PT` (60), `_CAPTION_SEARCH_RADIUS_ABOVE_PT` (30), `_CAPTION_LABEL_RE`. The HTML side reuses `_MAX_IMAGES_PER_PAPER` for symmetry.
+
+**Out of scope for v1:**
+
+- **Vector diagrams** (paths and lines drawn with PDF operators, e.g. flowcharts) are invisible to this path - `pymupdf.get_images()` does not expose them. See `improvements.md` §4 for the layout-aware extraction path that would unlock vector-diagram and scanned-page handling.
+- **Scanned-page PDFs** whose body is one image per page trip the 20-image cap and produce image-free markdown. Same forward path applies.
+- **No vision LLM.** Alt text comes from the caption-proximity regex only.
+
+**Stability commitment for `SectionKind.IMAGE`** (so the future Path 3 layout-aware integration doesn't break us first):
+
+- **Committed-stable**: the existence of `SectionKind.IMAGE`, its participation in the y-sort that interleaves it with PARAGRAPH/HEADING/LIST, its `image_ref: ExtractedImage` payload, and its emit shape `![alt](path)`.
+- **Swap point**: the source of `suggested_alt`. Today: caption-proximity regex over Path 1 text. Future: structural `caption` label from a layout model, with regex as fallback. Consumers must remain source-agnostic.
+- **Swap point**: the contents of `ExtractedImage.bytes`. Today: raw embedded-raster bytes from `doc.extract_image`. Future: may include rasterised page regions for vector-diagram matches. Consumers must treat it as opaque image bytes plus `ext`.
+
+`Section.text` and the per-path text fields (`mupdf_text`, `spatial_text`) are intentionally empty on IMAGE sections so `qa.compute_metrics` word counts aren't inflated by alt text. The canonical alt-text source is `image_ref.suggested_alt`, read by the emit step.
+
 ## Heading Rules
 
 - Heading level is derived from section numbering depth: `2.1.3` = depth 3 = `####` (depth + 1 because `#` is reserved for the document title)

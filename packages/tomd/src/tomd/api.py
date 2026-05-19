@@ -348,14 +348,19 @@ class _RawConversion:
     skip_reason: str
 
 
-def _convert_with_tomd_full(path: Path) -> _RawConversion:
+def _convert_with_tomd_full(
+    path: Path,
+    *,
+    html_images_manifest=None,
+) -> _RawConversion:
     """Dispatch by file suffix, returning the full pipeline output.
 
     For PDF sources, routes through :func:`run_pipeline` so the caller
     has access to the extracted image bytes alongside the markdown.
-    For HTML sources, returns empty image fields - HTML image support
-    lives in the mailing-side fetcher and a separate tomd HTML path
-    (a follow-up commit).
+    For HTML sources with a manifest, runs the HTML renderer with
+    manifest-driven ``<img>`` rewriting and surfaces the ExtractedImage
+    list (bytes already on disk from mailing - they aren't re-persisted
+    by the convert stage).
     """
     suffix = path.suffix.lower()
     if suffix == ".pdf":
@@ -370,10 +375,23 @@ def _convert_with_tomd_full(path: Path) -> _RawConversion:
             skip_reason=r.skip_reason,
         )
     if suffix in (".html", ".htm"):
-        md, prompts = convert_html(path)
+        html_result = None
+        if html_images_manifest is not None:
+            from tomd.lib.html.images import load_html_images
+
+            html_result = load_html_images(html_images_manifest)
+        md, prompts = convert_html(path, html_images_result=html_result)
+        if html_result is None:
+            return _RawConversion(
+                md=md, prompts=prompts,
+                images=[], source_image_count=0, images_truncated=False,
+                skipped=False, skip_reason="",
+            )
         return _RawConversion(
             md=md, prompts=prompts,
-            images=[], source_image_count=0, images_truncated=False,
+            images=list(html_result.images),
+            source_image_count=html_result.source_image_count,
+            images_truncated=html_result.images_truncated,
             skipped=False, skip_reason="",
         )
     raise ValueError(
@@ -401,6 +419,8 @@ def convert_paper_full(
     paper_id: str,
     source_path: Path,
     meta: dict,
+    *,
+    html_images_manifest=None,
 ) -> ConvertedPaper:
     """Convert a staged source file, returning markdown AND image data.
 
@@ -409,6 +429,13 @@ def convert_paper_full(
     fallback from ``meta``, canonicalizes front-matter key order, strips
     TOC blocks, and returns a :class:`ConvertedPaper` carrying both the
     markdown and the list of extracted images.
+
+    For HTML sources, pass the parsed
+    :class:`paperstore.html_manifest.HtmlImagesManifest` (or None)
+    via ``html_images_manifest``. With a manifest, ``<img>`` tags in
+    the source HTML are rewritten to point at the mailing-fetched
+    on-disk filenames; without one, ``<img>`` tags are suppressed so
+    no raw ``data:`` URI leaks into the markdown.
 
     Slide-deck, standards-draft, and unreadable PDFs produce a
     ``ConvertedPaper`` with ``skipped=True``, empty markdown, and
@@ -419,7 +446,9 @@ def convert_paper_full(
     strict canonical key order ``title, document, date, intent,
     audience, reply-to``.
     """
-    raw = _convert_with_tomd_full(source_path)
+    raw = _convert_with_tomd_full(
+        source_path, html_images_manifest=html_images_manifest,
+    )
 
     if raw.prompts:
         logger.warning(

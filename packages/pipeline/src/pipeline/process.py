@@ -230,8 +230,12 @@ async def _run_stage(
 
 
 async def _stage_download(pid: str, backend: StorageBackend, *, on_progress: object = None) -> None:
-    """Download the paper's source file."""
+    """Download the paper's source file. For HTML sources, also fetch
+    referenced images and write the tomd-side handoff manifest.
+    """
+    from mailing import fetch_html_images
     from mailing.download import default_client, download_paper
+    from paperstore.html_manifest import HtmlImageEntry, HtmlImagesManifest
 
     if postcondition_satisfied(backend, pid, STAGES["download"]):
         return
@@ -241,10 +245,56 @@ async def _stage_download(pid: str, backend: StorageBackend, *, on_progress: obj
     async with default_client() as client:
         result = await download_paper(pid, source_url=paper.url, client=client,
                                       on_progress=on_progress)
-    if result is None:
-        raise RuntimeError(f"Download returned nothing for {pid}")
-    content, suffix = result
-    backend.put_source(pid, content, suffix=suffix)
+        if result is None:
+            raise RuntimeError(f"Download returned nothing for {pid}")
+        content, suffix = result
+        backend.put_source(pid, content, suffix=suffix)
+
+        # HTML papers: walk <img> refs, fetch each, persist alongside the
+        # source. The manifest is the convert-time handoff so tomd never
+        # has to re-parse the HTML or hit the network.
+        if suffix in (".html", ".htm"):
+            try:
+                fetched = await fetch_html_images(
+                    content, source_url=paper.url, client=client,
+                )
+            except Exception as exc:  # Per-paper firewall: image flow
+                # failures must not fail the whole download stage. The
+                # paper's source is already on disk; the manifest just
+                # ends up missing or partial.
+                logger.warning(
+                    "html image walk failed for %s: %s", pid, exc,
+                )
+                fetched = []
+            if fetched:
+                # Re-fetching is destructive: wipe any prior set first so
+                # a re-run with different image refs doesn't leave
+                # orphans on disk.
+                backend.delete_paper_images(pid)
+                entries: list[HtmlImageEntry] = []
+                for img in fetched:
+                    backend.write_paper_image(
+                        pid, page=0, index=img.document_order,
+                        ext=img.ext, data=img.bytes,
+                    )
+                    entries.append(HtmlImageEntry(
+                        original_src=img.original_src,
+                        stored_filename=(
+                            f"{pid.lower()}-fig0-{img.document_order}.{img.ext}"
+                        ),
+                        document_order=img.document_order,
+                        caption_text=img.caption_text,
+                        alt_attr=img.alt_attr,
+                    ))
+                manifest = HtmlImagesManifest(pid=pid, entries=entries)
+                manifest_path = backend.get_html_images_manifest_path(pid)
+                manifest_path.write_text(
+                    manifest.to_json(), encoding="utf-8",
+                )
+                logger.info(
+                    "%s: persisted %d HTML image(s) + manifest",
+                    pid, len(entries),
+                )
 
 
 async def _stage_convert(
@@ -277,6 +327,8 @@ async def _stage_convert(
     import asyncio
     from pathlib import Path
 
+    from paperstore.html_manifest import HtmlImagesManifest, HtmlManifestError
+
     from tomd.api import convert_paper_full
 
     paper = backend.get_meta(pid)
@@ -291,8 +343,27 @@ async def _stage_convert(
         "url": paper.url,
         "document_date": paper.document_date,
     }
+
+    # HTML papers carry a sidecar manifest written by mailing's HTML
+    # image fetcher. Convert reads it from disk so it never hits the
+    # network and never re-parses the source HTML for image refs.
+    html_images_manifest = None
+    if Path(source_path).suffix.lower() in (".html", ".htm"):
+        manifest_path = backend.get_html_images_manifest_path(pid)
+        if manifest_path.exists():
+            try:
+                html_images_manifest = HtmlImagesManifest.from_json(
+                    manifest_path.read_text(encoding="utf-8"),
+                )
+            except HtmlManifestError as exc:
+                logger.warning(
+                    "%s: html images manifest unreadable (%s); continuing "
+                    "without image refs", pid, exc,
+                )
+
     result = await asyncio.to_thread(
         convert_paper_full, pid, Path(source_path), meta,
+        html_images_manifest=html_images_manifest,
     )
 
     if result.skipped:
@@ -312,13 +383,18 @@ async def _stage_convert(
     existing = backend.try_read_paper_md(pid)
     content_changed = existing is None or existing != result.markdown
 
-    backend.delete_paper_images(pid)
-    for img in result.images:
-        backend.write_paper_image(
-            pid, img.page, img.index_on_page, img.ext, img.bytes,
-        )
-    if result.images:
-        logger.info("%s: persisted %d image(s)", pid, len(result.images))
+    # HTML images carry empty bytes - mailing already persisted them
+    # at download time, alongside the manifest. The PDF case has bytes
+    # in memory and needs the delete-then-write rebuild to stay in sync
+    # with the canonical (page, y0, x0) order.
+    pdf_images = [img for img in result.images if img.bytes]
+    if pdf_images:
+        backend.delete_paper_images(pid)
+        for img in pdf_images:
+            backend.write_paper_image(
+                pid, img.page, img.index_on_page, img.ext, img.bytes,
+            )
+        logger.info("%s: persisted %d image(s)", pid, len(pdf_images))
     backend.write_paper_md(pid, result.markdown)
 
     if content_changed and not keep_downstream:
