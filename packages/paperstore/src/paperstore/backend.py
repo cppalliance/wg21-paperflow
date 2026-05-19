@@ -399,6 +399,17 @@ class StorageBackend(ABC):
         """
 
     @abstractmethod
+    def try_read_paper_md(self, paper_id: str) -> str | None:
+        """Return the converted markdown, or None if not yet written.
+
+        Non-raising alternative to :meth:`get_paper_md`, used by the
+        convert orchestration to perform the byte-equality check that
+        gates downstream invalidation. A first conversion returns None;
+        a re-convert producing the same bytes leaves dissect /
+        advocatus / agora artifacts intact.
+        """
+
+    @abstractmethod
     def get_paper_md_path(self, paper_id: str) -> Path:
         """Return the canonical local path for the converted markdown.
 

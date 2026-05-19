@@ -78,6 +78,7 @@ def run_process_command(
     stop_after = step_val
     chunk_index = getattr(args, "chunk", None)
     force = getattr(args, "force", False)
+    keep_downstream = getattr(args, "keep_downstream", False)
     service_overrides = _parse_service_overrides(getattr(args, "service", None))
     classifier_overrides = _parse_classifier_overrides(getattr(args, "classifier", None))
     provider_override = getattr(args, "provider", None)
@@ -135,6 +136,7 @@ def run_process_command(
                         classifier_overrides=classifier_overrides,
                         provider_override=provider_override,
                         force=force,
+                        keep_downstream=keep_downstream,
                         on_progress=on_progress,
                     )
                 )

@@ -994,6 +994,18 @@ class SqliteBackend(StorageBackend):
             )
         return path.read_text(encoding="utf-8")
 
+    def try_read_paper_md(self, paper_id: str) -> str | None:
+        row = self._conn.execute(
+            "SELECT markdown_path FROM papers WHERE paper_id = ?",
+            (paper_id.strip().upper(),),
+        ).fetchone()
+        if row is None or not row["markdown_path"]:
+            return None
+        path = Path(row["markdown_path"])
+        if not path.exists():
+            return None
+        return path.read_text(encoding="utf-8")
+
     def get_paper_md_path(self, paper_id: str) -> Path:
         pid = paper_id.strip().upper()
         return self._papers_dir / f"{pid.lower()}.md"

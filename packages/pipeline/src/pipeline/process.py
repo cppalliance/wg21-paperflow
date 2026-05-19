@@ -48,6 +48,7 @@ async def process_paper(
     classifier_overrides: dict[str, str] | None = None,
     provider_override: str | None = None,
     force: bool = False,
+    keep_downstream: bool = False,
     on_progress: object = None,
 ) -> ProcessResult:
     """Advance a paper through pipeline stages up to ``through``.
@@ -127,6 +128,7 @@ async def process_paper(
                              service_overrides=service_overrides,
                              classifier_overrides=classifier_overrides,
                              provider_override=provider_override,
+                             keep_downstream=keep_downstream,
                              on_progress=on_progress)
         except Exception as exc:
             logger.error("%s failed at %s: %s", pid, stage_name, exc)
@@ -196,13 +198,14 @@ async def _run_stage(
     service_overrides: dict[str, str] | None = None,
     classifier_overrides: dict[str, str] | None = None,
     provider_override: str | None = None,
+    keep_downstream: bool = False,
     on_progress: object = None,
 ) -> Any:
     """Execute a single pipeline stage for one paper."""
     if stage == STAGES["download"]:
         await _stage_download(pid, backend, on_progress=on_progress)
     elif stage == STAGES["convert"]:
-        await _stage_convert(pid, backend)
+        await _stage_convert(pid, backend, keep_downstream=keep_downstream)
     elif stage == STAGES["dissect"]:
         await _stage_dissect(pid, backend, debug=debug, trace=trace,
                              stop_after=stop_after, chunk_index=chunk_index,
@@ -244,15 +247,38 @@ async def _stage_download(pid: str, backend: StorageBackend, *, on_progress: obj
     backend.put_source(pid, content, suffix=suffix)
 
 
-async def _stage_convert(pid: str, backend: StorageBackend) -> None:
-    """Convert source file to markdown."""
+async def _stage_convert(
+    pid: str,
+    backend: StorageBackend,
+    *,
+    keep_downstream: bool = False,
+) -> None:
+    """Convert source file to markdown, persist extracted images, and
+    conditionally invalidate downstream pipelines.
+
+    No artifact-exists short-circuit: ``truthful_status`` upstream
+    already decided we need to run. (The dissect / advocatus / agora
+    stages follow the same pattern; only ``--force`` reruns reach this
+    body with a still-good prior markdown_path.)
+
+    For skipped papers (slide-deck, standards-draft, unreadable):
+    nothing is written to disk and no DB state is touched. The caller
+    treats the stage as failed (raise) so that the paper's status is
+    not advanced past ``download``.
+
+    Otherwise: byte-equality check against any prior markdown decides
+    whether downstream pipelines (dissect, advocatus, agora) should be
+    invalidated. A re-convert that produces identical markdown leaves
+    extract-table rows intact, since their stored ``loc.line`` offsets
+    are still valid. When the markdown does change AND
+    ``keep_downstream`` is False, the .dissect.md / .advocatus.md /
+    .agora.json files and the dissect-pipeline extract rows are wiped.
+    """
     import asyncio
     from pathlib import Path
 
-    from tomd.api import convert_paper
+    from tomd.api import convert_paper_full
 
-    if postcondition_satisfied(backend, pid, STAGES["convert"]):
-        return
     paper = backend.get_meta(pid)
     source_path = paper.source_file
     if not source_path:
@@ -265,10 +291,50 @@ async def _stage_convert(pid: str, backend: StorageBackend) -> None:
         "url": paper.url,
         "document_date": paper.document_date,
     }
-    markdown, _prompts, _intent = await asyncio.to_thread(
-        convert_paper, pid, Path(source_path), meta,
+    result = await asyncio.to_thread(
+        convert_paper_full, pid, Path(source_path), meta,
     )
-    backend.write_paper_md(pid, markdown)
+
+    if result.skipped:
+        # The convert stage cannot make this paper into markdown.
+        # Raise so process_paper records the failure and does not
+        # advance status past download. ``skip_reason`` distinguishes
+        # this from a genuine conversion error.
+        raise RuntimeError(f"convert skipped ({result.skip_reason})")
+
+    if result.images_truncated:
+        logger.warning(
+            "%s: kept %d of %d images (capped). The truncation marker is "
+            "in the markdown body.",
+            pid, len(result.images), result.source_image_count,
+        )
+
+    existing = backend.try_read_paper_md(pid)
+    content_changed = existing is None or existing != result.markdown
+
+    backend.delete_paper_images(pid)
+    for img in result.images:
+        backend.write_paper_image(
+            pid, img.page, img.index_on_page, img.ext, img.bytes,
+        )
+    if result.images:
+        logger.info("%s: persisted %d image(s)", pid, len(result.images))
+    backend.write_paper_md(pid, result.markdown)
+
+    if content_changed and not keep_downstream:
+        cleared = backend.clear_downstream_outputs(pid)
+        if cleared:
+            logger.warning(
+                "%s: cleared downstream artifacts (%s) - markdown content "
+                "changed and stored loc.line offsets would be stale. "
+                "Re-run those pipelines to refresh.",
+                pid, ", ".join(cleared.names()),
+            )
+    elif content_changed and keep_downstream:
+        logger.warning(
+            "%s: markdown changed; downstream preserved per "
+            "--keep-downstream (loc.line offsets may be stale).", pid,
+        )
 
 
 async def _stage_dissect(
