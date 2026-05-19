@@ -27,6 +27,7 @@ from paperstore.backend import StorageBackend
 from paperstore.stages import STAGE_NAMES, STAGES, failed_stage
 
 from pipeline.postconditions import (
+    ConvertReport,
     ProcessResult,
     postcondition_satisfied,
     truthful_status,
@@ -111,6 +112,7 @@ async def process_paper(
                     p.rename(bak)
 
     stages_run: list[int] = []
+    convert_report: ConvertReport | None = None
     while 0 <= status < through:
         stage_name = STAGE_NAMES.get(status, f"stage-{status}")
         logger.info("Processing %s: %s", pid, stage_name)
@@ -123,18 +125,22 @@ async def process_paper(
                     f.write(f"\n---\n\n## {stage_name} (started {now})\n\n")
 
         try:
-            await _run_stage(pid, status, backend, debug=debug, trace=trace,
-                             stop_after=stop_after, chunk_index=chunk_index,
-                             service_overrides=service_overrides,
-                             classifier_overrides=classifier_overrides,
-                             provider_override=provider_override,
-                             keep_downstream=keep_downstream,
-                             on_progress=on_progress)
+            stage_result = await _run_stage(
+                pid, status, backend, debug=debug, trace=trace,
+                stop_after=stop_after, chunk_index=chunk_index,
+                service_overrides=service_overrides,
+                classifier_overrides=classifier_overrides,
+                provider_override=provider_override,
+                keep_downstream=keep_downstream,
+                on_progress=on_progress,
+            )
         except Exception as exc:
             logger.error("%s failed at %s: %s", pid, stage_name, exc)
             backend.fail_paper(pid, status, str(exc))
             raise
 
+        if isinstance(stage_result, ConvertReport):
+            convert_report = stage_result
         stages_run.append(status)
 
         if not backend.advance_status(pid, status, status + 1):
@@ -142,7 +148,11 @@ async def process_paper(
 
         status += 1
 
-    return ProcessResult(final_status=status, stages_run=stages_run)
+    return ProcessResult(
+        final_status=status,
+        stages_run=stages_run,
+        convert_report=convert_report,
+    )
 
 
 async def ensure_paper_md(pid: str, backend: StorageBackend) -> str | None:
@@ -205,7 +215,7 @@ async def _run_stage(
     if stage == STAGES["download"]:
         await _stage_download(pid, backend, on_progress=on_progress)
     elif stage == STAGES["convert"]:
-        await _stage_convert(pid, backend, keep_downstream=keep_downstream)
+        return await _stage_convert(pid, backend, keep_downstream=keep_downstream)
     elif stage == STAGES["dissect"]:
         await _stage_dissect(pid, backend, debug=debug, trace=trace,
                              stop_after=stop_after, chunk_index=chunk_index,
@@ -302,7 +312,7 @@ async def _stage_convert(
     backend: StorageBackend,
     *,
     keep_downstream: bool = False,
-) -> None:
+) -> ConvertReport:
     """Convert source file to markdown, persist extracted images, and
     conditionally invalidate downstream pipelines.
 
@@ -397,20 +407,29 @@ async def _stage_convert(
         logger.info("%s: persisted %d image(s)", pid, len(pdf_images))
     backend.write_paper_md(pid, result.markdown)
 
+    downstream_cleared: tuple[str, ...] = ()
     if content_changed and not keep_downstream:
         cleared = backend.clear_downstream_outputs(pid)
         if cleared:
+            downstream_cleared = tuple(cleared.names())
             logger.warning(
                 "%s: cleared downstream artifacts (%s) - markdown content "
                 "changed and stored loc.line offsets would be stale. "
                 "Re-run those pipelines to refresh.",
-                pid, ", ".join(cleared.names()),
+                pid, ", ".join(downstream_cleared),
             )
     elif content_changed and keep_downstream:
         logger.warning(
             "%s: markdown changed; downstream preserved per "
             "--keep-downstream (loc.line offsets may be stale).", pid,
         )
+
+    return ConvertReport(
+        images_kept=len(result.images),
+        source_image_count=result.source_image_count,
+        images_truncated=result.images_truncated,
+        downstream_cleared=downstream_cleared,
+    )
 
 
 async def _stage_dissect(

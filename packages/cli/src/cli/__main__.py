@@ -102,7 +102,7 @@ _COMMANDS = {
 _VERB_FLAGS: dict[str, set[str]] = {
     "mailing":   set(),
     "download":  {"force", "concurrency"},
-    "convert":   {"force", "concurrency", "check_content", "check_content_json", "keep_downstream"},
+    "convert":   {"force", "concurrency", "check_content", "check_content_json", "keep_downstream", "yes"},
     "dissect":   {"debug", "trace", "step", "chunk", "service", "classifier", "provider", "force"},
     "advocatus": {"debug", "trace", "step", "service", "provider", "force"},
     "agora":     {"debug", "trace", "step", "service", "provider", "force"},
@@ -146,6 +146,11 @@ _FLAG_DEFS: list[dict] = [
          help="On convert: don't clear dissect/advocatus/agora artifacts even "
               "when the markdown content changed. Stored loc.line offsets may "
               "be stale until you re-run those pipelines."),
+    dict(name="yes", flags=["-y", "--yes"], action="store_true",
+         default=False,
+         help="On convert: skip the batch confirmation prompt that fires "
+              "when a multi-paper invocation would invalidate downstream "
+              "artifacts."),
 ]
 
 _PAPER_ID_RE = re.compile(r"^[PND]\d{3,5}(R\d+)?$", re.IGNORECASE)
