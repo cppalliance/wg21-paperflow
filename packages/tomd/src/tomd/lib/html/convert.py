@@ -9,19 +9,9 @@ from .. import format_front_matter, dedup_paragraphs, strip_redundant_body_meta,
 from . import extract as _extract
 from . import render as _render
 from .images import HtmlImagesResult
+from ..pdf.images import TRUNCATION_MARKER_TEMPLATE
 
 _log = logging.getLogger(__name__)
-
-# Mirrors tomd.lib.pdf.emit._TRUNCATION_MARKER_TEMPLATE so the two
-# paths produce the same marker shape on cap. Duplicated rather than
-# imported to keep the HTML emit path independent of the PDF emit
-# module - the two will share more once HTML moves to the same emit
-# pipeline.
-_TRUNCATION_MARKER_TEMPLATE = (
-    "<!-- tomd:images-truncated: kept {kept} of {total} images. "
-    "{dropped} image(s) dropped to stay under the {kept}-image cap. "
-    "See _MAX_IMAGES_PER_PAPER in tomd/lib/pdf/images.py. -->"
-)
 
 _PID_BASE_RE = re.compile(r"([DPN])(\d{3,5})(?:R(\d+))?", re.IGNORECASE)
 
@@ -100,7 +90,7 @@ def convert_html(
     if html_images_result is not None and html_images_result.images_truncated:
         kept = len(html_images_result.images)
         total = html_images_result.source_image_count
-        body_md = body_md.rstrip() + "\n\n" + _TRUNCATION_MARKER_TEMPLATE.format(
+        body_md = body_md.rstrip() + "\n\n" + TRUNCATION_MARKER_TEMPLATE.format(
             kept=kept, total=total, dropped=total - kept,
         )
 

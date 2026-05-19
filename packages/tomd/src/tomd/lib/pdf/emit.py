@@ -6,6 +6,7 @@ import re
 from .. import format_front_matter, dedup_paragraphs, strip_redundant_body_meta, strip_leading_h1, DEFAULT_FENCE_LANG
 from ..shared import _find_front_matter_end
 from .cleanup import normalize_whitespace
+from .images import TRUNCATION_MARKER_TEMPLATE
 from .types import Line, Span, Section, SectionKind, BULLET_CHARS
 
 _log = logging.getLogger(__name__)
@@ -342,13 +343,6 @@ def _render_section_md(sec: Section) -> str:
     return sec.text
 
 
-_TRUNCATION_MARKER_TEMPLATE = (
-    "<!-- tomd:images-truncated: kept {kept} of {total} images. "
-    "{dropped} image(s) dropped to stay under the {kept}-image cap. "
-    "See _MAX_IMAGES_PER_PAPER in tomd/lib/pdf/images.py. -->"
-)
-
-
 def emit_markdown(
     metadata: dict,
     sections: list[Section],
@@ -397,7 +391,7 @@ def emit_markdown(
         )
         dropped = source_image_count - kept_count
         if dropped > 0:
-            parts.append(_TRUNCATION_MARKER_TEMPLATE.format(
+            parts.append(TRUNCATION_MARKER_TEMPLATE.format(
                 kept=kept_count,
                 total=source_image_count,
                 dropped=dropped,

@@ -53,6 +53,17 @@ _log = logging.getLogger(__name__)
 # Tunable thresholds (CLAUDE.md: "named module-level constants").
 _MAX_IMAGES_PER_PAPER = 20
 
+# End-of-body HTML comment appended when the cap fires. Shared between
+# the PDF emit path (tomd.lib.pdf.emit) and the HTML emit path
+# (tomd.lib.html.convert) so the marker shape stays identical across
+# source formats. Invisible to the rendered HTML; visible to anyone
+# grepping the raw markdown for "truncated".
+TRUNCATION_MARKER_TEMPLATE = (
+    "<!-- tomd:images-truncated: kept {kept} of {total} images. "
+    "{dropped} image(s) dropped to stay under the {kept}-image cap. "
+    "See _MAX_IMAGES_PER_PAPER in tomd/lib/pdf/images.py. -->"
+)
+
 # Caption-proximity search radii, measured in PDF points relative to
 # the image's bbox. 60pt below catches the common "Figure N: caption"
 # placement; 30pt above catches the occasional "above caption" style.
@@ -92,16 +103,33 @@ class ExtractedImage:
     xref deduplication, so that the position numbering reflects the
     final canonical (page, y0, x0) order rather than ``pymupdf``'s
     enumeration.
+
+    Field semantics across the two producer paths:
+
+    - **PDF (this module)**: every field is populated. ``bytes`` carries
+      the raw embedded-raster bytes pulled via ``doc.extract_image``.
+      The CLI convert orchestration persists those bytes via
+      ``backend.write_paper_image``.
+    - **HTML (tomd.lib.html.images)**: built from the
+      ``HtmlImagesManifest`` sidecar that mailing already wrote to
+      disk. ``bytes`` is the empty bytes sentinel ``b""`` (the bytes
+      are already on disk; no re-write needed), ``bbox`` is
+      ``(0.0, 0.0, 0.0, 0.0)`` (HTML has no spatial concept), and
+      ``xref`` is ``0`` (not applicable). ``page`` is ``0`` (the
+      paperstore-wide "no page concept" sentinel). The CLI
+      orchestration in ``pipeline.process._stage_convert`` checks
+      ``bytes`` truthiness to decide whether to call
+      ``write_paper_image``.
     """
 
-    page: int                                       # 1-based
+    page: int                                       # 1-based for PDF, 0 for HTML
     index_on_page: int                              # 1-based, after y/x sort
-    ext: str                                        # "png" | "jpeg" | "jpx"
-    bytes: bytes
-    bbox: tuple[float, float, float, float]         # (x0, y0, x1, y1)
+    ext: str                                        # "png" | "jpeg" | "jpx" | ...
+    bytes: bytes                                    # empty for HTML
+    bbox: tuple[float, float, float, float]         # (x0, y0, x1, y1); zeros for HTML
     suggested_alt: str
     stored_filename: str                            # "<pid>-fig{page}-{index}.{ext}"
-    xref: int                                       # PDF xref; needed for dedup
+    xref: int                                       # PDF xref; 0 for HTML
 
 
 @dataclass(frozen=True)
