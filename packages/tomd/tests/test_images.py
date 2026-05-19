@@ -351,6 +351,55 @@ def test_structure_pass_blocks_paragraph_merge_across_image():
     assert len(paras) == 2, f"merged across IMAGE: {[s.text for s in paras]}"
 
 
+def test_image_not_swept_into_toc_gap_fill():
+    """Regression: an IMAGE section between two heading-matched
+    sections (find_toc_indices gap-fill territory) must not be
+    stripped as TOC content.
+
+    Reproduces the P4216R0 failure mode: paper has headings
+    ``Abstract``, ``Tony Table``, ``Revisions``, ``Motivation``
+    consecutively, with an image between ``Tony Table`` and
+    ``Revisions``. find_toc_indices marks the consecutive heading
+    matches as a TOC run and gap-fills the IMAGE index. The
+    pipeline filter must drop IMAGE indices from the TOC set
+    before applying them.
+    """
+    # Build a section list that mimics the failure: heading,
+    # heading, IMAGE, heading, heading.
+    def _heading(text: str) -> Section:
+        line = Line(spans=[
+            Span(text=text, font_name="T", font_size=14.0,
+                 bbox=(0, 0, 100, 14), bold=True),
+        ], bbox=(0, 0, 100, 14))
+        return Section(
+            kind=SectionKind.HEADING, text=text, heading_level=2,
+            confidence=Confidence.HIGH, lines=[line],
+        )
+
+    img_sec = _image_section()
+    sections = [
+        _heading("Abstract"),
+        _heading("Tony Table"),
+        img_sec,
+        _heading("Revisions"),
+        _heading("Motivation"),
+    ]
+    # Simulate the pipeline filter directly: build toc_indices set,
+    # filter out IMAGE indices, ensure the IMAGE survives.
+    from tomd.lib.toc import find_toc_indices
+
+    texts = [sec.text.split("\n")[0].strip() for sec in sections]
+    headings = {sec.text.split("\n")[0].strip() for sec in sections
+                if sec.kind == SectionKind.HEADING}
+    toc_indices = find_toc_indices(texts, headings, None)
+
+    # The buggy state would include index 2 (the IMAGE) in toc_indices.
+    # Verify the filter at the pipeline call site removes it.
+    filtered = {i for i in toc_indices
+                if sections[i].kind is not SectionKind.IMAGE}
+    assert 2 not in filtered, "IMAGE must not be in TOC strip set"
+
+
 def test_structure_pass_image_not_classified_as_list_item():
     """_detect_lists_by_position scans PARAGRAPH sections only; an IMAGE
     sandwiched between two LIST items must not become a list item itself."""

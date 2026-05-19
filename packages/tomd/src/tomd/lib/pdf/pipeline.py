@@ -541,6 +541,16 @@ def run_pipeline(path: Path) -> PipelineResult:
     structural_hints = _toc_structural_hints(sections) if not heading_texts else None
     toc_indices = find_toc_indices(texts, heading_texts, structural_hints)
     if toc_indices:
+        # IMAGE sections are never TOC content. find_toc_indices walks
+        # by section text and includes any "gap" index between matches
+        # as a gap-fill TOC entry; without this filter a figure that
+        # happens to sit between two heading-matched sections gets
+        # swept up and disappears from the markdown.
+        toc_indices = {
+            i for i in toc_indices
+            if sections[i].kind is not SectionKind.IMAGE
+        }
+    if toc_indices:
         sections = [s for i, s in enumerate(sections) if i not in toc_indices]
 
     md = emit_markdown(
