@@ -351,6 +351,68 @@ def test_structure_pass_blocks_paragraph_merge_across_image():
     assert len(paras) == 2, f"merged across IMAGE: {[s.text for s in paras]}"
 
 
+def test_finalize_drops_inline_emoji_sized_rasters():
+    """Inline emoji glyphs (PDF font-replacement PNGs at 8-18pt) are
+    not figures and must be filtered out.
+
+    The corpus survey of N5007 (editor's report with 107 emoji as
+    embedded PNGs, all <= 18pt) and P4216R0 (8x8 emoji in a code
+    block) showed: leaving these in produces phantom IMAGE sections
+    at wrong y-positions, oversized rendering, and noise that
+    pollutes the analytical pipelines downstream. The smallest
+    genuine figure bbox in the workspace is 24x24, so the 20pt
+    minimum bbox dim has comfortable margin.
+    """
+    per_page = [
+        [
+            _candidate(1, page=1, y0=10, x0=10),    # tiny emoji at 100x100
+            _candidate(2, page=1, y0=200, x0=200),  # also tiny
+            _candidate(3, page=1, y0=500, x0=200),  # real figure (overridden below)
+        ],
+    ]
+    # Shrink the first two to emoji dimensions, leave the third figure-sized.
+    per_page[0][0] = _PageImageCandidate(
+        xref=1, page=1, bbox=(10.0, 10.0, 18.0, 18.0),
+        ext="png", bytes=b"emoji1", suggested_alt="",
+    )
+    per_page[0][1] = _PageImageCandidate(
+        xref=2, page=1, bbox=(200.0, 200.0, 212.8, 212.8),
+        ext="png", bytes=b"emoji2", suggested_alt="",
+    )
+    per_page[0][2] = _PageImageCandidate(
+        xref=3, page=1, bbox=(200.0, 500.0, 400.0, 700.0),
+        ext="png", bytes=b"real_figure", suggested_alt="Figure 1: example",
+    )
+
+    r = finalize_extraction(per_page, "p1")
+    assert len(r.images) == 1
+    assert r.images[0].xref == 3
+    assert r.images[0].suggested_alt == "Figure 1: example"
+    # source_image_count is post-filter so the truncation marker
+    # doesn't get inflated by emoji.
+    assert r.source_image_count == 1
+    assert r.images_truncated is False
+
+
+def test_finalize_keeps_image_at_filter_boundary():
+    """A 20x20 bbox is exactly at the threshold and must be kept
+    (the filter uses ``>= _MIN_IMAGE_DIM_PT``). Smaller-than-threshold
+    is the dropped band.
+    """
+    per_page = [[
+        _PageImageCandidate(
+            xref=1, page=1, bbox=(0.0, 0.0, 20.0, 20.0),
+            ext="png", bytes=b"boundary", suggested_alt="",
+        ),
+        _PageImageCandidate(
+            xref=2, page=1, bbox=(0.0, 100.0, 19.5, 119.5),
+            ext="png", bytes=b"under", suggested_alt="",
+        ),
+    ]]
+    r = finalize_extraction(per_page, "p1")
+    assert {im.xref for im in r.images} == {1}
+
+
 def test_image_not_swept_into_toc_gap_fill():
     """Regression: an IMAGE section between two heading-matched
     sections (find_toc_indices gap-fill territory) must not be

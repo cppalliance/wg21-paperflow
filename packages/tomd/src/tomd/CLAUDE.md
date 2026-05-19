@@ -69,7 +69,9 @@ The PDF path is a fourth API surface independent of the MuPDF dict and spatial r
 
 The HTML path is downloaded at mailing time, not convert time, so `convert` stays offline-pure. The mailing-side `fetch_html_images` walks `<img>` / `<figure><img>` and persists each via `backend.write_paper_image(pid, page=0, index=document_order, ...)` and a typed `<pid>.html-images.json` manifest. The tomd-side reader (`tomd/lib/html/images.py`) parses the manifest, applies the same 20-image cap, and the HTML renderer rewrites `<img>` src and alt attributes before emit.
 
-Named constants live in `tomd/lib/pdf/images.py`: `_MAX_IMAGES_PER_PAPER` (20), `_CAPTION_SEARCH_RADIUS_BELOW_PT` (60), `_CAPTION_SEARCH_RADIUS_ABOVE_PT` (30), `_CAPTION_LABEL_RE`. The HTML side reuses `_MAX_IMAGES_PER_PAPER` for symmetry.
+Named constants live in `tomd/lib/pdf/images.py`: `_MAX_IMAGES_PER_PAPER` (20), `_MIN_IMAGE_DIM_PT` (20), `_CAPTION_SEARCH_RADIUS_BELOW_PT` (60), `_CAPTION_SEARCH_RADIUS_ABOVE_PT` (30), `_CAPTION_LABEL_RE`. The HTML side reuses `_MAX_IMAGES_PER_PAPER` for symmetry.
+
+`_MIN_IMAGE_DIM_PT` filters out font-replacement glyphs: PDF renderers embed inline emoji as tiny PNGs (8-18pt typically) when the font cannot represent the codepoint. Those glyphs are not figures - they have no caption, no standalone meaning, and their natural pixel resolution doesn't match their on-page size, so promoting them to IMAGE sections produces phantom figures at wrong y-positions and oversized renderings. The 20pt threshold is calibrated against corpus survey: the smallest genuine-figure bbox is 24x24, so the filter has comfortable margin. Trade-off: when the PDF text path (MuPDF dict) captured the emoji as a Unicode character, the emoji is preserved in body text and the filter is a strict improvement; when the emoji exists *only* as embedded raster (the corpus's N5007 editor's report has 107 such), the emoji is lost from the output entirely. dissect / advocatus benefit unambiguously - no phantom figures to misinterpret.
 
 **Out of scope for v1:**
 

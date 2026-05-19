@@ -53,6 +53,30 @@ _log = logging.getLogger(__name__)
 # Tunable thresholds (CLAUDE.md: "named module-level constants").
 _MAX_IMAGES_PER_PAPER = 20
 
+# Minimum bbox dimension (smaller of width, height) for an embedded
+# raster to be treated as a figure. Anything smaller is assumed to be
+# a font-replacement glyph - PDF renderers embed inline emoji as tiny
+# PNGs (typically 8-18pt) when the font can't represent the codepoint.
+# Such glyphs are not figures: they have no caption, no standalone
+# meaning, and their natural pixel resolution (often 64x64+) does
+# not match their on-page rendered size. Promoting them to IMAGE
+# sections (a) inserts phantom figures at wrong y-positions in the
+# markdown, (b) produces over-sized renderings in the preview, and
+# (c) inflates the cap (corpus survey N5007: 107 inline emoji, all
+# under 18pt). 20pt is calibrated to survey: smallest genuine figure
+# bbox in the workspace is 24x24, comfortably above the threshold.
+#
+# Trade-off documented: papers where MuPDF's text path *also*
+# extracts the emoji as a Unicode character (the common case)
+# render the emoji correctly inline and the phantom IMAGE goes
+# away. Papers where the emoji exists *only* as the embedded
+# raster (N5007's editor's report) lose the emoji from the output
+# entirely. The current behavior would render 20 of 107 misplaced
+# oversized emoji; the filtered behavior produces clean markdown
+# without that visual noise. dissect / advocatus benefit
+# unambiguously - they see no phantom figures.
+_MIN_IMAGE_DIM_PT = 20.0
+
 # End-of-body HTML comment appended when the cap fires. Shared between
 # the PDF emit path (tomd.lib.pdf.emit) and the HTML emit path
 # (tomd.lib.html.convert) so the marker shape stays identical across
@@ -332,6 +356,16 @@ def finalize_extraction(
     for xref, cands in by_xref.items():
         cands_sorted = sorted(cands, key=lambda c: (c.page, c.bbox[1], c.bbox[0]))
         canonicals.append(cands_sorted[0])
+
+    # Drop emoji-sized rasters before counting. The cap and the
+    # source_image_count both see post-filter numbers, so the
+    # truncation marker doesn't mis-attribute emoji bloat as a
+    # figure overload.
+    canonicals = [
+        c for c in canonicals
+        if min(c.bbox[2] - c.bbox[0], c.bbox[3] - c.bbox[1])
+        >= _MIN_IMAGE_DIM_PT
+    ]
 
     canonicals.sort(key=lambda c: (c.page, c.bbox[1], c.bbox[0]))
     source_image_count = len(canonicals)
