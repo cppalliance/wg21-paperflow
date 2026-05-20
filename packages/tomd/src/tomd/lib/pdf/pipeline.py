@@ -155,11 +155,18 @@ def _make_image_section(img: ExtractedImage) -> Section:
     consumers like ``qa.compute_metrics`` whose word counts would be
     inflated by alt text. The canonical alt-text source is
     ``image_ref.suggested_alt``, read by the emit step.
+
+    Confidence keys off ``img.source``: raster XObjects carry HIGH
+    (the bytes are unambiguously a figure), vector clusters carry
+    MEDIUM (the heuristic that grouped path operators into a figure
+    is single-signal and uncertain - see the vector-extraction plan
+    section 1.2).
     """
+    confidence = Confidence.MEDIUM if img.source == "vector" else Confidence.HIGH
     return Section(
         kind=SectionKind.IMAGE,
         text="",
-        confidence=Confidence.HIGH,
+        confidence=confidence,
         page_num=img.page - 1,    # Section.page_num is 0-based
         image_ref=img,
     )

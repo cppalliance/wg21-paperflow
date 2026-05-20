@@ -28,6 +28,7 @@ from tomd.lib.pdf.images import (
     _caption_for,
     finalize_extraction,
 )
+from tomd.lib.pdf.pipeline import _make_image_section
 from tomd.lib.pdf.structure import structure_sections
 from tomd.lib.pdf.types import (
     Block,
@@ -539,3 +540,77 @@ def test_emit_no_truncation_marker_when_not_capped():
         images_truncated=False, source_image_count=1,
     )
     assert "tomd:images-truncated" not in md
+
+
+# ---- source field: per-image discrimination of Confidence ------------------
+
+
+def test_finalize_default_source_is_raster():
+    """Candidates built without a source argument keep the legacy "raster"
+    default. Pre-existing call sites (HTML manifest, v1 PDF path) need
+    not know about the new field.
+    """
+    per_page = [[_candidate(1, page=1, y0=10.0)]]
+    r = finalize_extraction(per_page, "p1")
+    assert r.images[0].source == "raster"
+
+
+def test_finalize_propagates_source_from_candidate():
+    """A candidate explicitly tagged as vector reaches the extracted image
+    unchanged. Round-trip the field through the full pipeline so that a
+    future maintainer reordering the dataclass fields catches the break.
+    """
+    per_page = [[
+        _PageImageCandidate(
+            xref=-1234,                           # synthetic negative xref
+            page=1,
+            bbox=(50.0, 50.0, 200.0, 150.0),
+            ext="png",
+            bytes=b"VECTOR-RASTERISED-PNG",
+            suggested_alt="",
+            source="vector",
+        ),
+    ]]
+    r = finalize_extraction(per_page, "p1")
+    assert r.images[0].source == "vector"
+
+
+def test_make_image_section_vector_source_yields_medium_confidence():
+    """The Confidence branch keys on ``source``, not the sign of xref.
+    Construct an ExtractedImage with source="vector" AND a positive
+    xref. The section must still get Confidence.MEDIUM. Catches the
+    regression where someone reverts to xref-sign discrimination.
+    """
+    img = ExtractedImage(
+        page=1,
+        index_on_page=1,
+        ext="png",
+        bytes=b"PNGDATA",
+        bbox=(10.0, 10.0, 110.0, 110.0),
+        suggested_alt="",
+        stored_filename="p1-fig1-1.png",
+        xref=42,                                  # deliberately positive
+        source="vector",
+    )
+    sec = _make_image_section(img)
+    assert sec.confidence == Confidence.MEDIUM
+
+
+def test_make_image_section_raster_source_yields_high_confidence():
+    """Raster IMAGE sections retain Confidence.HIGH - the bytes are
+    unambiguously a figure. This is the v1 contract; pinning it here
+    so the vector branch doesn't regress the raster path.
+    """
+    img = ExtractedImage(
+        page=1,
+        index_on_page=1,
+        ext="png",
+        bytes=b"PNGDATA",
+        bbox=(10.0, 10.0, 110.0, 110.0),
+        suggested_alt="",
+        stored_filename="p1-fig1-1.png",
+        xref=42,
+        source="raster",
+    )
+    sec = _make_image_section(img)
+    assert sec.confidence == Confidence.HIGH
