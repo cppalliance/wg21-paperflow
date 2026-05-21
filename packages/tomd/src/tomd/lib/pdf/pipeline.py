@@ -327,10 +327,25 @@ def _run_pipeline(path: Path) -> PipelineResult:
         page0_colors = _get_page0_text_colors(doc[0]) if result.page_count > 0 else {}
 
         page_drawings: dict[int, list] = {}
+        page_mupdf_tables: dict[int, list[dict]] = {}
         for pg_num in range(result.page_count):
             drawings = collect_line_drawings(doc[pg_num])
             if drawings:
                 page_drawings[pg_num] = drawings
+            try:
+                ft = doc[pg_num].find_tables()
+                if ft.tables:
+                    page_mupdf_tables[pg_num] = [
+                        {"bbox": tuple(t.bbox),
+                         "row_count": t.row_count,
+                         "col_count": t.col_count,
+                         "cells": [tuple(c) if c else None for c in t.cells],
+                         "header_names": t.header.names if t.header else None}
+                        for t in ft.tables
+                    ]
+            except Exception:
+                _log.debug("find_tables() failed on page %d", pg_num,
+                           exc_info=True)
 
         pdf_info_date = _parse_pdf_info_date(doc.metadata.get("creationDate", ""))
         pdf_info_title = (doc.metadata.get("title") or "").strip()
@@ -379,7 +394,8 @@ def _run_pipeline(path: Path) -> PipelineResult:
     wg21_metadata, _ = extract_metadata_from_blocks(all_mupdf_blocks,
                                                      text_colors=page0_colors)
 
-    table_sections, all_mupdf_blocks = detect_tables(all_mupdf_blocks)
+    table_sections, all_mupdf_blocks = detect_tables(
+        all_mupdf_blocks, page_mupdf_tables=page_mupdf_tables)
     if table_sections:
         _log.info("Detected %d table(s)", len(table_sections))
         all_spatial_blocks = exclude_table_regions(
@@ -431,6 +447,18 @@ def _run_pipeline(path: Path) -> PipelineResult:
     _promote_abstract_from_uncertain(sections)
     _strip_pre_content_paragraphs(sections)
 
+    # Demote TABLE sections with dot-leaders back to PARAGRAPH so
+    # TOC detection can recognize them.  Horizontal-row table detection
+    # can misclassify TOC entries (section number + title + page number
+    # on the same y-line) as table rows; reverting them here lets the
+    # existing find_toc_indices / label-anchored logic strip them.
+    for sec in sections:
+        if sec.kind == SectionKind.TABLE and has_dot_leader(sec.text):
+            sec.kind = SectionKind.PARAGRAPH
+            sec.table_kind = None
+            sec.table_strategy = None
+            sec.columns = None
+
     texts = [sec.text.split("\n")[0].strip() for sec in sections]
     full_texts = [sec.text for sec in sections]
     heading_texts = {sec.text.split("\n")[0].strip()
@@ -470,37 +498,50 @@ def _run_pipeline(path: Path) -> PipelineResult:
                           len(toc_indices))
                 toc_indices = set()
 
-    # Fallback: label-anchored TOC detection. When find_toc_indices found
-    # nothing but a "Contents" / "Table of Contents" label exists, scan
-    # forward for numbered entries and mark as TOC. This handles PDFs
-    # where TOC entry titles differ from actual headings. The label may
-    # itself be classified as HEADING (e.g. bold "Table of Contents").
-    if not toc_indices:
-        for li, sec in enumerate(sections):
-            fl = next(
-                (ln.strip() for ln in sec.text.split("\n") if ln.strip()),
-                "",
-            )
-            if _is_toc_label(fl):
-                candidate = {li}
-                numbered = 0
-                for j in range(li + 1, min(li + 30, len(sections))):
-                    sec_j = sections[j]
-                    has_numbered = False
-                    for line in sec_j.text.split("\n"):
-                        stripped = line.strip()
-                        if (_NUMBERED_LINE_RE.match(stripped)
-                                or _BARE_PAGE_NUM_RE.match(stripped)):
-                            has_numbered = True
-                            numbered += 1
-                    if sec_j.kind == SectionKind.HEADING and not has_numbered:
-                        break
-                    candidate.add(j)
-                if numbered >= _LABEL_TOC_MIN_NUMBERED_LINES:
-                    toc_indices = candidate
-                    _log.info("Label-anchored TOC: %d entries after '%s'",
-                              len(candidate), fl)
+    # Label-anchored TOC detection. Scans for "Contents" / "Table of
+    # Contents" labels and sweeps subsequent numbered / dot-leader entries
+    # into toc_indices. Runs as a fallback when find_toc_indices found
+    # nothing, AND as an extension when the initial detection missed a
+    # multi-page TOC continuation (e.g. a second "Contents" label on a
+    # later page not covered by the initial run).
+    for li, sec in enumerate(sections):
+        if li in toc_indices:
+            continue
+        fl = next(
+            (ln.strip() for ln in sec.text.split("\n") if ln.strip()),
+            "",
+        )
+        if not _is_toc_label(fl):
+            continue
+        candidate = {li}
+        numbered = 0
+        for j in range(li + 1, min(li + 40, len(sections))):
+            if j in toc_indices:
+                continue
+            sec_j = sections[j]
+            jfl = sec_j.text.split("\n")[0].strip()
+            has_numbered = False
+            j_dot = any(has_dot_leader(ln) for ln in sec_j.text.split("\n"))
+            for line in sec_j.text.split("\n"):
+                stripped = line.strip()
+                if (_NUMBERED_LINE_RE.match(stripped)
+                        or _BARE_PAGE_NUM_RE.match(stripped)):
+                    has_numbered = True
+                    numbered += 1
+            if j_dot or has_numbered:
+                candidate.add(j)
+            elif jfl.lower() in ('ii', 'iii', 'iv', 'v', 'vi', 'vii', 'viii'):
+                candidate.add(j)
+            elif sec_j.kind == SectionKind.HEADING and not has_numbered and not j_dot:
                 break
+            elif jfl.strip() == '':
+                continue
+            else:
+                break
+        if len(candidate) > 1 and numbered >= _LABEL_TOC_MIN_NUMBERED_LINES:
+            toc_indices |= candidate
+            _log.info("Label-anchored TOC: %d entries after '%s'",
+                      len(candidate), fl)
 
     if toc_indices:
         # Map KNOWN_SECTIONS heading names that exist OUTSIDE the TOC

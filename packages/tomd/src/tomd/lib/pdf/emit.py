@@ -1,5 +1,6 @@
 """Markdown and companion prompts file generation."""
 
+import html as _html
 import logging
 import re
 
@@ -386,24 +387,170 @@ def _render_cell_spans(spans: list, suppress_bold: bool = False) -> str:
 
     When every non-whitespace span is monospace, all spans are merged into a
     single backtick pair to avoid fragmented output like `t``<``U`.
+    Newline marker spans (from table.py line-merge) become spaces in pipe tables.
     """
     if not spans:
         return ""
-    text_spans = [s for s in spans if s.text.strip()]
+    # Replace newline markers with spaces for pipe-table rendering
+    flat_spans = []
+    for s in spans:
+        if s.text == "\n":
+            if flat_spans and flat_spans[-1].text.endswith(" "):
+                continue
+            flat_spans.append(Span(text=" "))
+        else:
+            flat_spans.append(s)
+    text_spans = [s for s in flat_spans if s.text.strip()]
     if text_spans and all(s.monospace for s in text_spans):
-        merged = "".join(s.text for s in spans).strip()
+        merged = "".join(s.text for s in flat_spans).strip()
         if merged:
             return f"`{merged}`"
-    line = Line(spans=spans)
-    return _render_line_spans(line, suppress_bold=suppress_bold).strip()
+    line = Line(spans=flat_spans)
+    result = _render_line_spans(line, suppress_bold=suppress_bold).strip()
+    return result.replace("|", "\\|")
+
+
+def _spans_to_code_lines(spans: list) -> str:
+    """Convert cell spans to multi-line code text.
+
+    Newline marker spans (text="\\n") from table.py line-merge are
+    converted to actual newlines. All other spans are concatenated as raw text.
+    """
+    if not spans:
+        return ""
+    parts: list[str] = []
+    for sp in spans:
+        if sp.text == "\n":
+            parts.append("\n")
+        else:
+            parts.append(sp.text)
+    return "".join(parts).strip()
+
+
+def _render_code_comparison(sec: Section) -> str:
+    """Render a code-comparison table as side-by-side fenced code blocks.
+
+    Each cell may contain multiple logical lines marked by newline spans
+    (text="\\n") inserted by table.py during cell merge.
+    If the first row contains short labels (e.g. "Before" / "After"),
+    they are used as headings above each code block.
+    """
+    if not sec.columns:
+        return sec.text
+
+    rows = sec.columns
+    num_cols = max(len(row) for row in rows) if rows else 0
+
+    # Detect header row: first row with only short text (<=3 words per cell)
+    headers: list[str] = []
+    data_start = 0
+    if rows:
+        first_row = rows[0]
+        first_row_texts = []
+        for cell in first_row:
+            t = "".join(s.text for s in cell).strip()
+            first_row_texts.append(t)
+        if all(len(t.split()) <= 3 for t in first_row_texts) and any(first_row_texts):
+            headers = first_row_texts
+            data_start = 1
+
+    blocks_per_col: list[list[str]] = [[] for _ in range(num_cols)]
+    for row in rows[data_start:]:
+        for col_idx in range(num_cols):
+            if col_idx < len(row):
+                cell_spans = row[col_idx]
+                cell_text = _spans_to_code_lines(cell_spans)
+            else:
+                cell_text = ""
+            blocks_per_col[col_idx].append(cell_text)
+
+    parts = []
+    for col_idx, col_lines in enumerate(blocks_per_col):
+        content = "\n".join(col_lines).strip()
+        if content:
+            label = ""
+            if headers and col_idx < len(headers) and headers[col_idx]:
+                label = f"// {headers[col_idx]}\n"
+            parts.append(f"```cpp\n{label}{content}\n```")
+
+    return "\n\n".join(parts)
+
+
+def _render_table_as_text(sec: Section) -> str:
+    """Render a false-positive table as plain paragraphs."""
+    if not sec.columns:
+        return sec.text
+
+    parts = []
+    for row in sec.columns:
+        row_parts = []
+        for cell_spans in row:
+            cell_text = "".join(s.text for s in cell_spans).strip()
+            if cell_text:
+                row_parts.append(cell_text)
+        if row_parts:
+            parts.append(" ".join(row_parts))
+
+    return "\n\n".join(parts)
+
+
+def _render_html_table(sec: Section) -> str:
+    """Render a table as HTML with <pre> blocks for multi-line code cells.
+
+    Used for code-comparison tables (e.g. "Tony Tables") where each cell
+    contains multi-line code that would be flattened by a pipe table.
+    """
+    if not sec.columns:
+        return sec.text
+
+    rows = sec.columns
+    num_cols = max(len(row) for row in rows)
+    col_w = f"{100 // num_cols}%" if num_cols else "50%"
+    _S = (f"border: 1px solid #999; padding: 6px 10px; "
+          f"vertical-align: top; width: {col_w};")
+    parts: list[str] = [
+        '<table border="1" rules="all" cellpadding="6" cellspacing="0"'
+        ' style="border-collapse: collapse; width: 100%;">',
+    ]
+
+    for ri, row in enumerate(rows):
+        parts.append("<tr>")
+        tag = "th" if ri == 0 else "td"
+        for ci in range(num_cols):
+            cell_spans = row[ci] if ci < len(row) else []
+            cell_lines: list[str] = []
+            current_line: list[str] = []
+            for span in cell_spans:
+                if span.text == "\n":
+                    cell_lines.append("".join(current_line))
+                    current_line = []
+                else:
+                    current_line.append(span.text)
+            if current_line:
+                cell_lines.append("".join(current_line))
+            text = "\n".join(cell_lines).strip()
+            escaped = _html.escape(text)
+            if ri == 0 or not text:
+                parts.append(f'<{tag} style="{_S}">{escaped}</{tag}>')
+            else:
+                parts.append(
+                    f'<{tag} style="{_S}">'
+                    f'<pre style="margin: 0;">{escaped}</pre></{tag}>')
+        parts.append("</tr>")
+
+    parts.append("</table>")
+    return "\n".join(parts)
 
 
 def _render_table(sec: Section) -> str:
-    """Render a table section as a Markdown table.
+    """Render a table section according to its assigned strategy."""
+    if sec.table_strategy == "code_blocks":
+        return _render_code_comparison(sec)
+    if sec.table_strategy == "html_table":
+        return _render_html_table(sec)
+    if sec.table_strategy == "skip":
+        return _render_table_as_text(sec)
 
-    Cell content is collapsed to a single line because markdown table
-    rows cannot span multiple lines.
-    """
     if not sec.columns:
         return sec.text
 
@@ -565,6 +712,29 @@ def emit_markdown(metadata: dict, sections: list[Section]) -> str:
 
     md = strip_redundant_body_meta(md)
     md = strip_orphan_toc_list(md)
+
+    # Inject a <style> block for table borders when the document
+    # contains HTML tables. VS Code / Cursor markdown preview strips
+    # inline style attributes but honours embedded <style> tags.
+    if "<table " in md:
+        _TABLE_CSS = (
+            "<style>\n"
+            "table, th, td { border: 1px solid #999; "
+            "border-collapse: collapse; padding: 6px 10px; }\n"
+            "th { background: #f5f5f5; }\n"
+            "</style>"
+        )
+        insert_after = None
+        if fm:
+            fm_end = _find_front_matter_end(md)
+            if fm_end is not None:
+                line_end = md.find("\n", fm_end)
+                if line_end >= 0:
+                    insert_after = line_end + 1
+        if insert_after is not None:
+            md = md[:insert_after] + "\n" + _TABLE_CSS + "\n" + md[insert_after:]
+        else:
+            md = _TABLE_CSS + "\n\n" + md
 
     if fm:
         fm_end = _find_front_matter_end(md)

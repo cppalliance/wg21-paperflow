@@ -112,6 +112,8 @@ class Section:
     columns: list[list[list[Span]]] = field(default_factory=list)
     fence_lang: str = "cpp"
     indent_level: int = 0
+    table_kind: str | None = None
+    table_strategy: str | None = None
 
 
 @dataclass
