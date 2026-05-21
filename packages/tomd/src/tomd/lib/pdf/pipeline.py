@@ -1,5 +1,6 @@
 """PDF to Markdown converter - pipeline entry point."""
 
+import fitz
 import logging
 import re
 from collections import Counter
@@ -11,9 +12,12 @@ from .cleanup import (get_edge_items, detect_repeating, strip_repeating,
 from .extract import extract_mupdf, extract_spatial, collect_links, attach_links
 from .images import (
     ExtractedImage,
+    VectorUncertaintyStats,
+    _VectorExtractionStats,
     extract_page_images,
     finalize_extraction,
 )
+from .vector_images import extract_page_vector_images
 from .mono import propagate_monospace
 from .wording import classify_wording, collect_line_drawings
 from .spans import normalize_spans
@@ -232,6 +236,7 @@ class PipelineResult:
     images: list[ExtractedImage] = field(default_factory=list)
     source_image_count: int = 0
     images_truncated: bool = False
+    vector_uncertainty: VectorUncertaintyStats | None = None
 
 
 def _parse_pdf_info_date(raw: str) -> str:
@@ -320,13 +325,29 @@ def _enrich_pdf_reply_to(
     metadata["reply-to"] = existing
 
 
-def run_pipeline(path: Path) -> PipelineResult:
-    """Run the full PDF conversion pipeline, returning all intermediate data."""
-    import fitz
+def run_pipeline(
+    path: Path,
+    *,
+    extract_vector: bool = False,
+    whiteout_text: bool = False,
+) -> PipelineResult:
+    """Run the full PDF conversion pipeline, returning all intermediate data.
 
+    ``extract_vector`` opts in to vector-figure extraction (v2.0 default
+    off; see :mod:`tomd.lib.pdf.vector_images` for the heuristic and
+    :mod:`packages.tomd.improvements` for the layout-aware successor).
+    When False, the per-page driver is not called and per-page candidate
+    lists carry only the raster path's output - byte-identical to the
+    pre-v2 behaviour.
+
+    ``whiteout_text`` is forwarded to the vector driver and has no
+    effect when ``extract_vector`` is False.
+    labels inside vector figures render as pixels alongside body text.
+    """
     path = Path(path)
     result = PipelineResult()
     doc = None
+    vector_stats = _VectorExtractionStats() if extract_vector else None
     try:
         doc = fitz.open(str(path))
         result.page_count = doc.page_count
@@ -377,9 +398,19 @@ def run_pipeline(path: Path) -> PipelineResult:
             attach_links(mupdf_blocks, links)
             attach_links(spatial_blocks, links)
 
-            per_page_image_candidates.append(
-                extract_page_images(page, spatial_blocks)
-            )
+            raster_candidates = extract_page_images(page, spatial_blocks)
+            if extract_vector:
+                vector_candidates, page_vector_stats = extract_page_vector_images(
+                    page, spatial_blocks, whiteout_text=whiteout_text,
+                )
+                vector_stats = _VectorExtractionStats.combine(
+                    vector_stats, page_vector_stats,
+                )
+                per_page_image_candidates.append(
+                    raster_candidates + vector_candidates
+                )
+            else:
+                per_page_image_candidates.append(raster_candidates)
 
             all_mupdf_blocks.extend(mupdf_blocks)
             all_spatial_blocks.extend(spatial_blocks)
@@ -424,11 +455,13 @@ def run_pipeline(path: Path) -> PipelineResult:
         return result
 
     extraction_result = finalize_extraction(
-        per_page_image_candidates, path.stem.lower()
+        per_page_image_candidates, path.stem.lower(),
+        vector_stats=vector_stats,
     )
     result.images = extraction_result.images
     result.source_image_count = extraction_result.source_image_count
     result.images_truncated = extraction_result.images_truncated
+    result.vector_uncertainty = extraction_result.vector_uncertainty
 
     repeating = detect_repeating(all_edge_items, result.page_count)
     if repeating:
@@ -565,6 +598,7 @@ def run_pipeline(path: Path) -> PipelineResult:
         sections,
         images_truncated=result.images_truncated,
         source_image_count=result.source_image_count,
+        vector_uncertainty=result.vector_uncertainty,
     )
     prompts = emit_prompts(sections)
 
@@ -588,7 +622,12 @@ def run_pipeline(path: Path) -> PipelineResult:
     return result
 
 
-def convert_pdf(path: Path) -> tuple[str, list[str] | None]:
+def convert_pdf(
+    path: Path,
+    *,
+    extract_vector: bool = False,
+    whiteout_text: bool = False,
+) -> tuple[str, list[str] | None]:
     """Convert a PDF file to Markdown.
 
     Returns ``(markdown_text, prompts_or_none)`` where ``prompts_or_none``
@@ -597,6 +636,9 @@ def convert_pdf(path: Path) -> tuple[str, list[str] | None]:
     converter is fully confident. Returns ``("", None)`` for empty or
     unreadable PDFs. Raises fitz exceptions for corrupt or inaccessible
     files.
+
+    ``extract_vector`` opts in to vector-figure extraction. See
+    :func:`run_pipeline` for the contract.
     """
-    r = run_pipeline(path)
+    r = run_pipeline(path, extract_vector=extract_vector, whiteout_text=whiteout_text)
     return r.md, r.prompts

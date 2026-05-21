@@ -404,6 +404,8 @@ def extract_page_images(
 def finalize_extraction(
     per_page: Iterable[Iterable[_PageImageCandidate]],
     pid: str,
+    *,
+    vector_stats: "_VectorExtractionStats | None" = None,
 ) -> ExtractionResult:
     """Dedupe by xref, apply the cap, assign stable filenames.
 
@@ -482,8 +484,26 @@ def finalize_extraction(
 
     final.sort(key=lambda im: (im.page, im.bbox[1], im.bbox[0]))
 
+    vector_uncertainty: VectorUncertaintyStats | None = None
+    if vector_stats is not None and (
+        vector_stats.pages_scanned > 0 or vector_stats.pages_skipped > 0
+    ):
+        # kept is the count of vector entries in the markdown - after the
+        # global cap and dedup. The plan invariant: marker kept always
+        # equals the count of vector image refs in paper.md.
+        kept_vector = sum(1 for im in final if im.source == "vector")
+        vector_uncertainty = VectorUncertaintyStats(
+            pages_scanned=vector_stats.pages_scanned,
+            candidates=vector_stats.candidates,
+            kept=kept_vector,
+            rejected=vector_stats.rejected,
+            reasons=dict(vector_stats.reasons),
+            pages_skipped=vector_stats.pages_skipped,
+        )
+
     return ExtractionResult(
         images=final,
         source_image_count=source_image_count,
         images_truncated=images_truncated,
+        vector_uncertainty=vector_uncertainty,
     )
