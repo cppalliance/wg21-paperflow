@@ -120,19 +120,25 @@ Run two or three layout-only detectors per page in parallel and require quorum. 
 
 **What the layout model does NOT do:** produce text. Keep text extraction strictly with MuPDF (born-digital PDFs give exact glyph data). The third path contributes geometry + typed labels + reading order, not characters. Hallucination risk stays low.
 
-**Forward integration with the embedded-raster extractor.** The Resource-Dictionary path in [`tomd/lib/pdf/images.py`](src/tomd/lib/pdf/images.py) (shipped as v1) is independent of Paths 1-3 and produces `SectionKind.IMAGE` sections with regex-derived alt text. When the layout-aware path lands, three integration points open up:
+**Forward integration with the figure extractors.** Two figure-extraction paths ship today, both producing `SectionKind.IMAGE` sections with regex-derived alt text:
+
+- The Resource-Dictionary raster path in [`tomd/lib/pdf/images.py`](src/tomd/lib/pdf/images.py) (v1) reads embedded raster XObjects.
+- The vector-clustering path in [`tomd/lib/pdf/vector_images.py`](src/tomd/lib/pdf/vector_images.py) (v2, opt-in via `--extract-vector-images`) groups page drawing operators into figure candidates, filters decoration, and rasterises survivors. Heuristic by design; surfaces a per-paper `tomd:vector-extraction-uncertain` HTML marker disclosing what got rejected.
+
+When the layout-aware path lands, four integration points open up:
 
 - **a.** IoU each `picture` bbox from the layout model against `ExtractedImage.bbox` records. A match raises figure confidence and contributes the `picture` signal to the N-way agreement vector.
-- **b.** Treat `picture` bboxes with **no** embedded-raster match as vector-diagram candidates and rasterise that region of the rendered page. This is the current v1 non-goal (`pymupdf.get_images()` does not expose vector drawings); the layout model is the trigger that unlocks it.
-- **c.** Replace the v1 caption-proximity regex with structural `caption` labels from the layout model when present, falling back to the regex when absent. The regex stays a useful fallback because layout models occasionally miss the `caption` label on tightly-spaced figures.
+- **b.** Treat `picture` bboxes with **no** embedded-raster match as vector-diagram candidates. Today the v2 heuristic in `vector_images.py` handles this from drawing geometry alone; with a `picture` bbox in hand, the heuristic can be replaced by a single rasterise-the-region call (no clustering, no filter, no rejection-reason accounting), which removes the false-positive uncertainty that justifies v2's opt-in default. The promotion path from v2's opt-in to default-on is precisely this: once a layout `picture` label is available, the heuristic's rejection band collapses to "trust the structural signal."
+- **c.** Replace the caption-proximity regex with structural `caption` labels from the layout model when present, falling back to the regex when absent. The regex stays a useful fallback because layout models occasionally miss the `caption` label on tightly-spaced figures.
+- **d.** Retire `vector_images.py`'s heuristic constants (`_MIN_CLUSTER_DIM_PT`, `_MAX_TEXT_OVERLAP_FRACTION`, `_MIN_CLUSTER_ITEM_COUNT`, etc.) once the layout model's `picture` label is the load-bearing signal. The module can shrink to its bbox-clamp + rasterise + caption-reuse essentials.
 
 The N-way agreement vector documented above extends from `(mupdf_block_id, spatial_block_id, layout_label, layout_bbox)` to include a fifth element:
 
 ```
-(mupdf_block_id, spatial_block_id, layout_label, layout_bbox, embedded_raster_xref)
+(mupdf_block_id, spatial_block_id, layout_label, layout_bbox, image_source)
 ```
 
-`embedded_raster_xref` is the xref from `ExtractedImage` when the layout `picture` bbox IoU-matched an embedded image, or null when it didn't (the vector-diagram case). The stability commitment in `tomd/CLAUDE.md` already documents which parts of `SectionKind.IMAGE` are pinned vs. swap-points for this integration, so the layout path can plug in without breaking emit or downstream consumers.
+`image_source` is the `ExtractedImage.source` field (`"raster"` / `"vector"`) plus its `xref` when the layout `picture` bbox IoU-matched an extracted image, or null when no match exists. The stability commitment in `tomd/CLAUDE.md` already documents which parts of `SectionKind.IMAGE` are pinned vs. swap-points for this integration, so the layout path can plug in without breaking emit or downstream consumers.
 
 ### 4.4 A La Carte Opportunities
 
