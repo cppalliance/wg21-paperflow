@@ -1042,26 +1042,21 @@ class SqliteBackend(StorageBackend):
 
         advocatus_present = bool(meta.advocatus_path)
         agora_present = bool(meta.agora_path)
+        assay_present = bool(meta.assay_path)
 
         if advocatus_present:
             self.clear_advocatus(pid)
         if agora_present:
             self.clear_agora(pid)
-
-        # Extract rows reference loc.line offsets that become stale on any
-        # markdown content change; wipe them alongside the report artifacts.
-        with self._conn:
-            for table in (
-                "claims", "evidence", "paper_citations", "external_citations",
-                "questions", "rhetoric", "caput_causae", "citation_audit",
-            ):
-                self._conn.execute(
-                    f"DELETE FROM {table} WHERE paper_id = ?", (pid,),
-                )
+        if assay_present:
+            # clear_assay also wipes the 12 assay_* tables, whose loc_line
+            # offsets would otherwise point at stale lines after re-convert.
+            self.clear_assay(pid)
 
         return ClearedSet(
             advocatus=advocatus_present,
             agora=agora_present,
+            assay=assay_present,
         )
 
     # ---- reads ------------------------------------------------------------
