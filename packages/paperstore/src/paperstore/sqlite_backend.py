@@ -43,6 +43,7 @@ from paperstore.extract_rows import (
     QuestionRow,
 )
 from paperstore.errors import (
+    InvalidSuffixError,
     MissingAdvocatusError,
     MissingAgoraError,
     MissingMailingIndexError,
@@ -740,7 +741,7 @@ class SqliteBackend(StorageBackend):
     def put_source(self, paper_id: str, content: bytes, *, suffix: str) -> Path:
         """Write source bytes atomically and record the path in the DB."""
         if not suffix.startswith("."):
-            raise ValueError(
+            raise InvalidSuffixError(
                 f"put_source: suffix must start with '.' (got {suffix!r})"
             )
         pid = paper_id.strip().upper()

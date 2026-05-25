@@ -17,6 +17,7 @@ import pytest
 
 from paperstore import SqliteBackend
 from paperstore.errors import (
+    InvalidSuffixError,
     MissingAdvocatusError,
     MissingMailingIndexError,
     MissingMetaError,
@@ -155,7 +156,7 @@ def test_context_manager_closes_connection(tmp_path: Path):
 
 
 def test_put_source_rejects_suffix_without_dot(store: SqliteBackend):
-    with pytest.raises(ValueError, match=r"must start with '\.'"):
+    with pytest.raises(InvalidSuffixError, match=r"must start with '\.'"):
         store.put_source("P1", b"x", suffix="pdf")
 
 
