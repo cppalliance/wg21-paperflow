@@ -100,6 +100,7 @@ __all__ = [
     "default_auto_provider",
     "EmbeddingBackend",
     "ensure_paper_md",
+    "extract_code_blocks",
     "HFZeroShotBackend",
     "load_classifiers",
     "load_transformer_providers",

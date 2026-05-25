@@ -118,7 +118,7 @@ def _build_extract_user_message(
         parts.append("## References in this chunk\n\n")
         for r in chunk_refs:
             url_part = f", {r.urls[0]}" if r.urls else ""
-            lines_str = ", ".join(str(l) for l in r.lines[:3])
+            lines_str = ", ".join(str(ln) for ln in r.lines[:3])
             parts.append(f"- {r.paper_id} (line {lines_str}{url_part})\n")
         parts.append("\n")
 
@@ -132,7 +132,7 @@ def _refs_in_range(
     """Filter reference inventory to entries with at least one line in range."""
     result = []
     for ref in inventory:
-        if any(start_line <= l <= end_line for l in ref.lines):
+        if any(start_line <= ln <= end_line for ln in ref.lines):
             result.append(ref)
     return result
 
@@ -187,7 +187,7 @@ def _build_analyze_user_message(
         f"Problem: {derive.problem_statement if derive else ''}\n",
         f"Scope: {derive.scope_boundary if derive else ''}\n",
         f"Ask calibration: {derive.ask_calibration if derive else ''}\n\n",
-        f"## Load-bearing claims\n\n",
+        "## Load-bearing claims\n\n",
     ]
     for lb in (derive.load_bearing_claims if derive else []):
         parts.append(f"- [{lb.id}] \"{lb.quote}\"\n")
@@ -618,7 +618,6 @@ async def _custom_analyze(state: PipelineState, ctx: StepContext, spec) -> None:
     all_findings: list[FindingOutput] = []
     all_strengths: list[StrengthOutput] = []
     chunks = state.chunk_map or []
-    n_chunks = len(chunks)
 
     async def _analyze_one(ci: int, chunk: ChunkEntry):
         user_msg = _build_analyze_user_message(state.paper_id, chunk, paper_lines, state)

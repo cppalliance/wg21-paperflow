@@ -1048,6 +1048,17 @@ class SqliteBackend(StorageBackend):
         if agora_present:
             self.clear_agora(pid)
 
+        # Extract rows reference loc.line offsets that become stale on any
+        # markdown content change; wipe them alongside the report artifacts.
+        with self._conn:
+            for table in (
+                "claims", "evidence", "paper_citations", "external_citations",
+                "questions", "rhetoric", "caput_causae", "citation_audit",
+            ):
+                self._conn.execute(
+                    f"DELETE FROM {table} WHERE paper_id = ?", (pid,),
+                )
+
         return ClearedSet(
             advocatus=advocatus_present,
             agora=agora_present,

@@ -38,7 +38,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from types import MappingProxyType
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from pipeline.classifier_backends import (
     CLASSIFIER_BACKEND_REGISTRY,
@@ -47,6 +47,9 @@ from pipeline.classifier_backends import (
 from pipeline.errors import ServiceConfigError
 from pipeline.model_backends import BACKEND_REGISTRY, ModelBackend
 from pipeline.transformer_backend import TransformerProvider, default_auto_provider
+
+if TYPE_CHECKING:
+    from pipeline.transformer_backend import EmbeddingBackend
 
 logger = logging.getLogger(__name__)
 
@@ -370,7 +373,7 @@ def load_embedders(
     path: Path | None = None,
     *,
     provider: TransformerProvider | None = None,
-) -> tuple[dict[str, "EmbeddingBackend"], dict[str, str]]:
+) -> tuple[dict[str, EmbeddingBackend], dict[str, str]]:
     """Parse SERVICES.toml ``[embedders.*]``, build EmbeddingBackend instances.
 
     Parallel to :func:`load_classifiers`. Returns ``(embedders, defaults)``
