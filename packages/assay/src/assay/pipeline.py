@@ -30,6 +30,7 @@ from pipeline import (
     build_pipeline,
     dispatch,
     load_sections,
+    validate_capabilities,
 )
 from pipeline.services import load_embedders, load_services, parse_pipeline_config, parse_service_overrides, resolve_slots
 from pipeline.tools import wrap_source
@@ -1053,6 +1054,7 @@ async def assay_paper(
 
     hooks = _build_hooks(extraction_agent, synthesis_agent, research_agent)
     pipeline = build_pipeline(secs, hooks)
+    validate_capabilities(pipeline, stop_after=stop_after)
 
     # Load embedder for RAG index step
     embedders, embedder_defaults = load_embedders()
