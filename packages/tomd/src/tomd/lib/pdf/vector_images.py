@@ -89,6 +89,12 @@ _CLUSTER_LINK_DISTANCE_PT = 30.0
 # emoji; vector decorations are typically thinner so we set a higher
 # floor here. Smallest genuine diagram in the survey is ~80pt tall
 # (P3127R1's adjacency graph).
+#
+# Virtual clusters produced by container detection (see
+# :func:`_detect_frame_drawings`) get a relaxed floor of
+# :data:`_VIRTUAL_MIN_CLUSTER_DIM_PT` to admit horizontal flow
+# diagrams whose container is intentionally short and wide
+# (P4003R1's IoAwaitable diagram is 381 x 35 pt).
 _MIN_CLUSTER_DIM_PT = 60.0
 
 # Maximum overlap (intersection-over-cluster-area) with text block
@@ -126,6 +132,84 @@ _PAGE_EDGE_BAND_FRACTION = 0.08
 # uncertainty marker rather than disappearing silently.
 _MAX_CLUSTERS_PER_PAGE = 200
 
+# Maximum cluster bbox area as a fraction of the page area. Clusters
+# whose bbox covers more than this much of the page are almost
+# always single-linkage chaining noise: a page-frame stroke or
+# margin marker pulled an unrelated drawing into the cluster and
+# the bbox now spans the page. The text-overlap filter cannot catch
+# this case alone because code-heavy WG21 pages commonly have
+# 17-30% text coverage, so a page-spanning cluster's overlap
+# fraction stays under _MAX_TEXT_OVERLAP_FRACTION (0.35) even
+# though it visually swallows everything. Real figures, even the
+# largest in the calibration corpus (P4003R1 page 35 at 288x400pt),
+# stay under 25% of page area; the 50% threshold leaves ample
+# headroom while catching the failure cleanly.
+_MAX_CLUSTER_AREA_FRACTION = 0.50
+
+# ---- Container detection (virtual-cluster merge) ---------------------------
+#
+# A "frame" drawing is a thin outer container (typically 2 horizontal
+# lines or 1 wide-thin rectangle) that visually encloses a row of
+# smaller diagram elements - the canonical horizontal-flow-diagram
+# shape "A -> B -> C". Single-linkage clustering at the bbox level
+# leaves such frames as their own 2-item cluster and treats the
+# enclosed boxes as separate clusters, so size and item-count
+# filters individually reject each piece. Container detection
+# explicitly merges a frame with the clusters it encloses into a
+# single "virtual cluster" that carries the combined item count and
+# union bbox; virtual clusters get relaxed thresholds in the
+# downstream filters.
+
+# Maximum item count for a drawing to qualify as a frame. Real frames
+# are 1 ('re' rectangle) or 2 ('l' top + 'l' bottom); a few corner
+# decorations push it to 4. Anything richer is a figure body, not a
+# container.
+_MAX_FRAME_ITEMS = 4
+
+# A frame's bbox area must stay under this fraction of the page area.
+# Caps page frames, full-page background fills, and margin markers
+# from triggering container detection.
+_MAX_FRAME_AREA_FRACTION = 0.30
+
+# A frame must extend at least this far in its longest dimension.
+# Excludes tiny outline boxes (e.g. checkbox icons) that aren't
+# structural containers.
+_MIN_FRAME_DIM_PT = 80.0
+
+# A frame must have at least this aspect ratio (long-side / short-
+# side). Background-fill rectangles tend to be square-ish (aspect
+# ~1.5-2.0); thin container frames are wide-and-short or tall-and-
+# narrow with aspect >> 3.
+_MIN_FRAME_ASPECT_RATIO = 3.0
+
+# For a cluster to be considered "inside" a frame, its bbox must
+# overlap the frame's bbox by at least this fraction (intersection
+# over cluster area). 0.80 catches the common case of an inner box
+# fully nested plus a small tolerance for sub-pt extraction drift.
+_MIN_NESTING_FRACTION = 0.80
+
+# Relaxed min-dim floor for virtual clusters. The container's
+# intentional thinness (e.g. 35pt tall for a labels-in-one-row flow
+# diagram) would otherwise fail the strict 60pt floor.
+_VIRTUAL_MIN_CLUSTER_DIM_PT = 30.0
+
+# Virtual clusters with at least this many drawing items bypass the
+# aspect-extreme filter. Dense content inside a thin frame is the
+# characteristic structure of a populated flow diagram (P4003R1's
+# IoAwaitable has 301 items); thin frames containing little (<= 50
+# items) are usually decoration that survived clustering for other
+# reasons and should stay rejected.
+_VIRTUAL_MIN_ITEM_COUNT = 50
+
+# Maximum aspect ratio (long-side / short-side) for a cluster bbox.
+# Clusters with extreme aspect ratios are almost always code-block
+# background fills or shaded callout strips that span the page
+# width as a thin horizontal band. The calibration corpus's
+# tightest legitimate figure is 3.0:1 (a narrow flowchart column);
+# 3.5 leaves margin while catching strip noise that runs 3.9:1 to
+# 8.0:1 in the wild.
+_MAX_CLUSTER_ASPECT_RATIO = 3.5
+
 # Hard upper bound on summed drawing-item count BEFORE clustering.
 # Single-linkage clustering on N items is O(N^2) naively; even with
 # the spatial-hash bucketed implementation below, pathological pages
@@ -158,6 +242,8 @@ _VECTOR_XREF_RANGE = (1 << 31) - 1
 
 # ---- Rejection-reason key set (D7-ordered when formatted) -------------------
 
+REASON_ASPECT_EXTREME = "aspect_extreme"
+REASON_BBOX_TOO_LARGE = "bbox_too_large"
 REASON_CLUSTERS_OVERFLOW = "clusters_overflow"
 REASON_EDGE_BAND = "edge_band"
 REASON_TEXT_OVERLAP = "text_overlap"
@@ -170,6 +256,8 @@ REASON_WORDING_COLOR = "wording_color"
 # stability"). The tuple is the source of truth for tests that pin
 # the contract.
 ALLOWED_REASON_KEYS: tuple[str, ...] = (
+    REASON_ASPECT_EXTREME,
+    REASON_BBOX_TOO_LARGE,
     REASON_CLUSTERS_OVERFLOW,
     REASON_EDGE_BAND,
     REASON_TEXT_OVERLAP,
@@ -310,6 +398,142 @@ def _bbox_fully_in_edge_band(
     if bbox[1] >= bottom_band_top:
         return True
     return False
+
+
+def _bbox_contains(
+    outer: tuple[float, float, float, float],
+    inner: tuple[float, float, float, float],
+    *,
+    threshold: float = _MIN_NESTING_FRACTION,
+) -> bool:
+    """True if ``inner`` overlaps ``outer`` by at least ``threshold`` of its area.
+
+    Used to decide whether a candidate cluster is "inside" a frame
+    drawing for container detection. A fully nested inner cluster
+    has intersection = inner_area, fraction = 1.0; the threshold is
+    a tolerance for sub-pt drift and clusters whose bboxes nudge
+    over a frame edge.
+    """
+    ix0 = max(outer[0], inner[0])
+    iy0 = max(outer[1], inner[1])
+    ix1 = min(outer[2], inner[2])
+    iy1 = min(outer[3], inner[3])
+    if ix0 >= ix1 or iy0 >= iy1:
+        return False
+    inner_area = (inner[2] - inner[0]) * (inner[3] - inner[1])
+    if inner_area <= 0:
+        return False
+    intersection = (ix1 - ix0) * (iy1 - iy0)
+    return intersection / inner_area >= threshold
+
+
+def _detect_frame_drawings(
+    drawings: Sequence[dict],
+    page_area: float,
+) -> list[tuple[tuple[float, float, float, float], int]]:
+    """Identify "container frame" drawings: thin outlines that enclose
+    figure content.
+
+    Returns a list of ``(frame_bbox, item_count)`` tuples for drawings
+    matching all of:
+
+    - item count <= :data:`_MAX_FRAME_ITEMS`,
+    - area < :data:`_MAX_FRAME_AREA_FRACTION` of the page area,
+    - longest dimension >= :data:`_MIN_FRAME_DIM_PT`,
+    - aspect ratio >= :data:`_MIN_FRAME_ASPECT_RATIO` (excludes
+      square-ish background fills).
+
+    A diagram drawn as "outer thin rectangle + inner labelled boxes"
+    leaves its outer rectangle as a 2-item drawing with extreme
+    aspect; centroid-based clustering can't merge it with the inner
+    elements because the centroids land in distant buckets. Detecting
+    these frames explicitly and merging their enclosed clusters in a
+    post-clustering pass (see :func:`_merge_clusters_into_frames`)
+    recovers the figure as one unit while leaving unrelated nearby
+    drawings untouched.
+    """
+    if page_area <= 0:
+        return []
+    frames: list[tuple[tuple[float, float, float, float], int]] = []
+    for d in drawings:
+        items = d.get("items") or ()
+        if len(items) > _MAX_FRAME_ITEMS:
+            continue
+        bbox = _drawing_bbox(d)
+        if bbox is None:
+            continue
+        width = bbox[2] - bbox[0]
+        height = bbox[3] - bbox[1]
+        if width <= 0 or height <= 0:
+            continue
+        if width * height >= _MAX_FRAME_AREA_FRACTION * page_area:
+            continue
+        if max(width, height) < _MIN_FRAME_DIM_PT:
+            continue
+        aspect = max(width / height, height / width)
+        if aspect < _MIN_FRAME_ASPECT_RATIO:
+            continue
+        frames.append((bbox, len(items)))
+    return frames
+
+
+def _merge_clusters_into_frames(
+    frames: Sequence[tuple[tuple[float, float, float, float], int]],
+    clusters: Sequence[tuple[tuple[float, float, float, float], int]],
+) -> list[tuple[tuple[float, float, float, float], int, bool]]:
+    """Merge clusters enclosed by frame drawings into "virtual" clusters.
+
+    Returns a list of ``(bbox, item_count, is_virtual)`` tuples.
+    Virtual clusters (``is_virtual=True``) carry the union bbox of the
+    frame plus all its enclosed clusters and the summed item count.
+    Regular (non-virtual) clusters pass through unchanged.
+
+    A frame with no enclosed clusters produces nothing - the frame
+    drawing itself was already its own cluster and stays in the
+    regular set.
+    """
+    cluster_list = list(clusters)
+    used = set()
+    virtual: list[tuple[tuple[float, float, float, float], int, bool]] = []
+    # Threshold: a cluster qualifies as "enclosed" only if it is
+    # strictly smaller than the frame. Skips the frame's OWN cluster
+    # (the frame drawing always forms a cluster whose bbox equals the
+    # frame's, which would otherwise self-match and double-count
+    # items), while still admitting nearly-as-large inner content
+    # with a small allowance for sub-pt drift.
+    _ENCLOSED_AREA_CEILING = 0.95
+    for frame_bbox, frame_items in frames:
+        frame_area = ((frame_bbox[2] - frame_bbox[0])
+                      * (frame_bbox[3] - frame_bbox[1]))
+        enclosed_idx: list[int] = []
+        for i, (c_bbox, _c_items) in enumerate(cluster_list):
+            if i in used:
+                continue
+            c_area = (c_bbox[2] - c_bbox[0]) * (c_bbox[3] - c_bbox[1])
+            if c_area >= _ENCLOSED_AREA_CEILING * frame_area:
+                # Same-size cluster - that's the frame drawing's own
+                # cluster. Skip; we don't want to merge a frame "into
+                # itself".
+                continue
+            if _bbox_contains(frame_bbox, c_bbox):
+                enclosed_idx.append(i)
+        if not enclosed_idx:
+            continue
+        v_bbox = frame_bbox
+        v_items = frame_items
+        for i in enclosed_idx:
+            c_bbox, c_items = cluster_list[i]
+            v_bbox = _bbox_union(v_bbox, c_bbox)
+            v_items += c_items
+            used.add(i)
+        virtual.append((v_bbox, v_items, True))
+
+    out: list[tuple[tuple[float, float, float, float], int, bool]] = []
+    for i, (c_bbox, c_items) in enumerate(cluster_list):
+        if i not in used:
+            out.append((c_bbox, c_items, False))
+    out.extend(virtual)
+    return out
 
 
 def _text_overlap_fraction(
@@ -654,16 +878,47 @@ def extract_page_vector_images(
         after_edge.append(d)
 
     clusters = _cluster_drawings(after_edge)
-    candidates_count = len(clusters)
+
+    # Container detection: identify thin frame drawings that enclose
+    # smaller clusters (canonical horizontal-flow-diagram shape) and
+    # merge their enclosed clusters into "virtual" clusters with the
+    # union bbox and summed item count. Virtual clusters get relaxed
+    # thresholds in the filter loop below.
+    page_area = page_rect.width * page_rect.height
+    frames = _detect_frame_drawings(after_edge, page_area)
+    annotated = _merge_clusters_into_frames(frames, clusters)
+    candidates_count = len(annotated)
 
     # Per-cluster shape + text-overlap filter.
     surviving_clusters: list[tuple[tuple[float, float, float, float], int]] = []
-    for cluster_bbox, item_count in clusters:
+    for cluster_bbox, item_count, is_virtual in annotated:
         width = cluster_bbox[2] - cluster_bbox[0]
         height = cluster_bbox[3] - cluster_bbox[1]
-        if width < _MIN_CLUSTER_DIM_PT or height < _MIN_CLUSTER_DIM_PT:
+        # Min-dim floor: virtual clusters get the lower
+        # _VIRTUAL_MIN_CLUSTER_DIM_PT so an intentionally thin
+        # container (e.g. a labels-in-one-row flow diagram) survives.
+        min_dim = _VIRTUAL_MIN_CLUSTER_DIM_PT if is_virtual else _MIN_CLUSTER_DIM_PT
+        if width < min_dim or height < min_dim:
             reasons[REASON_TOO_SMALL] = reasons.get(REASON_TOO_SMALL, 0) + 1
             continue
+        if page_area > 0 and width * height >= _MAX_CLUSTER_AREA_FRACTION * page_area:
+            # Single-linkage chaining symptom: a page-frame stroke or
+            # margin marker pulled the cluster bbox out to span the
+            # page. text_overlap can't catch this on whitespace-heavy
+            # pages where coverage stays under 35% even at full-page
+            # extent.
+            reasons[REASON_BBOX_TOO_LARGE] = reasons.get(REASON_BBOX_TOO_LARGE, 0) + 1
+            continue
+        if max(width / height, height / width) >= _MAX_CLUSTER_ASPECT_RATIO:
+            # Strip-shaped cluster - code-block background fill or
+            # shaded callout spanning the page width. Real figures
+            # stay under 3.5:1 in the calibration corpus.
+            # Virtual clusters with dense content (>= _VIRTUAL_MIN_ITEM_COUNT
+            # items) bypass: they represent a populated flow diagram
+            # whose container is intentionally extreme-aspect.
+            if not (is_virtual and item_count >= _VIRTUAL_MIN_ITEM_COUNT):
+                reasons[REASON_ASPECT_EXTREME] = reasons.get(REASON_ASPECT_EXTREME, 0) + 1
+                continue
         if item_count < _MIN_CLUSTER_ITEM_COUNT:
             reasons[REASON_TOO_FEW_ITEMS] = reasons.get(REASON_TOO_FEW_ITEMS, 0) + 1
             continue

@@ -161,6 +161,46 @@ The N-way agreement vector documented above extends from `(mupdf_block_id, spati
 - MinerU vs Docling layout mAP: https://www.codesota.com/ocr/docling-vs-mineru
 - DocLayout-YOLO paper: https://huggingface.co/papers/2410.12628
 
+### 4.7 Known v2.0 vector-extraction limitations (calibrated against P4003R1)
+
+The v2.0 vector-extraction heuristic in `tomd/lib/pdf/vector_images.py` has known false-positive classes pending the layout-aware path above (§4.3) which would replace the heuristic with structural `picture` bboxes.
+
+**Horizontal flow diagrams with thin outer containers: handled via container detection.**
+
+P4003R1 page 8 has an "IoAwaitable → IoRunnable → io_task<T>" flow diagram drawn as one row of labeled boxes connected by arrows. Its bbox is 381 × 35 pt — well under the strict `_MIN_CLUSTER_DIM_PT = 60` floor. The pattern is a thin outer container (2-item rectangle) enclosing smaller per-label clusters; centroid-based clustering doesn't merge them, so naively the outer cluster has only 2 items and the inner clusters are individually too small.
+
+Resolved via `_detect_frame_drawings` + `_merge_clusters_into_frames` in `vector_images.py`: a frame-shaped drawing (low item count, extreme aspect, area < 30% of page) explicitly merges with the clusters it encloses into a "virtual cluster" with combined item count and union bbox. Virtual clusters get a relaxed min-dim floor (`_VIRTUAL_MIN_CLUSTER_DIM_PT = 30`) and bypass the `aspect_extreme` filter when their item count clears `_VIRTUAL_MIN_ITEM_COUNT = 50`. Targeted enough not to over-merge unrelated nearby content; constraints documented inline.
+
+**Limit: Code blocks with dense syntax-highlight backgrounds extract as duplicate "figures".**
+
+P4003R1 pages 67 and 69 have code blocks rendered with substantial syntax-highlight vector decoration (token-color rectangles, gradient backgrounds). These clusters pass `_MAX_TEXT_OVERLAP_FRACTION = 0.35` because the per-line Block bboxes are tight around the text and leave whitespace between lines, so the summed overlap stays under threshold even though the cluster bbox is clearly a code region.
+
+The text path already extracts the code correctly into the markdown, so the vector PNG is duplicate content: a markdown code block followed by a `![](...)` image rendering the same code. Annoying but not destructive.
+
+Distinguishing legitimate flow diagrams from code-block backgrounds requires a structural signal — either a layout model's `picture` vs `code` label (§4.3 integration point c), a syntactic check on the cluster's text content (e.g., monospace-font dominance, parse-as-code success), or a defer-to-structural-section filter that rejects vector clusters overlapping detected `SectionKind.CODE` regions. The last of these is the cleanest near-term fix and shares its architecture with the table-overlap filter proposed in `bug-p4003r1-pg8-table-extraction.md`. Currently out of scope for v2.0.
+
+**Limit: Tables drawn with per-cell background rectangles extract as one image per column.**
+
+P4003R1 page 8 has a comparison table where each cell has its own background rectangle and there is no horizontal header underline spanning all columns. Single-linkage clustering forms one cluster per column (the per-cell rects stack vertically with tight spacing within a column, but inter-column gaps exceed the link distance and there are no spanning drawings to bridge them). All four column-clusters pass every existing filter and emit as separate PNGs.
+
+The same architectural fix proposed for code-block duplicates applies: reject vector clusters that overlap detected `SectionKind.TABLE` regions. See `bug-p4003r1-pg8-table-extraction.md` for the full investigation.
+
+### 4.8 Known text-pipeline bug: code-block reordering (independent of vector extraction)
+
+Surfaced during P4003R1 calibration but not caused by vector extraction. P4003R1 page 34 has the layout:
+
+```
+y= 61-118  prose: "The window... TLS remains valid between await_suspend and await_resume:"
+y=155-397  code:  auto initial_suspend() noexcept { ... }
+y=434-462  prose: "Every time the coroutine resumes... The flow:"
+```
+
+PDF y-order is prose → code → prose. The converted markdown emits them as prose → prose → code, suggesting the structure pipeline (`structure.py`'s paragraph-merge pass, most likely) merges the two prose paragraphs across the interleaving code section.
+
+The v1 IMAGE-survival pass guards against this for `SectionKind.IMAGE`. The equivalent guard for `SectionKind.CODE` may be missing or the merge predicate is firing because the first prose lacks terminal punctuation. Affects pure-raster runs too on any paper with prose-code-prose layout; the vector-extraction flag only made this paper visible during review.
+
+Fix location: `tomd/lib/pdf/structure.py`'s paragraph-merge / section-ordering passes. Add a CODE-respecting guard symmetric to the IMAGE one. Separate ticket; medium-to-high complexity (requires tracing how `compare_extractions` builds the section order and where merging happens).
+
 ---
 
 ## 5. Research Area 2: Zero-Shot NLI for Block/Span Classification

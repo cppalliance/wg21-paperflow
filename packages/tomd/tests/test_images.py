@@ -48,6 +48,8 @@ from tomd.lib.pdf.types import (
 from tomd.lib.pdf import vector_images
 from tomd.lib.pdf.vector_images import (
     ALLOWED_REASON_KEYS,
+    REASON_ASPECT_EXTREME,
+    REASON_BBOX_TOO_LARGE,
     REASON_CLUSTERS_OVERFLOW,
     REASON_EDGE_BAND,
     REASON_TEXT_OVERLAP,
@@ -895,6 +897,8 @@ class TestVectorUncertaintyMarker:
         # Pin the closed key set; adding to it without bumping the marker
         # contract is a versioned change per plan section 1.6a.
         assert sorted(ALLOWED_REASON_KEYS) == [
+            "aspect_extreme",
+            "bbox_too_large",
             "clusters_overflow",
             "edge_band",
             "text_overlap",
@@ -1083,6 +1087,261 @@ class TestPerClusterFilter:
         text_block = Block(bbox=(100.0, 100.0, 136.0, 200.0))
         cands, _stats = extract_page_vector_images(page, [text_block])
         assert cands == [], "36% overlap fails the < 35% gate"
+
+
+class TestBboxTooLargeFilter:
+    """Clusters whose bbox covers more than _MAX_CLUSTER_AREA_FRACTION of
+    the page are rejected as ``bbox_too_large``. Targets the single-
+    linkage chaining failure mode where a page-frame stroke pulls
+    unrelated drawings into one cluster spanning the page.
+    """
+
+    @staticmethod
+    def _setup(monkeypatch):
+        monkeypatch.setattr(vector_images, "_MIN_PAGE_DRAWING_ITEMS", 1)
+        monkeypatch.setattr(vector_images, "_MAX_DRAWINGS_PER_PAGE", 100_000)
+
+    def test_cluster_covering_more_than_half_page_drops(self, monkeypatch):
+        self._setup(monkeypatch)
+        # Page 612x792 = 484_704 sq pt; _MAX_CLUSTER_AREA_FRACTION=0.50
+        # -> threshold 242_352. A 500x600 cluster = 300_000 sq pt (> 0.61).
+        drawings = [_drawing(50, 50, 550, 650, items=8)]
+        page = _mock_page(drawings)
+        cands, stats = extract_page_vector_images(page, [])
+        assert cands == []
+        assert stats.reasons.get(REASON_BBOX_TOO_LARGE) == 1
+
+    def test_cluster_at_exactly_threshold_drops(self, monkeypatch):
+        self._setup(monkeypatch)
+        # Build a cluster whose area is exactly 50% of the page.
+        # 612x792/2 = 242_352. A 612x396 strip = 242_352. Use it.
+        # But this strip is aspect ratio 1.55:1, which passes aspect.
+        drawings = [_drawing(0, 0, 612, 396, items=8)]
+        page = _mock_page(drawings)
+        cands, stats = extract_page_vector_images(page, [])
+        assert cands == [], "boundary inclusive: area == threshold drops"
+        assert stats.reasons.get(REASON_BBOX_TOO_LARGE) == 1
+
+    def test_cluster_just_under_threshold_passes(self, monkeypatch):
+        self._setup(monkeypatch)
+        # 49% of page area, well within aspect cap.
+        # area_target = 242_352 * 0.98 = 237_505
+        # use 600x395 = 237_000 sq pt = ~48.9% of page.
+        drawings = [_drawing(5, 5, 605, 400, items=8)]
+        page = _mock_page(drawings)
+        cands, _stats = extract_page_vector_images(page, [])
+        assert len(cands) == 1, (
+            "49% of page area is under the 50% floor and must pass"
+        )
+
+
+class TestAspectExtremeFilter:
+    """Clusters with aspect ratio >= _MAX_CLUSTER_ASPECT_RATIO are
+    rejected as ``aspect_extreme``. Targets code-block background
+    fills and shaded callouts that span the page width as thin
+    horizontal strips."""
+
+    @staticmethod
+    def _setup(monkeypatch):
+        monkeypatch.setattr(vector_images, "_MIN_PAGE_DRAWING_ITEMS", 1)
+        monkeypatch.setattr(vector_images, "_MAX_DRAWINGS_PER_PAGE", 100_000)
+
+    def test_wide_strip_drops(self, monkeypatch):
+        self._setup(monkeypatch)
+        # 400x80 strip -> aspect 5.0 >= 3.5. Stays under area cap
+        # (400*80 = 32_000 = ~6.6% of page) so bbox_too_large doesn't fire first.
+        drawings = [_drawing(100, 100, 500, 180, items=8)]
+        page = _mock_page(drawings)
+        cands, stats = extract_page_vector_images(page, [])
+        assert cands == []
+        assert stats.reasons.get(REASON_ASPECT_EXTREME) == 1
+
+    def test_tall_strip_drops(self, monkeypatch):
+        self._setup(monkeypatch)
+        # 80x400 strip -> aspect 5.0 (height/width). Tall-narrow noise.
+        drawings = [_drawing(100, 100, 180, 500, items=8)]
+        page = _mock_page(drawings)
+        cands, stats = extract_page_vector_images(page, [])
+        assert cands == []
+        assert stats.reasons.get(REASON_ASPECT_EXTREME) == 1
+
+    def test_aspect_at_threshold_drops(self, monkeypatch):
+        self._setup(monkeypatch)
+        # 350x100 -> aspect 3.5 (== threshold) -> drop.
+        drawings = [_drawing(100, 100, 450, 200, items=8)]
+        page = _mock_page(drawings)
+        cands, stats = extract_page_vector_images(page, [])
+        assert cands == [], "boundary inclusive: aspect == 3.5 drops"
+        assert stats.reasons.get(REASON_ASPECT_EXTREME) == 1
+
+    def test_aspect_just_under_threshold_passes(self, monkeypatch):
+        self._setup(monkeypatch)
+        # 340x100 -> aspect 3.4 < 3.5 -> pass.
+        drawings = [_drawing(100, 100, 440, 200, items=8)]
+        page = _mock_page(drawings)
+        cands, _stats = extract_page_vector_images(page, [])
+        assert len(cands) == 1, "aspect 3.4 must pass"
+
+    def test_square_cluster_passes(self, monkeypatch):
+        self._setup(monkeypatch)
+        drawings = [_drawing(100, 100, 200, 200, items=8)]
+        page = _mock_page(drawings)
+        cands, _stats = extract_page_vector_images(page, [])
+        assert len(cands) == 1
+
+
+class TestContainerDetection:
+    """Frame-shaped drawings that enclose smaller clusters trigger
+    container detection: the frame and its enclosed clusters merge
+    into a virtual cluster carrying combined item counts and a union
+    bbox. Virtual clusters get relaxed thresholds (lower min-dim,
+    aspect-extreme bypass when dense). Pins the recovery of the
+    P4003R1 page 8 IoAwaitable -> IoRunnable -> io_task<T> horizontal
+    flow diagram, which is 381 x 35pt with a 2-item outer container
+    enclosing inner box clusters.
+    """
+
+    @staticmethod
+    def _setup(monkeypatch):
+        monkeypatch.setattr(vector_images, "_MIN_PAGE_DRAWING_ITEMS", 1)
+        monkeypatch.setattr(vector_images, "_MAX_DRAWINGS_PER_PAGE", 100_000)
+
+    def test_thin_frame_with_nested_content_recovered_as_virtual(
+        self, monkeypatch,
+    ):
+        """Thin frame (2 items, aspect 10:1) plus a nested dense
+        cluster merges into a virtual cluster that survives the
+        relaxed virtual-cluster filters."""
+        self._setup(monkeypatch)
+        # Outer frame: 400x40pt, 2 items, aspect 10.0 - matches
+        # IoAwaitable shape.
+        frame = _drawing(100, 100, 500, 140, items=2)
+        # Nested dense cluster centered inside the frame; populates
+        # the virtual cluster's item count past the aspect-extreme
+        # bypass threshold (50).
+        nested = _drawing(200, 110, 300, 130, items=60)
+        page = _mock_page([frame, nested])
+        cands, stats = extract_page_vector_images(page, [])
+        assert len(cands) == 1, (
+            f"virtual cluster should be kept; got {len(cands)} "
+            f"with stats {stats}"
+        )
+        # The virtual cluster's bbox is the union of frame and nested.
+        bbox = cands[0].bbox
+        assert bbox[0] <= 100 and bbox[1] <= 100
+        assert bbox[2] >= 500 and bbox[3] >= 140
+
+    def test_no_frame_below_min_aspect_no_virtual(self, monkeypatch):
+        """A square-ish single-rect background fill (aspect < 3.0) is
+        NOT a frame - it's a code-block bg or shaded callout. Must not
+        trigger container detection."""
+        self._setup(monkeypatch)
+        # 400x300 background (aspect 1.33) - normal rectangle.
+        bg = _drawing(100, 100, 500, 400, items=1)
+        nested = _drawing(200, 200, 300, 250, items=8)
+        page = _mock_page([bg, nested])
+        cands, _stats = extract_page_vector_images(page, [])
+        # Each cluster is evaluated individually under the regular
+        # path. The 400x300 bg has 1 item (< _MIN_CLUSTER_ITEM_COUNT)
+        # so it drops; the small nested cluster passes too_small
+        # but fails too_few_items.
+        # We assert NO virtual cluster was produced - either both
+        # clusters drop on their individual filters, or only the
+        # large one passes. The point: no merge happened.
+        assert all(
+            not (im.bbox[0] <= 100 and im.bbox[2] >= 500
+                 and im.bbox[1] <= 100 and im.bbox[3] >= 400)
+            for im in cands
+        ), "no virtual cluster spanning the union of bg + nested should form"
+
+    def test_no_frame_with_too_many_items_no_virtual(self, monkeypatch):
+        """A wide-and-short drawing with > _MAX_FRAME_ITEMS isn't a
+        thin container frame - it's a figure body with substance.
+        Must not trigger container detection (the existing per-
+        cluster filters handle it on its own merits)."""
+        self._setup(monkeypatch)
+        # 400x40 with 10 items - too rich to be a frame.
+        big_drawing = _drawing(100, 100, 500, 140, items=10)
+        # A potential nested element.
+        nested = _drawing(200, 110, 300, 130, items=20)
+        page = _mock_page([big_drawing, nested])
+        cands, _stats = extract_page_vector_images(page, [])
+        # No virtual cluster - the 10-item drawing fails the frame
+        # criterion. Its own cluster is 400x40 (height < 60) - drops
+        # as too_small.
+        assert len(cands) == 0 or all(
+            not (im.bbox[0] <= 100 and im.bbox[2] >= 500
+                 and im.bbox[3] - im.bbox[1] < 50)
+            for im in cands
+        )
+
+    def test_page_sized_frame_does_not_trigger(self, monkeypatch):
+        """A page-spanning thin rectangle (aspect-extreme,
+        low-item-count) is geometrically frame-shaped but its area
+        exceeds _MAX_FRAME_AREA_FRACTION. Must not pull every
+        unrelated drawing on the page into one virtual cluster."""
+        self._setup(monkeypatch)
+        # Page is 612x792 (default), area ~485k. Frame at 600x300
+        # has area 180k (37% of page) > 30% threshold - excluded.
+        page_frame = _drawing(10, 10, 610, 310, items=2)
+        unrelated = _drawing(50, 50, 200, 200, items=20)
+        page = _mock_page([page_frame, unrelated])
+        cands, _stats = extract_page_vector_images(page, [])
+        # No virtual cluster spanning frame + unrelated should form.
+        # The unrelated 150x150 cluster can pass on its own merits;
+        # we only assert the merge didn't happen.
+        for im in cands:
+            assert not (
+                im.bbox[0] <= 10 and im.bbox[1] <= 10
+                and im.bbox[2] >= 600 and im.bbox[3] >= 300
+            ), "page-sized frame must not produce a virtual cluster"
+
+    def test_virtual_cluster_below_density_threshold_drops_on_aspect(
+        self, monkeypatch,
+    ):
+        """A virtual cluster with item_count < _VIRTUAL_MIN_ITEM_COUNT
+        does NOT get the aspect-extreme bypass. This keeps the
+        single-line-code-strip case (low-item-count even after merge)
+        on the strict path."""
+        self._setup(monkeypatch)
+        frame = _drawing(100, 100, 500, 140, items=2)
+        # Sparse nested: only 10 items. Virtual total = 12, well under
+        # the 50-item density threshold.
+        nested = _drawing(200, 110, 300, 130, items=10)
+        page = _mock_page([frame, nested])
+        cands, stats = extract_page_vector_images(page, [])
+        # Aspect 10:1 with item_count 12 < 50 -> rejected as aspect_extreme.
+        assert cands == []
+        assert stats.reasons.get(REASON_ASPECT_EXTREME) == 1
+
+    def test_virtual_cluster_relaxed_min_dim_floor(self, monkeypatch):
+        """A virtual cluster with a thin frame (height 35pt, below the
+        strict 60pt floor) is admitted via the relaxed
+        _VIRTUAL_MIN_CLUSTER_DIM_PT = 30pt path."""
+        self._setup(monkeypatch)
+        # 400x35 frame - height below strict floor, above virtual floor.
+        frame = _drawing(100, 100, 500, 135, items=2)
+        nested = _drawing(200, 110, 300, 130, items=60)
+        page = _mock_page([frame, nested])
+        cands, stats = extract_page_vector_images(page, [])
+        assert len(cands) == 1, f"thin virtual cluster should pass; stats={stats}"
+
+    def test_frame_with_no_enclosed_clusters_falls_back_to_regular(
+        self, monkeypatch,
+    ):
+        """A thin frame drawing with NO nested clusters produces no
+        virtual cluster. The frame itself stays in the regular set
+        and goes through normal filters (where it likely fails on
+        too_small / too_few_items / aspect_extreme)."""
+        self._setup(monkeypatch)
+        # Lone frame, no nested content.
+        frame = _drawing(100, 100, 500, 140, items=2)
+        page = _mock_page([frame])
+        cands, stats = extract_page_vector_images(page, [])
+        # Frame's own cluster: 400x40, aspect 10:1, only 2 items.
+        # Fails too_small (height 40 < 60) on the regular path.
+        assert cands == []
+        assert stats.reasons.get(REASON_TOO_SMALL) == 1
 
 
 class TestEdgeBand:
