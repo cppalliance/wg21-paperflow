@@ -51,6 +51,8 @@ _DIAGRAM_PDF = _FIXTURES / "synth_vector_one_diagram.pdf"
 _DIAGRAM_GOLDEN = _FIXTURES / "synth_vector_one_diagram.golden.md"
 _NOISE_PDF = _FIXTURES / "synth_noise_no_diagram.pdf"
 _NOISE_GOLDEN = _FIXTURES / "synth_noise_no_diagram.golden.md"
+_TABLE_PDF = _FIXTURES / "synth_table_with_cells.pdf"
+_TABLE_GOLDEN = _FIXTURES / "synth_table_with_cells.golden.md"
 
 # Recorded aHash of the diagram fixture's rasterised PNG. Stable
 # across pymupdf 1.27.x; refresh if a perceptual delta sneaks past
@@ -219,6 +221,75 @@ class TestSynthNoiseNoDiagram:
         body = marker_line.split("reasons={", 1)[1].split("}", 1)[0]
         keys = [pair.split(":", 1)[0] for pair in body.split(", ")]
         assert keys == sorted(keys)
+
+
+class TestSynthTableWithCells:
+    """End-to-end coverage for the structural-overlap / table-detector
+    fix class (calibrated against P4003R1 page 8, full report in
+    ``bug-p4003r1-pg8-table-extraction.md``).
+
+    The fixture is a comparison table rendered with per-cell background
+    rectangles and no inter-column spanning rules - the canonical
+    false-positive shape that caused page 8's 4 column-images. The
+    test asserts the converter produces ZERO phantom vector images
+    from this layout AND a properly-formatted markdown table covering
+    all rows.
+
+    The right-edge-fallback in ``table.py::_columns_match`` is also
+    exercised because the rightmost numeric column has variable
+    x-starts (cell text length varies: "9.10x" vs "11.92x" vs "-")
+    but a fixed x-end.
+    """
+
+    def test_markdown_matches_golden(self):
+        result = _run_with_vector_extract(_TABLE_PDF)
+        assert result.md == _TABLE_GOLDEN.read_text()
+
+    def test_zero_vector_images_produced(self):
+        """No matter which filter does the work (text_overlap or
+        structural-overlap), the converter must emit zero phantom
+        column-images. The user-visible contract is "table is a
+        table, not 4 stacked column-images"."""
+        result = _run_with_vector_extract(_TABLE_PDF)
+        assert all(im.source != "vector" for im in result.images)
+
+    def test_markdown_table_has_all_rows(self):
+        """The right-edge-fallback in _columns_match must fire so the
+        table detector finds all 10 rows (1 header + 9 data). Counted
+        by markdown pipe-delimited row markers; the separator row
+        ``| --- | --- | --- | --- |`` and 10 content rows = 11 lines
+        with leading ``|``."""
+        result = _run_with_vector_extract(_TABLE_PDF)
+        table_lines = [ln for ln in result.md.splitlines() if ln.startswith("|")]
+        # 1 header line + 1 separator + 9 data rows = 11 pipe-prefixed lines.
+        assert len(table_lines) == 11, (
+            f"expected 11 pipe-prefixed lines (header + sep + 9 data), "
+            f"got {len(table_lines)}: {table_lines}"
+        )
+
+    def test_right_aligned_column_values_present(self):
+        """The variable-length right-aligned values must all appear in
+        the markdown table. If _columns_match's x-end fallback failed,
+        the table detector would split the rows and some values would
+        end up as prose."""
+        result = _run_with_vector_extract(_TABLE_PDF)
+        # Spot-check a value from each x-start variation: short, mid,
+        # long, and the dash-only cell.
+        for value in ("9.10x", "11.92x", "10.40x", "-"):
+            assert f"| {value} |" in result.md, (
+                f"value {value!r} should appear in a markdown table cell"
+            )
+
+    def test_uncertainty_marker_explains_rejections(self):
+        """When the vector path catches the column-clusters (by any
+        filter), the marker must disclose the rejection count so a
+        reader sees that something was filtered."""
+        result = _run_with_vector_extract(_TABLE_PDF)
+        assert "tomd:vector-extraction-uncertain" in result.md
+        # 4 column-clusters formed (one per column), all rejected.
+        assert "candidates=4" in result.md
+        assert "kept=0" in result.md
+        assert "rejected=4" in result.md
 
 
 class TestVectorExtractionIsOptIn:

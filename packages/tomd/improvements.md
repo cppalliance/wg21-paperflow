@@ -171,19 +171,13 @@ P4003R1 page 8 has an "IoAwaitable → IoRunnable → io_task<T>" flow diagram d
 
 Resolved via `_detect_frame_drawings` + `_merge_clusters_into_frames` in `vector_images.py`: a frame-shaped drawing (low item count, extreme aspect, area < 30% of page) explicitly merges with the clusters it encloses into a "virtual cluster" with combined item count and union bbox. Virtual clusters get a relaxed min-dim floor (`_VIRTUAL_MIN_CLUSTER_DIM_PT = 30`) and bypass the `aspect_extreme` filter when their item count clears `_VIRTUAL_MIN_ITEM_COUNT = 50`. Targeted enough not to over-merge unrelated nearby content; constraints documented inline.
 
-**Limit: Code blocks with dense syntax-highlight backgrounds extract as duplicate "figures".**
+**Vector clusters duplicating structural content: handled via structural-overlap filter.**
 
-P4003R1 pages 67 and 69 have code blocks rendered with substantial syntax-highlight vector decoration (token-color rectangles, gradient backgrounds). These clusters pass `_MAX_TEXT_OVERLAP_FRACTION = 0.35` because the per-line Block bboxes are tight around the text and leave whitespace between lines, so the summed overlap stays under threshold even though the cluster bbox is clearly a code region.
+P4003R1 pages 67 and 69 have code blocks rendered with substantial syntax-highlight vector decoration; P4003R1 page 8 has a comparison table where each cell has its own background rectangle. These cluster as vector figures despite the text path already producing structural representations (markdown code blocks, markdown tables).
 
-The text path already extracts the code correctly into the markdown, so the vector PNG is duplicate content: a markdown code block followed by a `![](...)` image rendering the same code. Annoying but not destructive.
+Resolved via `_filter_vector_images_against_structural` in `pipeline.py`: after `structure_sections` completes, any vector `ExtractedImage` whose bbox overlaps a `SectionKind.TABLE` or `SectionKind.CODE` section by more than `_STRUCTURAL_OVERLAP_THRESHOLD` (50%) is dropped, and its corresponding IMAGE section removed from the section list. Raster images are not filtered (embedded screenshots co-located with code blocks are intentional content). The per-paper uncertainty marker's `kept` count is recomputed after filtering so its disclosure matches the actual markdown.
 
-Distinguishing legitimate flow diagrams from code-block backgrounds requires a structural signal — either a layout model's `picture` vs `code` label (§4.3 integration point c), a syntactic check on the cluster's text content (e.g., monospace-font dominance, parse-as-code success), or a defer-to-structural-section filter that rejects vector clusters overlapping detected `SectionKind.CODE` regions. The last of these is the cleanest near-term fix and shares its architecture with the table-overlap filter proposed in `bug-p4003r1-pg8-table-extraction.md`. Currently out of scope for v2.0.
-
-**Limit: Tables drawn with per-cell background rectangles extract as one image per column.**
-
-P4003R1 page 8 has a comparison table where each cell has its own background rectangle and there is no horizontal header underline spanning all columns. Single-linkage clustering forms one cluster per column (the per-cell rects stack vertically with tight spacing within a column, but inter-column gaps exceed the link distance and there are no spanning drawings to bridge them). All four column-clusters pass every existing filter and emit as separate PNGs.
-
-The same architectural fix proposed for code-block duplicates applies: reject vector clusters that overlap detected `SectionKind.TABLE` regions. See `bug-p4003r1-pg8-table-extraction.md` for the full investigation.
+The fix relies on the structure pipeline correctly identifying TABLE and CODE sections. For the P4003R1 page 8 comparison table specifically, `tomd/lib/pdf/table.py`'s `_columns_match` was also extended with a right-edge-fallback signal so right-aligned numeric columns whose x-start varies row-to-row by cell-text length but whose x-end is exact (the canonical "1265.2" vs "-" both right-aligning to the same edge) detect as the same column. The fallback uses a strict `_COLUMN_X_END_TOLERANCE = 1.0pt` so it doesn't false-positive on table-of-contents-style layouts where section-name endings drift 1-2pt by coincidence.
 
 ### 4.8 Known text-pipeline bug: code-block reordering (independent of vector extraction)
 
