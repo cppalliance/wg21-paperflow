@@ -77,7 +77,7 @@ Named constants live in `tomd/lib/pdf/images.py`: `_MAX_IMAGES_PER_PAPER` (20), 
 
 Vector extraction is heuristic and surfaces its uncertainty per paper: when the path fired and at least one cluster was rejected or page was skipped, the emit step appends a trailing `<!-- tomd:vector-extraction-uncertain: pages_scanned=X candidates=Y kept=Z rejected=W reasons={...} pages_skipped=V -->` HTML comment. The marker is absent on HTML papers (vector is PDF-only) and on clean extractions (nothing honest to disclose). The reasons dict has a closed key set: `clusters_overflow, edge_band, text_overlap, too_few_items, too_small, wording_color`; adding a key is a versioned change. The companion `--vector-whiteout-text` flag is independent and defaults off; when set, text-line bboxes inside each cluster get painted white before PNG emission.
 
-The heuristic is corpus-tuned (see `tests/fixtures/vector-corpus-acceptance-expectations.csv`) and explicitly opt-in for v2.0. The promotion path to opt-out default is the layout-aware extractor described in `improvements.md` §4, or a maintainer-run fresh corpus re-survey against a 50%-expanded corpus.
+The heuristic is corpus-tuned against the WG21 corpus and explicitly opt-in for v2.0. `tests/fixtures/vector-corpus-acceptance-expectations.csv` pins the kept-count band for the three shipped synth fixtures (one diagram, one pure-noise, one table-cell rectangles); real-corpus acceptance is a manual reviewer step, not a committed gate. The promotion path to opt-out default is the layout-aware extractor described in `improvements.md` §4, or a maintainer-run fresh corpus re-survey against a 50%-expanded corpus.
 
 **Out of scope:**
 
