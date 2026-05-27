@@ -67,14 +67,16 @@ _log = logging.getLogger(__name__)
 # ---- Tunable thresholds (CLAUDE.md: named module-level constants) ----------
 
 # A page must produce at least this many drawing items before we treat
-# it as potentially containing vector figures. Pages with table borders
-# and code backgrounds typically clock 50-200 items; pages with real
-# diagrams cross 300 on the diagram page itself (corpus survey,
-# notes/find-vector-diagrams-results.csv, max_page_ops column). 250
-# sits comfortably above the noise band and just below the diagram
-# threshold, so we don't enter the clustering pipeline on pages that
-# are almost certainly chrome.
-_MIN_PAGE_DRAWING_ITEMS = 250
+# it as potentially containing vector figures. The floor is an early-
+# exit optimisation; the real noise rejection happens in the per-cluster
+# filters (_MIN_CLUSTER_ITEM_COUNT, _MIN_CLUSTER_DIM_PT,
+# _MAX_TEXT_OVERLAP_FRACTION, _MAX_CLUSTER_AREA_FRACTION) and the
+# pipeline-level structural-overlap filter that drops vectors covering
+# TABLE/CODE regions. Real diagrams can be quite sparse: P3556R0's
+# page-3 flowchart clocks only ~115 items (boxes + arrowheads + labels).
+# 100 admits sparse flowcharts while still skipping pages whose entire
+# vector content is page chrome (running rules, header underlines).
+_MIN_PAGE_DRAWING_ITEMS = 100
 
 # Single-linkage clustering distance: drawings whose bboxes are within
 # this many pt of each other are merged. Calibrated against the corpus
@@ -103,8 +105,39 @@ _MIN_CLUSTER_DIM_PT = 60.0
 # text and would otherwise survive every other filter. 0.35 keeps
 # diagrams whose caption label happens to bleed slightly into the
 # cluster's bottom edge but rejects clusters that are mostly
-# coincident with a text region.
+# coincident with a text region. Dense clusters (real diagrams with
+# many drawing items packed into the bbox) bypass this check; see
+# :data:`_DENSE_DIAGRAM_DRAWING_DENSITY`.
 _MAX_TEXT_OVERLAP_FRACTION = 0.35
+
+# Density-based bypass for the text-overlap check. The bypass exists
+# because the spatial extraction path bundles scattered diagram
+# labels into a single tall bbox; that bbox overlaps the vector
+# cluster and inflates the text-overlap measure beyond
+# _MAX_TEXT_OVERLAP_FRACTION even when the cluster is a real
+# flowchart whose own boxes enclose the labels (canonical example:
+# P3556R0 page 3's Figure 2, spatial overlap 0.56, mupdf overlap 0.17).
+#
+# The bypass deliberately admits only the narrow window real
+# flowcharts inhabit. All four conditions must hold:
+#   - drawing density >= _DENSE_DIAGRAM_DRAWING_DENSITY (rules out
+#     code-block backgrounds: ~24 items in a 479x154 bbox = 0.00033);
+#   - cluster area >= _DENSE_DIAGRAM_MIN_AREA_PT2 (rules out small
+#     annotation boxes, code-line callouts ~7000pt^2);
+#   - item count >= _DENSE_DIAGRAM_MIN_ITEMS (rules out medium
+#     clusters with a few path strokes);
+#   - text overlap < _DENSE_DIAGRAM_MAX_OVERLAP (rules out clusters
+#     whose bbox is almost entirely behind body text; real diagrams
+#     with internal labels max out around the P3556R0 figure 2 value
+#     of 0.56).
+#
+# Loosen any threshold only after re-validating against the
+# calibration corpus (see notes/preview-tool-abstract-images-
+# vector-images-plan.md section 7.1).
+_DENSE_DIAGRAM_DRAWING_DENSITY = 0.0015
+_DENSE_DIAGRAM_MIN_AREA_PT2 = 30_000.0
+_DENSE_DIAGRAM_MIN_ITEMS = 100
+_DENSE_DIAGRAM_MAX_OVERLAP = 0.65
 
 # Minimum number of drawing items inside a surviving cluster. Single
 # items are almost always rules or one-stroke decorations. Real
@@ -941,7 +974,15 @@ def extract_page_vector_images(
         if item_count < _MIN_CLUSTER_ITEM_COUNT:
             reasons[REASON_TOO_FEW_ITEMS] = reasons.get(REASON_TOO_FEW_ITEMS, 0) + 1
             continue
-        if _text_overlap_fraction(cluster_bbox, page_blocks) >= _MAX_TEXT_OVERLAP_FRACTION:
+        cluster_area = width * height
+        overlap = _text_overlap_fraction(cluster_bbox, page_blocks)
+        is_dense_diagram = (
+            cluster_area >= _DENSE_DIAGRAM_MIN_AREA_PT2
+            and item_count >= _DENSE_DIAGRAM_MIN_ITEMS
+            and item_count / cluster_area >= _DENSE_DIAGRAM_DRAWING_DENSITY
+            and overlap < _DENSE_DIAGRAM_MAX_OVERLAP
+        )
+        if not is_dense_diagram and overlap >= _MAX_TEXT_OVERLAP_FRACTION:
             reasons[REASON_TEXT_OVERLAP] = reasons.get(REASON_TEXT_OVERLAP, 0) + 1
             continue
         surviving_clusters.append((cluster_bbox, item_count))

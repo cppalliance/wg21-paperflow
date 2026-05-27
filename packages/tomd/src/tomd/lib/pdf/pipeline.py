@@ -281,6 +281,27 @@ def _filter_vector_images_against_structural(
     uncertainty marker's ``kept`` value so its disclosure matches the
     actual markdown content.
     """
+    # Per-page body x-range from non-table, non-image content. Used to
+    # inflate TABLE bboxes for the overlap test: table Section bboxes are
+    # the union of cell-text bboxes, which are tight to glyphs and ignore
+    # column padding. A vector cluster sitting in a table's column-padding
+    # whitespace (canonical case: P4003R1 page 72 right column, vector at
+    # x=326-538 vs table text x_end=409) would otherwise overlap below
+    # the 0.5 threshold and survive. Stretching to the body x-range
+    # restores the full visual column extent.
+    body_x_by_page: dict[int, tuple[float, float]] = {}
+    for sec in sections:
+        if sec.kind in (SectionKind.TABLE, SectionKind.IMAGE):
+            continue
+        page = sec.page_num + 1
+        for line in sec.lines:
+            bx0, bx1 = line.bbox[0], line.bbox[2]
+            prev = body_x_by_page.get(page)
+            if prev is None:
+                body_x_by_page[page] = (bx0, bx1)
+            else:
+                body_x_by_page[page] = (min(prev[0], bx0), max(prev[1], bx1))
+
     structural_bboxes_by_page: dict[int, list[tuple[float, float, float, float]]] = {}
     for sec in sections:
         if sec.kind not in (SectionKind.TABLE, SectionKind.CODE):
@@ -290,6 +311,11 @@ def _filter_vector_images_against_structural(
             continue
         # ExtractedImage.page is 1-based; Section.page_num is 0-based.
         page = sec.page_num + 1
+        if sec.kind == SectionKind.TABLE:
+            body_x = body_x_by_page.get(page)
+            if body_x is not None:
+                bbox = (min(bbox[0], body_x[0]), bbox[1],
+                        max(bbox[2], body_x[1]), bbox[3])
         structural_bboxes_by_page.setdefault(page, []).append(bbox)
 
     if not structural_bboxes_by_page:
