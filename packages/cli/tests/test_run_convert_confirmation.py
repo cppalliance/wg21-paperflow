@@ -323,7 +323,7 @@ def test_extract_vector_flag_forwards_to_process_paper(backend: SqliteBackend):
         captured.update(kwargs)
         return ProcessResult(final_status=2, stages_run=[1])
 
-    _run_convert(
+    _run(
         backend,
         _stub_args(["2026"], extract_vector_images=True),
         fake_process_paper=fake,
@@ -345,7 +345,7 @@ def test_whiteout_flag_forwards_to_process_paper(backend: SqliteBackend):
         captured.update(kwargs)
         return ProcessResult(final_status=2, stages_run=[1])
 
-    _run_convert(
+    _run(
         backend,
         _stub_args(
             ["2026"],
@@ -368,7 +368,7 @@ def test_default_forwards_both_flags_false(backend: SqliteBackend):
         captured.update(kwargs)
         return ProcessResult(final_status=2, stages_run=[1])
 
-    _run_convert(backend, _stub_args(["2026"]), fake_process_paper=fake)
+    _run(backend, _stub_args(["2026"]), fake_process_paper=fake)
     assert captured.get("extract_vector") is False
     assert captured.get("whiteout_text") is False
 
@@ -407,7 +407,7 @@ def test_truncation_summary_mixed_format_when_both_kinds_present(
             final_status=2, stages_run=[1], convert_report=report,
         )
 
-    _run_convert(backend, _stub_args(["2026"]), fake_process_paper=fake)
+    _run(backend, _stub_args(["2026"]), fake_process_paper=fake)
 
     out = capsys.readouterr().out
     assert "P1 (kept 20 of 49: 12 raster + 8 vector)" in out
@@ -433,7 +433,7 @@ def test_truncation_hint_drops_vector_diagrams_from_non_goals(
             ),
         )
 
-    _run_convert(backend, _stub_args(["2026"]), fake_process_paper=fake)
+    _run(backend, _stub_args(["2026"]), fake_process_paper=fake)
 
     out = capsys.readouterr().out
     # The new hint still names scanned-page PDFs but no longer
