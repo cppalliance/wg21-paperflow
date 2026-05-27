@@ -177,10 +177,24 @@ _MAX_FRAME_AREA_FRACTION = 0.30
 _MIN_FRAME_DIM_PT = 80.0
 
 # A frame must have at least this aspect ratio (long-side / short-
-# side). Background-fill rectangles tend to be square-ish (aspect
-# ~1.5-2.0); thin container frames are wide-and-short or tall-and-
-# narrow with aspect >> 3.
-_MIN_FRAME_ASPECT_RATIO = 3.0
+# side). Both thin horizontal-strip containers (like P4003R1 page
+# 8's IoAwaitable, aspect 10.81) and normal-aspect rectangular
+# containers (P4003R1 page 13's coroutine flow diagram, aspect 1.88)
+# qualify; only near-perfect squares (aspect < 1.5) are excluded.
+# The :data:`_MIN_ENCLOSED_CLUSTERS` requirement below guards against
+# a square-ish background-fill rectangle that happens to enclose
+# one unrelated cluster from accidentally triggering a merge.
+_MIN_FRAME_ASPECT_RATIO = 1.5
+
+# A frame must enclose at least this many smaller clusters before
+# its merge fires. Two is the natural floor: container detection
+# exists to consolidate a frame with multiple inner parts (the
+# IoAwaitable diagram's three labelled boxes, the page 13 coroutine
+# flow's three timeline columns). A frame with a single inner
+# cluster doesn't need consolidation and merging it would risk
+# absorbing unrelated content (a background rect that happens to
+# overlap one adjacent figure).
+_MIN_ENCLOSED_CLUSTERS = 2
 
 # For a cluster to be considered "inside" a frame, its bbox must
 # overlap the frame's bbox by at least this fraction (intersection
@@ -517,7 +531,12 @@ def _merge_clusters_into_frames(
                 continue
             if _bbox_contains(frame_bbox, c_bbox):
                 enclosed_idx.append(i)
-        if not enclosed_idx:
+        if len(enclosed_idx) < _MIN_ENCLOSED_CLUSTERS:
+            # Lone-frame guard: a frame that doesn't enclose multiple
+            # parts isn't a structural container - either it's a
+            # decorative box around a single cluster (no consolidation
+            # needed) or it's a background fill that accidentally
+            # overlaps something unrelated.
             continue
         v_bbox = frame_bbox
         v_items = frame_items

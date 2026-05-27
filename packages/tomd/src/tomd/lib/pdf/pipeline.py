@@ -190,6 +190,31 @@ def _make_image_section(img: ExtractedImage) -> Section:
 #   ~100% overlapping the CODE section the text path produces).
 _STRUCTURAL_OVERLAP_THRESHOLD = 0.5
 
+# Thresholds for the vector-image dedup filter (see
+# :func:`_filter_overlapping_vector_images`). A small vector image
+# whose bbox overlaps a larger vector image's bbox by at least this
+# fraction of the small image's area AND whose area is at most
+# :data:`_OVERLAPPING_VECTOR_AREA_RATIO` of the larger image's area
+# is treated as a detail crop of content already in the larger
+# image and dropped. Calibrated against P4003R1 page 13's fig13-2
+# (87x90pt small image, 40% inside fig13-1 at 481x256pt, area
+# ratio 6.3% - clearly a redundant detail crop).
+#
+# The area-ratio guard prevents two genuinely adjacent figures of
+# similar size (e.g. side-by-side panels) from being deduped just
+# because their bboxes happen to overlap.
+_OVERLAPPING_VECTOR_THRESHOLD = 0.30
+_OVERLAPPING_VECTOR_AREA_RATIO = 0.20
+
+# Threshold for the text-inside-vector dedup filter (see
+# :func:`_filter_sections_inside_vector_images`). A non-structural
+# section whose bbox is at least this fraction inside a surviving
+# vector image's bbox is treated as duplicate content (the same
+# text is already rasterised into the PNG) and dropped from the
+# section list. TABLE, CODE, and IMAGE sections are never filtered
+# - they are structural representations that stay regardless.
+_SECTION_INSIDE_VECTOR_THRESHOLD = 0.5
+
 
 def _section_bbox(
     sec: Section,
@@ -297,6 +322,175 @@ def _filter_vector_images_against_structural(
         )
     ]
     return kept_images, kept_sections, len(dropped_ids)
+
+
+def _filter_overlapping_vector_images(
+    images: list[ExtractedImage],
+    sections: list[Section],
+    *,
+    overlap_threshold: float = _OVERLAPPING_VECTOR_THRESHOLD,
+    area_ratio: float = _OVERLAPPING_VECTOR_AREA_RATIO,
+) -> tuple[list[ExtractedImage], list[Section], int]:
+    """Drop vector images that are detail crops of larger vector images.
+
+    A vector image A is treated as a redundant detail crop of a
+    larger vector image B when:
+
+    - A and B are on the same page,
+    - A's bbox overlaps B's bbox by at least ``overlap_threshold``
+      of A's area, AND
+    - A's area is at most ``area_ratio`` of B's area (i.e. A is
+      MUCH smaller than B - the area-ratio guard distinguishes a
+      detail crop from a genuinely adjacent similar-sized figure).
+
+    Resolves the calibrated false-positive case where a small
+    cluster ends up adjacent to a much larger merged figure on the
+    same page and shows duplicate content (P4003R1 page 13's
+    fig13-2 "run_async legend" box overlapping fig13-1 main diagram
+    at ~40% of fig13-2's area, area ratio 6.3%).
+
+    The corresponding IMAGE section in ``sections`` (placed by
+    :func:`_insert_image_sections`) is also removed so the markdown
+    doesn't reference a dropped image.
+
+    Returns ``(filtered_images, filtered_sections, dropped_count)``.
+    """
+    # Group vector images by page; sort each page's list by area
+    # descending so we test smaller-vs-larger pairs.
+    vectors_by_page: dict[int, list[int]] = {}
+    for i, im in enumerate(images):
+        if im.source != "vector":
+            continue
+        vectors_by_page.setdefault(im.page, []).append(i)
+
+    def _area(im: ExtractedImage) -> float:
+        return (im.bbox[2] - im.bbox[0]) * (im.bbox[3] - im.bbox[1])
+
+    dropped_ids: set[int] = set()
+    for page_indices in vectors_by_page.values():
+        # Sort descending by area so the largest is considered first.
+        sorted_idx = sorted(
+            page_indices, key=lambda i: _area(images[i]), reverse=True,
+        )
+        # Larger images are "potential containers"; smaller images may
+        # be detail crops. Compare each smaller against each kept
+        # larger one. ``kept_local`` is the surviving subset on this
+        # page that smaller images get tested against.
+        kept_local: list[int] = []
+        for i in sorted_idx:
+            im = images[i]
+            im_area = _area(im)
+            is_dup = False
+            for j in kept_local:
+                larger = images[j]
+                larger_area = _area(larger)
+                if im_area > area_ratio * larger_area:
+                    # Not "much smaller" than larger - keep both.
+                    continue
+                if _bbox_overlap_fraction(im.bbox, larger.bbox) >= overlap_threshold:
+                    is_dup = True
+                    break
+            if is_dup:
+                dropped_ids.add(id(im))
+            else:
+                kept_local.append(i)
+
+    if not dropped_ids:
+        return images, sections, 0
+
+    kept_images = [im for im in images if id(im) not in dropped_ids]
+    kept_sections = [
+        s for s in sections
+        if not (
+            s.kind == SectionKind.IMAGE
+            and s.image_ref is not None
+            and id(s.image_ref) in dropped_ids
+        )
+    ]
+    return kept_images, kept_sections, len(dropped_ids)
+
+
+def _filter_sections_inside_vector_images(
+    images: list[ExtractedImage],
+    sections: list[Section],
+    *,
+    threshold: float = _SECTION_INSIDE_VECTOR_THRESHOLD,
+) -> list[Section]:
+    """Drop lines inside surviving vector image bboxes from non-structural sections.
+
+    The vector image already shows the line's text content as
+    rasterised pixels (a label rendered inside a diagram is baked
+    into the PNG by ``page.get_pixmap``), so re-emitting the same
+    line as body markdown produces visible duplication. P4003R1
+    page 13's diagram labels ("I/O operation child task parent task
+    run_async / handle() / set_environment(env) / ...") are the
+    calibrated case.
+
+    Operates line-by-line rather than section-by-section because the
+    structure pipeline often joins a diagram's leaked labels with
+    surrounding prose into one PARAGRAPH section. A whole-section
+    filter would over-drop the prose too. Per-line filtering keeps
+    bullet text adjacent to a figure while dropping the figure's own
+    labels.
+
+    Sections whose lines are ALL filtered out are removed entirely.
+    Sections that lose SOME lines get a rebuilt ``text`` (simple
+    newline-join of surviving lines' text); if every line in the
+    section survives, the section is returned unchanged.
+
+    TABLE, CODE, and IMAGE sections are always kept verbatim - they
+    are structural representations that should stay regardless of
+    overlap (and the structural-overlap filter at
+    :func:`_filter_vector_images_against_structural` has already
+    handled the reverse case of dropping vectors that duplicate
+    structural sections).
+    """
+    image_bboxes_by_page: dict[int, list[tuple[float, float, float, float]]] = {}
+    for im in images:
+        if im.source != "vector":
+            continue
+        image_bboxes_by_page.setdefault(im.page, []).append(im.bbox)
+    if not image_bboxes_by_page:
+        return sections
+
+    from dataclasses import replace
+    structural_kinds = {SectionKind.TABLE, SectionKind.CODE, SectionKind.IMAGE}
+    kept: list[Section] = []
+    for sec in sections:
+        if sec.kind in structural_kinds:
+            kept.append(sec)
+            continue
+        if not sec.lines:
+            kept.append(sec)
+            continue
+        page = sec.page_num + 1  # 1-based to match ExtractedImage.page
+        page_bboxes = image_bboxes_by_page.get(page, ())
+        if not page_bboxes:
+            kept.append(sec)
+            continue
+
+        kept_lines = []
+        for line in sec.lines:
+            line_bbox = line.bbox
+            if line_bbox == (0, 0, 0, 0):
+                # No bbox info - can't decide, keep.
+                kept_lines.append(line)
+                continue
+            if any(
+                _bbox_overlap_fraction(line_bbox, ib) >= threshold
+                for ib in page_bboxes
+            ):
+                continue
+            kept_lines.append(line)
+
+        if len(kept_lines) == len(sec.lines):
+            kept.append(sec)
+            continue
+        if not kept_lines:
+            continue  # all lines dropped - section gone
+        new_text = "\n".join(line.text for line in kept_lines)
+        kept.append(replace(sec, lines=kept_lines, text=new_text))
+    return kept
 
 
 def _insert_image_sections(
@@ -645,16 +839,36 @@ def run_pipeline(
         sections, has_title=has_title)
     metadata = {**structure_metadata, **wg21_metadata}
 
-    # Defer to structural sections: drop vector PNGs that duplicate a
-    # TABLE or CODE region the structure pass already produced. Must
-    # run after structure_sections so CODE sections are identified;
-    # also updates vector_uncertainty.kept to match the actual
-    # markdown vector count after filtering.
+    # Vector-image post-processing, in three passes:
+    #   1. Defer to structural sections: drop vector PNGs that
+    #      duplicate a TABLE or CODE region the structure pass
+    #      already produced (the structural representation is
+    #      canonical).
+    #   2. Dedup overlapping vectors: drop small vector PNGs that
+    #      are detail crops of larger surviving ones (the larger
+    #      image already shows the content).
+    #   3. Drop body-text sections that fall mostly inside a
+    #      surviving vector PNG (the same text is already
+    #      rasterised into the image; emitting it as prose creates
+    #      duplicated content).
+    # All three are skipped when result.images is empty. The
+    # vector_uncertainty marker's ``kept`` count is recomputed once
+    # at the end so its disclosure matches what actually lands in
+    # the markdown.
     if result.images:
-        result.images, sections, dropped = (
+        total_dropped = 0
+        result.images, sections, dropped_a = (
             _filter_vector_images_against_structural(result.images, sections)
         )
-        if dropped and result.vector_uncertainty is not None:
+        total_dropped += dropped_a
+        result.images, sections, dropped_b = (
+            _filter_overlapping_vector_images(result.images, sections)
+        )
+        total_dropped += dropped_b
+        sections = _filter_sections_inside_vector_images(
+            result.images, sections,
+        )
+        if total_dropped and result.vector_uncertainty is not None:
             from dataclasses import replace
             new_kept = sum(1 for im in result.images if im.source == "vector")
             result.vector_uncertainty = replace(

@@ -36,6 +36,8 @@ from tomd.lib.pdf.images import (
     finalize_extraction,
 )
 from tomd.lib.pdf.pipeline import (
+    _filter_overlapping_vector_images,
+    _filter_sections_inside_vector_images,
     _filter_vector_images_against_structural,
     _make_image_section,
 )
@@ -1212,18 +1214,21 @@ class TestContainerDetection:
     def test_thin_frame_with_nested_content_recovered_as_virtual(
         self, monkeypatch,
     ):
-        """Thin frame (2 items, aspect 10:1) plus a nested dense
-        cluster merges into a virtual cluster that survives the
-        relaxed virtual-cluster filters."""
+        """Thin frame (2 items, aspect 10:1) plus TWO nested clusters
+        merges into a virtual cluster that survives the relaxed
+        virtual-cluster filters. Two clusters is the minimum required
+        by _MIN_ENCLOSED_CLUSTERS so a lone wrapped figure does not
+        accidentally trigger merge."""
         self._setup(monkeypatch)
         # Outer frame: 400x40pt, 2 items, aspect 10.0 - matches
         # IoAwaitable shape.
         frame = _drawing(100, 100, 500, 140, items=2)
-        # Nested dense cluster centered inside the frame; populates
-        # the virtual cluster's item count past the aspect-extreme
-        # bypass threshold (50).
-        nested = _drawing(200, 110, 300, 130, items=60)
-        page = _mock_page([frame, nested])
+        # Two nested clusters. Combined item count populates the
+        # virtual cluster's count past the aspect-extreme bypass
+        # threshold (50).
+        nested_a = _drawing(140, 110, 240, 130, items=30)
+        nested_b = _drawing(360, 110, 460, 130, items=30)
+        page = _mock_page([frame, nested_a, nested_b])
         cands, stats = extract_page_vector_images(page, [])
         assert len(cands) == 1, (
             f"virtual cluster should be kept; got {len(cands)} "
@@ -1308,10 +1313,11 @@ class TestContainerDetection:
         on the strict path."""
         self._setup(monkeypatch)
         frame = _drawing(100, 100, 500, 140, items=2)
-        # Sparse nested: only 10 items. Virtual total = 12, well under
-        # the 50-item density threshold.
-        nested = _drawing(200, 110, 300, 130, items=10)
-        page = _mock_page([frame, nested])
+        # Two sparse nested clusters: 5 items each. Virtual total
+        # = 12, well under the 50-item density threshold.
+        nested_a = _drawing(140, 110, 240, 130, items=5)
+        nested_b = _drawing(360, 110, 460, 130, items=5)
+        page = _mock_page([frame, nested_a, nested_b])
         cands, stats = extract_page_vector_images(page, [])
         # Aspect 10:1 with item_count 12 < 50 -> rejected as aspect_extreme.
         assert cands == []
@@ -1324,8 +1330,10 @@ class TestContainerDetection:
         self._setup(monkeypatch)
         # 400x35 frame - height below strict floor, above virtual floor.
         frame = _drawing(100, 100, 500, 135, items=2)
-        nested = _drawing(200, 110, 300, 130, items=60)
-        page = _mock_page([frame, nested])
+        # Two nested clusters totalling 60 items.
+        nested_a = _drawing(140, 110, 240, 130, items=30)
+        nested_b = _drawing(360, 110, 460, 130, items=30)
+        page = _mock_page([frame, nested_a, nested_b])
         cands, stats = extract_page_vector_images(page, [])
         assert len(cands) == 1, f"thin virtual cluster should pass; stats={stats}"
 
@@ -1345,6 +1353,66 @@ class TestContainerDetection:
         # Fails too_small (height 40 < 60) on the regular path.
         assert cands == []
         assert stats.reasons.get(REASON_TOO_SMALL) == 1
+
+    def test_normal_aspect_frame_recovers_diagram(self, monkeypatch):
+        """Normal-aspect rectangular containers (aspect 1.5+) qualify
+        as frames. Pins the P4003R1 page 13 regression where a 481x256
+        diagram container (aspect 1.88) was excluded by the original
+        aspect >= 3.0 threshold even though it enclosed multiple
+        legitimate sub-clusters.
+
+        Frame and inner-cluster centroids are arranged in different
+        spatial-hash buckets (centroid-only bucketing uses a 30pt
+        grid) so the frame doesn't cluster directly with its
+        contents via single-linkage; the merge must happen via
+        container detection.
+        """
+        self._setup(monkeypatch)
+        # 400x250 frame, aspect 1.6; centroid (300, 225) -> bucket (10, 7).
+        frame = _drawing(100, 100, 500, 350, items=1)
+        # Inner clusters at y=130-200, centroid y=165 -> bucket y=5.
+        # Frame's 3x3 neighbourhood is x in [9,11] AND y in [6,8];
+        # y=5 is outside, so none of these merge into the frame via
+        # spatial-hash neighbour search.
+        nested_a = _drawing(130, 130, 200, 200, items=30)  # centroid (165,165) bucket (5,5)
+        nested_b = _drawing(310, 130, 380, 200, items=30)  # centroid (345,165) bucket (11,5)
+        nested_c = _drawing(430, 130, 490, 200, items=30)  # centroid (460,165) bucket (15,5)
+        page = _mock_page([frame, nested_a, nested_b, nested_c])
+        cands, stats = extract_page_vector_images(page, [])
+        assert len(cands) == 1, (
+            f"normal-aspect frame with 3 inner clusters should merge; "
+            f"stats={stats}"
+        )
+
+    def test_frame_with_one_enclosed_cluster_does_not_merge(self, monkeypatch):
+        """A frame enclosing only ONE smaller cluster doesn't trigger
+        the virtual-cluster merge. The single inner cluster either
+        stands on its own (extracted directly) or fails its own
+        filters; the frame stays in the regular set. This guard
+        prevents a square-ish background-fill rectangle from
+        accidentally absorbing one adjacent unrelated cluster."""
+        self._setup(monkeypatch)
+        # 400x250 frame; centroid (300, 225) -> bucket (10, 7).
+        frame = _drawing(100, 100, 500, 350, items=1)
+        # Lone inner cluster; centroid (200, 165) -> bucket (6, 5),
+        # outside the frame's 3x3 spatial-hash neighbourhood so the
+        # two stay as separate clusters during clustering.
+        lone_inner = _drawing(150, 130, 250, 200, items=20)
+        page = _mock_page([frame, lone_inner])
+        cands, _stats = extract_page_vector_images(page, [])
+        kept_bboxes = [c.bbox for c in cands]
+        # The inner cluster (100x70, 20 items) passes filters on its
+        # own. The frame (400x250, 1 item) fails too_few_items.
+        assert any(
+            abs(b[0] - 150) < 1 and abs(b[2] - 250) < 1
+            and abs(b[1] - 130) < 1 and abs(b[3] - 200) < 1
+            for b in kept_bboxes
+        ), f"inner cluster should be extracted as-is; got {kept_bboxes}"
+        # And no virtual cluster spanning frame + inner.
+        assert not any(
+            b[0] <= 100 and b[2] >= 500 and b[1] <= 100 and b[3] >= 350
+            for b in kept_bboxes
+        ), "frame + inner should NOT have merged into a virtual cluster"
 
 
 class TestEdgeBand:
@@ -1871,3 +1939,260 @@ class TestFilterVectorImagesAgainstStructural:
         )
         assert dropped == 1, "50% overlap is the boundary - drops"
         assert kept_images == []
+
+
+# ---- Filter 1: vector-image dedup -----------------------------------------
+
+
+class TestFilterOverlappingVectorImages:
+    """Drops small vector images that are detail crops of a larger
+    vector image on the same page. Pins the P4003R1 page 13 case
+    (fig13-2, a 87x90pt "run_async legend" image overlapping fig13-1
+    main diagram at 481x256pt)."""
+
+    def test_small_inside_larger_dropped(self):
+        large = _ext_img(page=13, bbox=(57, 190, 538, 447), fn="large.png")
+        small = _ext_img(page=13, bbox=(70, 410, 150, 500), fn="small.png")
+        kept_images, _kept_sections, dropped = (
+            _filter_overlapping_vector_images([large, small], [])
+        )
+        assert dropped == 1
+        assert kept_images == [large]
+
+    def test_larger_kept_when_smaller_overlaps(self):
+        """Iteration order shouldn't matter: the LARGER survives, the
+        smaller drops, regardless of input order."""
+        large = _ext_img(page=13, bbox=(57, 190, 538, 447), fn="large.png")
+        small = _ext_img(page=13, bbox=(70, 410, 150, 500), fn="small.png")
+        # Reverse input order to confirm sort-by-area-descending logic.
+        kept_images, _kept_sections, dropped = (
+            _filter_overlapping_vector_images([small, large], [])
+        )
+        assert dropped == 1
+        assert kept_images == [large]
+
+    def test_similar_size_overlapping_both_kept(self):
+        """Two vectors of similar size that happen to overlap (e.g.
+        adjacent panels) must NOT be deduped - they're peers, not a
+        crop and its origin. The area-ratio guard distinguishes."""
+        # Both ~200x200, area ratio 1.0 (way above 0.20 area ratio).
+        a = _ext_img(page=13, bbox=(57, 190, 257, 390), fn="a.png")
+        b = _ext_img(page=13, bbox=(200, 190, 400, 390), fn="b.png")
+        kept_images, _kept_sections, dropped = (
+            _filter_overlapping_vector_images([a, b], [])
+        )
+        assert dropped == 0
+        assert len(kept_images) == 2
+
+    def test_overlap_below_threshold_both_kept(self):
+        """Small image whose overlap with the larger one is < 30% of
+        the small image's area stays - it's an adjacent figure, not a
+        detail crop."""
+        large = _ext_img(page=13, bbox=(57, 190, 538, 447), fn="large.png")
+        # Small image at the corner with only ~15% overlap.
+        # large bbox 481x257 = 123,617 area; small 80x80 at (500, 410)
+        # overlap: x = min(538,580)-max(57,500) = 38; y = min(447,490)-max(190,410) = 37
+        # overlap area = 1406. small area = 6400. fraction = 22%.
+        small = _ext_img(page=13, bbox=(500, 410, 580, 490), fn="small.png")
+        kept_images, _kept_sections, dropped = (
+            _filter_overlapping_vector_images([large, small], [])
+        )
+        # 22% overlap is under the 30% threshold.
+        assert dropped == 0
+        assert len(kept_images) == 2
+
+    def test_cross_page_isolation(self):
+        """Vector images on different pages don't dedup against each
+        other (geometric overlap is meaningless across pages)."""
+        page8 = _ext_img(page=8, bbox=(57, 190, 538, 447), fn="p8.png")
+        page13 = _ext_img(page=13, bbox=(70, 200, 150, 290), fn="p13.png")
+        kept_images, _kept_sections, dropped = (
+            _filter_overlapping_vector_images([page8, page13], [])
+        )
+        assert dropped == 0
+        assert len(kept_images) == 2
+
+    def test_raster_image_not_filtered(self):
+        """Raster images don't dedup against vectors; an embedded
+        screenshot positioned over a vector diagram is intentional
+        content."""
+        large = _ext_img(page=13, bbox=(57, 190, 538, 447), fn="large.png")
+        small_raster = _ext_img(
+            page=13, bbox=(70, 410, 150, 500), source="raster", fn="r.png",
+        )
+        kept_images, _kept_sections, dropped = (
+            _filter_overlapping_vector_images([large, small_raster], [])
+        )
+        assert dropped == 0
+        assert kept_images == [large, small_raster]
+
+    def test_corresponding_image_section_removed(self):
+        """The corresponding IMAGE section in ``sections`` is removed
+        when its image gets filtered, otherwise the markdown would
+        still reference the dropped image."""
+        large = _ext_img(page=13, bbox=(57, 190, 538, 447), fn="large.png")
+        small = _ext_img(page=13, bbox=(70, 410, 150, 500), fn="small.png")
+        large_section = Section(
+            kind=SectionKind.IMAGE, text="",
+            confidence=Confidence.MEDIUM, page_num=12,
+            image_ref=large,
+        )
+        small_section = Section(
+            kind=SectionKind.IMAGE, text="",
+            confidence=Confidence.MEDIUM, page_num=12,
+            image_ref=small,
+        )
+        _kept_images, kept_sections, _dropped = (
+            _filter_overlapping_vector_images(
+                [large, small], [large_section, small_section],
+            )
+        )
+        # Only the large IMAGE section remains.
+        image_sections = [s for s in kept_sections if s.kind == SectionKind.IMAGE]
+        assert len(image_sections) == 1
+        assert image_sections[0].image_ref is large
+
+
+# ---- Filter 2: text-inside-vector dedup -----------------------------------
+
+
+def _para_section_with_lines(
+    *,
+    page_num: int,
+    line_bboxes_and_text: list[tuple[tuple[float, float, float, float], str]],
+) -> Section:
+    """Build a PARAGRAPH section with the given lines."""
+    lines = [
+        Line(spans=[Span(text=text, bbox=bbox)], bbox=bbox)
+        for bbox, text in line_bboxes_and_text
+    ]
+    full_text = "\n".join(text for _, text in line_bboxes_and_text)
+    return Section(
+        kind=SectionKind.PARAGRAPH, text=full_text,
+        confidence=Confidence.HIGH, page_num=page_num,
+        lines=lines,
+    )
+
+
+class TestFilterSectionsInsideVectorImages:
+    """Drops paragraph lines whose bbox is mostly inside a surviving
+    vector image. Pins the P4003R1 page 13 label-leakage case where
+    the diagram's internal labels (rasterised into fig13-1.png) also
+    leak into body markdown as prose."""
+
+    def test_paragraph_section_all_lines_inside_vector_dropped(self):
+        img = _ext_img(page=13, bbox=(57, 190, 538, 447))
+        # 2 lines both fully inside the image's bbox.
+        para = _para_section_with_lines(
+            page_num=12,
+            line_bboxes_and_text=[
+                ((100, 380, 500, 395), "I/O operation child task"),
+                ((100, 420, 500, 435), "handle() set_environment(env)"),
+            ],
+        )
+        kept = _filter_sections_inside_vector_images([img], [para])
+        # All lines dropped - whole section gone.
+        assert len(kept) == 0
+
+    def test_paragraph_section_partial_lines_kept_with_rewritten_text(self):
+        """Section with mixed inside/outside lines keeps the outside
+        lines and rebuilds its text. Pins the P4003R1 page 13 case
+        where label-leakage and bullet text were joined into one
+        paragraph; we want labels dropped, bullets preserved."""
+        img = _ext_img(page=13, bbox=(57, 190, 538, 447))
+        para = _para_section_with_lines(
+            page_num=12,
+            line_bboxes_and_text=[
+                # Inside the image bbox (labels):
+                ((100, 380, 500, 395), "I/O operation child task"),
+                ((100, 420, 500, 435), "handle() set_environment(env)"),
+                # Below the image bbox (bullets):
+                ((100, 470, 500, 485), "run_async is the root of a coroutine chain"),
+                ((100, 490, 500, 505), "run performs executor hopping"),
+            ],
+        )
+        kept = _filter_sections_inside_vector_images([img], [para])
+        assert len(kept) == 1
+        kept_text = kept[0].text
+        assert "I/O operation" not in kept_text
+        assert "handle()" not in kept_text
+        assert "run_async is the root" in kept_text
+        assert "run performs executor" in kept_text
+
+    def test_table_section_kept_even_if_inside_vector(self):
+        """Structural section kinds (TABLE, CODE, IMAGE) are NEVER
+        filtered. Their structural representation stands; the
+        structural-overlap filter at
+        _filter_vector_images_against_structural has already handled
+        the reverse direction (dropping vectors that duplicate
+        structural sections)."""
+        img = _ext_img(page=13, bbox=(57, 190, 538, 447))
+        table = Section(
+            kind=SectionKind.TABLE, text="row content",
+            confidence=Confidence.HIGH, page_num=12,
+            lines=[Line(spans=[Span(text="cell", bbox=(100, 200, 400, 300))],
+                        bbox=(100, 200, 400, 300))],
+        )
+        kept = _filter_sections_inside_vector_images([img], [table])
+        assert kept == [table]
+
+    def test_code_section_kept_even_if_inside_vector(self):
+        img = _ext_img(page=13, bbox=(57, 190, 538, 447))
+        code = Section(
+            kind=SectionKind.CODE, text="x = 1",
+            confidence=Confidence.HIGH, page_num=12,
+            lines=[Line(spans=[Span(text="x", bbox=(100, 200, 400, 300))],
+                        bbox=(100, 200, 400, 300))],
+        )
+        kept = _filter_sections_inside_vector_images([img], [code])
+        assert kept == [code]
+
+    def test_image_section_kept_even_if_inside_vector(self):
+        img = _ext_img(page=13, bbox=(57, 190, 538, 447))
+        another_img = _ext_img(page=13, bbox=(100, 200, 400, 300), fn="another.png")
+        img_section = Section(
+            kind=SectionKind.IMAGE, text="",
+            confidence=Confidence.MEDIUM, page_num=12,
+            image_ref=another_img,
+        )
+        kept = _filter_sections_inside_vector_images([img], [img_section])
+        # IMAGE sections aren't filtered by this pass (Filter 1 handles
+        # vector-vs-vector dedup separately).
+        assert kept == [img_section]
+
+    def test_cross_page_isolation(self):
+        """A vector image on page 8 must not filter sections on page 13."""
+        img = _ext_img(page=8, bbox=(57, 190, 538, 447))
+        para = _para_section_with_lines(
+            page_num=12,  # page 13 (0-based)
+            line_bboxes_and_text=[
+                ((100, 200, 500, 215), "this text lives at page 13 y=200"),
+            ],
+        )
+        kept = _filter_sections_inside_vector_images([img], [para])
+        assert kept == [para]
+
+    def test_no_vector_images_returns_sections_unchanged(self):
+        """Fast path: empty image list (or no vector images) means no
+        filtering work."""
+        para = _para_section_with_lines(
+            page_num=12,
+            line_bboxes_and_text=[((100, 200, 400, 215), "text")],
+        )
+        kept = _filter_sections_inside_vector_images([], [para])
+        assert kept == [para]
+
+    def test_lines_without_bbox_kept_conservatively(self):
+        """A line whose bbox is (0,0,0,0) (no geometry info) can't be
+        classified - keep it rather than dropping conservatively."""
+        img = _ext_img(page=13, bbox=(57, 190, 538, 447))
+        line = Line(spans=[Span(text="text", bbox=(0, 0, 0, 0))],
+                    bbox=(0, 0, 0, 0))
+        para = Section(
+            kind=SectionKind.PARAGRAPH, text="text",
+            confidence=Confidence.HIGH, page_num=12,
+            lines=[line],
+        )
+        kept = _filter_sections_inside_vector_images([img], [para])
+        assert len(kept) == 1
+        assert len(kept[0].lines) == 1

@@ -2,4 +2,4 @@ pid,expected_vector_count,allowed_min,allowed_max,expect_captioned,produced_by,p
 SYNTH_VECTOR_ONE_DIAGRAM,1,1,1,1,dima,2026-05-21,SYNTH: shipped fixture; one canonical figure with caption; zero-tolerance band
 SYNTH_NOISE_NO_DIAGRAM,0,0,0,0,dima,2026-05-21,SYNTH: shipped fixture; pure noise (table borders + rules); pins the false-positive floor
 SYNTH_TABLE_WITH_CELLS,0,0,0,0,dima,2026-05-21,SYNTH: shipped fixture; per-cell background rectangles + right-aligned numeric column; pins zero phantom column-images
-P4003R1,5,4,6,0,dima,2026-05-21,calibration paper; expects IoAwaitable diagram (pg 8) + 3 page-13 figures + page-35 flowchart; exercises container detection + structural-overlap filter + right-edge column match
+P4003R1,3,2,4,0,test,2026-05-21,calibration paper; expects IoAwaitable diagram (pg 8) + page-13 main flow diagram (merged via normal-aspect container detection; secondary fig13-2 deduped as redundant detail crop) + page-35 flowchart; exercises container detection (thin + normal-aspect frames) + structural-overlap filter + vector-vs-vector dedup + text-inside-vector line filtering + right-edge column match
