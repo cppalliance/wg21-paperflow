@@ -176,6 +176,129 @@ def _make_image_section(img: ExtractedImage) -> Section:
     )
 
 
+# Threshold for the structural-overlap filter (see
+# :func:`_filter_vector_images_against_structural`). A vector
+# ExtractedImage whose bbox overlaps a TABLE or CODE section by at
+# least this fraction of the image area is treated as a duplicate of
+# the structural representation and dropped. 0.5 is conservative
+# enough that a real figure with a stray code line at one edge stays
+# kept, while catching the calibrated false-positive cases:
+#
+# - P4003R1 page 8 comparison table (4 per-column vector PNGs
+#   each ~100% overlapping the detected TABLE bbox).
+# - P4003R1 pages 67 and 69 code-block backgrounds (vector PNGs
+#   ~100% overlapping the CODE section the text path produces).
+_STRUCTURAL_OVERLAP_THRESHOLD = 0.5
+
+
+def _section_bbox(
+    sec: Section,
+) -> tuple[float, float, float, float] | None:
+    """Return the union bbox of a section's lines, or None if it has none."""
+    if not sec.lines:
+        return None
+    bbox = sec.lines[0].bbox
+    for line in sec.lines[1:]:
+        bbox = (
+            min(bbox[0], line.bbox[0]),
+            min(bbox[1], line.bbox[1]),
+            max(bbox[2], line.bbox[2]),
+            max(bbox[3], line.bbox[3]),
+        )
+    return bbox
+
+
+def _bbox_overlap_fraction(
+    image_bbox: tuple[float, float, float, float],
+    section_bbox: tuple[float, float, float, float],
+) -> float:
+    """Intersection area divided by ``image_bbox`` area.
+
+    Returns 0.0 when image_bbox has non-positive area. Used to decide
+    whether a vector image is "mostly inside" a structural section.
+    """
+    ix0, iy0, ix1, iy1 = image_bbox
+    sx0, sy0, sx1, sy1 = section_bbox
+    overlap_w = max(0.0, min(ix1, sx1) - max(ix0, sx0))
+    overlap_h = max(0.0, min(iy1, sy1) - max(iy0, sy0))
+    image_area = (ix1 - ix0) * (iy1 - iy0)
+    if image_area <= 0:
+        return 0.0
+    return (overlap_w * overlap_h) / image_area
+
+
+def _filter_vector_images_against_structural(
+    images: list[ExtractedImage],
+    sections: list[Section],
+    *,
+    threshold: float = _STRUCTURAL_OVERLAP_THRESHOLD,
+) -> tuple[list[ExtractedImage], list[Section], int]:
+    """Drop vector ExtractedImage records (and their IMAGE sections)
+    that overlap a TABLE or CODE section by more than ``threshold``.
+
+    A vector PNG that lands on top of a structural section (TABLE or
+    CODE) duplicates content the markdown already renders structurally
+    (as a markdown table or fenced code block). Removing the vector
+    duplicate keeps the output clean and resolves the calibrated
+    false-positive classes documented in:
+
+    - bug-p4003r1-pg8-table-extraction.md (per-column vector PNGs of
+      a comparison table).
+    - improvements.md section 4.7 (vector PNGs duplicating code-block
+      content on P4003R1 pages 67 and 69).
+
+    Raster images are not filtered; an embedded raster image that
+    overlaps a code block or table is presumed intentional (annotated
+    diagram, embedded screenshot).
+
+    Returns ``(filtered_images, filtered_sections, dropped_count)``.
+    The dropped count is used to adjust the per-paper vector
+    uncertainty marker's ``kept`` value so its disclosure matches the
+    actual markdown content.
+    """
+    structural_bboxes_by_page: dict[int, list[tuple[float, float, float, float]]] = {}
+    for sec in sections:
+        if sec.kind not in (SectionKind.TABLE, SectionKind.CODE):
+            continue
+        bbox = _section_bbox(sec)
+        if bbox is None:
+            continue
+        # ExtractedImage.page is 1-based; Section.page_num is 0-based.
+        page = sec.page_num + 1
+        structural_bboxes_by_page.setdefault(page, []).append(bbox)
+
+    if not structural_bboxes_by_page:
+        return images, sections, 0
+
+    dropped_ids: set[int] = set()
+    kept_images: list[ExtractedImage] = []
+    for im in images:
+        if im.source != "vector":
+            kept_images.append(im)
+            continue
+        page_bboxes = structural_bboxes_by_page.get(im.page, ())
+        if any(
+            _bbox_overlap_fraction(im.bbox, b) >= threshold
+            for b in page_bboxes
+        ):
+            dropped_ids.add(id(im))
+            continue
+        kept_images.append(im)
+
+    if not dropped_ids:
+        return images, sections, 0
+
+    kept_sections = [
+        s for s in sections
+        if not (
+            s.kind == SectionKind.IMAGE
+            and s.image_ref is not None
+            and id(s.image_ref) in dropped_ids
+        )
+    ]
+    return kept_images, kept_sections, len(dropped_ids)
+
+
 def _insert_image_sections(
     sections: list[Section],
     images: list[ExtractedImage],
@@ -521,6 +644,22 @@ def run_pipeline(
     structure_metadata, sections, nesting_corrections = structure_sections(
         sections, has_title=has_title)
     metadata = {**structure_metadata, **wg21_metadata}
+
+    # Defer to structural sections: drop vector PNGs that duplicate a
+    # TABLE or CODE region the structure pass already produced. Must
+    # run after structure_sections so CODE sections are identified;
+    # also updates vector_uncertainty.kept to match the actual
+    # markdown vector count after filtering.
+    if result.images:
+        result.images, sections, dropped = (
+            _filter_vector_images_against_structural(result.images, sections)
+        )
+        if dropped and result.vector_uncertainty is not None:
+            from dataclasses import replace
+            new_kept = sum(1 for im in result.images if im.source == "vector")
+            result.vector_uncertainty = replace(
+                result.vector_uncertainty, kept=new_kept,
+            )
 
     if "document" not in metadata:
         from .. import DOC_NUM_RE

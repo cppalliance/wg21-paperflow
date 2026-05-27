@@ -35,7 +35,10 @@ from tomd.lib.pdf.images import (
     _caption_for,
     finalize_extraction,
 )
-from tomd.lib.pdf.pipeline import _make_image_section
+from tomd.lib.pdf.pipeline import (
+    _filter_vector_images_against_structural,
+    _make_image_section,
+)
 from tomd.lib.pdf.structure import structure_sections
 from tomd.lib.pdf.types import (
     Block,
@@ -1692,3 +1695,179 @@ class TestForcedXrefCollision:
         assert len(r.images) == 1
         assert r.images[0].page == 1
         assert r.images[0].bytes == b"FIRST"
+
+
+# ---- Fix A1: structural-overlap filter (vector vs TABLE/CODE) -------------
+
+
+def _ext_img(
+    *,
+    page: int,
+    bbox: tuple[float, float, float, float],
+    source: str = "vector",
+    fn: str = "test.png",
+) -> ExtractedImage:
+    """Compact ExtractedImage builder for filter tests."""
+    return ExtractedImage(
+        page=page, index_on_page=1, ext="png", bytes=b"PNG",
+        bbox=bbox, suggested_alt="",
+        stored_filename=fn, xref=-1, source=source,
+    )
+
+
+def _structural_section(
+    *, kind: SectionKind, page_num: int, bbox: tuple[float, float, float, float],
+) -> Section:
+    """Section with one Line spanning bbox, for filter tests."""
+    line = Line(spans=[Span(text="x", bbox=bbox)], bbox=bbox)
+    return Section(
+        kind=kind, text="x", confidence=Confidence.HIGH,
+        page_num=page_num, lines=[line],
+    )
+
+
+class TestFilterVectorImagesAgainstStructural:
+    """Drops vector ExtractedImage records (and their IMAGE sections)
+    whose bbox overlaps a TABLE or CODE section by more than the
+    threshold. Resolves the calibrated false-positive class where
+    vector PNGs duplicate already-structural content (P4003R1 pages
+    67/69 code blocks, page 8 table columns)."""
+
+    def test_vector_image_overlapping_table_filtered(self):
+        # ExtractedImage.page is 1-based; Section.page_num is 0-based.
+        # Both reference the same page.
+        img = _ext_img(page=8, bbox=(100, 100, 300, 250))
+        table_sec = _structural_section(
+            kind=SectionKind.TABLE, page_num=7,
+            bbox=(50, 90, 350, 260),  # encloses the image
+        )
+        kept_images, kept_sections, dropped = (
+            _filter_vector_images_against_structural([img], [table_sec])
+        )
+        assert dropped == 1
+        assert kept_images == []
+
+    def test_vector_image_overlapping_code_filtered(self):
+        img = _ext_img(page=8, bbox=(100, 100, 300, 250))
+        code_sec = _structural_section(
+            kind=SectionKind.CODE, page_num=7,
+            bbox=(50, 90, 350, 260),
+        )
+        kept_images, _kept_sections, dropped = (
+            _filter_vector_images_against_structural([img], [code_sec])
+        )
+        assert dropped == 1
+        assert kept_images == []
+
+    def test_vector_image_partial_overlap_below_threshold_kept(self):
+        """A 200x150 image with only 30x30 of overlap (3% of image area)
+        does NOT meet the 50% threshold. Real diagrams whose bbox grazes
+        an adjacent code block must survive."""
+        img = _ext_img(page=1, bbox=(100, 100, 300, 250))
+        code_sec = _structural_section(
+            kind=SectionKind.CODE, page_num=0,
+            bbox=(80, 80, 130, 130),  # 30x30 overlap with image
+        )
+        kept_images, _kept_sections, dropped = (
+            _filter_vector_images_against_structural([img], [code_sec])
+        )
+        assert dropped == 0
+        assert len(kept_images) == 1
+
+    def test_raster_image_not_filtered(self):
+        """Raster images stay even when they fully overlap a TABLE/CODE
+        section. An embedded screenshot of a code block is intentional
+        content the user explicitly placed in the PDF."""
+        img = _ext_img(page=8, bbox=(100, 100, 300, 250), source="raster")
+        code_sec = _structural_section(
+            kind=SectionKind.CODE, page_num=7,
+            bbox=(50, 90, 350, 260),
+        )
+        kept_images, _kept_sections, dropped = (
+            _filter_vector_images_against_structural([img], [code_sec])
+        )
+        assert dropped == 0
+        assert kept_images == [img]
+
+    def test_section_on_different_page_does_not_filter(self):
+        """A TABLE on page 7 must not filter vector images on page 8."""
+        img = _ext_img(page=8, bbox=(100, 100, 300, 250))
+        table_sec = _structural_section(
+            kind=SectionKind.TABLE, page_num=6,  # 0-based -> page 7
+            bbox=(50, 90, 350, 260),
+        )
+        kept_images, _kept_sections, dropped = (
+            _filter_vector_images_against_structural([img], [table_sec])
+        )
+        assert dropped == 0
+        assert len(kept_images) == 1
+
+    def test_image_section_removed_when_image_filtered(self):
+        """The corresponding SectionKind.IMAGE section must be removed
+        from the sections list when its image gets filtered, otherwise
+        the markdown would still try to render the removed image."""
+        img = _ext_img(page=8, bbox=(100, 100, 300, 250))
+        img_section = Section(
+            kind=SectionKind.IMAGE, text="", confidence=Confidence.MEDIUM,
+            page_num=7, image_ref=img,
+        )
+        table_sec = _structural_section(
+            kind=SectionKind.TABLE, page_num=7,
+            bbox=(50, 90, 350, 260),
+        )
+        _kept_images, kept_sections, _dropped = (
+            _filter_vector_images_against_structural(
+                [img], [table_sec, img_section],
+            )
+        )
+        # The IMAGE section is gone; the TABLE section stays.
+        assert all(s.kind != SectionKind.IMAGE for s in kept_sections)
+        assert any(s.kind == SectionKind.TABLE for s in kept_sections)
+
+    def test_paragraph_section_not_treated_as_structural(self):
+        """Only TABLE and CODE count as 'structural'. A PARAGRAPH
+        section overlapping the vector image must not filter it -
+        otherwise legitimate figures with captions or surrounding text
+        would all drop."""
+        img = _ext_img(page=8, bbox=(100, 100, 300, 250))
+        para_sec = Section(
+            kind=SectionKind.PARAGRAPH, text="caption",
+            confidence=Confidence.HIGH, page_num=7,
+            lines=[Line(spans=[Span(text="cap", bbox=(80, 90, 350, 260))],
+                        bbox=(80, 90, 350, 260))],
+        )
+        kept_images, _kept_sections, dropped = (
+            _filter_vector_images_against_structural([img], [para_sec])
+        )
+        assert dropped == 0
+        assert kept_images == [img]
+
+    def test_no_filter_when_no_structural_sections(self):
+        """Fast path: no TABLE/CODE sections in the list means no
+        filtering work. Vector images pass through verbatim."""
+        img = _ext_img(page=8, bbox=(100, 100, 300, 250))
+        para_sec = Section(
+            kind=SectionKind.PARAGRAPH, text="x", confidence=Confidence.HIGH,
+            page_num=7,
+        )
+        kept_images, kept_sections, dropped = (
+            _filter_vector_images_against_structural([img], [para_sec])
+        )
+        assert dropped == 0
+        assert kept_images == [img]
+        assert kept_sections == [para_sec]
+
+    def test_boundary_at_threshold_drops(self):
+        """A 200x100 image with exactly 50% overlap (100x100 region) hits
+        the >= 0.5 threshold and is dropped."""
+        img = _ext_img(page=1, bbox=(0, 0, 200, 100))
+        # 100x100 overlap = 50% of the 200x100 image (area 10000 out of 20000).
+        code_sec = _structural_section(
+            kind=SectionKind.CODE, page_num=0,
+            bbox=(0, 0, 100, 100),
+        )
+        kept_images, _kept_sections, dropped = (
+            _filter_vector_images_against_structural([img], [code_sec])
+        )
+        assert dropped == 1, "50% overlap is the boundary - drops"
+        assert kept_images == []
