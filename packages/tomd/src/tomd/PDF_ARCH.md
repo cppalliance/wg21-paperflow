@@ -9,7 +9,7 @@ For deeper technique tables and module maps, see [`lib/pdf/ARCHITECTURE.md`](lib
 - [Goals](#goals)
 - [Principles and corpus assumptions](#principles-and-corpus-assumptions)
 - [Before changing behavior](#before-changing-behavior)
-- [Pipeline](#pipeline)
+- [Pipeline](#pipeline) (includes [Figure detection](#figure-detection))
 - [Appendix: rules by source file](#appendix-rules-by-source-file)
 
 ## Goals
@@ -87,6 +87,42 @@ Tightening similarity without prompts; loosening TOC detection; aggressive parag
 - Gather nearly horizontal drawing segments from `page.get_drawings()` with minimum width for later strikethrough correlation ([`wording.py`](lib/pdf/wording.py)).
 
 **Sources:** `collect_line_drawings` in [`lib/pdf/wording.py`](lib/pdf/wording.py).
+
+---
+
+### Figure detection
+
+**Box detection**
+
+- Detect bordered boxes from `page.get_drawings()`: paths with **both** stroke color and fill color, width 30-80% of page, height 10-80pt. These indicate diagram boxes (flow charts, sequence diagrams, concept chains). Page-spanning rectangles are rejected ([`figures.py`](lib/pdf/figures.py)).
+
+**Grouping and merging**
+
+- Group spatially proximate boxes by y-tolerance (`_BOX_GROUP_Y_TOLERANCE`). Then merge groups bridged by connectors (Union-Find over connector endpoints) so multi-row diagrams (e.g. sequence diagrams with top and bottom participant headers) form a single region ([`figures.py`](lib/pdf/figures.py)).
+
+**Arrow and connector classification**
+
+- **Arrowheads:** Small filled triangles (3 line items, max size `_ARROWHEAD_MAX_SIZE`). Accepts both closed paths and open paths with fill+color (dashed return arrow arrowheads). Returns centroid, pointy vertex, and base midpoint ([`figures.py`](lib/pdf/figures.py)).
+- **Solid connectors:** Stroked paths with 1-4 line or curve items exceeding `_CONNECTOR_MIN_LENGTH`. Must not have fill color (excludes box borders) ([`figures.py`](lib/pdf/figures.py)).
+- **Dashed connectors:** Filled paths without stroke color, 20+ tiny line items forming a near-horizontal or near-vertical dashed line (common for UML return arrows). Direction reversed for return semantics ([`figures.py`](lib/pdf/figures.py)).
+
+**Graph topology**
+
+- **Sequence diagram detection:** When boxes cluster into columns with duplicate x-positions (top and bottom participant headers), collapse into logical nodes. Build edges from arrowheads matched to connectors, ordered by y-position. Dashed return arrows whose arrowhead tip lands inside an intermediate box are projected through to the next terminal node in the arrow direction ([`figures.py`](lib/pdf/figures.py)).
+- **General topology:** Match arrowheads to nearest boxes (pointy vertex = target, base = source). Fall back to connector-only matching when no arrowheads are found. Detect bidirectional edges ([`figures.py`](lib/pdf/figures.py)).
+
+**Pipeline integration**
+
+- `pipeline.py` calls `detect_figure_regions()` per page after `get_drawings()`. Resulting `FigureRegion` objects (with optional `FigureGraph`) are passed to `structure_body()`.
+- `structure.py` reclassifies sections overlapping figure regions as `SectionKind.FIGURE`. Consecutive FIGURE sections from the same region are merged. The `FigureGraph` is attached to the merged section ([`structure.py`](lib/pdf/structure.py)).
+
+**Rendering**
+
+- **Graph-based:** Sequence diagrams render as participant header + numbered steps. Linear chains render as `A -> label -> B -> label -> C`. Vertical flows render as numbered lists. Bidirectional flows are annotated ([`emit.py`](lib/pdf/emit.py)).
+- **Positional fallback:** When no graph topology is extracted, text fragments are sorted by bbox coordinates and rendered as a blockquote ([`emit.py`](lib/pdf/emit.py)).
+- Orphan labels (text between boxes, e.g. arrow labels) are matched to edges by spatial proximity or y-position ([`emit.py`](lib/pdf/emit.py)).
+
+**Sources:** `detect_figure_regions`, `_is_bordered_box`, `_is_arrowhead`, `_is_connector`, `_is_dashed_connector`, `_detect_sequence_diagram`, `_match_topology`, `_project_through_box`, `_merge_connected_groups` in [`lib/pdf/figures.py`](lib/pdf/figures.py); `_render_figure_placeholder`, `_render_graph_figure`, `_render_sequence_figure`, `_render_positional_figure` in [`lib/pdf/emit.py`](lib/pdf/emit.py).
 
 ---
 
@@ -505,8 +541,9 @@ Links point to sections above.
 | [`lib/pdf/wording.py`](lib/pdf/wording.py) | [Line drawings](#line-drawings), [Wording](#wording) |
 | [`lib/pdf/spans.py`](lib/pdf/spans.py) | [Text cleanup](#text-cleanup) normalization |
 | [`lib/pdf/wg21.py`](lib/pdf/wg21.py) | [Page zero metadata](#page-zero-metadata) |
+| [`lib/pdf/figures.py`](lib/pdf/figures.py) | [Figure detection](#figure-detection) |
 | [`lib/pdf/table.py`](lib/pdf/table.py) | [Tables](#tables) |
-| [`lib/pdf/structure.py`](lib/pdf/structure.py) | [Dual-path confidence](#dual-path-confidence), [Structure](#structure) |
+| [`lib/pdf/structure.py`](lib/pdf/structure.py) | [Dual-path confidence](#dual-path-confidence), [Structure](#structure), [Figure detection](#figure-detection) (FIGURE classification) |
 | [`lib/toc.py`](lib/toc.py) | [TOC stripping](#toc-stripping) |
 | [`lib/pdf/emit.py`](lib/pdf/emit.py) | [Emit](#emit) |
 | [`lib/__init__.py`](lib/__init__.py) | Link schemes, front matter helpers, [Emit](#emit) post-pass |

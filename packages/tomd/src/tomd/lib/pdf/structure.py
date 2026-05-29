@@ -12,6 +12,7 @@ from .. import (
 )
 from .types import (
     Block, Line, Span, Section, SectionKind, Confidence,
+    FigureRegion,
     SIMILARITY_THRESHOLD, TERMINAL_PUNCTUATION, FALLBACK_BODY_SIZE,
     MIN_UNCERTAIN_WORDS,
     SECTION_NUM_RE,
@@ -476,6 +477,7 @@ def structure_sections(sections: list[Section],
 
 def structure_body(sections: list[Section],
                    has_title: bool = False,
+                   figure_regions: list | None = None,
                    ) -> tuple[dict, list[Section], int]:
     """Body structuring only, without metadata extraction.
 
@@ -483,12 +485,51 @@ def structure_body(sections: list[Section],
     Returns (body_metadata, structured_sections, nesting_corrections).
     body_metadata may contain a 'title' if one was detected during structuring.
     """
-    return _structure_body_impl({}, sections, has_title)
+    return _structure_body_impl({}, sections, has_title,
+                                figure_regions=figure_regions)
+
+
+def _section_in_figure_region(sec: Section,
+                              figure_regions: list[FigureRegion],
+                              ) -> FigureRegion | None:
+    """Return the matching FigureRegion if *sec* overlaps one, else None."""
+    if not sec.lines:
+        return None
+    s_bbox = sec.lines[0].bbox
+    s_y0, s_y1 = s_bbox[1], s_bbox[3]
+    s_x0, s_x1 = s_bbox[0], s_bbox[2]
+    for fr in figure_regions:
+        if sec.page_num != fr.page_num:
+            continue
+        f_x0, f_y0, f_x1, f_y1 = fr.bbox
+        if s_x0 < f_x1 and s_x1 > f_x0 and s_y0 < f_y1 and s_y1 > f_y0:
+            return fr
+    return None
+
+
+def _merge_figure_sections(sections: list[Section]) -> list[Section]:
+    """Consolidate consecutive FIGURE sections into one per figure."""
+    if not sections:
+        return sections
+    merged: list[Section] = [sections[0]]
+    for sec in sections[1:]:
+        prev = merged[-1]
+        if (sec.kind == SectionKind.FIGURE
+                and prev.kind == SectionKind.FIGURE
+                and sec.page_num == prev.page_num):
+            prev.text = prev.text + "\n" + sec.text
+            prev.lines.extend(sec.lines)
+            if sec.figure_graph is not None and prev.figure_graph is None:
+                prev.figure_graph = sec.figure_graph
+        else:
+            merged.append(sec)
+    return merged
 
 
 def _structure_body_impl(metadata: dict,
                          sections: list[Section],
                          has_title: bool = False,
+                         figure_regions: list | None = None,
                          ) -> tuple[dict, list[Section], int]:
     """Implementation of body structuring logic."""
     body_size = _detect_body_size(sections)
@@ -579,6 +620,19 @@ def _structure_body_impl(metadata: dict,
                 last_heading_level = 1
                 continue
 
+        # Figure-region guard: text overlapping a detected vector-graphic
+        # figure is classified as FIGURE to prevent heading misclassification
+        # of diagram label fragments (e.g. box labels rendered in bold).
+        if figure_regions:
+            matched_region = _section_in_figure_region(sec, figure_regions)
+            if matched_region is not None:
+                sec.kind = SectionKind.FIGURE
+                sec.confidence = Confidence.HIGH
+                if matched_region.graph is not None:
+                    sec.figure_graph = matched_region.graph
+                structured.append(sec)
+                continue
+
         m = SECTION_NUM_RE.match(first_line)
         has_number = m is not None
         section_num = m.group(1) if m else ""
@@ -654,6 +708,8 @@ def _structure_body_impl(metadata: dict,
         sec.kind = SectionKind.PARAGRAPH
         structured.append(sec)
 
+    if figure_regions:
+        structured = _merge_figure_sections(structured)
     structured = _merge_orphan_heading_numbers(structured)
     structured = _detect_lists_by_position(structured)
     structured = _merge_paragraphs(structured)
@@ -661,6 +717,7 @@ def _structure_body_impl(metadata: dict,
     structured = [s for s in structured if _detect_lang_label(s) is None]
     structured = _classify_wording_sections(structured)
     structured = _coalesce_code_paragraphs(structured)
+    structured = _absorb_code_orphans(structured)
     structured = _rescue_unfenced_code(structured)
     _demote_repeated_low_confidence_numbers(structured)
     nesting_corrections = _validate_nesting(structured)
@@ -948,6 +1005,10 @@ def _split_inline_bullets_text(sec: Section) -> list[Section]:
     return result if result else [sec]
 
 
+_LIST_CONTINUATION_INDENT = 10.0  # min extra x-offset (pt) for indent merge
+_BULLET_LIKE = BULLET_CHARS | frozenset("\u25cb\u25b8\u25ba\u25c6\u2013\u2014")
+
+
 def _merge_paragraphs(sections: list[Section]) -> list[Section]:
     """Merge consecutive sections that are continuations.
 
@@ -955,6 +1016,11 @@ def _merge_paragraphs(sections: list[Section]) -> list[Section]:
     paragraph starts with a lowercase letter, they are the same
     logical paragraph split by PDF line wrapping. Works for
     PARAGRAPH+PARAGRAPH and LIST+PARAGRAPH (bullet continuation).
+
+    Also merges PARAGRAPH into a preceding LIST when the paragraph is
+    x-indented relative to the list item, indicating it is a
+    continuation of the same list entry (e.g. a second sentence under
+    a numbered item that MuPDF placed in a separate block).
     """
     if len(sections) < 2:
         return sections
@@ -970,8 +1036,29 @@ def _merge_paragraphs(sections: list[Section]) -> list[Section]:
                 and sec.text.lstrip()):
             prev_end = prev.text.rstrip()[-1]
             cur_start = sec.text.lstrip()[0]
-            if prev_end not in TERMINAL_PUNCTUATION and cur_start.islower():
-                prev.text = prev.text.rstrip() + " " + sec.text.lstrip()
+
+            text_merge = (prev_end not in TERMINAL_PUNCTUATION
+                          and cur_start.islower())
+
+            indent_merge = False
+            if (prev.kind == SectionKind.LIST
+                    and prev.lines and sec.lines
+                    and sec.page_num == prev.page_num):
+                prev_x0 = prev.lines[0].bbox[0]
+                prev_last_x0 = prev.lines[-1].bbox[0]
+                sec_x0 = sec.lines[0].bbox[0]
+                y_gap = sec.lines[0].bbox[1] - prev.lines[-1].bbox[3]
+                max_gap = prev.font_size * 2.0
+                first_char = sec.text.lstrip()[:1]
+                if (sec_x0 - prev_x0 >= _LIST_CONTINUATION_INDENT
+                        and sec_x0 >= prev_last_x0
+                        and 0 <= y_gap <= max_gap
+                        and first_char not in _BULLET_LIKE):
+                    indent_merge = True
+
+            if text_merge or indent_merge:
+                joiner = "\n" if indent_merge else " "
+                prev.text = prev.text.rstrip() + joiner + sec.text.lstrip()
                 prev.lines.extend(sec.lines)
                 if prev.lines:
                     prev.font_size = prev.lines[0].font_size
@@ -1185,6 +1272,57 @@ def _coalesce_code_paragraphs(sections: list[Section]) -> list[Section]:
         else:
             result.append(sec)
         i = j
+    return result
+
+
+def _absorb_code_orphans(sections: list[Section]) -> list[Section]:
+    """Absorb monospace-only first lines from PARAGRAPHs into preceding CODE.
+
+    When a PDF code block is split across MuPDF blocks, the trailing
+    fragment (e.g. ``});``) becomes a separate PARAGRAPH whose first
+    line(s) are purely monospace. This pass detects that pattern and
+    moves monospace-only leading lines back into the preceding CODE
+    section, leaving any remaining non-monospace lines as the paragraph.
+    """
+    result: list[Section] = []
+    for sec in sections:
+        if (result
+                and result[-1].kind == SectionKind.CODE
+                and sec.kind == SectionKind.PARAGRAPH
+                and sec.page_num == result[-1].page_num
+                and sec.lines):
+            # Find leading monospace lines.
+            mono_lines: list[Line] = []
+            rest_lines: list[Line] = []
+            found_non_mono = False
+            for ln in sec.lines:
+                if found_non_mono:
+                    rest_lines.append(ln)
+                elif ln.is_monospace:
+                    mono_lines.append(ln)
+                else:
+                    found_non_mono = True
+                    rest_lines.append(ln)
+
+            if mono_lines:
+                prev = result[-1]
+                mono_text = "\n".join(
+                    "".join(s.text for s in ln.spans) for ln in mono_lines
+                )
+                result[-1] = replace(
+                    prev,
+                    text=prev.text + "\n" + mono_text,
+                    lines=prev.lines + mono_lines,
+                )
+                if rest_lines:
+                    rest_text = "\n".join(
+                        "".join(s.text for s in ln.spans) for ln in rest_lines
+                    )
+                    result.append(replace(sec, text=rest_text, lines=rest_lines))
+                _log.info("Absorbed %d mono orphan line(s) into code block",
+                          len(mono_lines))
+                continue
+        result.append(sec)
     return result
 
 

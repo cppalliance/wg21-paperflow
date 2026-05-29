@@ -10,6 +10,7 @@ from .cleanup import (get_edge_items, detect_repeating, strip_repeating,
                       cleanup_text, find_hidden_regions, strip_hidden_blocks)
 from .extract import extract_mupdf, extract_spatial, collect_links, attach_links
 from .mono import propagate_monospace
+from .figures import detect_figure_regions
 from .wording import classify_wording, collect_line_drawings
 from .spans import normalize_spans
 from .structure import (compare_extractions, structure_body,
@@ -33,6 +34,14 @@ from ..body.abstract import promote_abstract_from_uncertain as _promote_abstract
 from ..body.abstract import reorder_abstract_in_uncertain as _reorder_abstract_in_uncertain
 from ..body.abstract import rescue_stranded_abstract_body as _rescue_stranded_abstract_body
 from ..body.abstract import strip_metadata_from_uncertain as _strip_metadata_from_uncertain
+
+from .docling_backend import (
+    docling_available as _docling_available,
+    extract_docling_tables as _extract_docling_tables,
+    enrich_tables_with_docling as _enrich_tables_with_docling,
+    absorb_cross_page_spec_rows as _absorb_cross_page_spec_rows,
+    discover_tables_with_docling as _discover_tables_with_docling,
+)
 
 __all__ = ["convert_pdf", "PipelineResult"]
 
@@ -237,6 +246,7 @@ class PipelineResult:
     readable: bool = True
     skipped: bool = False
     skip_reason: str = ""
+    visualize_html: str | None = None
 
 
 def _parse_pdf_info_date(raw: str) -> str:
@@ -251,7 +261,8 @@ def _parse_pdf_info_date(raw: str) -> str:
     return ""
 
 
-def _run_pipeline(path: Path) -> PipelineResult:
+def _run_pipeline(path: Path, *, ml_tables: bool = False,
+                  visualize: bool = False) -> PipelineResult:
     """Run the full PDF conversion pipeline, returning all intermediate data."""
     import fitz  # lazy: PyMuPDF not required for HTML-only paths
 
@@ -309,6 +320,17 @@ def _run_pipeline(path: Path) -> PipelineResult:
             all_mupdf_blocks.extend(mupdf_blocks)
             all_spatial_blocks.extend(spatial_blocks)
 
+        # Detect two-column pages from raw (pre-stripping) blocks.
+        two_column_pages: frozenset[int] = frozenset(
+            pg for pg in page_widths
+            if _detect_column_split(
+                [b for b in all_mupdf_blocks if b.page_num == pg],
+                page_widths[pg],
+            ) is not None
+        )
+        if two_column_pages:
+            _log.debug("Two-column pages: %s", sorted(two_column_pages))
+
         font_counts: Counter[str] = Counter()
         for b in all_mupdf_blocks:
             for ln in b.lines:
@@ -328,12 +350,20 @@ def _run_pipeline(path: Path) -> PipelineResult:
 
         page_drawings: dict[int, list] = {}
         page_mupdf_tables: dict[int, list[dict]] = {}
+        all_figure_regions = []
         for pg_num in range(result.page_count):
-            drawings = collect_line_drawings(doc[pg_num])
+            page = doc[pg_num]
+            drawings = collect_line_drawings(page)
             if drawings:
                 page_drawings[pg_num] = drawings
+
+            raw_drawings = page.get_drawings()
+            page_figures = detect_figure_regions(
+                raw_drawings, pg_num, page.rect.width)
+            all_figure_regions.extend(page_figures)
+
             try:
-                ft = doc[pg_num].find_tables()
+                ft = page.find_tables()
                 if ft.tables:
                     page_mupdf_tables[pg_num] = [
                         {"bbox": tuple(t.bbox),
@@ -346,6 +376,9 @@ def _run_pipeline(path: Path) -> PipelineResult:
             except Exception:
                 _log.debug("find_tables() failed on page %d", pg_num,
                            exc_info=True)
+
+        if all_figure_regions:
+            _log.info("Detected %d figure region(s)", len(all_figure_regions))
 
         pdf_info_date = _parse_pdf_info_date(doc.metadata.get("creationDate", ""))
         pdf_info_title = (doc.metadata.get("title") or "").strip()
@@ -378,39 +411,81 @@ def _run_pipeline(path: Path) -> PipelineResult:
 
     wording_problems = classify_wording(all_mupdf_blocks, page_drawings)
 
+    # Sort blocks into reading order BEFORE cleanup_text, which contains
+    # _join_cross_page.  That function merges the first block on page N+1
+    # with the last block on page N; if blocks are still in MuPDF's
+    # arbitrary extraction order (e.g. code blocks extracted after body
+    # text despite higher y-positions) the merge target is wrong and
+    # continuation text lands on the wrong block.  Sorting first ensures
+    # "last block on the page" means visually bottom-most.
+    _column_aware_sort(all_mupdf_blocks, page_widths)
+    _column_aware_sort(all_spatial_blocks, page_widths)
+
     all_mupdf_blocks = cleanup_text(all_mupdf_blocks)
     all_spatial_blocks = cleanup_text(all_spatial_blocks)
 
     all_mupdf_blocks = normalize_spans(all_mupdf_blocks)
     all_spatial_blocks = normalize_spans(all_spatial_blocks)
 
-    # Sort blocks by reading order.  For two-column pages (detected via
-    # x-midpoint gap analysis) the left column is placed before the right
-    # column, each sorted internally by y.  Single-column pages use plain
-    # y-midpoint sorting (the P3625R1 fix for out-of-order MuPDF blocks).
-    _column_aware_sort(all_mupdf_blocks, page_widths)
-    _column_aware_sort(all_spatial_blocks, page_widths)
-
     wg21_metadata, _ = extract_metadata_from_blocks(all_mupdf_blocks,
                                                      text_colors=page0_colors)
 
+    # Snapshot for Docling enrichment: detect_tables consumes blocks,
+    # but the enrichment needs access to ALL page spans (including
+    # those consumed but dropped from sec.lines by the rule-based
+    # detector) to correctly populate Docling cell grids.
+    pre_detect_blocks = list(all_mupdf_blocks) if ml_tables else []
+
     table_sections, all_mupdf_blocks = detect_tables(
-        all_mupdf_blocks, page_mupdf_tables=page_mupdf_tables)
+        all_mupdf_blocks, page_mupdf_tables=page_mupdf_tables,
+        two_column_pages=two_column_pages)
     if table_sections:
         _log.info("Detected %d table(s)", len(table_sections))
         all_spatial_blocks = exclude_table_regions(
             all_spatial_blocks, table_sections)
 
+    # --- Optional Docling ML table processing ---
+    # When ml_tables=True and Docling is available:
+    #   1. Enrich existing rule-based tables with Docling cell grids.
+    #   2. Discover new tables that rule-based detection missed
+    #      (borderless tables), consuming their blocks so they
+    #      don't become duplicate paragraphs.
+    if ml_tables and _docling_available():
+        docling_tables = _extract_docling_tables(path)
+        if docling_tables:
+            if table_sections:
+                n = _enrich_tables_with_docling(
+                    table_sections, docling_tables, pre_detect_blocks)
+                if n:
+                    _log.info("Docling enriched %d/%d table(s)",
+                              n, len(table_sections))
+
+            all_mupdf_blocks = _absorb_cross_page_spec_rows(
+                table_sections, all_mupdf_blocks, docling_tables)
+
+            new_tables, all_mupdf_blocks = _discover_tables_with_docling(
+                docling_tables, all_mupdf_blocks, table_sections)
+            if new_tables:
+                table_sections.extend(new_tables)
+                all_spatial_blocks = exclude_table_regions(
+                    all_spatial_blocks, new_tables)
+                _log.info("Docling discovered %d new table(s)",
+                          len(new_tables))
+
     sections = compare_extractions(all_mupdf_blocks, all_spatial_blocks)
 
     for ts in table_sections:
         inserted = False
+        data_on_label_page = (
+            ts.lines and ts.lines[0].page_num == ts.page_num
+        )
         for i, sec in enumerate(sections):
             if sec.page_num > ts.page_num:
                 sections.insert(i, ts)
                 inserted = True
                 break
-            if (sec.page_num == ts.page_num and sec.lines
+            if (data_on_label_page
+                    and sec.page_num == ts.page_num and sec.lines
                     and ts.lines
                     and sec.lines[0].bbox[1] > ts.lines[0].bbox[1]):
                 sections.insert(i, ts)
@@ -430,7 +505,8 @@ def _run_pipeline(path: Path) -> PipelineResult:
 
     # --- Phase 1b: Body structuring (may detect title for metadata) ---
     body_metadata, sections, nesting_corrections = structure_body(
-        sections, has_title=has_title)
+        sections, has_title=has_title,
+        figure_regions=all_figure_regions or None)
     for k, v in body_metadata.items():
         if k not in metadata:
             metadata[k] = v
@@ -671,10 +747,20 @@ def _run_pipeline(path: Path) -> PipelineResult:
     result.sections = sections
     result.metadata = metadata
     result.nesting_corrections = nesting_corrections
+
+    if visualize:
+        from .visualize import generate_visualization
+        result.visualize_html = generate_visualization(
+            path, sections, metadata)
+
     return result
 
 
-def convert_pdf(path: Path) -> tuple[str, list[str] | None]:
+def convert_pdf(
+    path: Path,
+    *,
+    ml_tables: bool = False,
+) -> tuple[str, list[str] | None]:
     """Convert a PDF file to Markdown.
 
     Returns ``(markdown_text, prompts_or_none)`` where ``prompts_or_none``
@@ -683,6 +769,24 @@ def convert_pdf(path: Path) -> tuple[str, list[str] | None]:
     converter is fully confident. Returns ``("", None)`` for empty or
     unreadable PDFs. Raises fitz exceptions for corrupt or inaccessible
     files.
+
+    When *ml_tables* is True and the ``docling`` package is installed,
+    table cell grids are enriched with Docling's ML-detected structure
+    (fixing multi-line cells the rule-based detector misses).
     """
-    r = _run_pipeline(path)
+    r = _run_pipeline(path, ml_tables=ml_tables)
     return r.md, r.prompts
+
+
+def convert_pdf_full(
+    path: Path,
+    *,
+    ml_tables: bool = False,
+) -> PipelineResult:
+    """Run the full pipeline and return the complete result including sections.
+
+    Unlike :func:`convert_pdf` which only returns ``(md, prompts)``, this
+    exposes the full :class:`PipelineResult` with sections, metadata, and
+    all intermediate data. Used by the preview server for highlight rendering.
+    """
+    return _run_pipeline(path, ml_tables=ml_tables)

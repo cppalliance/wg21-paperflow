@@ -8,7 +8,7 @@ from ..metadata_yaml.format import format_front_matter
 from .. import dedup_paragraphs, strip_redundant_body_meta, strip_orphan_toc_list, strip_leading_h1, DEFAULT_FENCE_LANG
 from ..shared import _find_front_matter_end
 from .cleanup import normalize_whitespace
-from .types import Line, Span, Section, SectionKind, BULLET_CHARS
+from .types import Line, Span, Section, SectionKind, BULLET_CHARS, FigureGraph
 
 _log = logging.getLogger(__name__)
 
@@ -499,11 +499,16 @@ def _render_html_table(sec: Section) -> str:
 
     Used for code-comparison tables (e.g. "Tony Tables") where each cell
     contains multi-line code that would be flattened by a pipe table.
+
+    When ``sec.table_continuation`` is true the section is a cross-page
+    continuation whose duplicate header has been stripped.  All rows are
+    rendered as ``<td>`` data cells (no ``<th>`` header row).
     """
     if not sec.columns:
         return sec.text
 
     rows = sec.columns
+    is_continuation = getattr(sec, "table_continuation", False)
     num_cols = max(len(row) for row in rows)
     col_w = f"{100 // num_cols}%" if num_cols else "50%"
     _S = (f"border: 1px solid #999; padding: 6px 10px; "
@@ -515,7 +520,8 @@ def _render_html_table(sec: Section) -> str:
 
     for ri, row in enumerate(rows):
         parts.append("<tr>")
-        tag = "th" if ri == 0 else "td"
+        is_header = (ri == 0 and not is_continuation)
+        tag = "th" if is_header else "td"
         for ci in range(num_cols):
             cell_spans = row[ci] if ci < len(row) else []
             cell_lines: list[str] = []
@@ -530,7 +536,7 @@ def _render_html_table(sec: Section) -> str:
                 cell_lines.append("".join(current_line))
             text = "\n".join(cell_lines).strip()
             escaped = _html.escape(text)
-            if ri == 0 or not text:
+            if is_header or not text:
                 parts.append(f'<{tag} style="{_S}">{escaped}</{tag}>')
             else:
                 parts.append(
@@ -555,21 +561,25 @@ def _render_table(sec: Section) -> str:
         return sec.text
 
     rows = sec.columns
+    is_continuation = getattr(sec, "table_continuation", False)
     num_cols = max(len(row) for row in rows)
 
-    header = rows[0]
-    header_cells = [
-        _render_cell_spans(cell, suppress_bold=True).replace("\n", " ")
-        for cell in header
-    ]
-    while len(header_cells) < num_cols:
-        header_cells.append("")
-
     lines = []
-    lines.append("| " + " | ".join(header_cells) + " |")
-    lines.append("| " + " | ".join(["---"] * num_cols) + " |")
+    if is_continuation:
+        data_rows = rows
+    else:
+        header = rows[0]
+        header_cells = [
+            _render_cell_spans(cell, suppress_bold=True).replace("\n", " ")
+            for cell in header
+        ]
+        while len(header_cells) < num_cols:
+            header_cells.append("")
+        lines.append("| " + " | ".join(header_cells) + " |")
+        lines.append("| " + " | ".join(["---"] * num_cols) + " |")
+        data_rows = rows[1:]
 
-    for row in rows[1:]:
+    for row in data_rows:
         cells = [
             _render_cell_spans(cell).replace("\n", " ")
             for cell in row
@@ -579,6 +589,321 @@ def _render_table(sec: Section) -> str:
         lines.append("| " + " | ".join(cells) + " |")
 
     return "\n".join(lines)
+
+
+_FIGURE_HORIZONTAL_Y_THRESHOLD = 5.0
+
+
+_MERMAID_SPECIAL_RE = re.compile(r"[^\w]")
+
+
+def _mermaid_participant(name: str) -> str:
+    """Declare a sequence-diagram participant, quoting when needed."""
+    safe = name.replace('"', "#quot;")
+    if _MERMAID_SPECIAL_RE.search(safe):
+        return f'    participant "{safe}"'
+    return f"    participant {safe}"
+
+
+def _mermaid_actor(name: str) -> str:
+    """Reference a participant in a message line."""
+    safe = name.replace('"', "#quot;")
+    if _MERMAID_SPECIAL_RE.search(safe):
+        return f'"{safe}"'
+    return safe
+
+
+def _mermaid_message_label(label: str) -> str:
+    return label.replace('"', "#quot;").replace("\n", " ").strip()
+
+
+def _render_sequence_figure(graph: FigureGraph, sec: Section) -> str:
+    """Render a sequence diagram as a Mermaid ``sequenceDiagram`` block.
+
+    Orphan labels (text between lifelines) are assigned to the nearest
+    edge by y-position to serve as call labels.
+    """
+    orphans = _populate_graph_texts(graph, sec)
+    _assign_orphan_labels_to_edges(graph, orphans)
+
+    lines = ["sequenceDiagram"]
+    for node in graph.nodes:
+        lines.append(_mermaid_participant(node.text or "?"))
+
+    for e in graph.edges:
+        src = _mermaid_actor(graph.nodes[e.source_idx].text or "?")
+        tgt = _mermaid_actor(graph.nodes[e.target_idx].text or "?")
+        arrow = "-->>" if e.dashed else "->>"
+        if e.label:
+            label = _mermaid_message_label(e.label)
+            lines.append(f"    {src}{arrow}{tgt}: {label}")
+        else:
+            lines.append(f"    {src}{arrow}{tgt}")
+
+    return "```mermaid\n" + "\n".join(lines) + "\n```"
+
+
+def _assign_orphan_labels_to_edges(
+    graph: FigureGraph,
+    orphans: list[tuple[tuple[float, float, float, float], str]],
+) -> None:
+    """Assign orphan text labels to sequence diagram edges by y-proximity.
+
+    Each edge in a sequence diagram corresponds to a horizontal arrow at
+    a specific y-position.  Orphan labels near that y-position and
+    between the source/target x-columns become edge labels.
+    """
+    if not orphans or not graph.edges:
+        return
+
+    edge_y: list[float] = []
+    for e in graph.edges:
+        if e.y_position > 0:
+            edge_y.append(e.y_position)
+        else:
+            src_bbox = graph.nodes[e.source_idx].bbox
+            tgt_bbox = graph.nodes[e.target_idx].bbox
+            ey = (src_bbox[1] + src_bbox[3] + tgt_bbox[1] + tgt_bbox[3]) / 4
+            edge_y.append(ey)
+
+    used: set[int] = set()
+    for ei, e in enumerate(graph.edges):
+        src_bbox = graph.nodes[e.source_idx].bbox
+        tgt_bbox = graph.nodes[e.target_idx].bbox
+        min_x = min(src_bbox[0], tgt_bbox[0]) - 10
+        max_x = max(src_bbox[2], tgt_bbox[2]) + 10
+
+        best_idx = None
+        best_dist = 40.0
+        for oi, (bbox, _text) in enumerate(orphans):
+            if oi in used:
+                continue
+            ox = (bbox[0] + bbox[2]) / 2
+            oy = (bbox[1] + bbox[3]) / 2
+            if not (min_x <= ox <= max_x):
+                continue
+            d = abs(oy - edge_y[ei])
+            if d < best_dist:
+                best_dist = d
+                best_idx = oi
+
+        if best_idx is not None:
+            used.add(best_idx)
+            e.label = orphans[best_idx][1]
+
+
+def _render_graph_figure(graph: FigureGraph, sec: Section) -> str:
+    """Render a FIGURE section using extracted graph topology.
+
+    Populates graph node texts from the section's lines by matching
+    bbox overlap, then walks the edges to produce topologically correct
+    output with proper arrow notation.
+    """
+    is_sequence = getattr(graph, "_is_sequence", False)
+    if is_sequence:
+        return _render_sequence_figure(graph, sec)
+
+    orphans = _populate_graph_texts(graph, sec)
+
+    non_empty = [n for n in graph.nodes if n.text]
+    if not non_empty:
+        return _render_positional_figure(sec)
+
+    is_vertical = _is_vertical_layout(graph)
+    has_bidir = any(e.bidirectional for e in graph.edges)
+
+    if has_bidir:
+        parts = []
+        for e in graph.edges:
+            src = graph.nodes[e.source_idx].text or "?"
+            tgt = graph.nodes[e.target_idx].text or "?"
+            arrow = " <-> " if e.bidirectional else " -> "
+            parts.append(f"{src}{arrow}{tgt}")
+        body = "\n> ".join(parts)
+        return f"> **[Figure: Flow Diagram (bidirectional)]**\n> {body}"
+
+    if graph.is_linear:
+        chain = _linearize_graph_with_labels(graph, orphans)
+        if chain:
+            if is_vertical:
+                steps = [f"> {i}. {t}" for i, t in enumerate(chain, 1)]
+                return "> **[Figure: Flow Diagram]**\n" + "\n".join(steps)
+            body = " -> ".join(chain)
+            return f"> **[Figure: Concept Chain]**\n> {body}"
+
+    parts = []
+    for e in graph.edges:
+        src = graph.nodes[e.source_idx].text or "?"
+        tgt = graph.nodes[e.target_idx].text or "?"
+        parts.append(f"{src} -> {tgt}")
+    body = "\n> ".join(parts)
+    return f"> **[Figure: Flow Diagram]**\n> {body}"
+
+
+def _populate_graph_texts(
+    graph: FigureGraph,
+    sec: Section,
+) -> list[tuple[tuple[float, float, float, float], str]]:
+    """Fill graph node texts by matching section lines to node bboxes.
+
+    Returns a list of ``(bbox, text)`` for lines that did not match any
+    node (orphan labels sitting between boxes, e.g. edge labels).
+    """
+    orphans: list[tuple[tuple[float, float, float, float], str]] = []
+    for ln in sec.lines:
+        t = ln.text.strip()
+        if not t:
+            continue
+        lx = (ln.bbox[0] + ln.bbox[2]) / 2
+        ly = (ln.bbox[1] + ln.bbox[3]) / 2
+        best_idx = None
+        best_dist = float("inf")
+        for i, node in enumerate(graph.nodes):
+            nx0, ny0, nx1, ny1 = node.bbox
+            if nx0 - 5 <= lx <= nx1 + 5 and ny0 - 5 <= ly <= ny1 + 5:
+                cx = (nx0 + nx1) / 2
+                cy = (ny0 + ny1) / 2
+                d = abs(lx - cx) + abs(ly - cy)
+                if d < best_dist:
+                    best_dist = d
+                    best_idx = i
+        if best_idx is not None:
+            existing = graph.nodes[best_idx].text
+            if existing:
+                if t != existing:
+                    graph.nodes[best_idx].text = existing + " " + t
+            else:
+                graph.nodes[best_idx].text = t
+        else:
+            orphans.append((ln.bbox, t))
+    return orphans
+
+
+def _is_vertical_layout(graph: FigureGraph) -> bool:
+    """True if graph nodes are arranged vertically (y-spread > x-spread)."""
+    if len(graph.nodes) < 2:
+        return False
+    ys = [(n.bbox[1] + n.bbox[3]) / 2 for n in graph.nodes]
+    xs = [(n.bbox[0] + n.bbox[2]) / 2 for n in graph.nodes]
+    y_spread = max(ys) - min(ys)
+    x_spread = max(xs) - min(xs)
+    return y_spread > x_spread
+
+
+def _linearize_graph_with_labels(
+    graph: FigureGraph,
+    orphans: list[tuple[tuple[float, float, float, float], str]],
+) -> list[str] | None:
+    """Walk edges to produce a linear chain, inserting orphan labels
+    between connected nodes when they fall spatially between them.
+    """
+    if not graph.edges:
+        return None
+
+    out_map: dict[int, int] = {}
+    in_set: set[int] = set()
+    for e in graph.edges:
+        if e.source_idx in out_map:
+            return None
+        out_map[e.source_idx] = e.target_idx
+        if e.target_idx in in_set:
+            return None
+        in_set.add(e.target_idx)
+
+    starts = [i for i in range(len(graph.nodes))
+              if i in out_map and i not in in_set]
+    if len(starts) != 1:
+        return None
+
+    chain: list[str] = []
+    current = starts[0]
+    visited: set[int] = set()
+    while current is not None:
+        if current in visited:
+            return None
+        visited.add(current)
+        chain.append(graph.nodes[current].text or "?")
+        next_idx = out_map.get(current)
+        if next_idx is not None and orphans:
+            label = _find_label_between(
+                graph.nodes[current].bbox,
+                graph.nodes[next_idx].bbox,
+                orphans,
+            )
+            if label:
+                chain.append(label)
+        current = next_idx
+
+    return chain if len(chain) >= 2 else None
+
+
+def _find_label_between(
+    src_bbox: tuple[float, float, float, float],
+    tgt_bbox: tuple[float, float, float, float],
+    orphans: list[tuple[tuple[float, float, float, float], str]],
+) -> str | None:
+    """Find an orphan label positioned between two node bboxes."""
+    sx = (src_bbox[0] + src_bbox[2]) / 2
+    sy = (src_bbox[1] + src_bbox[3]) / 2
+    tx = (tgt_bbox[0] + tgt_bbox[2]) / 2
+    ty = (tgt_bbox[1] + tgt_bbox[3]) / 2
+    mid_x = (sx + tx) / 2
+    mid_y = (sy + ty) / 2
+
+    best_dist = float("inf")
+    best_idx = None
+    for i, (bbox, _text) in enumerate(orphans):
+        ox = (bbox[0] + bbox[2]) / 2
+        oy = (bbox[1] + bbox[3]) / 2
+        d = abs(ox - mid_x) + abs(oy - mid_y)
+        x_between = min(sx, tx) - 20 <= ox <= max(sx, tx) + 20
+        y_between = min(sy, ty) - 20 <= oy <= max(sy, ty) + 20
+        if (x_between or y_between) and d < best_dist:
+            best_dist = d
+            best_idx = i
+
+    if best_idx is not None:
+        _, text = orphans.pop(best_idx)
+        return text
+    return None
+
+
+def _render_positional_figure(sec: Section) -> str:
+    """Fallback: render figure using positional sorting (no graph data)."""
+    if not sec.lines:
+        texts = [t.strip() for t in sec.text.split("\n") if t.strip()]
+        if not texts:
+            return "> **[Figure]**"
+        body = "\n> ".join(texts)
+        return f"> **[Figure]**\n> {body}"
+
+    live = [(ln.bbox, ln.text.strip()) for ln in sec.lines if ln.text.strip()]
+    if not live:
+        return "> **[Figure]**"
+
+    y_coords = [bbox[1] for bbox, _ in live]
+    y_spread = max(y_coords) - min(y_coords)
+
+    if y_spread < _FIGURE_HORIZONTAL_Y_THRESHOLD:
+        sorted_items = sorted(live, key=lambda pair: pair[0][0])
+        body = " -> ".join(t for _, t in sorted_items)
+        return f"> **[Figure: Concept Chain]**\n> {body}"
+
+    sorted_items = sorted(live, key=lambda pair: (pair[0][1], pair[0][0]))
+    steps = [f"> {i}. {t}" for i, (_, t) in enumerate(sorted_items, 1)]
+    return "> **[Figure: Flow Diagram]**\n" + "\n".join(steps)
+
+
+def _render_figure_placeholder(sec: Section) -> str:
+    """Render a FIGURE section as an LLM-readable blockquote.
+
+    When a FigureGraph is available (Tier 3 arrow extraction), renders
+    using extracted topology for correct flow direction.  Otherwise
+    falls back to positional sorting (Tier 2).
+    """
+    if sec.figure_graph is not None and sec.figure_graph.edges:
+        return _render_graph_figure(sec.figure_graph, sec)
+    return _render_positional_figure(sec)
 
 
 def _render_section_md(sec: Section) -> str:
@@ -598,6 +923,9 @@ def _render_section_md(sec: Section) -> str:
     if sec.kind in (SectionKind.WORDING, SectionKind.WORDING_ADD,
                     SectionKind.WORDING_REMOVE):
         return _render_wording_section(sec)
+
+    if sec.kind == SectionKind.FIGURE:
+        return _render_figure_placeholder(sec)
 
     if sec.kind == SectionKind.PARAGRAPH:
         return _render_paragraph_spans(sec)
@@ -660,13 +988,67 @@ def _assign_emdash_nesting(sections: list[Section]) -> None:
             sec.indent_level = level_map.get(x0, 0)
 
 
-def emit_markdown(metadata: dict, sections: list[Section]) -> str:
+def _annotate_wrap(rendered: str, sec: Section) -> str:
+    """Wrap rendered markdown in a colored HTML div for highlight mode."""
+    from .highlight import KIND_COLORS, CONFIDENCE_BORDERS
+    bg = KIND_COLORS.get(sec.kind.value, "transparent")
+    border = CONFIDENCE_BORDERS.get(sec.confidence.value, "3px solid #ccc")
+    kind_label = sec.kind.value.replace("-", " ")
+    return (
+        f'<div style="background:{bg};border-left:{border};'
+        f'padding:4px 10px;margin:2px 0;border-radius:3px" '
+        f'title="{kind_label} | {sec.confidence.value} | page {sec.page_num}">\n\n'
+        f'{rendered}\n\n'
+        f'</div>'
+    )
+
+
+def emit_markdown(
+    metadata: dict,
+    sections: list[Section],
+    *,
+    annotate: bool = False,
+) -> str:
     """Generate the output Markdown from structured sections.
 
     Confident sections are clean Markdown. Uncertain sections emit
     the MuPDF version marked with an HTML comment.
+
+    When *annotate* is True, each section's rendered markdown is wrapped
+    in a colored HTML ``<div>`` whose background indicates the
+    ``SectionKind`` and whose left-border indicates ``Confidence``.
+    The result is valid markdown+HTML that scrivener renders correctly,
+    producing the same layout as the normal view but with colored
+    section backgrounds.  Used by the preview highlight overlay.
     """
     _assign_emdash_nesting(sections)
+
+    # Pre-pass: fold cross-page table continuations into the preceding
+    # table so they render as a single HTML/pipe table.  The detection
+    # layer marks the continuation with table_continuation=True and has
+    # already stripped its duplicate header row.
+    folded: set[int] = set()
+    for i in range(len(sections) - 1, 0, -1):
+        sec = sections[i]
+        if (sec.kind == SectionKind.TABLE
+                and getattr(sec, "table_continuation", False)
+                and sec.columns):
+            # Walk backwards to find the preceding TABLE section
+            # (skipping any interleaved non-table sections like page
+            # numbers or headings that the pipeline may have inserted).
+            for j in range(i - 1, -1, -1):
+                prev = sections[j]
+                if prev.kind == SectionKind.TABLE and prev.columns:
+                    prev.columns.extend(sec.columns)
+                    prev.text = "\n".join(
+                        " | ".join(
+                            "".join(s.text for s in cell).strip()
+                            for cell in row)
+                        for row in prev.columns)
+                    folded.add(i)
+                    break
+    if folded:
+        sections = [s for i, s in enumerate(sections) if i not in folded]
 
     parts: list[str] = []
 
@@ -682,8 +1064,11 @@ def emit_markdown(metadata: dict, sections: list[Section]) -> str:
             text_lines = text.count("\n") + 1
             text_start = line_num + 2
             comment = f"<!-- tomd:uncertain:L{text_start}-L{text_start + text_lines - 1} -->"
-            parts.append(comment)
-            parts.append(text)
+            if annotate:
+                parts.append(_annotate_wrap(comment + "\n\n" + text, sec))
+            else:
+                parts.append(comment)
+                parts.append(text)
             line_num += text_lines + 3
             continue
 
@@ -694,6 +1079,8 @@ def emit_markdown(metadata: dict, sections: list[Section]) -> str:
         if sec.kind in (SectionKind.TITLE, SectionKind.HEADING):
             if not rendered.lstrip("#").strip():
                 continue
+        if annotate:
+            rendered = _annotate_wrap(rendered, sec)
         parts.append(rendered)
         line_num += rendered.count("\n") + 2
 

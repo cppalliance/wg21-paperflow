@@ -111,6 +111,7 @@ The converter handles six generator families (mpark/wg21, Bikeshed, hand-written
 - Pipe characters in cells escaped as `\|`
 - Short rows padded with empty cells
 - Paths 1-3 are lossy (table structure cannot be represented in CommonMark). Each emits a `<!-- tomd:lossy-table -->` HTML comment marker before the table. The QA scorer (`qa.py`) counts these markers as `lossy_table_count` to flag papers for manual review.
+- Note: HTML tables use DOM-structure-based rendering dispatch (above). PDF tables use a separate classification system with 5 table kinds and 5 detection passes; see `lib/pdf/table.py` module docstring.
 
 **T13. List rendering**
 - `render.py:_render_list`

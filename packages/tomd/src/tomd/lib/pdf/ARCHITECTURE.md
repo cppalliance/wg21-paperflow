@@ -26,13 +26,13 @@ Section - A classified document region (kind, text, confidence, heading_level, l
 
 Enums:
 - `Confidence`: HIGH, MEDIUM, LOW, UNCERTAIN
-- `SectionKind`: TITLE, HEADING, PARAGRAPH, LIST, CODE, TABLE, UNCERTAIN
+- `SectionKind`: TITLE, HEADING, PARAGRAPH, LIST, CODE, TABLE, FIGURE, UNCERTAIN
 
 ## Pipeline (13 steps)
 
 | Step | What | Module |
 |------|------|--------|
-| 1 | Dual extraction (MuPDF + spatial) + edge items + links + hidden scan + drawings | `extract.py`, `cleanup.py`, `wording.py`, `pipeline.py` |
+| 1 | Dual extraction (MuPDF + spatial) + edge items + links + hidden scan + drawings + figure detection | `extract.py`, `cleanup.py`, `wording.py`, `figures.py`, `pipeline.py` |
 | 1.5 | Slide-deck / standards-draft detection (geometry or page-count early exit) | `pipeline.py` |
 | 2 | Close document | `pipeline.py` |
 | 3 | Hidden block stripping + readability check | `cleanup.py`, `types.py` |
@@ -140,6 +140,29 @@ Enums:
 - When a bold/italic boundary falls mid-word between adjacent non-monospace spans, moves text to align the boundary with a word edge
 - Monospace spans are exempt (code boundaries are intentional)
 - Uses `dataclasses.replace` for immutable span updates
+
+### Layer 3.5: Figure Detection (4 techniques)
+
+**T13b. Bordered-box detection**
+- `figures.py:_is_bordered_box`
+- Identifies diagram boxes from vector drawings: paths with both stroke color and fill, width 30-80% of page, height 10-80pt
+- Rejects page-spanning rules and table cell borders (too wide or too narrow)
+
+**T13c. Arrow and connector classification**
+- `figures.py:_is_arrowhead`, `_is_connector`, `_is_dashed_connector`
+- Arrowheads: small filled triangles (3 items, max 15pt). Accepts closePath=True and closePath=False (dashed return arrow arrowheads with fill+color)
+- Solid connectors: stroked paths, 1-4 items, min 20pt length, no fill (distinguishes from box borders)
+- Dashed connectors: filled no-stroke paths, 20+ tiny line items, near-horizontal/vertical. Direction reversed for return arrow semantics
+
+**T13d. Graph topology extraction**
+- `figures.py:_detect_sequence_diagram`, `_match_topology`, `_project_through_box`
+- Sequence diagrams: duplicate-x columns collapsed into logical nodes, edges ordered by y-position. Dashed return arrowheads inside intermediate boxes projected to terminal nodes
+- General graphs: arrowhead pointy vertex = target, base = source. Connector-only fallback. Bidirectional edge detection
+
+**T13e. Figure region detection and grouping**
+- `figures.py:detect_figure_regions`, `_group_boxes`, `_merge_connected_groups`
+- Groups proximate boxes by y-tolerance. Union-Find merge of groups bridged by connectors (handles sequence diagram top/bottom box rows)
+- Returns FigureRegion with bbox and optional FigureGraph for each group of 2+ boxes
 
 ### Layer 4: Table Detection (3 techniques)
 
@@ -284,6 +307,13 @@ Enums:
 - `emit.py:_render_table`
 - GitHub-style Markdown pipe tables. First row = header with bold suppressed.
 
+**T34b. Figure rendering**
+- `emit.py:_render_figure_placeholder`, `_render_graph_figure`, `_render_sequence_figure`, `_render_positional_figure`
+- Sequence diagrams: participant header + numbered steps with arrow labels
+- Linear graphs: concept chains (`A -> label -> B`) or numbered vertical flows
+- Orphan label matching: text between boxes assigned to edges by y-proximity
+- Positional fallback: text sorted by bbox when no graph topology exists
+
 **T35. Uncertain region marking**
 - `emit.py:emit_markdown`
 - HTML comments with line ranges: `<!-- tomd:uncertain:L{start}-L{end} -->`
@@ -327,6 +357,7 @@ Enums:
 | `wording.py` | Wording section detection (ins/del) | `classify_wording`, `collect_line_drawings` | ~239 |
 | `cleanup.py` | Text cleanup, header/footer, hidden regions | `detect_repeating`, `strip_repeating`, `cleanup_text`, `find_hidden_regions`, `strip_hidden_blocks` | ~360 |
 | `spans.py` | Style boundary normalization | `normalize_spans` | ~114 |
+| `figures.py` | Figure/diagram detection and graph topology | `detect_figure_regions` | ~690 |
 | `table.py` | Two-signal table detection and exclusion | `detect_tables`, `exclude_table_regions` | ~805 |
 | `structure.py` | Comparison, heading/list/code classification | `compare_extractions`, `structure_sections` | ~1113 |
 | `emit.py` | Markdown and prompts generation | `emit_markdown`, `emit_prompts` | ~532 |

@@ -29,8 +29,16 @@ def get_edge_items(blocks: list[Block], page_num: int) -> list[PageEdgeItem]:
     Deduplicates by (text, rounded y-position) to avoid counting the
     same visual item twice when blocks overlap edge regions.
     """
+    _COLUMNAR_X_GAP = 50.0
+
     items = []
     for block in blocks:
+        # Skip columnar blocks: 2+ lines at widely separated x-positions
+        # are table column headers, not repeating page headers/footers.
+        if len(block.lines) >= 2:
+            x0s = [ln.bbox[0] for ln in block.lines if ln.text.strip()]
+            if x0s and max(x0s) - min(x0s) > _COLUMNAR_X_GAP:
+                continue
         for line in block.lines:
             text = line.text.strip()
             if not text:
@@ -243,6 +251,7 @@ def _join_cross_page(blocks: list[Block]) -> list[Block]:
                 and merged_boundary is None
                 and prev_text
                 and cur_text
+                and not PAGE_NUM_RE.match(prev_text)
                 and prev_text[-1] not in TERMINAL_PUNCTUATION
                 and cur_text[0].islower()):
             prev.lines.extend(block.lines)

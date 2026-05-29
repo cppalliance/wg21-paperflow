@@ -38,8 +38,28 @@ _LIGHT_SCHEME_OVERRIDE = (
     "<style>\n"
     "  html, body { background: #ffffff; color: #1f2328; }\n"
     "  body { margin: 0; padding: 24px; }\n"
+    "  .mermaid { margin: 1.5em 0; }\n"
     "</style>\n"
 )
+
+_MERMAID_INIT = (
+    '<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>\n'
+    "<script>\n"
+    "document.addEventListener('DOMContentLoaded', function () {\n"
+    "  if (typeof mermaid === 'undefined') { return; }\n"
+    "  mermaid.initialize({ startOnLoad: false, theme: 'default' });\n"
+    "  document.querySelectorAll('pre.code-block.mermaid code').forEach(function (el) {\n"
+    "    var div = document.createElement('div');\n"
+    "    div.className = 'mermaid';\n"
+    "    div.textContent = el.textContent;\n"
+    "    el.closest('pre').replaceWith(div);\n"
+    "  });\n"
+    "  mermaid.run();\n"
+    "});\n"
+    "</script>\n"
+)
+
+_HEAD_INJECT = _LIGHT_SCHEME_OVERRIDE + _MERMAID_INIT
 
 
 @lru_cache(maxsize=4)
@@ -79,8 +99,8 @@ def render_markdown(md_text: str, *, style: str = _DEFAULT_STYLE) -> str:
     head_close = "</head>"
     idx = html.find(head_close)
     if idx == -1:
-        return _LIGHT_SCHEME_OVERRIDE + html
-    return html[:idx] + _LIGHT_SCHEME_OVERRIDE + html[idx:]
+        return _HEAD_INJECT + html
+    return html[:idx] + _HEAD_INJECT + html[idx:]
 
 
 _IMG_SRC_RE = re.compile(r'(<img\b[^>]*\bsrc=")([^"]+)(")', re.IGNORECASE)
