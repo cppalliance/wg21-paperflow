@@ -31,7 +31,7 @@ from ..metadata_yaml.extract import (
 from .table import detect_tables, exclude_table_regions
 from .wg21 import extract_metadata_from_blocks
 from .emit import emit_markdown, emit_prompts
-from .types import KNOWN_SECTIONS, Confidence, Section, SectionKind, is_readable
+from .types import Confidence, Section, SectionKind, is_readable
 from ..toc import find_toc_indices, has_dot_leader, _is_toc_label
 from ..metadata_yaml.strip import (
     strip_metadata_headings as _strip_metadata_headings_new,

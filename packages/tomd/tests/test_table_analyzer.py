@@ -5,7 +5,7 @@
 
 from conftest import make_span
 from tomd.lib.pdf.table import (
-    TableKind, TableStrategy, _compute_table_signals, _classify_table,
+    TableKind, _compute_table_signals, _classify_table,
     _classify_and_annotate,
 )
 

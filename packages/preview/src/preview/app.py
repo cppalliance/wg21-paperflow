@@ -47,7 +47,10 @@ def create_app(
     """Build a Flask app pinned to a single paper id."""
     pid = paper_id.strip().upper()
     title = _resolve_title(backend, pid)
-    source_format = backend.get_source_path(pid).suffix.lstrip(".").upper()
+    try:
+        source_format = backend.get_source_path(pid).suffix.lstrip(".").upper()
+    except Exception:
+        source_format = "PDF"
 
     app = Flask(
         __name__,

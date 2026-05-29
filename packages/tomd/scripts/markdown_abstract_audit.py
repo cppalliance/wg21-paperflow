@@ -147,7 +147,6 @@ def main(argv: list[str] | None = None) -> int:
             w.writerow(r)
 
     n_struct = sum(1 for r in rows if r["has_structured_abstract_section"])
-    n_open = sum(1 for r in rows if r["opening_has_abstract_word"])
     n_neither = sum(
         1
         for r in rows

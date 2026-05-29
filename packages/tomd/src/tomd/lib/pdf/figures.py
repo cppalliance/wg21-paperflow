@@ -396,8 +396,6 @@ def _detect_sequence_diagram(
     if len(boxes) < 4:
         return None
 
-    xs = sorted(set(round(((b[0] + b[2]) / 2) / _COLUMN_X_TOLERANCE)
-                     for b in boxes))
     columns: dict[int, list[tuple]] = {}
     for b in boxes:
         cx = round(((b[0] + b[2]) / 2) / _COLUMN_X_TOLERANCE)
@@ -464,7 +462,6 @@ def _detect_sequence_diagram(
 
     if not arrow_events and connectors:
         for ci, (cs, ce) in enumerate(connectors):
-            dy = abs(ce[1] - cs[1])
             dx = abs(ce[0] - cs[0])
             if dx < 5.0:
                 continue

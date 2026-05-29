@@ -47,7 +47,7 @@ from collections import Counter, defaultdict
 from dataclasses import replace
 from enum import Enum
 
-from .types import Block, Span, Section, SectionKind, Confidence
+from .types import Block, Line, Span, Section, SectionKind, Confidence
 
 _log = logging.getLogger(__name__)
 

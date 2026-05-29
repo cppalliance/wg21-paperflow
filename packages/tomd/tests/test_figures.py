@@ -4,7 +4,6 @@
 
 """Tests for tomd.lib.pdf.figures -- figure region detection."""
 
-import pytest
 from tomd.lib.pdf.figures import (
     detect_figure_regions,
     _is_bordered_box,
