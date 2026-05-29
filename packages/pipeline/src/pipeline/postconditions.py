@@ -35,6 +35,32 @@ __all__ = [
 ]
 
 
+@dataclass(frozen=True)
+class ConvertReport:
+    """Per-paper convert-stage telemetry, surfaced to the CLI for
+    end-of-batch summaries.
+
+    Populated by ``_stage_convert`` when it ran. ``downstream_cleared``
+    is the names list from :class:`paperstore.ClearedSet` for papers
+    whose markdown content changed and where ``--keep-downstream`` was
+    not set.
+
+    ``source_raster_count`` and ``source_vector_count`` split the
+    ``source_image_count`` total by extraction source. Both are zero
+    for HTML papers (no raster/vector distinction) and for PDF
+    invocations that did not pass ``--extract-vector-images``. The
+    CLI uses them to format the per-paper truncation line as
+    ``kept M of N: R raster + V vector`` when both are non-zero.
+    """
+
+    images_kept: int = 0
+    source_image_count: int = 0
+    images_truncated: bool = False
+    downstream_cleared: tuple[str, ...] = ()
+    source_raster_count: int = 0
+    source_vector_count: int = 0
+
+
 @dataclass
 class ProcessResult:
     """Result of one ``process_paper`` invocation.
@@ -43,10 +69,15 @@ class ProcessResult:
     ``_stage_*`` body actually executed. An empty list means the verb
     short-circuited (paper already at or past ``through`` with all
     artifacts intact).
+
+    ``convert_report`` is set when the convert stage ran in this
+    invocation (so the CLI can roll up truncation and invalidation
+    summaries across the batch).
     """
 
     final_status: int
     stages_run: list[int] = field(default_factory=list)
+    convert_report: ConvertReport | None = None
 
 
 def postcondition_satisfied(
@@ -64,10 +95,6 @@ def postcondition_satisfied(
         return bool(paper.source_file) and Path(paper.source_file).exists()
     if stage == STAGES["convert"]:
         return bool(paper.markdown_path) and Path(paper.markdown_path).exists()
-    if stage == STAGES["dissect"]:
-        return bool(paper.dissect_path) and Path(paper.dissect_path).exists()
-    if stage == STAGES["advocatus"]:
-        return bool(paper.advocatus_path) and Path(paper.advocatus_path).exists()
     if stage == STAGES["agora"]:
         return bool(paper.agora_path) and Path(paper.agora_path).exists()
     return True

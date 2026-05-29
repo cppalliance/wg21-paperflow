@@ -1,0 +1,245 @@
+Here is a structured, categorized list of tickets for your bug-tracking system
+based on your notes. I have filtered out all the "ok" entries, translated the
+error descriptions into English software-development terms, grouped them by root
+cause, and preserved the original Paper IDs exactly as requested.
+
+🐛 Category 1: Heading Extraction Fails Due to Emojis & Styling  ✅ SOLVED (2026-05-13)
+
+Root cause: All 12 HTML papers use Jan Schultke's custom generator, which wraps
+the abstract in an `<abstract-block>` custom HTML element. The "Abstract:" label
+is rendered via a CSS `::before` pseudo-element, invisible to BeautifulSoup.
+The HTML renderer (`render.py`) had no handler for `<abstract-block>`, so child
+paragraphs rendered but the heading was lost.
+
+Fix: Added `abstract-block` handler in `_render_element` (render.py) that emits
+`## Abstract` + rendered children. The 13th paper (P4088R0) is a PDF and was
+already working correctly.
+
+Verified: All 13 papers now produce `## Abstract` after full regeneration
+(270 converted, 0 failed).
+
+Description: The parser fails to recognize headings (specifically "Abstract")
+when they contain an emoji, use different colors (e.g., grey), or are placed
+inside comment blocks. The body text is extracted, but the heading itself is
+completely missing in the Markdown. Affected Papers (13):
+
+  - P3666R3
+  - P3724R3
+  - P3737R3
+  - P3864R1
+  - P3876R1
+  - P3899R1
+  - P3938R1
+  - P3969R0
+  - P4037R0
+  - P4037R1
+  - P4040R0
+  - P4088R0
+  - P4168R0
+
+🐛 Category 2: Section Boundaries Not Detected (Content Over-Extraction)  ✅ SOLVED (2026-05-13)
+
+Root cause: Two independent bugs in `pipeline.py`:
+1. Pre-heading metadata (author, doc number, affiliations) on page 0 was not
+   stripped from the body after extraction into YAML, causing duplicate metadata
+   in the Markdown output.
+2. The `_TOC_BODY_PROTECT_MIN_WORDS` filter applied its word-count gate to
+   every paragraph after a protected heading. Short but valid prose paragraphs
+   (e.g. "Finally, a plan for progress is outlined (§5).") were stripped as
+   suspected TOC artifacts.
+
+Fix:
+1. Added pre-heading metadata stripping: after metadata merge, all non-heading
+   sections on page 0 before the first HEADING/TITLE are removed from the
+   section list.
+2. Refined min_words logic: the word-count gate now applies only to the first
+   body paragraph after a protected heading. Once that first paragraph confirms
+   the section has real content, all subsequent paragraphs are protected
+   regardless of length.
+
+Verified: P3984R0 and P3725R2 regenerated clean. P4030R0 has no PDF (removed).
+P4031R1 had no problems.
+
+Original affected papers (5):
+
+  - P3725R2 — fixed (metadata removed from body, abstract clean)
+  - P3984R0 — fixed ("Finally..." paragraph retained, metadata removed from body)
+  - P4012R0 — fixed (multi-line TOC entries now detected via joined-line matching)
+  - P4030R0 — removed (no PDF available)
+  - P4031R1 — no problems found
+
+🐛 Category 3: Numbered Headings Ignored by Parser  ✅ SOLVED (2026-05-13)
+
+Root cause: MuPDF splits heading blocks so the section number ("1") and title
+("Abstract") are on separate lines within the same block, both at the same font
+size and weight. `_render_heading_spans` in `emit.py` only rendered `lines[0]`,
+silently dropping the title text. `_split_heading_body` did not split because
+both lines had identical font properties. `_merge_orphan_heading_numbers` did
+not trigger because `sec.text` contained both lines (not bare number).
+
+Fix: Modified `_render_heading_spans` to detect bare section numbers on line 0
+(via `_BARE_HEADING_NUM_RE`) and join subsequent same-font lines to recover the
+title text. Golden tests updated for p1068r11 (Roman numerals) and p3556r0
+(decimal numbered headings).
+
+Verified: P4161R0 regenerated with correct headings (e.g. `### 1 Abstract`).
+P4160R0 and N5034 were already correct (different heading patterns).
+
+Original affected papers (3):
+
+  - P4161R0 — fixed (headings now show "1 Abstract", "2 Motivation", etc.)
+  - P4160R0 — no problems found (headings already correct)
+  - N5034 — no problems found (agenda doc, different heading structure)
+
+🐛 Category 4: Empty or Partially Extracted Abstract (Under-Extraction)  ✅ SOLVED (2026-05-13)
+
+Root cause: MuPDF merged the bold "Abstract" heading and its non-bold body
+paragraph into a single block because they are spatially adjacent. Both use
+fs=12.0pt (body size). `_split_heading_body` in `structure.py` has a
+`bold_drop` condition that should split bold-heading + non-bold-body, but
+it required `fs0 >= body_size * 1.05` (the `_HEADING_SIZE_RATIO` guard).
+At body font size (12.0 < 12.6), the guard blocked the split. The entire
+7-line block stayed as one HEADING section, and `_render_heading_spans`
+rendered only line[0] ("Abstract"), silently dropping lines 1-6 (the prose).
+
+Fix: Relaxed the `bold_drop` guard in `_split_heading_body` to also trigger
+when line0 is short (<= `_HEADING_MAX_WORDS` = 12 words), regardless of
+font size ratio. This catches bold headings at body size while preserving
+the size-ratio guard for longer bold lines (preventing false splits on bold
+paragraph starts).
+
+Simulation: Tested across all 124 PDFs in paperstore. Only 3 behavior
+changes detected, all in the P4021 family (R0, R1, R2). No other papers
+affected.
+
+Verified: P4021R0, P4021R1, P4021R2 all regenerated with complete abstract
+paragraphs.
+
+Original affected papers (1, expanded to 3 revisions):
+
+  - P4021R0 — fixed (abstract paragraph restored)
+  - P4021R1 — fixed (abstract paragraph restored)
+  - P4021R2 — fixed (abstract paragraph restored; TOC leak also fixed, see below)
+
+Additional fix for P4021R2: Label-anchored TOC detection fallback. The
+standard TOC detection failed because the PDF's TOC entries had different
+titles than the actual section headings (e.g. "1. Introduction to
+compile_assert" vs "1. Introduction"), so no 3+ consecutive heading matches
+formed. Added a fallback in `pipeline.py`: when `find_toc_indices` returns
+empty but a paragraph-level "Contents"/"Table of Contents" label exists
+with 3+ numbered lines following (before the next HEADING), those sections
+are marked as TOC. Simulated across 124 PDFs: only P4021R2 affected.
+
+🐛 Category 5: Duplicate Data & Unfiltered Garbage Text  (P2000R5 ✅ SOLVED 2026-05-13)
+
+Root cause (P2000R5): Orphaned TOC label "Table of Content" (singular, without
+"s") survived pipeline stripping. Two independent issues:
+1. `_TOC_LABELS` in `toc.py` only contained "table of contents" (plural) and
+   "contents". The singular variant was not recognized by `_is_toc_label()`.
+2. The label sat on page 0 AFTER the Revision History heading, so it was not
+   stripped as pre-heading metadata. The actual TOC entries (page 2) were
+   correctly detected and removed, but this standalone label was orphaned.
+
+Fix:
+1. Added "table of content" (singular) to `_TOC_LABELS` in `toc.py`.
+2. Added orphaned TOC label stripping in `pipeline.py`: after TOC detection and
+   removal, any PARAGRAPH section whose text matches `_is_toc_label()` and is
+   <= 4 words is removed. This catches standalone labels separated from their
+   TOC entries by page breaks or other content.
+
+Simulation: Tested across 124 PDFs. Only P2000R5 had a surviving orphaned label
+in the final markdown. 5 spot-check papers (P2583R3, P3856R5, P4003R2, P4021R2,
+N5036) regenerated clean with no regressions.
+
+Verified: P2000R5 regenerated without "Table of Content" in body. Transition is
+now clean: Revision History -> ## 1 Abstract.
+
+Description: The extraction process is pulling in redundant information,
+duplicating sections, or importing useless formatting characters (like PDF
+dot-leaders). Bullet points also seem to manipulate/break the extraction logic
+in some cases. Affected Papers (3):
+
+  - P2000R5 — fixed (orphaned "Table of Content" label removed)
+  - P3059R2 (Abstract appears twice—once correct, once incorrect. Bullet points
+    seem to manipulate extraction)
+  - P3977R0 (Heading is not bolded. Additionally, metadata like document, date,
+    audience, and reply-to are incorrectly printed in the Markdown body even
+    though they are already in the YAML frontmatter)
+
+🐛 Category 6: Table of Contents Extraction Failure (solved with one of the other tickets)
+
+Description: The Table of Contents (TOC) is completely missing/empty in the
+generated Markdown, even though a fully formatted TOC exists in the source PDF.
+Needs debugging to determine if the TOC is being parsed from raw text or PDF
+metadata layers. Affected Papers (1):
+
+  - P3968R0
+
+🐛 Category 7: Duplicate & False-Positive Headings (Running Header Leakage)
+
+Root cause (debugged 2026-05-13): Some LaTeX-generated PDFs (e.g. P4012R0)
+include per-page running headers that repeat the current section name in normal
+font size (9.7pt). These are distinct from the actual section headings which
+use large CAPS font (19.9pt). `structure_sections` classifies both as headings
+because both start with a section number, producing duplicate headings:
+  - `## 5 Motivation` (running header, LOW confidence, 9.7pt)
+  - `### 5 MOTIVATION` (real heading, MEDIUM confidence, 19.9pt)
+
+Additionally, footnote/margin text starting with a number (8.9pt) gets
+false-positive promoted to headings:
+  - `## 2 format strings are very close, though: https://...`
+  - `## 3 explicit conversion to basic_vec allows conversions...`
+
+This causes the markdown viewer's auto-generated Table of Contents to display
+broken entries (bare numbers like "1", "2", "3" without titles, plus long
+body-text lines promoted to headings).
+
+Proposed fix (two parts):
+1. Heading dedup: when two consecutive headings have the same normalized text
+   (case-insensitive, after stripping section number prefix), keep only the one
+   with higher confidence. This removes running-header duplicates.
+2. False-positive filter: headings with LOW confidence and font size below body
+   size should be demoted to PARAGRAPH. This removes footnote/margin text.
+
+Both fixes would go in `structure.py` or as post-processing in `pipeline.py`.
+
+Affected Papers (confirmed):
+
+  - P4012R0 (23 headings produced, only 12 are real; 11 are running headers
+    or false positives)
+
+🐛 Category 7b: Multi-Font Heading Recovery (Extension of Category 3)
+
+Root cause (debugged 2026-05-13): Some LaTeX templates (Matthias Kretz simd
+papers) use a decorative two-font heading pattern: a large bold number
+(EURB10, 19.9pt) paired with a smaller ALL-CAPS title (TeXGyreAdventor,
+11.6pt) on the next line within the same MuPDF block. The Category 3 fix
+in `_render_heading_spans` (emit.py) joins bare-number line[0] with
+subsequent lines, but only when font sizes match within 0.5pt. Here the
+difference is 8.3pt, so line[1] ("CHANGELOG") is silently dropped.
+
+Proposed fix: Relax the break condition from
+  `abs(line.font_size - head_fs) > 0.5`
+to
+  `line.font_size > head_fs + 0.5`
+This allows joining when the number is LARGER than the title (decorative
+pattern) but still blocks when the title is larger than the number
+(reference numbers, footnotes). The P4007R0 false-positive cases (running
+headers classified as headings) are a separate Category 7 issue.
+
+Simulation: 93 multi-font heading instances across 13 PDFs. The Kretz
+pattern (fs=19.9 + fs=11.6) accounts for 80+ of these across P3844R3/R4,
+P3932R0, P3948R1, P3978R0-R3, P4011R0, P4012R0/R1. The remaining cases
+(P0876R22, P4007R0) have line[0] SMALLER than line[1] and would correctly
+NOT be joined by the proposed fix.
+
+Affected Papers (13):
+
+  - P4012R0, P4012R1
+  - P3844R3, P3844R4
+  - P3932R0
+  - P3948R1
+  - P3978R0, P3978R1, P3978R2, P3978R3
+  - P4011R0
+  - P0876R22 (different pattern, line[0] smaller - would not be affected)
+  - P4007R0 (false-positive headings - separate Category 7 issue)

@@ -1,0 +1,272 @@
+pid,sources_pmdh,primary_stored_source,pdf_span_hits,pdf_line_kind_set,has_structured_heading,pdf_first_page,pdf_label_font,pdf_label_size_pt,pdf_label_y_frac,pdf_label_x_frac,pdf_error,body_abstract_preview,has_word_abstract_in_body_opening,html_abstract_preview,html_patterns,md_heading_signal,md_patterns
+n5034,MH,markdown,0,,False,,,,,,,,False,,,False,
+n5035,PM,pdf,0,,False,,,,,,,,False,,,False,
+n5036,PM,pdf,0,,False,,,,,,,,False,,,False,
+n5037,PM,pdf,0,,False,,,,,,,,False,,,False,
+n5038,PM,pdf,0,,False,,,,,,,,False,,,False,
+n5040,PM,pdf,0,,False,,,,,,,,False,,,False,
+n5043,PM,pdf,0,,False,,,,,,,,False,,,False,
+p0876r22,PM,pdf,2,inline_with_text;standalone_label,True,0,NimbusSanL-Bold,11.955,0.724,0.1,,abstract . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .,True,,,True,md_h2_abstract
+p1000r7,PM,pdf,0,,False,,,,,,,,False,,,False,
+p1000r8,PM,pdf,0,,False,,,,,,,,False,,,False,
+p1040r9,MH,markdown,0,,True,,,,,,,,False,eanHeyd Meneide               Abstract   A proposal for a function that allows pulling resources at compile-,html_h2_abstract;html_id_contains_abstract,False,
+p1130r2,MH,markdown,0,,True,,,,,,,,False,pers/d1130.html               Abstract   This proposal provides a way of tracking dependencies at preprocess,html_h2_abstract;html_id_contains_abstract,False,
+p2000r5,PM,pdf,2,numbered_heading,True,1,Calibri-Bold,11.0,0.0976,0.1176,,,False,,,False,
+p2034r6,PM,pdf,0,,False,,,,,,,,False,,,False,
+p2285r1,MH,markdown,0,,False,,,,,,,,False,,,False,
+p2583r0,PM,pdf,2,standalone_label,True,0,Type3 (10 0 R),9.195,0.4093,0.121,,## Abstract  C++20 provides symmetric transfer ([P0913R1](https://wg21.,True,,,True,md_h2_abstract
+p2583r1,PM,pdf,2,standalone_label,True,0,Type3 (10 0 R),9.195,0.4093,0.121,,## Abstract  C++20 provides symmetric transfer ([P0913R1](https://wg21.,True,,,True,md_h2_abstract
+p2583r2,PM,pdf,2,standalone_label,True,0,Type3 (10 0 R),9.195,0.4093,0.121,,## Abstract  C++20 provides symmetric transfer ([P0913R1](https://wg21.,True,,,True,md_h2_abstract
+p2583r3,PM,pdf,2,standalone_label,True,0,Body,9.0,0.3443,0.1154,,## Abstract  :::wording-remove  C++20 provides symmetric transfer (P091,True,,,True,md_h2_abstract
+p2728r11,MH,markdown,0,,False,,,,,,,is section.  The Unicode standard maps *abstract characters* to *code points* in the *Unicode codespace* fro,True,   The Unicode standard maps  abstract characters  to  code points  in the  Unicode codespace  from  0  to  ,,False,
+p2929r2,MH,markdown,0,,True,,,,,,,,False,C1/SC22/WG21                  Abstract   Proposal to extend  std :: simd  with a method of allowing a lambda,html_h2_abstract;html_id_contains_abstract,False,
+p2929r3,MH,markdown,0,,True,,,,,,,,False,C1/SC22/WG21                  Abstract   Proposal to extend  std :: simd  with a method of allowing a lambda,html_h2_abstract;html_id_contains_abstract,False,
+p2953r3,MH,markdown,0,,True,,,,,,,,False,on:       12                  Abstract   Current C++ permits explicitly-defaulted special members to differ ,html_h2_abstract;html_id_contains_abstract,False,
+p2953r4,MH,markdown,0,,True,,,,,,,,False,on:       12                  Abstract   Current C++ permits explicitly-defaulted special members to differ ,html_h2_abstract;html_id_contains_abstract,False,
+p2956r2,MH,markdown,0,,True,,,,,,,,False,C1/SC22/WG21                  Abstract   Proposal to add  std :: simd  overloads for the saturating arithmet,html_h2_abstract;html_id_contains_abstract,False,
+p2964r2,MH,markdown,0,,True,,,,,,,,False,C1/SC22/WG21                  Abstract   This paper proposes extending  std :: simd  to support user-defined,html_h2_abstract;html_id_contains_abstract,False,
+p2964r3,MH,markdown,0,,True,,,,,,,,False,C1/SC22/WG21                  Abstract   This paper proposes extending  std :: simd  to support user-defined,html_h2_abstract;html_id_contains_abstract,False,
+p3039r1,PM,pdf,0,,False,,,,,,,,False,,,False,
+p3045r7,MH,markdown,0,,True,,,,,,,,False,,html_id_contains_abstract,False,
+p3052r2,MH,markdown,0,,True,,,,,,,- Abstract   - Revision history   - Discussion   - Design   - Proposed,True, view_interface::at()         Abstract   Revision history   Discussion   Design   Proposed change   Acknowle,html_h2_abstract,True,md_h2_abstract
+p3059r2,MH,markdown,0,,True,,,,,,,- Abstract   - Revision history   - Discussion   - Proposed change  ##,True,ors/sentinels private         Abstract   Revision history   Discussion   Proposed change           Abstract ,html_h2_abstract,True,md_h2_abstract
+p3154r2,MH,markdown,0,,True,,,,,,,angelog  ### Changes since R1  - Reword Abstract - Clarify in § 2 Motivation that `int8_t` and `uint8_t` are,True,"C1/SC22/WG21                  Abstract   This paper proposes deprecating overloads under iostreams, that tak",html_h2_abstract;html_id_contains_abstract,False,
+p3161r5,MH,markdown,0,,True,,,,,,,## Target  C++29  ## Abstract  Addition and uniformization of integer arithmetic function,True,"SG6, LWG     Target   C++29   Abstract   Addition and uniformization of integer arithmetic functions with ov",html_h2_abstract,True,md_h2_abstract
+p3181r1,PM,pdf,1,standalone_label,True,0,ArialMT,14.0,0.3501,0.1176,,"1 Date: Feb 22, 2026  Target: C++26  ## Abstract  The current object lifetime rules insist that the last upd",True,,,True,md_h2_abstract
+p3242r2,MH,markdown,0,,False,,,,,,,,False,,,False,
+p3373r2,PM,pdf,1,standalone_label,True,0,ArialMT,20.0,0.2425,0.1176,,,False,,,False,
+p3373r3,PM,pdf,1,standalone_label,True,0,ArialMT,20.0,0.2425,0.1176,,,False,,,False,
+p3373r4,PM,pdf,1,standalone_label,True,0,ArialMT,20.0,0.2425,0.1176,,,False,,,False,
+p3384r1,MH,markdown,0,,True,,,,,,,,False,/cpp/counter.bs               Abstract   __COUNTER__  is a predefined macro provided as a language extension,html_h2_abstract;html_id_contains_abstract,False,
+p3385r7,MH,markdown,0,,False,,,,,,,,False,,,False,
+p3411r5,MH,markdown,0,,True,,,,,,,,False,R2   1.5  R1   1.6  R0     2  Abstract   3  Motivation   4  Design Space and Prior Art     4.1  Boost.Range ,html_h1_numbered_abstract_space;html_id_contains_abstract,True,md_h1_abstract
+p3427r3,PM,pdf,0,,False,,,,,,,,False,,,False,
+p3440r2,MH,markdown,0,,True,,,,,,,,False,C1/SC22/WG21                  Abstract   Proposal to add  std :: simd :: mask_from_count  function to create,html_h2_abstract;html_id_contains_abstract,False,
+p3440r3,MH,markdown,0,,True,,,,,,,,False,C1/SC22/WG21                  Abstract   Proposal to add  std :: simd :: mask_from_count  function to create,html_h2_abstract;html_id_contains_abstract,False,
+p3450r1,MH,markdown,0,,False,,,,,,,,False,,,False,
+p3596r0,PM,pdf,5,short_line_mentions_abstract;standalone_label,True,0,LMRoman10-Bold,9.963,0.3275,0.4644,,,False,,,False,
+p3596r1,PM,pdf,5,short_line_mentions_abstract;standalone_label,True,0,LMRoman10-Bold,9.963,0.3275,0.4644,,,False,,,False,
+p3598r0,PM,pdf,1,standalone_label,True,0,LMRoman10-Bold,9.963,0.2804,0.4644,,,False,,,False,
+p3605r1,PM,pdf,2,numbered_heading,True,0,TimesNewRomanPSMT,9.091,0.2591,0.11,,mplexity; Simplify Returns. ```  ### 1. Abstract  This paper proposes to add an `isqrt` function (template) ,True,,,False,
+p3625r1,PM,pdf,1,standalone_label,True,0,HelveticaNeue-Bold,18.0,0.2586,0.0952,,,False,,,False,
+p3642r4,MH,markdown,0,,False,,,,,,,,False,,,False,
+p3647r1,MH,markdown,0,,False,,,,,,,,False,,,False,
+p3655r4,MH,markdown,0,,True,,,,,,,# Abstract  We propose a standard string view type that guarantees nul,True,akov <aleshevl@gmail.com>  1  Abstract We propose a standard string view type that guarantees null-terminati,html_h1_numbered_abstract_space;html_id_contains_abstract,True,md_h1_abstract
+p3666r3,MH,markdown,0,,False,,,,,,,,False,,,False,
+p3688r6,MH,markdown,0,,False,,,,,,,,False,,,False,
+p3692r4,PM,pdf,30,inline_with_text;short_line_mentions_abstract;standalone_label,True,0,LinLibertineTB,11.955,0.2334,0.0882,,,False,,,False,
+p3724r3,MH,markdown,0,,False,,,,,,,,False,,,False,
+p3725r2,PM,pdf,0,,False,,,,,,,,False,,,False,
+p3725r3,PM,pdf,0,,False,,,,,,,,False,,,False,
+p3726r2,MH,markdown,0,,False,,,,,,,,False,,,False,
+p3732r2,MH,markdown,0,,True,,,,,,,# Abstract  We propose `ranges` algorithm overloads (both parallel and,True,,html_h1_abstract;html_id_contains_abstract,True,md_h1_abstract
+p3737r3,MH,markdown,0,,False,,,,,,,,False,,,False,
+p3769r1,MH,markdown,0,,True,,,,,,,,False,b/main/D3769.bs               Abstract   Clarifies wording for selection of deallocation functions in placem,html_h2_abstract;html_id_contains_abstract,False,
+p3786r2,PM,pdf,1,standalone_label,True,0,HelveticaNeue-Bold,18.0,0.2611,0.0952,,,False,,,False,
+p3787r1,MH,markdown,0,,True,,,,,,,,False,C1/SC22/WG21                  Abstract   We extend the same changes that  [P2248R8]  applied to the rest of ,html_h2_abstract;html_id_contains_abstract,False,
+p3787r2,MH,markdown,0,,True,,,,,,,,False,C1/SC22/WG21                  Abstract   We extend the same changes that  [P2248R8]  applied to the rest of ,html_h2_abstract;html_id_contains_abstract,False,
+p3795r1,MH,markdown,0,,False,,,,,,,,False,,,False,
+p3795r2,MH,markdown,0,,False,,,,,,,,False,,,False,
+p3804r2,MH,markdown,0,,True,,,,,,,# Abstract  `parallel_scheduler` [[P2079R10](https://wg21.link/p2079r1,True,ments   7  References         Abstract   parallel_scheduler   [ P2079R10 ]  was a long time in the making an,html_h1_abstract;html_id_contains_abstract,True,md_h1_abstract
+p3816r2,MH,markdown,0,,True,,,,,,,"pport. - Added some more motivation.  # Abstract  This paper proposes a new standard library template, `cons",True, 1.2  Changes from R0:     2  Abstract   3  Motivation   4  Examples     4.1  Mp11  mp_unique  using reflect,html_h1_numbered_abstract_space;html_id_contains_abstract,True,md_h1_abstract
+p3822r1,MH,markdown,0,,False,,,,,,,,False,,,False,
+p3826r3,MH,markdown,0,,False,,,,,,,,False,,,False,
+p3826r4,MH,markdown,0,,False,,,,,,,,False,,,False,
+p3826r5,MH,markdown,0,,False,,,,,,,,False,,,False,
+p3828r1,PM,pdf,0,,False,,,,,,,,False,,,False,
+p3832r1,MH,markdown,0,,True,,,,,,,ng reached” in Effects and Returns.  ## Abstract  C++11 introduced `std::lock` and `std::try_lock` (and C++1,True,” in Effects and Returns.     Abstract   C++11 introduced  std::lock  and  std::try_lock  (and C++17 introdu,html_h2_abstract;html_id_contains_abstract,True,md_h2_abstract
+p3833r1,MH,markdown,0,,True,,,,,,,"`false`”) instead of `==` notation.  ## Abstract  This paper proposes `std::multi_lock`, a RAII class templa",True,"instead of  ==  notation.     Abstract   This paper proposes  std::multi_lock , a RAII class template that c",html_h2_abstract;html_id_contains_abstract,True,md_h2_abstract
+p3833r2,MH,markdown,0,,True,,,,,,,"`false`”) instead of `==` notation.  ## Abstract  This paper proposes `std::multi_lock`, a RAII class templa",True,"instead of  ==  notation.     Abstract   This paper proposes  std::multi_lock , a RAII class template that c",html_h2_abstract;html_id_contains_abstract,True,md_h2_abstract
+p3839r0,P,pdf,0,,False,,,,,,,,,,,,
+p3842r1,MH,markdown,0,,True,,,,,,,## Abstract  The papers [P3818](https://open-std.org/JTC1/SC22/WG21/doc,True,s() and current_exception()   Abstract      The papers  P3818  and  P3820  explain the background of the pro,html_h2_abstract,True,md_h2_abstract
+p3842r2,PM,pdf,1,standalone_label,True,0,NotoSerif-Bold,18.0,0.3295,0.0705,, # A conservative fix for constexpr  ## Abstract  The papers [P3818](https://open-std.org/JTC1/SC22/WG21/doc,True,,,True,md_h2_abstract
+p3844r3,PM,pdf,1,standalone_label,True,0,TeXGyreAdventor-Regular,11.645,0.2902,0.777,,,False,,,False,
+p3844r4,PM,pdf,1,standalone_label,True,0,TeXGyreAdventor-Regular,11.645,0.3585,0.777,,,False,,,False,
+p3846r1,PM,pdf,1,standalone_label,True,0,LMRoman10-Bold,9.963,0.6756,0.4644,,,False,,,False,
+p3856r4,PM,pdf,0,,False,,,,,,,,False,,,False,
+p3856r5,PM,pdf,0,,False,,,,,,,,False,,,False,
+p3856r6,PM,pdf,0,,False,,,,,,,,False,,,False,
+p3856r7,PM,pdf,0,,False,,,,,,,,False,,,False,
+p3856r8,PM,pdf,0,,False,,,,,,,,False,,,False,
+p3864r1,MH,markdown,0,,False,,,,,,,,False,,,False,
+p3865r1,PM,pdf,1,standalone_label,True,0,Times-Italic,18.0,0.2754,0.1191,,,False,,,False,
+p3865r2,PM,pdf,1,standalone_label,True,0,Times-Italic,18.0,0.2754,0.1191,,,False,,,False,
+p3865r3,PM,pdf,1,standalone_label,True,0,Times-Italic,18.0,0.2754,0.1191,,,False,,,False,
+p3873r0,MH,markdown,0,,False,,,,,,,,False,,,False,
+p3874r1,PM,pdf,1,standalone_label,True,0,ArialMT,20.0,0.3628,0.1176,,ia.org/wiki/Voiced_velar_plosive)/)  ## Abstract  In recent years there have been numerous recommendations f,True,,,True,md_h2_abstract
+p3876r1,MH,markdown,0,,False,,,,,,,nor improvements were made:  - expanded abstract - considered floating-point overloads when counting the siz,True,ents were made:      expanded abstract        considered floating-point overloads when counting the size of ,,False,
+p3895r1,MH,markdown,0,,False,,,,,,,,False,,,False,
+p3899r1,MH,markdown,0,,False,,,,,,,,False,,,False,
+p3899r2,MH,markdown,0,,False,,,,,,,,False,,,False,
+p3904r1,MH,markdown,0,,False,,,,,,,,False,,,False,
+p3911r1,MH,markdown,0,,True,,,,,,,"tter@gmail.com> **Audience**: EWG    ## Abstract  Building on motivation from EWG Kona 2025, this paper prop",True,om>   Audience : EWG Contents Abstract Revision History Acknowledgments 0. TL;DR 1. Introduction   1.1 Overv,html_h2_abstract;html_id_contains_abstract,True,md_h2_abstract
+p3911r2,MH,markdown,0,,True,,,,,,,"tter@gmail.com> **Audience**: EWG    ## Abstract  Building on motivation from EWG Kona 2025, this paper prop",True,om>   Audience : EWG Contents Abstract Revision History Acknowledgments TL;DR §1. Introduction   §1.1 Motiva,html_h2_abstract;html_id_contains_abstract,True,md_h2_abstract
+p3924r1,MH,markdown,0,,False,,,,,,,,False,,,False,
+p3927r0,MH,markdown,0,,False,,,,,,,or a scheduler-like object. It uses the abstract base classes `parallel_scheduler_backend` and `receiver_pro,True,uler-like object. It uses the abstract base classes  parallel_scheduler_backend  and  receiver_proxy  to pun,,False,
+p3927r1,MH,markdown,0,,False,,,,,,,or a scheduler-like object. It uses the abstract base classes `parallel_scheduler_backend` and `receiver_pro,True,uler-like object. It uses the abstract base classes  parallel_scheduler_backend  and  receiver_proxy  to pun,,False,
+p3927r2,MH,markdown,0,,False,,,,,,,,False,uler-like object. It uses the abstract base classes  parallel_scheduler_backend  and  receiver_proxy  to pun,,False,
+p3932r0,PM,pdf,1,standalone_label,True,0,TeXGyreAdventor-Regular,11.645,0.3882,0.777,,,False,,,False,
+p3936r1,PM,pdf,1,standalone_label,True,0,NotoSans-Bold,14.346,0.2892,0.1168,,,False,,,False,
+p3938r1,MH,markdown,0,,False,,,,,,,,False,,,False,
+p3941r1,MH,markdown,0,,False,,,,,,,,False,,,False,
+p3941r2,MH,markdown,0,,False,,,,,,,,False,,,False,
+p3941r3,MH,markdown,0,,False,,,,,,,,False,,,False,
+p3941r4,MH,markdown,0,,False,,,,,,,,False,,,False,
+p3948r1,PM,pdf,1,standalone_label,True,0,TeXGyreAdventor-Regular,11.645,0.3902,0.777,,,False,,,False,
+p3950r0,PM,pdf,1,standalone_label,True,0,ArialMT,20.0,0.288,0.1176,,,False,,,False,
+p3951r0,MH,markdown,0,,False,,,,,,,,False,,,False,
+p3951r1,MH,markdown,0,,False,,,,,,,,False,,,False,
+p3952r0,PM,pdf,0,,False,,,,,,,,False,,,False,
+p3953r0,MH,markdown,0,,True,,,,,,,n and naming things. — Phil Karlton  ## Abstract  [P2918] introduced `std::runtime_format` to allow opting o,True,    Table of Contents     1   Abstract   2   Motivation   3   Proposed Naming:  std :: dynamic_format   4   ,html_h2_numbered_abstract;html_id_contains_abstract,True,md_h2_abstract
+p3953r1,MH,markdown,0,,True,,,,,,,n and naming things. — Phil Karlton  ## Abstract  [P2918] introduced `std::runtime_format` to allow opting o,True,    Table of Contents     1   Abstract   2   Changes since R0   3   Motivation   4   Proposed Naming:  std :,html_h2_numbered_abstract;html_id_contains_abstract,True,md_h2_abstract
+p3953r2,MH,markdown,0,,True,,,,,,,n and naming things. — Phil Karlton  ## Abstract  [P2918] introduced `std::runtime_format` to allow opting o,True,    Table of Contents     1   Abstract   2   Changes since R1   3   Changes since R0   4   Motivation   5   ,html_h2_numbered_abstract;html_id_contains_abstract,True,md_h2_abstract
+p3953r3,MH,markdown,0,,True,,,,,,,n and naming things. — Phil Karlton  ## Abstract  [P2918] introduced `std::runtime_format` to allow opting o,True,    Table of Contents     1   Abstract   2   Changes since R2   3   Changes since R1   4   Changes since R0 ,html_h2_numbered_abstract;html_id_contains_abstract,True,md_h2_abstract
+p3955r0,PM,pdf,1,standalone_label,True,0,ArialMT,20.0,0.2425,0.1176,,,False,,,False,
+p3959r0,MH,markdown,0,,False,,,,,,,,False,,,False,
+p3960r0,MH,markdown,0,,True,,,,,,,"(NVIDIA) - Ruslan Arutyunyan (Intel)  # Abstract  Given an object `src` of trivially-copyable type `T`, we c",True, Contents     1  Authors   2  Abstract   3  Motivation     3.1  Accelerators launch parallel algorithms by b,html_h1_numbered_abstract_space;html_id_contains_abstract,True,md_h1_abstract
+p3961r0,MH,markdown,0,,False,,,,,,,,False,,,False,
+p3961r1,MH,markdown,0,,False,,,,,,,,False,,,False,
+p3962r0,PM,pdf,0,,False,,,,,,,,False,,,False,
+p3963r0,MH,markdown,0,,True,,,,,,,# Abstract  This paper proposes making lambdas with captures copy assi,True,sure]     6  References       Abstract   This paper proposes making lambdas with captures copy assignable an,html_h1_abstract;html_id_contains_abstract,True,md_h1_abstract
+p3965r0,MH,markdown,0,,False,,,,,,,,False,,,False,
+p3966r0,MH,markdown,0,,False,,,,,,,,False,,,False,
+p3967r0,PM,pdf,0,,False,,,,,,,,False,,,False,
+p3968r0,PM,pdf,0,,False,,,,,,,,False,,,False,
+p3969r0,MH,markdown,0,,False,,,,,,,,False,,,False,
+p3970r0,PM,pdf,0,,False,,,,,,,,False,,,False,
+p3971r0,MH,markdown,0,,True,,,,,,,,False,"C1/SC22/WG21                  Abstract   This paper proposes  std :: rebind , a facility for converting cont",html_h2_abstract;html_id_contains_abstract,False,
+p3973r0,MH,markdown,0,,True,,,,,,,,False,"C1/SC22/WG21                  Abstract   We propose  std :: bit_cast_as () , a facility for reinterpreting s",html_h2_abstract;html_id_contains_abstract,False,
+p3977r0,PM,pdf,1,standalone_label,True,0,CMBX9,8.966,0.1646,0.4702,,"er J. Rosten (oliver.rosten@gmail.com)  Abstract  Historically, contracts have been categorized according to",True,,,True,md_standalone_word
+p3978r0,PM,pdf,1,standalone_label,True,0,TeXGyreAdventor-Regular,11.645,0.4584,0.777,,,False,,,False,
+p3978r1,PM,pdf,1,standalone_label,True,0,TeXGyreAdventor-Regular,11.645,0.4086,0.777,,,False,,,False,
+p3978r2,PM,pdf,1,standalone_label,True,0,TeXGyreAdventor-Regular,11.645,0.3899,0.777,,,False,,,False,
+p3978r3,PM,pdf,1,standalone_label,True,0,TeXGyreAdventor-Regular,11.645,0.3806,0.777,,,False,,,False,
+p3980r0,MH,markdown,0,,False,,,,,,,,False,,,False,
+p3980r1,MH,markdown,0,,False,,,,,,,,False,,,False,
+p3981r0,MH,markdown,0,,False,,,,,,,,False,,,False,
+p3981r1,MH,markdown,0,,False,,,,,,,,False,,,False,
+p3981r2,MH,markdown,0,,False,,,,,,,,False,,,False,
+p3982r0,MH,markdown,0,,False,,,,,,,,False,,,False,
+p3982r1,MH,markdown,0,,False,,,,,,,,False,,,False,
+p3982r2,MH,markdown,0,,False,,,,,,,,False,,,False,
+p3983r0,MH,markdown,0,,True,,,,,,,,False,C1/SC22/WG21                  Abstract   The Working Draft specification of  std :: simd  makes  basic_vec  ,html_h2_abstract;html_id_contains_abstract,False,
+p3983r1,MH,markdown,0,,True,,,,,,,,False,C1/SC22/WG21                  Abstract   The Working Draft specification of  std :: simd  makes  basic_vec  ,html_h2_abstract;html_id_contains_abstract,False,
+p3984r0,PM,pdf,1,standalone_label,True,0,TimesNewRomanPSMT,20.04,0.2962,0.1177,,,False,,,False,
+p3985r0,MH,markdown,0,,True,,,,,,,,False,s/papers/issues               Abstract   This paper proposes adding 10 public concepts to the  std :: simd  ,html_h2_abstract;html_id_contains_abstract,False,
+p3986r0,PM,pdf,1,standalone_label,True,0,ArialMT,20.0,0.288,0.1176,,,False,,,False,
+p3986r1,PM,pdf,1,standalone_label,True,0,ArialMT,20.0,0.288,0.1176,,,False,,,False,
+p4003r0,PM,pdf,2,standalone_label,True,0,Type3 (10 0 R),9.195,0.4262,0.121,,"## Abstract  C++20 coroutines have five properties that, taken together",True,,,True,md_h2_abstract
+p4003r1,PM,pdf,2,standalone_label,True,0,Type3 (10 0 R),9.195,0.4262,0.121,,"## Abstract  C++20 coroutines have five properties that, taken together",True,,,True,md_h2_abstract
+p4003r2,PM,pdf,2,standalone_label,True,0,Body,9.0,0.3586,0.1154,,## Abstract  This paper asks the committee to advance the *IoAwaitable*,True,,,True,md_h2_abstract
+p4004r0,PM,pdf,1,standalone_label,True,0,Times-Italic,18.0,0.2754,0.1191,,,False,,,False,
+p4004r1,PM,pdf,1,standalone_label,True,0,Times-Italic,18.0,0.2754,0.1191,,,False,,,False,
+p4005r0,MH,markdown,0,,True,,,,,,,## Abstract  This paper proposes a particular form of guaranteed-enforc,True,-(quick-)enforced contracts   Abstract   This paper proposes a particular form of guaranteed-enforced contra,html_h2_abstract,True,md_h2_abstract
+p4006r0,MH,markdown,0,,True,,,,,,,,False,C1/SC22/WG21                  Abstract   This paper proposes adding  std :: bit_lshift  and  std :: bit_rshi,html_h2_abstract;html_id_contains_abstract,False,
+p4007r0,PM,pdf,2,standalone_label,True,0,Type3 (10 0 R),8.097,0.3685,0.118,,## Abstract  `std::execution` serves its domain well. Different asynchr,True,,,True,md_h2_abstract
+p4007r1,PM,pdf,2,standalone_label,True,0,Type3 (11 0 R),9.195,0.4093,0.121,,  ## References  WG21 Papers  Other  ## Abstract  `std::execution::task` ([P3552R3](https://wg21.link/p3552r,True,,,True,md_h2_abstract
+p4007r2,PM,pdf,2,standalone_label,True,0,Body,9.0,0.3443,0.1154,,## Abstract  `std::execution::task` ([P3552R3](https://www.open-std.org,True,,,True,md_h2_abstract
+p4008r0,PM,pdf,0,,False,,,,,,,,False,,,False,
+p4009r0,MH,markdown,0,,True,,,,,,,## Abstract  We have had a couple of attempts to resolve the Romanian N,True,l of the contracts concerns   Abstract   We have had a couple of attempts to resolve the Romanian NB comment,html_h2_abstract,True,md_h2_abstract
+p4010r0,MH,markdown,0,,True,,,,,,,,False,C1/SC22/WG21                  Abstract   This paper proposes adding funnel shift operations to the C++ stand,html_h2_abstract;html_id_contains_abstract,False,
+p4010r1,MH,markdown,0,,True,,,,,,,,False,C1/SC22/WG21                  Abstract   This paper proposes adding funnel shift operations to the C++ stand,html_h2_abstract;html_id_contains_abstract,False,
+p4011r0,PM,pdf,1,standalone_label,True,0,TeXGyreAdventor-Regular,11.645,0.487,0.777,,,False,,,False,
+p4012r0,PM,pdf,1,standalone_label,True,0,TeXGyreAdventor-Regular,11.645,0.3729,0.777,,,False,,,False,
+p4012r1,PM,pdf,1,standalone_label,True,0,TeXGyreAdventor-Regular,11.645,0.31,0.777,,,False,,,False,
+p4014r0,PM,pdf,2,standalone_label,True,0,Type3 (10 0 R),8.838,0.396,0.12,,## Abstract  C++26 introduces a rich sub-language for asynchronous prog,True,,,True,md_h2_abstract
+p4014r1,PM,pdf,2,standalone_label,True,0,Body,9.0,0.3443,0.1154,,"## Abstract  Every sender algorithm in C++26 - all thirty - explained, ",True,,,True,md_h2_abstract
+p4015r0,PM,pdf,1,standalone_label,True,0,LMRoman9-Bold,8.966,0.3071,0.4668,,th Statements  #### Lisa Lippincott  ## Abstract  C++26 contracts come with an enforcement mechanism that pr,True,,,True,md_h2_abstract
+p4016r0,PM,pdf,7,inline_with_text;short_line_mentions_abstract;standalone_label,True,0,DejaVuSerif,7.495,0.2532,0.125,,3  ## Abstract  C++ today offers two endpoints for reduction:  `std::accum,True,,,True,md_h2_abstract
+p4019r0,PM,pdf,0,,False,,,,,,,,False,,,False,
+p4019r1,PM,pdf,0,,False,,,,,,,,False,,,False,
+p4020r0,MH,markdown,0,,False,,,,,,,,False,,,False,
+p4021r0,PM,pdf,1,standalone_label,True,0,Arial-BoldMT,12.0,0.1662,0.1192,,## Abstract  ```cpp main4.c:15:9: note: in expansion of macro ‘compile_,True,,,True,md_h2_abstract
+p4021r1,PM,pdf,1,standalone_label,True,0,Arial-BoldMT,12.0,0.2017,0.1192,,"enforced conditions at compile time  ## Abstract  It is used for bounds checking, avoiding nullptr dereferen",True,,,True,md_h2_abstract
+p4021r2,PM,pdf,1,standalone_label,True,0,Arial-BoldMT,12.0,0.3875,0.1192,,t [jg@jguk.org](mailto:jg@jguk.org)  ## Abstract  `compile_assert()` provides a way to specify constraint pr,True,,,True,md_h2_abstract
+p4022r0,MH,markdown,0,,False,,,,,,,,False,,,False,
+p4023r0,PM,pdf,0,,False,,,,,,,,False,,,False,
+p4024r0,PM,pdf,0,,False,,,,,,,,False,,,False,
+p4025r0,PM,pdf,0,,False,,,,,,,,False,,,False,
+p4025r1,PM,pdf,0,,False,,,,,,,,False,,,False,
+p4026r0,PM,pdf,0,,False,,,,,,,,False,,,False,
+p4027r0,MH,markdown,0,,False,,,,,,,,False,,,False,
+p4028r0,MH,markdown,0,,False,,,,,,,,False,,,False,
+p4029r0,PM,pdf,1,inline_with_text,True,0,Arial-BoldMT,11.0,0.2664,0.1176,, The SG14 Priority List for C++29/32  **Abstract:** This document outlines the strategic priorities for SG14,True,,,False,
+p4029r1,PM,pdf,1,standalone_label,True,0,Arial-BoldMT,17.0,0.6605,0.1176,,,False,,,False,
+p4030r0,MH,markdown,0,,False,,,,,,,,False,,,False,
+p4031r0,MH,markdown,0,,True,,,,,,,# Abstract  This paper proposes to rename `system_context_replaceabili,True,roposal   3  References       Abstract   This paper proposes to rename  system_context_replaceability  names,html_h1_abstract;html_id_contains_abstract,True,md_h1_abstract
+p4031r1,MH,markdown,0,,True,,,,,,,# Abstract  This paper proposes to rename `system_context_replaceabili,True,=> R1     6  References       Abstract   This paper proposes to rename  system_context_replaceability  names,html_h1_abstract;html_id_contains_abstract,True,md_h1_abstract
+p4032r0,MH,markdown,0,,False,,,,,,,,False,,,False,
+p4032r1,MH,markdown,0,,False,,,,,,,,False,,,False,
+p4033r0,MH,markdown,0,,False,,,,,,,,False,,,False,
+p4035r0,PM,pdf,2,standalone_label,True,0,Body,9.0,0.3443,0.1154,,"## Abstract  C++ should make the safe thing easy, and the unsafe thing ",True,,,True,md_h2_abstract
+p4037r0,MH,markdown,0,,False,,,,,,,,False,,,False,
+p4037r1,MH,markdown,0,,False,,,,,,,,False,,,False,
+p4038r0,MH,markdown,0,,False,,,,,,,,False,,,False,
+p4040r0,MH,markdown,0,,False,,,,,,,,False,,,False,
+p4042r0,PM,pdf,1,standalone_label,True,0,TeXGyreAdventor-Regular,11.645,0.5671,0.777,,,False,,,False,
+p4043r0,MH,markdown,0,,True,,,,,,,"n@adobe.com> **Audience**: EWG, WG21  # Abstract  The C++ Contracts facility introduced by P2900 represents ",True,"e.com>   Audience : EWG, WG21 Abstract The C++ Contracts facility introduced by P2900 represents a major add",html_h1_abstract;html_id_contains_abstract,True,md_h1_abstract
+p4044r0,MH,markdown,0,,True,,,,,,,"lucteo@lucteo.ro> **Audience**: EWG  ## Abstract  C++26 contracts support a wide range of uses, but they cur",True,"o@lucteo.ro>   Audience : EWG Abstract C++26 contracts support a wide range of uses, but they currently cann",html_h2_abstract;html_id_contains_abstract,True,md_h2_abstract
+p4049r0,MH,markdown,0,,True,,,,,,,,False,"C1/SC22/WG21                  Abstract   The preconditions on the copy family of algorithms ( copy ,  move ,",html_h2_abstract;html_id_contains_abstract,False,
+p4052r0,MH,markdown,0,,False,,,,,,,,False,,,False,
+p4088r0,PM,pdf,2,standalone_label,True,0,Body,9.0,0.3443,0.1154,,## Abstract  C++ already got an asynchronous model: regular C++20 corou,True,,,True,md_h2_abstract
+p4089r0,PM,pdf,2,standalone_label,True,0,Body,9.0,0.3443,0.1154,,## Abstract  The Environment parameter in `std::execution::task` makes ,True,,,True,md_h2_abstract
+p4090r0,PM,pdf,2,standalone_label,True,0,Body,9.0,0.3586,0.1154,,,False,,,True,md_h2_abstract
+p4091r0,PM,pdf,2,standalone_label,True,0,Body,9.0,0.3443,0.1154,,## Abstract  Both coroutines and senders destroy compound data at an ab,True,,,True,md_h2_abstract
+p4092r0,PM,pdf,2,standalone_label,True,0,Body,9.0,0.3586,0.1154,,Appendix A. Bridge Implementation  ## Abstract  A single class template bridges sender-based code into cor,True,,,True,md_h2_abstract
+p4093r0,PM,pdf,2,standalone_label,True,0,Body,9.0,0.3586,0.1154,,"## Abstract  Coroutine-native awaitables can be wrapped as senders, but",True,,,True,md_h2_abstract
+p4094r0,PM,pdf,2,standalone_label,True,0,Body,9.0,0.3443,0.1154,,## Abstract  The unification of three working executor models had unant,True,,,True,md_h2_abstract
+p4095r0,PM,pdf,2,standalone_label,True,0,Body,9.0,0.3443,0.1154,,## Abstract  Of the four deficiencies that [P1525R0](http://www.open-st,True,,,True,md_h2_abstract
+p4096r0,PM,pdf,2,standalone_label,True,0,Body,9.0,0.3443,0.1154,,## Abstract  The committee set aside the Networking TS in 2021. The pro,True,,,True,md_h2_abstract
+p4097r0,PM,pdf,2,standalone_label,True,0,Body,9.0,0.3443,0.1154,,## Abstract  The committee expressed consensus that sender/receiver is ,True,,,True,md_h2_abstract
+p4098r0,PM,pdf,2,standalone_label,True,0,Body,9.0,0.3443,0.1154,,"## Abstract  Published claims about executors, networking, and unificat",True,,,True,md_h2_abstract
+p4099r0,PM,pdf,2,standalone_label,True,0,Body,9.0,0.3443,0.1154,,"## Abstract  Four decisions, each locally reasonable, each under-eviden",True,,,True,md_h2_abstract
+p4100r0,PM,pdf,5,inline_with_text;short_line_mentions_abstract;standalone_label,True,0,Body,9.0,0.4014,0.1154,,## Abstract  C++ coroutines have five language mechanisms that combine ,True,,,True,md_h2_abstract
+p4101r0,MH,markdown,0,,True,,,,,,,,False,2.1  Consteval-only Types are Abstract Types   2.2  Must Pointers and References to Consteval-only Types be ,html_id_contains_abstract,False,
+p4102r0,MH,markdown,0,,True,,,,,,,,False,C1/SC22/WG21                  Abstract   We propose to change the type requirements of erasure and insertion,html_h2_abstract;html_id_contains_abstract,False,
+p4125r0,PM,pdf,2,standalone_label,True,0,Body,9.0,0.3443,0.1154,,## Abstract  A derivatives exchange is porting from Asio callbacks to c,True,,,True,md_h2_abstract
+p4126r0,PM,pdf,2,standalone_label,True,0,Body,9.0,0.3586,0.1154,,## Abstract  Senders pay a frame allocation to enter the awaitable prot,True,,,True,md_h2_abstract
+p4135r0,PM,pdf,0,,False,,,,,,,,False,,,False,
+p4136r0,PM,pdf,1,standalone_label,True,0,NotoSans-Bold,14.346,0.2735,0.1168,,,False,,,False,
+p4136r1,PM,pdf,1,standalone_label,True,0,NotoSans-Bold,14.346,0.3851,0.1168,,,False,,,False,
+p4137r0,PM,pdf,2,standalone_label,True,0,Body,9.0,0.3301,0.1154,,## Abstract  The paper offers a way to measure what the type-safety pro,True,,,True,md_h2_abstract
+p4138r0,MH,markdown,0,,True,,,,,,,"# Abstract  While looking at [[CWG3103]](https://wg21.link/cwg3103), I",True,              Contents     1  Abstract   2  Revision History   3  Background   4  Status quo   5  Not all ✅ ,html_h1_numbered_abstract_space;html_id_contains_abstract,True,md_h1_abstract
+p4138r1,MH,markdown,0,,True,,,,,,,"# Abstract  While looking at [[CWG3103]](https://wg21.link/cwg3103), I",True,              Contents     1  Abstract   2  Revision History   3  Background   4  Status quo   5  Not all ✅ ,html_h1_numbered_abstract_space;html_id_contains_abstract,True,md_h1_abstract
+p4138r2,MH,markdown,0,,True,,,,,,,# Abstract  While looking at [CWG3103](https://cplusplus.github.io/CWG,True,              Contents     1  Abstract   2  Revision history   3  Background   4  Status quo   5  Not all ✅ ,html_h1_numbered_abstract_space;html_id_contains_abstract,True,md_h1_abstract
+p4139r0,MH,markdown,0,,False,,,,,,,,False,,,False,
+p4139r1,MH,markdown,0,,False,,,,,,,,False,,,False,
+p4140r0,MH,markdown,0,,False,,,,,,,,False,,,False,
+p4142r0,PM,pdf,0,,False,,,,,,,,False,,,False,
+p4143r0,MH,markdown,0,,False,,,,,,,,False,,,False,
+p4144r0,MH,markdown,0,,False,,,,,,,,False,,,False,
+p4144r1,MH,markdown,0,,False,,,,,,,,False,,,False,
+p4145r0,MH,markdown,0,,False,,,,,,,,False,,,False,
+p4146r0,MH,markdown,0,,False,,,,,,,,False,,,False,
+p4148r0,PM,pdf,1,standalone_label,True,0,LMRoman12-Bold,11.955,0.4023,0.2186,,"](mailto:dr.nbanglawala@gmail.com)*  ## Abstract  We propose `protocol<T,` `A>` and `protocol_view<T>`, stan",True,,,True,md_h2_abstract
+p4149r0,MH,markdown,0,,False,,,,,,,,False,,,False,
+p4149r1,MH,markdown,0,,False,,,,,,,,False,,,False,
+p4150r0,MH,markdown,0,,True,,,,,,,on Mailing  - Initial paper revision  # Abstract  <!-- tomd:lossy-table -->  ```cpp std::ranges::for_each(  ,True,4 Post-Croydon Mailing     2  Abstract   3  Motivation and Background     3.1  Stencil operations   3.2  Ite,html_h1_numbered_abstract_space;html_id_contains_abstract,True,md_h1_abstract
+p4151r0,PM,pdf,1,standalone_label,True,0,ArialMT,20.0,0.2425,0.1176,,,False,,,False,
+p4151r1,PM,pdf,1,standalone_label,True,0,ArialMT,20.0,0.2425,0.1176,,,False,,,False,
+p4154r0,MH,markdown,0,,False,,,,,,,,False,,,False,
+p4155r0,MH,markdown,0,,False,,,,,,,,False,,,False,
+p4156r0,MH,markdown,0,,True,,,,,,,## Abstract  This paper proposes wording to resolve the NB comment [FR-,True,to meta::is_vararg_function   Abstract      This paper proposes wording to resolve the NB comment  FR-017-15,html_h2_abstract,True,md_h2_abstract
+p4157r0,MH,markdown,0,,False,,,,,,,,False,,,False,
+p4158r0,PM,pdf,0,,False,,,,,,,,False,,,False,
+p4159r0,MH,markdown,0,,False,,,,,,,,False,,,False,
+p4160r0,MH,markdown,0,,False,,,,,,,,False,      Change in 4.1.2 [ intro.abstract ] paragraph 2 as follows:     Certain aspects and operations of the a,,False,
+p4161r0,PM,pdf,2,standalone_label,True,0,LMRoman10-Bold,9.963,0.3765,0.1284,,,False,,,False,
+p4168r0,MH,markdown,0,,False,,,,,,,,False,,,False,
+p4172r0,PM,pdf,2,standalone_label,True,0,Body,9.0,0.3586,0.1154,,## Abstract  This paper documents the design rationale for the *IoAwait,True,,,True,md_h2_abstract
+p4173r0,MH,markdown,0,,True,,,,,,,- Abstract   - Revision history   - Discussion   - Design   - Implemen,True,acility for  mdspan           Abstract   Revision history   Discussion   Design   Implementation experience ,html_h2_abstract,True,md_h2_abstract
+p4174r0,PM,pdf,1,standalone_label,True,0,Arial-BoldMT,18.0,0.2042,0.1208,,,False,,,False,
+p4175r0,MH,markdown,0,,False,,,,,,,,False,,,False,
+p4176r0,MH,markdown,0,,True,,,,,,,# Abstract  7.6.1 [[expr.post]](https://wg21.link/expr.post) lists all,True,              Contents     1  Abstract   2  Revision history   3  Approach   4  Proposed wording     4.1  Po,html_h1_numbered_abstract_space;html_id_contains_abstract,True,md_h1_abstract
+p4179r0,MH,markdown,0,,True,,,,,,,- Abstract   - Revision history   - Discussion   - Design   - Implemen,True,nterface::[c]rbegin()         Abstract   Revision history   Discussion   Design   Implementation experience ,html_h2_abstract,True,md_h2_abstract
+p4182r0,PM,pdf,2,standalone_label,True,0,Body,9.0,0.3301,0.1154,,## Abstract  Every mailing repeats the same deployment background. This,True,,,True,md_h2_abstract
+p4186r0,MH,markdown,0,,True,,,,,,,# Abstract  This paper proposes a tentative plan for making progress o,True,Bindels <cpp@dascandy.nl>  1  Abstract This paper proposes a tentative plan for making progress on safety an,html_h1_numbered_abstract_space;html_id_contains_abstract,True,md_h1_abstract
+p4188r0,PM,pdf,1,standalone_label,True,0,LMRoman9-Bold,8.966,0.3048,0.4668,,,False,,,False,
+p4190r0,MH,markdown,0,,True,,,,,,,for the 2026-04 post-Croydon mailing  # Abstract  [P4144R1](https://isocpp.org/files/papers/P4144R1.html) re,True,     1  Revision history   2  Abstract   3  Why the constructor was removed   4  Adding the constructor back,html_h1_numbered_abstract_space;html_id_contains_abstract,True,md_h1_abstract
+p4191r0,PM,pdf,1,standalone_label,True,0,ArialMT,20.0,0.2425,0.1176,,,False,,,False,
+p4192r0,MH,markdown,0,,True,,,,,,,# Abstract  There are multiple open Core issues against 6.8.3 [[basic.,True,              Contents     1  Abstract   2  Revision history   3  Implementation divergence   4  Issues with,html_h1_numbered_abstract_space;html_id_contains_abstract,True,md_h1_abstract
+p4197r0,MH,markdown,0,,True,,,,,,,,False,C1/SC22/WG21                  Abstract   Trivial relocation was removed from C++26 due to a number of fundam,html_h2_abstract;html_id_contains_abstract,False,
+p5000r0,PM,pdf,1,numbered_heading,True,0,Calibri-Bold,18.0,0.4483,0.1176,,,False,,,False,

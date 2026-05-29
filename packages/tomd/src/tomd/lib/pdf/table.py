@@ -55,6 +55,7 @@ _log = logging.getLogger(__name__)
 _COLUMN_GAP_THRESHOLD = 50.0
 _MIN_TABLE_ROWS = 2
 _COLUMN_X_TOLERANCE = 10.0
+_COLUMN_X_END_TOLERANCE = 1.0
 _TABLE_Y_OVERLAP_MARGIN = 5.0
 
 _COLUMN_X_BUCKET = 5.0    # bucket size for x-position clustering
@@ -257,10 +258,30 @@ def _block_column_positions(block: Block) -> list[float] | None:
     return x_starts
 
 
-def _columns_match(cols_a: list[float], cols_b: list[float]) -> bool:
-    """Check if two column position lists represent the same table structure."""
+def _columns_match(
+    cols_a: list[float],
+    cols_b: list[float],
+    *,
+    block_a: Block | None = None,
+    block_b: Block | None = None,
+) -> bool:
+    """Check if two column position lists represent the same table structure.
+
+    When both *block_a* and *block_b* are provided, a secondary x-end
+    check fires for right-aligned columns whose x-start varies with
+    cell text length but whose x-end is fixed by the layout engine.
+    """
     if len(cols_a) != len(cols_b):
         return False
+    if block_a is not None and block_b is not None:
+        ends_a = [ln.bbox[2] for ln in block_a.lines]
+        ends_b = [ln.bbox[2] for ln in block_b.lines]
+        for sa, sb, ea, eb in zip(cols_a, cols_b, ends_a, ends_b):
+            start_ok = abs(sa - sb) < _COLUMN_X_TOLERANCE
+            end_ok = abs(ea - eb) < _COLUMN_X_END_TOLERANCE
+            if not (start_ok or end_ok):
+                return False
+        return True
     return all(abs(a - b) < _COLUMN_X_TOLERANCE for a, b in zip(cols_a, cols_b))
 
 

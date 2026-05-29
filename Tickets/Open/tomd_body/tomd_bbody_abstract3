@@ -1,0 +1,106 @@
+### 📋 Ticket Overview: Paper Extraction Issues
+
+Missing or Empty Abstracts
+Issues where the abstract is completely missing or the text fails to extract
+after the heading.
+
+P3692R4 [SOLVED]
+Description: The entire abstract is missing. Why is it missing?
+Root cause: PDF paper. TOC body protection in pipeline.py counted only
+first-line words (nxt_fl.split()) instead of full paragraph words
+(nxt_sec.text.split()). P3692R4's abstract paragraph has 170 words total
+but only 8 on the first line, failing the _TOC_BODY_PROTECT_MIN_WORDS=10
+threshold. The abstract body was correctly extracted by MuPDF but then
+stripped as a TOC artifact.
+Fix: Changed nxt_fl.split() to nxt_sec.text.split() in pipeline.py.
+Simulated across all 124 PDFs: only P3692R4 changes (abstract body now
+present), 122 others identical, 0 regressions.
+File: packages/tomd/src/tomd/lib/pdf/pipeline.py.
+P4043R0 [SOLVED]
+Description: The abstract is empty. The "Abstract" heading is extracted,
+but the text that follows it is not.
+Root cause: HTML paper. Abstract body was correctly extracted. The actual
+issue was a metadata leak: bold-formatted metadata lines
+(**Document number**: P4043R0, **Date**: ..., **Authors**: ...,
+**Audience**: ...) appeared in the Markdown body because
+_REDUNDANT_META_RE and _FREEFORM_META_LABEL_RE in shared.py did not
+match Markdown bold markers (**...**).
+Fix: Extended both regexes with \*{0,2} anchors to match optional bold
+markers. Also added "Document number" as a label in _FREEFORM_META_LABEL_RE.
+Verified across 270 markdowns: 6 legitimate metadata leaks now stripped,
+zero false positives. File: packages/tomd/src/tomd/lib/shared.py.
+P4151R1 [SOLVED]
+Description: The abstract is missing. It was present before; a recent
+code change led to this error.
+Root cause: PDF paper. Abstract body is genuinely short (5 words:
+"std::execution::affine_on should be named std::execution::affine.").
+total_words=5 < _TOC_BODY_PROTECT_MIN_WORDS=10. The word-count threshold
+rejected the body as a TOC artifact.
+Fix: Abstract-specific threshold bypass. When the protected heading is
+"abstract" (case-insensitive), the _TOC_BODY_PROTECT_MIN_WORDS check is
+skipped for the first body paragraph. All other KNOWN_SECTIONS retain the
+threshold of 10 to guard against TOC artifacts. Simulated across all 124
+PDFs: only P4151R0 and P4151R1 change (abstract body recovered, 5 words
+each), 122 others identical, 0 regressions.
+Also affects P4151R0 (older revision, same abstract, also fixed).
+File: packages/tomd/src/tomd/lib/pdf/pipeline.py.
+
+P4042R0 [SOLVED]
+Description: Abstract body missing. Root cause: _detect_body_size in
+structure.py miscalculates body font size (9.0pt from LMRoman9-Regular
+wording text instead of 10.7pt Lato-Light prose). This causes the
+actual abstract body (10.7pt) to be classified as HEADING with
+Confidence.LOW, and the TOC protection loop breaks on HEADING.
+Fix: In pipeline.py TOC protection loop, when the protected heading
+is "abstract" and the first following section is a LOW-confidence
+HEADING, reclassify it as PARAGRAPH (kind=PARAGRAPH, heading_level=0)
+and protect it. Simulated across all 124 PDFs: only P4042R0 changes
+(abstract body recovered, 11 words), 123 others identical, 0
+regressions. File: packages/tomd/src/tomd/lib/pdf/pipeline.py.
+Extraction Boundary Issues / Over-Extraction
+Issues where the abstract extracts correctly at first, but doesn't stop where it
+should, pulling in metadata, unrelated paragraphs, or swallowing other sections.
+
+P3977R0 [SOLVED]
+Description: PDF paper. Title and metadata (Document, Date, Audience,
+Reply to) appeared as plaintext in the body.
+Root cause: _FREEFORM_META_LABEL_RE in shared.py did not match bare
+"Document:" (only "Document number"/"Document No."). Additionally,
+continuation detection required indentation or comma prefix, but PDF
+metadata often has the value on the next line without indentation
+(e.g. "Date:\nJanuary 22, 2026").
+Fix: (1) Changed regex to make "number"/"No." optional after
+"Document" so bare "Document:" matches. (2) Extended continuation
+logic: when a metadata label line ends with ":" (value on next line),
+the next non-blank non-structural non-label line is treated as the
+value and also removed. Simulated across 270 markdowns: only P3977R0
+changes, 0 regressions.
+Additionally fixed: (3) Plaintext title echo stripped by extending
+strip_leading_h1 to match non-ATX titles (no # prefix) via fuzzy
+_titles_match. (4) Bare "Abstract" promoted to ## Abstract when it
+appears as the first content line after frontmatter (PDF structurer
+missed the heading). Both changes in shared.py, verified with golden
+tests (0 regressions).
+File: packages/tomd/src/tomd/lib/shared.py.
+
+P4030R0 [REMOVED]
+No abstract in this paper. Removed from ticket.
+
+P4031R1 [SOLVED]
+Works correctly after regeneration.
+
+P5000R0 [OPEN]
+Description: PDF body extraction is catastrophically incomplete.
+Only 1916 chars extracted. The PDF contains multiple sections
+(Revision History, 1. Abstract, 2. Tier 0: Safety, 2.1 Profiles,
+etc.) but the markdown is missing most content. PDF vs markdown
+do not match at all.
+
+Missing Specific Elements / Sub-sections
+Issues where the abstract is present, but specific related components are left
+out.
+
+P3625R1
+Description: The abstract is present, but the following "Tony Table" is
+missing. Question: Is the Tony Table supposed to be part of the abstract
+extraction, or is it considered a separate section?

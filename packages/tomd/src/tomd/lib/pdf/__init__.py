@@ -1,8 +1,10 @@
 """PDF to Markdown converter."""
 
+from tomd.lib.pdf.images import ExtractedImage
 from tomd.lib.pdf.pipeline import (
     convert_pdf,
     convert_pdf_full,
+    run_pipeline,
     PipelineResult,
     _is_slide_deck,
     _is_standards_draft,
@@ -14,6 +16,8 @@ from tomd.lib.metadata_yaml.extract import enrich_pdf_reply_to as _enrich_pdf_re
 __all__ = [
     "convert_pdf",
     "convert_pdf_full",
+    "run_pipeline",
+    "ExtractedImage",
     "PipelineResult",
     "_enrich_pdf_reply_to",
     "_is_slide_deck",

@@ -1,0 +1,7 @@
+this took a very long time to convert p3299r3 could be a 
+pathological regex match or a deeply nested table?
+
+Problem:https://github.com/cppalliance/wg21-paperflow/commit/87c2229d9e50defe5324cac934112e6f6787c279
+Solution: https://github.com/cppalliance/wg21-paperflow/commit/87c2229d9e50defe5324cac934112e6f6787c279
+
+Vinnie already solved.

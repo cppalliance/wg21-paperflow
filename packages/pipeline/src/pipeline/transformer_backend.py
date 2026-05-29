@@ -7,7 +7,7 @@
 
 """Pipeline-owned transformer inference layer.
 
-Callers (dissect, advocatus, future Step 9 NLI gates) pass collections
+Callers (future Step 9 NLI gates) pass collections
 of work to a :class:`TransformerBackend` subclass; the backend slices
 the collection into batches sized by the active
 :class:`TransformerProvider` and runs inference on the device, dtype,
@@ -50,6 +50,8 @@ import threading
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field, replace
 from typing import Any, Iterable, Literal
+
+from pipeline.errors import TransformerConfigError
 
 logger = logging.getLogger(__name__)
 
@@ -129,12 +131,13 @@ class TransformerProvider:
           ``max_length`` / ``executor_workers`` cap the detected
           values.
         - ``"explicit"`` uses the declared ``device`` / ``dtype`` /
-          ``batch_size`` verbatim. Missing keys raise ``ValueError``
-          at load time, not at first inference.
+          ``batch_size`` verbatim. Missing keys raise
+          :class:`pipeline.errors.TransformerConfigError` at load time,
+          not at first inference.
         """
         mode = raw.get("mode", "auto")
         if mode not in ("auto", "explicit"):
-            raise ValueError(
+            raise TransformerConfigError(
                 f"Transformer provider '{name}': mode must be 'auto' "
                 f"or 'explicit', got {mode!r}."
             )
@@ -150,7 +153,7 @@ class TransformerProvider:
         # Explicit mode: validate required keys before constructing.
         missing = [k for k in ("device", "dtype", "batch_size") if k not in raw]
         if missing:
-            raise ValueError(
+            raise TransformerConfigError(
                 f"Transformer provider '{name}' (mode=explicit): "
                 f"missing required key(s) {missing}. Explicit providers "
                 f"must declare device, dtype, and batch_size so cloud "
@@ -159,14 +162,14 @@ class TransformerProvider:
 
         device = str(raw["device"])
         if device not in ("cuda", "mps", "cpu"):
-            raise ValueError(
+            raise TransformerConfigError(
                 f"Transformer provider '{name}': device must be 'cuda', "
                 f"'mps', or 'cpu', got {device!r}."
             )
 
         dtype = str(raw["dtype"])
         if dtype not in ("bf16", "fp16", "fp32"):
-            raise ValueError(
+            raise TransformerConfigError(
                 f"Transformer provider '{name}': dtype must be 'bf16', "
                 f"'fp16', or 'fp32', got {dtype!r}."
             )
@@ -642,9 +645,8 @@ class EmbeddingBackend(TransformerBackend):
     """Wraps ``sentence_transformers.SentenceTransformer`` for embeddings.
 
     Provided as the embedding op of the TransformerBackend family. The
-    existing dissect ``shadow.py`` embedding loader is not migrated
-    yet (see plan Out-of-scope); this class is the target for that
-    migration.
+    existing ``shadow.py`` embedding loader is not migrated yet (see
+    plan Out-of-scope); this class is the target for that migration.
     """
 
     def __init__(self, model_id: str, provider: TransformerProvider | None = None) -> None:
@@ -655,9 +657,20 @@ class EmbeddingBackend(TransformerBackend):
         if self._model is not None:
             return self._model
         from sentence_transformers import SentenceTransformer  # type: ignore[import-untyped]
-        self._model = SentenceTransformer(
-            self.model_id, device=self.provider.device,
-        )
+        try:
+            self._model = SentenceTransformer(
+                self.model_id, device=self.provider.device,
+                local_files_only=True,
+            )
+        except (OSError, ValueError, TypeError):
+            logger.info(
+                "Downloading embedding model '%s' to local HF cache "
+                "(first run only).",
+                self.model_id,
+            )
+            self._model = SentenceTransformer(
+                self.model_id, device=self.provider.device,
+            )
         return self._model
 
     def embed(self, texts: list[str]) -> Any:

@@ -26,15 +26,15 @@ Section - A classified document region (kind, text, confidence, heading_level, l
 
 Enums:
 - `Confidence`: HIGH, MEDIUM, LOW, UNCERTAIN
-- `SectionKind`: TITLE, HEADING, PARAGRAPH, LIST, CODE, TABLE, FIGURE, UNCERTAIN
+- `SectionKind`: TITLE, METADATA, HEADING, PARAGRAPH, LIST, CODE, TABLE, IMAGE, UNCERTAIN, WORDING, WORDING_ADD, WORDING_REMOVE
 
 ## Pipeline (13 steps)
 
 | Step | What | Module |
 |------|------|--------|
-| 1 | Dual extraction (MuPDF + spatial) + edge items + links + hidden scan + drawings + figure detection | `extract.py`, `cleanup.py`, `wording.py`, `figures.py`, `pipeline.py` |
-| 1.5 | Slide-deck / standards-draft detection (geometry or page-count early exit) | `pipeline.py` |
-| 2 | Close document | `pipeline.py` |
+| 1 | Dual extraction (MuPDF + spatial) + edge items + links + hidden scan + drawings + image extraction | `extract.py`, `cleanup.py`, `wording.py`, `images.py`, `__init__.py` |
+| 1.5 | Slide-deck / standards-draft detection (geometry or page-count early exit) | `__init__.py` |
+| 2 | Close document | `__init__.py` |
 | 3 | Hidden block stripping + readability check | `cleanup.py`, `types.py` |
 | 4 | Header/footer detection and stripping | `cleanup.py` |
 | 5 | Monospace propagation (spatial -> MuPDF) | `mono.py` |
@@ -46,14 +46,14 @@ Enums:
 | 10 | Structure (headings, lists, paragraphs, code blocks, nesting) | `structure.py` |
 | 11 | TOC stripping | `toc.py` |
 | 12 | Emit Markdown + prompts file | `emit.py` |
-| 13 | Return `PipelineResult` | `pipeline.py` |
+| 13 | Return `PipelineResult` | `__init__.py` |
 
 ## Techniques by Layer
 
 ### Layer 1: Extraction (8 techniques)
 
 **T0. Document-type early exits**
-- `pipeline.py:_is_slide_deck`, `pipeline.py:_is_standards_draft`
+- `__init__.py:_is_slide_deck`, `__init__.py:_is_standards_draft`
 - Slide-deck detection: landscape (width > height) AND small (width < 600pt) on 80%+ of pages. Catches presentation PDFs whose navigation sidebars confuse the dual-path extractor.
 - Standards-draft detection: page count >= 200. Catches C++ standard drafts (2000+ pages) that are not technical papers.
 - Both return `PipelineResult` with `skipped=True`, empty markdown, and a prompts message identifying the document type.
@@ -93,6 +93,35 @@ Enums:
 - Collects `page.get_links()`, filters to http/https/mailto schemes
 - Attaches to spans by bounding rect overlap (best overlap wins)
 
+**Resource-Dictionary path (image extraction).**
+- `images.py:extract_page_images`, `images.py:finalize_extraction`
+- A fourth PDF API surface, independent of the MuPDF dict and spatial
+  rawdict text-extraction paths. Uses `page.get_images(full=True)` +
+  `page.get_image_rects(xref)` + `doc.extract_image(xref)` to enumerate
+  the raster image XObjects referenced by the page's resource dictionary,
+  not the rendered glyphs.
+- Produces `ExtractedImage` records (page, index_on_page, ext, bytes,
+  bbox, suggested_alt, stored_filename). The caller persists `bytes`;
+  this module never writes to disk.
+- Runs per page during step 1 (while the document is still open). The
+  caption-proximity heuristic uses the spatial-path text blocks already
+  produced on the same page, so no duplicate text extraction.
+- Cross-page xref deduplication and the 20-image cap are applied by
+  `finalize_extraction` after the readability check passes. Unreadable
+  PDFs and early-exit paths (slide deck, standards draft) produce
+  `PipelineResult.images = []` so the CLI never persists orphan PNGs.
+- Visible to this path: every embedded JPEG / PNG / JPX, regardless of
+  rendering.
+- Invisible to this path: vector drawings (paths and lines, e.g.
+  flowcharts, graph diagrams), scanned-page rasters that ARE the page
+  rather than embedded within it, and any structural meaning of the
+  image. The caption-proximity regex over Path 1's text is a v1
+  stopgap; the layout-aware path in `improvements.md` section 4 would
+  supersede it with structural `caption` bboxes from a layout model.
+- Named constants: `_MAX_IMAGES_PER_PAPER`,
+  `_CAPTION_SEARCH_RADIUS_BELOW_PT`, `_CAPTION_SEARCH_RADIUS_ABOVE_PT`,
+  `_CAPTION_LABEL_RE`.
+
 ### Layer 2: Cleanup (9 techniques)
 
 **T6. Hidden region detection**
@@ -124,7 +153,7 @@ Enums:
 - Copies blocks before mutating to prevent caller mutation
 
 **T11. Page 0 color extraction**
-- `pipeline.py:_get_page0_text_colors`
+- `__init__.py:_get_page0_text_colors`
 - Type 3 fonts report black for all glyphs. Space characters (type=0 in texttrace) leak the true graphics-state fill color.
 - Maps y-positions to lightness values for title detection
 
@@ -141,29 +170,6 @@ Enums:
 - Monospace spans are exempt (code boundaries are intentional)
 - Uses `dataclasses.replace` for immutable span updates
 
-### Layer 3.5: Figure Detection (4 techniques)
-
-**T13b. Bordered-box detection**
-- `figures.py:_is_bordered_box`
-- Identifies diagram boxes from vector drawings: paths with both stroke color and fill, width 30-80% of page, height 10-80pt
-- Rejects page-spanning rules and table cell borders (too wide or too narrow)
-
-**T13c. Arrow and connector classification**
-- `figures.py:_is_arrowhead`, `_is_connector`, `_is_dashed_connector`
-- Arrowheads: small filled triangles (3 items, max 15pt). Accepts closePath=True and closePath=False (dashed return arrow arrowheads with fill+color)
-- Solid connectors: stroked paths, 1-4 items, min 20pt length, no fill (distinguishes from box borders)
-- Dashed connectors: filled no-stroke paths, 20+ tiny line items, near-horizontal/vertical. Direction reversed for return arrow semantics
-
-**T13d. Graph topology extraction**
-- `figures.py:_detect_sequence_diagram`, `_match_topology`, `_project_through_box`
-- Sequence diagrams: duplicate-x columns collapsed into logical nodes, edges ordered by y-position. Dashed return arrowheads inside intermediate boxes projected to terminal nodes
-- General graphs: arrowhead pointy vertex = target, base = source. Connector-only fallback. Bidirectional edge detection
-
-**T13e. Figure region detection and grouping**
-- `figures.py:detect_figure_regions`, `_group_boxes`, `_merge_connected_groups`
-- Groups proximate boxes by y-tolerance. Union-Find merge of groups bridged by connectors (handles sequence diagram top/bottom box rows)
-- Returns FigureRegion with bbox and optional FigureGraph for each group of 2+ boxes
-
 ### Layer 4: Table Detection (3 techniques)
 
 **T14. Table detection (two-signal)**
@@ -179,7 +185,7 @@ Enums:
 - Removes spatial blocks whose y-center falls within detected table y-ranges (5-unit margin)
 
 **T16. Table section insertion**
-- `pipeline.py:_run_pipeline`
+- `__init__.py:convert_pdf`
 - Tables inserted into the section list by page number and y-position ordering
 
 ### Layer 5: Wording Detection (3 techniques)
@@ -307,13 +313,6 @@ Enums:
 - `emit.py:_render_table`
 - GitHub-style Markdown pipe tables. First row = header with bold suppressed.
 
-**T34b. Figure rendering**
-- `emit.py:_render_figure_placeholder`, `_render_graph_figure`, `_render_sequence_figure`, `_render_positional_figure`
-- Sequence diagrams: participant header + numbered steps with arrow labels
-- Linear graphs: concept chains (`A -> label -> B`) or numbered vertical flows
-- Orphan label matching: text between boxes assigned to edges by y-proximity
-- Positional fallback: text sorted by bbox when no graph topology exists
-
 **T35. Uncertain region marking**
 - `emit.py:emit_markdown`
 - HTML comments with line ranges: `<!-- tomd:uncertain:L{start}-L{end} -->`
@@ -331,7 +330,7 @@ Enums:
 ### Layer 10: Pipeline Orchestration (1 technique)
 
 **T38. Pipeline execution**
-- `pipeline.py:_run_pipeline`, `pipeline.py:convert_pdf`
+- `__init__.py:convert_pdf`
 - Strict ordering of all 13 steps. Early exit on empty PDF or unreadable text.
 - Metadata merging: `{**structure_metadata, **wg21_metadata}` - WG21 metadata takes precedence.
 - TOC heading collection: only HEADING sections used as the reference set for TOC matching.
@@ -349,20 +348,19 @@ Enums:
 
 | Module | Responsibility | Public API | Lines |
 |--------|---------------|------------|------:|
-| `__init__.py` | Package re-exports | `convert_pdf`, `PipelineResult` | ~19 |
-| `pipeline.py` | Pipeline orchestration, slide-deck detection, TOC plausibility | `convert_pdf` (via `__init__`) | ~562 |
-| `types.py` | Data model, enums, constants | Span, Line, Block, Section, SectionKind, Confidence, is_readable + shared constants | ~223 |
-| `extract.py` | Dual-path text extraction | `extract_mupdf`, `extract_spatial`, `collect_links`, `attach_links` | ~224 |
-| `mono.py` | Monospace font detection | `classify_monospace`, `propagate_monospace` | ~196 |
-| `wording.py` | Wording section detection (ins/del) | `classify_wording`, `collect_line_drawings` | ~239 |
-| `cleanup.py` | Text cleanup, header/footer, hidden regions | `detect_repeating`, `strip_repeating`, `cleanup_text`, `find_hidden_regions`, `strip_hidden_blocks` | ~360 |
-| `spans.py` | Style boundary normalization | `normalize_spans` | ~114 |
-| `figures.py` | Figure/diagram detection and graph topology | `detect_figure_regions` | ~690 |
-| `table.py` | Two-signal table detection and exclusion | `detect_tables`, `exclude_table_regions` | ~805 |
-| `structure.py` | Comparison, heading/list/code classification | `compare_extractions`, `structure_sections` | ~1113 |
-| `emit.py` | Markdown and prompts generation | `emit_markdown`, `emit_prompts` | ~532 |
-| `wg21.py` | WG21 metadata extraction | `extract_metadata_from_blocks` | ~457 |
-| `qa.py` | Markdown QA scoring (mistune AST) | `compute_metrics`, `run_qa_report` | ~479 |
+| `__init__.py` | Pipeline orchestration, slide-deck detection | `convert_pdf`, `run_pipeline`, `PipelineResult`, `ExtractedImage` | ~295 |
+| `types.py` | Data model, enums, constants | Span, Line, Block, Section, SectionKind, Confidence, is_readable + shared constants | ~252 |
+| `extract.py` | Dual-path text extraction | `extract_mupdf`, `extract_spatial`, `collect_links`, `attach_links` | ~249 |
+| `images.py` | Resource-Dictionary path: embedded raster extraction | `ExtractedImage`, `ExtractionResult`, `extract_page_images`, `finalize_extraction` | ~250 |
+| `mono.py` | Monospace font detection | `classify_monospace`, `propagate_monospace` | ~222 |
+| `wording.py` | Wording section detection (ins/del) | `classify_wording`, `collect_line_drawings` | ~250 |
+| `cleanup.py` | Text cleanup, header/footer, hidden regions | `detect_repeating`, `strip_repeating`, `cleanup_text`, `find_hidden_regions`, `strip_hidden_blocks` | ~373 |
+| `spans.py` | Style boundary normalization | `normalize_spans` | ~149 |
+| `table.py` | Two-signal table detection and exclusion | `detect_tables`, `exclude_table_regions` | ~252 |
+| `structure.py` | Comparison, heading/list/code classification | `compare_extractions`, `structure_sections` | ~939 |
+| `emit.py` | Markdown and prompts generation | `emit_markdown`, `emit_prompts` | ~401 |
+| `wg21.py` | WG21 metadata extraction | `extract_metadata_from_blocks` | ~199 |
+| `qa.py` | Markdown QA scoring (mistune AST) | `compute_metrics`, `run_qa_report` | ~326 |
 | `similarity.py` | Fuzzy string comparison | `similar` | ~66 |
 | `toc.py` | TOC detection and removal | `find_toc_indices` | ~159 |
-| **Total** | | **24 public functions** | **~5986** |
+| **Total** | | **24 public functions** | **~4132** |

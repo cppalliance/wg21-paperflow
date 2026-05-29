@@ -1,0 +1,11 @@
+this is from p3290r4 
+
+* Revision 4, post-C++26, April 2026
+
+**–** Rebased on C++26 as shipped
+
+**–** Update to be ready to present to LEWG
+
+**–** Wording cleanup and bug fixes
+
+bullets don't need bold

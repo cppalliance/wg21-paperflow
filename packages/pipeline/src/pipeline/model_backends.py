@@ -12,7 +12,7 @@ family on one specific infrastructure. It encapsulates all mechanical
 concerns: HTTP calls, tokenizer quirks, think-block format, BPE
 cleanup, tool-call parsing, structured output strategy, and retry.
 
-The backend is named after what it is (``DeepSeekR1DistillVllm021Backend``,
+The backend is named after what it is (``VllmThinkingBackend``,
 ``Llama3Backend``) so the code is honest about which workarounds are
 active. When a bug is fixed upstream, a new backend class replaces the
 old one; the old stays in the codebase for anyone still on the
@@ -24,13 +24,18 @@ upstream issue links and retire-when conditions.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import re
 from abc import ABC, abstractmethod
-from typing import Any, Callable, TypeVar
+from typing import Any, Callable, ClassVar, TypeVar
+
+import openai
 
 from pydantic import BaseModel, ValidationError
+
+from pipeline.errors import MalformedModelOutputError, ModelBackendConfigError
 
 logger = logging.getLogger(__name__)
 
@@ -44,6 +49,17 @@ _THINK_RE = re.compile(r"<think>(.*?)</think>", re.DOTALL)
 _FENCE_RE = re.compile(r"```(?:json)?\s*", re.IGNORECASE)
 
 _BPE_ARTIFACTS = str.maketrans({"\u0120": " ", "\u010a": "\n"})
+
+DEFAULT_REQUEST_LIMIT = 500
+"""Default cap on pydantic-ai's UsageLimits.request_limit.
+
+This counts every model request, tool call, and output-validator retry
+issued inside one Agent.run(). 500 is high enough for tool-free synthesis
+under retries=3 (effective ceiling ~4 model calls), and low enough that a
+runaway tool loop terminates in single-digit minutes at typical hosted-LLM
+latency. Lower it per-step via StepHooks.request_limit when the tool-call
+shape is known.
+"""
 
 
 def _clean_bpe(text: str) -> str:
@@ -80,7 +96,9 @@ def _extract_json(text: str) -> str:
     text = re.sub(r"```\s*$", "", text, flags=re.MULTILINE)
     start = text.find("{")
     if start < 0:
-        raise ValueError(f"No JSON object found in model response: {text[:200]!r}")
+        raise MalformedModelOutputError(
+            f"No JSON object found in model response: {text[:200]!r}"
+        )
     depth = 0
     for i in range(start, len(text)):
         if text[i] == "{":
@@ -116,8 +134,46 @@ class ModelBackend(ABC):
     API extensions.
     """
 
-    thinking_capable: bool
-    tools_capable: bool
+    thinking_capable: ClassVar[bool] = False
+    tools_capable: ClassVar[bool] = False
+
+    required_api_key_env: ClassVar[str | None] = None
+    """Env var the loader must see declared on the service entry.
+
+    Set on subclasses whose SDK reads its credential directly from the
+    environment (and therefore ignores the ``api_key`` kwarg). When
+    non-None, ``load_services`` rejects ``[services.NAME]`` entries
+    whose ``api_key_env`` does not match this value, so the loader and
+    the SDK cannot drift apart on which variable the user must export.
+    Leave as ``None`` for backends that accept the ``api_key`` kwarg.
+    """
+
+    _max_context_window: int = 0
+    _chars_per_token: float = 0
+    _token_multiplier: float = 0
+
+    @property
+    def max_context_window(self) -> int:
+        """Total context window capacity (input + output tokens)."""
+        return self._max_context_window
+
+    @property
+    def chars_per_token(self) -> float:
+        """Characters per token for this model's tokenizer.
+
+        Used by pipeline.tokens.est_tokens() and tokens_to_chars() when
+        an agent is available. Falls back to pipeline.tokens.CHARS_PER_TOKEN
+        if not set on this backend.
+        """
+        if self._chars_per_token > 0:
+            return self._chars_per_token
+        from pipeline.tokens import CHARS_PER_TOKEN
+        return CHARS_PER_TOKEN
+
+    @property
+    def token_multiplier(self) -> float:
+        """Words-to-tokens multiplier used by batching."""
+        return self._token_multiplier if self._token_multiplier > 0 else 1.3
 
     @abstractmethod
     async def run(
@@ -126,22 +182,35 @@ class ModelBackend(ABC):
         user_message: str,
         output_type: type[_T],
         *,
+        max_tokens: int = 16384,
         tools: dict[str, Callable] | None = None,
         thinking_budget: int | None = None,
         label: str = "",
         debug_log: list[str] | None = None,
+        request_limit: int = DEFAULT_REQUEST_LIMIT,
     ) -> _T:
-        """Send a prompt and return validated structured output."""
+        """Send a prompt and return validated structured output.
+
+        ``max_tokens`` caps the output token count for this call.
+        Pipelines set this per-agent via ``AgentBackend``; backends
+        forward it to the API layer.
+
+        ``request_limit`` caps the total model requests (model calls,
+        tool calls, output-validator retries) issued in this call.
+        Backends without an agentic loop bound their internal retry
+        budget by this value.
+        """
         ...
 
 
 # ---------------------------------------------------------------------------
-# DeepSeek R1-Distill on vLLM 0.21 (with workarounds)
+# Thinking models on vLLM (with workarounds)
 # ---------------------------------------------------------------------------
 
 
-class DeepSeekR1DistillVllm021Backend(ModelBackend):
-    """DeepSeek-R1-Distill-Llama family on vLLM <= 0.21.
+class VllmThinkingBackend(ModelBackend):
+    """Thinking-capable models served by vLLM (DeepSeek-R1-Distill-Llama,
+    Qwen3 with reasoning enabled, etc.).
 
     Workarounds (see MODELS.md for upstream issue links):
     - BPE U+0120/U+010A cleanup (HF Transformers v5 regression #45920)
@@ -151,18 +220,25 @@ class DeepSeekR1DistillVllm021Backend(ModelBackend):
     - Raw JSON extraction with retry
 
     Retire when: vLLM unified parser ships AND HF Transformers fixes
-    the AutoTokenizer dispatch for R1-Distill.
+    the AutoTokenizer dispatch.
     """
 
     thinking_capable = True
-    tools_capable = False
 
     def __init__(self, *, base_url: str, api_key: str, model: str,
-                 max_tokens: int = 16384, **kwargs: Any) -> None:
-        from openai import AsyncOpenAI
-        self._client = AsyncOpenAI(base_url=base_url, api_key=api_key)
+                 max_context_window: int = 131072,
+                 chars_per_token: float = 0,
+                 token_multiplier: float = 0,
+                 stream: bool = True,
+                 tools_capable: bool = False, **kwargs: Any) -> None:
+        self._base_url = base_url
+        self._api_key = api_key
         self._model = model
-        self._max_tokens = max_tokens
+        self._max_context_window = max_context_window
+        self._chars_per_token = chars_per_token
+        self._token_multiplier = token_multiplier
+        self._stream = stream
+        self.tools_capable = tools_capable
 
     async def run(
         self,
@@ -170,16 +246,29 @@ class DeepSeekR1DistillVllm021Backend(ModelBackend):
         user_message: str,
         output_type: type[_T],
         *,
+        max_tokens: int = 16384,
         tools: dict[str, Callable] | None = None,
         thinking_budget: int | None = None,
         label: str = "",
         debug_log: list[str] | None = None,
+        request_limit: int = DEFAULT_REQUEST_LIMIT,
     ) -> _T:
+        from openai import AsyncOpenAI
+
         if tools:
-            raise NotImplementedError(
-                f"{type(self).__name__} does not support tools. "
-                "Use a tools_capable backend for tool-using steps."
+            return await self._run_with_tools(
+                system_prompt, user_message, output_type,
+                tools=tools, max_tokens=max_tokens,
+                thinking_budget=thinking_budget,
+                label=label, debug_log=debug_log,
+                request_limit=request_limit,
             )
+        if request_limit < 1:
+            raise ModelBackendConfigError(
+                f"request_limit must be >= 1, got {request_limit}"
+            )
+
+        client = AsyncOpenAI(base_url=self._base_url, api_key=self._api_key)
 
         schema_block = _schema_instruction(output_type)
         full_system = f"{system_prompt}\n\n{schema_block}"
@@ -189,17 +278,57 @@ class DeepSeekR1DistillVllm021Backend(ModelBackend):
             {"role": "user", "content": user_message},
         ]
 
-        for attempt in range(2):
-            response = await self._client.chat.completions.create(
-                model=self._model,
-                messages=messages,
-                temperature=0.0,
-                top_p=1.0,
-                seed=0,
-                max_tokens=self._max_tokens,
-            )
+        extra: dict[str, Any] = {}
+        if thinking_budget is not None:
+            if thinking_budget == 0:
+                extra["extra_body"] = {"chat_template_kwargs": {"enable_thinking": False}}
+            else:
+                extra["extra_body"] = {"thinking_token_budget": thinking_budget}
 
-            raw_content = response.choices[0].message.content or ""
+        max_attempts = min(2, request_limit)
+        for attempt in range(max_attempts):
+            effective_max = max_tokens
+
+            try:
+                if self._stream:
+                    stream = await client.chat.completions.create(
+                        model=self._model,
+                        messages=messages,
+                        temperature=0.0,
+                        top_p=1.0,
+                        seed=0,
+                        max_tokens=effective_max,
+                        stream=True,
+                        **extra,
+                    )
+                    parts: list[str] = []
+                    async for chunk in stream:
+                        delta = chunk.choices[0].delta.content
+                        if delta:
+                            parts.append(delta)
+                    raw_content = "".join(parts)
+                else:
+                    response = await client.chat.completions.create(
+                        model=self._model,
+                        messages=messages,
+                        temperature=0.0,
+                        top_p=1.0,
+                        seed=0,
+                        max_tokens=effective_max,
+                        **extra,
+                    )
+                    raw_content = response.choices[0].message.content or ""
+            except (openai.NotFoundError, openai.APIConnectionError,
+                    openai.InternalServerError, openai.APITimeoutError) as exc:
+                if attempt < max_attempts - 1:
+                    delay = 2 ** (attempt + 1)
+                    logger.warning(
+                        "Transient API error (attempt %d/%d), retrying in %ds: %s",
+                        attempt + 1, max_attempts, delay, exc,
+                    )
+                    await asyncio.sleep(delay)
+                    continue
+                raise
             reasoning, content = _strip_think_block(raw_content)
 
             if debug_log is not None:
@@ -219,10 +348,15 @@ class DeepSeekR1DistillVllm021Backend(ModelBackend):
                         f"{json.dumps(result.model_dump(), indent=2, ensure_ascii=False)}\n"
                     )
                 return result
-            except (ValueError, json.JSONDecodeError, ValidationError) as exc:
-                if attempt == 0:
+            except (
+                MalformedModelOutputError,
+                json.JSONDecodeError,
+                ValidationError,
+            ) as exc:
+                if attempt < max_attempts - 1:
                     logger.warning(
-                        "Raw JSON parse failed (attempt 1), retrying: %s", exc,
+                        "Raw JSON parse failed (attempt %d), retrying: %s",
+                        attempt + 1, exc,
                     )
                     messages.append({"role": "assistant", "content": raw_content})
                     messages.append({
@@ -233,12 +367,79 @@ class DeepSeekR1DistillVllm021Backend(ModelBackend):
                         ),
                     })
                     continue
-                raise ValueError(
-                    f"Raw JSON completion failed after retry: {exc}\n"
+                raise MalformedModelOutputError(
+                    f"Raw JSON completion failed after {attempt + 1} attempt(s): {exc}\n"
                     f"Content: {content[:500]!r}"
                 ) from exc
 
-        raise RuntimeError("unreachable")
+        raise AssertionError(
+            f"unreachable: loop must return or raise (max_attempts={max_attempts})"
+        )
+
+    async def _run_with_tools(
+        self,
+        system_prompt: str,
+        user_message: str,
+        output_type: type[_T],
+        *,
+        tools: dict[str, Callable],
+        max_tokens: int = 16384,
+        thinking_budget: int | None = None,
+        label: str = "",
+        debug_log: list[str] | None = None,
+        request_limit: int = DEFAULT_REQUEST_LIMIT,
+    ) -> _T:
+        """Tool-calling path via pydantic-ai Agent.
+
+        Uses the OpenAI-compatible tool calling API exposed by vLLM
+        with ``--tool-call-parser gemma4``. The non-tool path stays
+        on raw completions with schema-in-prompt.
+        """
+        from pydantic_ai import Agent
+        from pydantic_ai.exceptions import UsageLimitExceeded
+        from pydantic_ai.settings import ModelSettings
+        from pydantic_ai.usage import UsageLimits
+        from pydantic_ai.models.openai import OpenAIChatModel
+        from pydantic_ai.providers.openai import OpenAIProvider
+        from openai import AsyncOpenAI
+
+        client = AsyncOpenAI(base_url=self._base_url, api_key=self._api_key)
+        provider = OpenAIProvider(openai_client=client)
+        model = OpenAIChatModel(self._model, provider=provider)
+
+        settings = ModelSettings(
+            temperature=0.0,
+            top_p=1.0,
+            seed=0,
+            parallel_tool_calls=False,
+            max_tokens=max_tokens,
+        )
+
+        agent: Agent[None, _T] = Agent(
+            model=model,
+            output_type=output_type,
+            system_prompt=system_prompt,
+            retries=3,
+            model_settings=settings,
+        )
+
+        for name, fn in tools.items():
+            agent.tool_plain(fn)
+
+        try:
+            result = await agent.run(
+                user_message,
+                usage_limits=UsageLimits(request_limit=request_limit),
+            )
+        except UsageLimitExceeded as exc:
+            exc.add_note(f"request_limit={request_limit}")
+            raise
+
+        if debug_log is not None:
+            from pipeline.tasks import render_debug_md
+            debug_log.append(render_debug_md(result, label))
+
+        return result.output
 
 
 # ---------------------------------------------------------------------------
@@ -263,11 +464,15 @@ class Llama3Backend(ModelBackend):
     tools_capable = True
 
     def __init__(self, *, base_url: str, api_key: str, model: str,
-                 max_tokens: int = 16384, **kwargs: Any) -> None:
+                 max_context_window: int = 131072,
+                 chars_per_token: float = 0,
+                 token_multiplier: float = 0, **kwargs: Any) -> None:
         self._base_url = base_url
         self._api_key = api_key
         self._model_name = model
-        self._max_tokens = max_tokens
+        self._max_context_window = max_context_window
+        self._chars_per_token = chars_per_token
+        self._token_multiplier = token_multiplier
 
     async def run(
         self,
@@ -275,12 +480,15 @@ class Llama3Backend(ModelBackend):
         user_message: str,
         output_type: type[_T],
         *,
+        max_tokens: int = 16384,
         tools: dict[str, Callable] | None = None,
         thinking_budget: int | None = None,
         label: str = "",
         debug_log: list[str] | None = None,
+        request_limit: int = DEFAULT_REQUEST_LIMIT,
     ) -> _T:
         from pydantic_ai import Agent
+        from pydantic_ai.exceptions import UsageLimitExceeded
         from pydantic_ai.settings import ModelSettings
         from pydantic_ai.usage import UsageLimits
         from pydantic_ai.models.openai import OpenAIChatModel
@@ -296,7 +504,7 @@ class Llama3Backend(ModelBackend):
             top_p=1.0,
             seed=0,
             parallel_tool_calls=False,
-            max_tokens=self._max_tokens,
+            max_tokens=max_tokens,
         )
 
         agent: Agent[None, _T] = Agent(
@@ -311,10 +519,14 @@ class Llama3Backend(ModelBackend):
             for name, fn in tools.items():
                 agent.tool_plain(fn)
 
-        result = await agent.run(
-            user_message,
-            usage_limits=UsageLimits(request_limit=500),
-        )
+        try:
+            result = await agent.run(
+                user_message,
+                usage_limits=UsageLimits(request_limit=request_limit),
+            )
+        except UsageLimitExceeded as exc:
+            exc.add_note(f"request_limit={request_limit}")
+            raise
 
         if debug_log is not None:
             from pipeline.tasks import render_debug_md
@@ -344,11 +556,15 @@ class Qwen3Backend(ModelBackend):
     tools_capable = True
 
     def __init__(self, *, base_url: str, api_key: str, model: str,
-                 max_tokens: int = 16384, **kwargs: Any) -> None:
+                 max_context_window: int = 131072,
+                 chars_per_token: float = 0,
+                 token_multiplier: float = 0, **kwargs: Any) -> None:
         self._base_url = base_url
         self._api_key = api_key
         self._model_name = model
-        self._max_tokens = max_tokens
+        self._max_context_window = max_context_window
+        self._chars_per_token = chars_per_token
+        self._token_multiplier = token_multiplier
 
     async def run(
         self,
@@ -356,12 +572,15 @@ class Qwen3Backend(ModelBackend):
         user_message: str,
         output_type: type[_T],
         *,
+        max_tokens: int = 16384,
         tools: dict[str, Callable] | None = None,
         thinking_budget: int | None = None,
         label: str = "",
         debug_log: list[str] | None = None,
+        request_limit: int = DEFAULT_REQUEST_LIMIT,
     ) -> _T:
         from pydantic_ai import Agent
+        from pydantic_ai.exceptions import UsageLimitExceeded
         from pydantic_ai.settings import ModelSettings
         from pydantic_ai.usage import UsageLimits
         from pydantic_ai.models.openai import OpenAIChatModel
@@ -379,7 +598,7 @@ class Qwen3Backend(ModelBackend):
             top_p=1.0,
             seed=0,
             parallel_tool_calls=False,
-            max_tokens=self._max_tokens,
+            max_tokens=max_tokens,
             extra_body=extra,
         )
 
@@ -395,10 +614,14 @@ class Qwen3Backend(ModelBackend):
             for name, fn in tools.items():
                 agent.tool_plain(fn)
 
-        result = await agent.run(
-            user_message,
-            usage_limits=UsageLimits(request_limit=500),
-        )
+        try:
+            result = await agent.run(
+                user_message,
+                usage_limits=UsageLimits(request_limit=request_limit),
+            )
+        except UsageLimitExceeded as exc:
+            exc.add_note(f"request_limit={request_limit}")
+            raise
 
         if debug_log is not None:
             from pipeline.tasks import render_debug_md
@@ -423,11 +646,15 @@ class AnthropicBackend(ModelBackend):
 
     thinking_capable = False
     tools_capable = True
+    required_api_key_env = "ANTHROPIC_API_KEY"
 
-    def __init__(self, *, model: str, max_tokens: int = 80000,
-                 **kwargs: Any) -> None:
+    def __init__(self, *, model: str, max_context_window: int = 200000,
+                 chars_per_token: float = 0,
+                 token_multiplier: float = 0, **kwargs: Any) -> None:
         self._model_name = model
-        self._max_tokens = max_tokens
+        self._max_context_window = max_context_window
+        self._chars_per_token = chars_per_token
+        self._token_multiplier = token_multiplier
 
     async def run(
         self,
@@ -435,19 +662,22 @@ class AnthropicBackend(ModelBackend):
         user_message: str,
         output_type: type[_T],
         *,
+        max_tokens: int = 16384,
         tools: dict[str, Callable] | None = None,
         thinking_budget: int | None = None,
         label: str = "",
         debug_log: list[str] | None = None,
+        request_limit: int = DEFAULT_REQUEST_LIMIT,
     ) -> _T:
         from pydantic_ai import Agent
+        from pydantic_ai.exceptions import UsageLimitExceeded
         from pydantic_ai.settings import ModelSettings
         from pydantic_ai.usage import UsageLimits
 
         settings = ModelSettings(
             temperature=0.0,
             parallel_tool_calls=False,
-            max_tokens=self._max_tokens,
+            max_tokens=max_tokens,
         )
 
         agent: Agent[None, _T] = Agent(
@@ -462,10 +692,14 @@ class AnthropicBackend(ModelBackend):
             for name, fn in tools.items():
                 agent.tool_plain(fn)
 
-        result = await agent.run(
-            user_message,
-            usage_limits=UsageLimits(request_limit=500),
-        )
+        try:
+            result = await agent.run(
+                user_message,
+                usage_limits=UsageLimits(request_limit=request_limit),
+            )
+        except UsageLimitExceeded as exc:
+            exc.add_note(f"request_limit={request_limit}")
+            raise
 
         if debug_log is not None:
             from pipeline.tasks import render_debug_md
@@ -479,7 +713,7 @@ class AnthropicBackend(ModelBackend):
 # ---------------------------------------------------------------------------
 
 BACKEND_REGISTRY: dict[str, type[ModelBackend]] = {
-    "deepseek_r1_distill_vllm021": DeepSeekR1DistillVllm021Backend,
+    "vllm_thinking": VllmThinkingBackend,
     "llama3": Llama3Backend,
     "qwen3": Qwen3Backend,
     "anthropic": AnthropicBackend,

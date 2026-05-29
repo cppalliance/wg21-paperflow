@@ -37,17 +37,21 @@ class MissingPaperMdError(MissingPaperError):
     """Raised when no converted markdown is stored for the paper."""
 
 
-class MissingDissectError(MissingPaperError):
-    """Raised when no dissect file is stored for the paper."""
-
-
-class MissingAdvocatusError(MissingPaperError):
-    """Raised when no advocatus file (Relatio) is stored for the paper."""
-
-
 class MissingAgoraError(MissingPaperError):
     """Raised when no agora JSON (planned Reddit thread) is stored for the paper."""
 
 
 class MissingMailingIndexError(PaperstoreError):
     """Raised when the requested mailing index has never been upserted."""
+
+
+class InvalidPaperstoreUriError(PaperstoreError):
+    """Raised by :func:`paperstore.from_uri` for malformed or unsupported URIs.
+
+    Covers missing workspace fallback, non-empty/non-localhost authority on
+    ``file://``, empty path with no fallback, and unsupported schemes.
+    """
+
+
+class InvalidSuffixError(PaperstoreError):
+    """Raised when a write API receives a suffix that does not start with ``.``."""

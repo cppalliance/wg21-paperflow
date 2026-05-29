@@ -39,15 +39,14 @@ SKIP_HYPO = "A heading, list marker, or page metadata."
 
 def main() -> None:
     pid = "p2300r10"
+    data_dir = Path(__file__).parent / "data"
     sentences = json.loads(
-        Path(f"study/ensemble/data/{pid}_sentences.json")
-        .read_text(encoding="utf-8")
+        (data_dir / f"{pid}_sentences.json").read_text(encoding="utf-8")
     )
     gold = {
         r["sid"]: r["gold"]
         for r in json.loads(
-            Path(f"study/ensemble/data/{pid}_gold_phase1.json")
-            .read_text(encoding="utf-8")
+            (data_dir / f"{pid}_gold_phase1.json").read_text(encoding="utf-8")
         )["labels"]
     }
     texts = [s["text"] for s in sentences if s["sid"] in gold]
@@ -58,7 +57,7 @@ def main() -> None:
     slots = resolve_classifier_slots(clfs, defaults, {"selector": "nli-small"})
     classifier = slots["selector"]
 
-    print(f"# Alternative TARGET hypothesis test (nli-small, P2300R10 Phase 1)\n")
+    print("# Alternative TARGET hypothesis test (nli-small, P2300R10 Phase 1)\n")
     print(f"Phase 1: {len(texts)} sentences, "
           f"gold T/C/S = "
           f"{sum(1 for v in gold.values() if v == 'TARGET')}/"

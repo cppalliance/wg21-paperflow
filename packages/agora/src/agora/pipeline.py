@@ -36,19 +36,19 @@ from paperstore.progress import ProgressCallback
 
 from pipeline import (
     AgentBackend,
+    PipelinePrompt,
     StepContext,
     StepHooks,
+    StepSpec,
     WebResearcher,
     build_pipeline,
     dispatch,
-    load_sections,
     load_services,
-    resolve_slots,
+    resolve_pipeline_models,
     run_task,
 )
 from pipeline.errors import (
     PaperNotConvertedError,
-    PaperNotDissectedError,
     PaperNotFoundError,
     PromptFileError,
     StepError,
@@ -69,6 +69,8 @@ from agora.models import (
 from agora.render import render_trace
 
 logger = logging.getLogger(__name__)
+
+MAX_OUTPUT_TOKENS = 16384
 
 # Step name constants - must match exactly the ## headers in agora.md.
 _STEP_0_LOAD = "Step 0 - Load"
@@ -130,8 +132,8 @@ def _guard_encounter_count_positive(state: PipelineState) -> bool:
 # -- Step 0 - Load -----------------------------------------------------------
 
 
-async def _pure_load(state: PipelineState, ctx: StepContext) -> None:
-    """Load paper + dissect data from paperstore, route subreddit, detect case."""
+async def _pure_load(state: PipelineState, ctx: StepContext, spec: StepSpec) -> None:
+    """Load paper + extract data from paperstore, route subreddit, detect case."""
     assert ctx.backend is not None
     pid = ctx.pid
 
@@ -151,12 +153,6 @@ async def _pure_load(state: PipelineState, ctx: StepContext) -> None:
             f"Run 'paperflow convert {pid}' first."
         ) from exc
 
-    if not meta.dissect_path:
-        raise PaperNotDissectedError(
-            f"Paper '{pid}' has no dissect output. "
-            f"Run 'paperflow dissect {pid}' first."
-        )
-
     state.paper_id = pid
     state.paper_source = paper_md
     state.paper_title = meta.title or ""
@@ -169,7 +165,7 @@ async def _pure_load(state: PipelineState, ctx: StepContext) -> None:
     state.paper_revision = revision
     state.subreddit = _route_subreddit(state.paper_audience)
 
-    # Load every dissect artifact as raw row dicts; downstream steps
+    # Load every extract artifact as raw row dicts; downstream steps
     # pick the fields they need without rebuilding typed models here.
     claim_rows = await asyncio.to_thread(ctx.backend.get_claims, pid)
     evidence_rows = await asyncio.to_thread(ctx.backend.get_evidence, pid)
@@ -253,7 +249,7 @@ async def _detect_revision_case(
 
 
 def _prepare_smell_test(state: PipelineState, ctx: StepContext) -> str:
-    body = ctx.sections.get(_STEP_1_SMELL_TEST, "")
+    body = ctx.prompt.step_section(_STEP_1_SMELL_TEST)
     return (
         f"## Paper Identity\n\n"
         f"- id: {state.paper_id}\n"
@@ -261,13 +257,13 @@ def _prepare_smell_test(state: PipelineState, ctx: StepContext) -> str:
         f"- authors: {', '.join(state.paper_authors)}\n"
         f"- audience: {state.paper_audience}\n"
         f"- date: {state.paper_date}\n\n"
-        f"## Caput Causae (from dissect)\n\n"
+        f"## Caput Causae\n\n"
         f"{state.dissect_caput_causae or '(none recorded)'}\n\n"
-        f"## Dissect Claims\n\n"
+        f"## Claims\n\n"
         f"{_json(state.dissect_claims)}\n\n"
-        f"## Dissect Evidence\n\n"
+        f"## Evidence\n\n"
         f"{_json(state.dissect_evidence)}\n\n"
-        f"## Dissect Markers\n\n"
+        f"## Markers\n\n"
         f"{_json(state.dissect_markers)}\n\n"
         f"## Paper Source\n\n{state.paper_source or ''}\n\n"
         f"## Instructions\n\n{body}"
@@ -317,9 +313,9 @@ _RESEARCH_AGENT_PROMPTS = {
 }
 
 
-async def _pure_research(state: PipelineState, ctx: StepContext) -> None:
+async def _pure_research(state: PipelineState, ctx: StepContext, spec: StepSpec) -> None:
     """Dispatch three sub-agents in parallel and gather a ResearchSummary."""
-    body = ctx.sections.get(_STEP_2_RESEARCH, "")
+    body = ctx.prompt.step_section(_STEP_2_RESEARCH)
     deep_search = ctx.tool_registry.get("deep_search")
     web_fetch = ctx.tool_registry.get("web_fetch")
 
@@ -328,7 +324,7 @@ async def _pure_research(state: PipelineState, ctx: StepContext) -> None:
         state.research_summary = _empty_research_summary()
         return
 
-    research_agent = ctx.agents["tool"]
+    research_agent = ctx.agents[spec.step.model]
     tools = {"deep_search": deep_search, "web_fetch": web_fetch}
     anchors_json = _json(
         [a.model_dump(mode="json") for a in (state.technical_anchors or [])]
@@ -398,7 +394,7 @@ def _empty_research_summary() -> ResearchSummary:
 
 
 def _prepare_calibrate(state: PipelineState, ctx: StepContext) -> str:
-    body = ctx.sections.get(_STEP_3_CALIBRATE, "")
+    body = ctx.prompt.step_section(_STEP_3_CALIBRATE)
     rs = state.research_summary
     if rs is None:
         research = "(no research summary)"
@@ -433,7 +429,7 @@ def _extract_calibrate(state: PipelineState, output: CalibrationOutput) -> None:
 
 
 def _prepare_submission(state: PipelineState, ctx: StepContext) -> str:
-    body = ctx.sections.get(_STEP_4_SUBMISSION, "")
+    body = ctx.prompt.step_section(_STEP_4_SUBMISSION)
     rs = state.research_summary
     research = _json(rs.model_dump(mode="json")) if rs else "(none)"
     return (
@@ -481,7 +477,7 @@ def _fallback_link(state: PipelineState) -> str:
 
 
 def _prepare_skeleton(state: PipelineState, ctx: StepContext) -> str:
-    body = ctx.sections.get(_STEP_5_SKELETON, "")
+    body = ctx.prompt.step_section(_STEP_5_SKELETON)
     return (
         f"## Plan Targets (from Step 3)\n\n"
         f"- heat: {state.heat}\n"
@@ -511,7 +507,7 @@ def _extract_skeleton(state: PipelineState, output: SkeletonOutput) -> None:
 
 
 def _prepare_encounters(state: PipelineState, ctx: StepContext) -> str:
-    body = ctx.sections.get(_STEP_6_ENCOUNTERS, "")
+    body = ctx.prompt.step_section(_STEP_6_ENCOUNTERS)
     groups = state.encounter_slot_groups or []
     return (
         f"## Design Tensions\n\n"
@@ -536,7 +532,7 @@ def _extract_encounters(state: PipelineState, output: EncountersOutput) -> None:
 # -- Step 7 - Serialize ------------------------------------------------------
 
 
-async def _pure_serialize(state: PipelineState, ctx: StepContext) -> None:
+async def _pure_serialize(state: PipelineState, ctx: StepContext, spec: StepSpec) -> None:
     """Assemble the final Thread, validate, write to paperstore."""
     assert ctx.backend is not None
     assert state.subreddit is not None
@@ -657,43 +653,39 @@ def _json(obj: Any) -> str:
 
 # -- Hook registry -----------------------------------------------------------
 
-def _build_hooks(
-    synthesis_agent: AgentBackend,
-    research_agent: AgentBackend,
-) -> dict[str, StepHooks]:
-    """Build the step hooks dict with agents assigned."""
+def _build_hooks() -> dict[str, StepHooks]:
+    """Build the step hooks dict.
+
+    No agents are attached here; the runner resolves the agent for
+    each step via ``ctx.agents[spec.step.model]`` so ``agora.md``'s
+    ``**Model:**`` declarations are the single source of truth.
+    """
     return {
         _STEP_0_LOAD: StepHooks(custom=_pure_load),
         _STEP_1_SMELL_TEST: StepHooks(
-            agent=synthesis_agent,
             output_type=SmellTestOutput,
             prepare=_prepare_smell_test,
             extract=_extract_smell_test,
         ),
         _STEP_2_RESEARCH: StepHooks(
-            agent=research_agent,
             custom=_pure_research,
         ),
         _STEP_3_CALIBRATE: StepHooks(
-            agent=synthesis_agent,
             output_type=CalibrationOutput,
             prepare=_prepare_calibrate,
             extract=_extract_calibrate,
         ),
         _STEP_4_SUBMISSION: StepHooks(
-            agent=synthesis_agent,
             output_type=SubmissionOutput,
             prepare=_prepare_submission,
             extract=_extract_submission,
         ),
         _STEP_5_SKELETON: StepHooks(
-            agent=synthesis_agent,
             output_type=SkeletonOutput,
             prepare=_prepare_skeleton,
             extract=_extract_skeleton,
         ),
         _STEP_6_ENCOUNTERS: StepHooks(
-            agent=synthesis_agent,
             output_type=EncountersOutput,
             prepare=_prepare_encounters,
             extract=_extract_encounters,
@@ -710,7 +702,6 @@ async def agora_paper(
     pid: str,
     backend: StorageBackend,
     *,
-    service_overrides: dict[str, str] | None = None,
     on_progress: ProgressCallback | None = None,
     stop_after: int | None = None,
     debug: bool = False,
@@ -718,41 +709,46 @@ async def agora_paper(
 ) -> Thread | str:
     """Plan a Reddit thread for a dissected WG21 paper.
 
-    Loads services from SERVICES.toml, builds agents, runs the 8-step
-    analysis pipeline, writes ``{pid}.agora.json`` via
-    ``backend.write_agora_json``, and returns the planned
-    :class:`Thread`. Generation-phase fields stay ``None``. Pass
-    ``service_overrides`` to bind slots to specific services.
+    Loads ``agora.md``, resolves its ``## Services`` block against
+    SERVICES.toml, builds agents, runs the 8-step analysis pipeline,
+    writes ``{pid}.agora.json`` via ``backend.write_agora_json``, and
+    returns the planned :class:`Thread`. Generation-phase fields stay
+    ``None``.
 
     Raises :class:`PromptFileError` if ``agora.md`` has structural
-    problems. Raises :class:`PaperNotFoundError`,
-    :class:`PaperNotConvertedError`, or :class:`PaperNotDissectedError`
-    if the prerequisite paperstore artifacts are missing.
+    problems. Raises :class:`PaperNotFoundError` or
+    :class:`PaperNotConvertedError` if the prerequisite paperstore
+    artifacts are missing.
     """
-    services, defaults = load_services()
-    slots = resolve_slots(services, defaults, service_overrides)
+    prompt = PipelinePrompt.load("agora", "agora.md")
+    registry = load_services()
+    models = resolve_pipeline_models(prompt.services, registry)
 
-    synthesis_agent = AgentBackend(slots["default"], thinking_budget=4096)
-    research_agent = AgentBackend(slots.get("tool", slots["default"]))
-
-    agents = {
-        "default": synthesis_agent,
-        "tool": research_agent,
-    }
-
-    secs = dict(load_sections("agora", "agora.md"))
-
-    if "System Prompt" not in secs:
-        raise PromptFileError(
-            "'System Prompt' section not found in agora.md. "
-            f"Available sections: {sorted(secs)}"
+    # Build one AgentBackend per logical name. Synthesis steps want a
+    # thinking budget; tool / research steps do not. The default name
+    # is always present (resolve_pipeline_models enforces it); the
+    # tool name is pipeline-defined and may or may not be declared.
+    agents: dict[str, AgentBackend] = {}
+    for name, model_backend in models.items():
+        thinking_budget = 4096 if name == "default" else None
+        agents[name] = AgentBackend(
+            model_backend,
+            max_tokens=MAX_OUTPUT_TOKENS,
+            thinking_budget=thinking_budget,
+            slot_name=name,
+            service_name=prompt.services[name],
         )
 
-    hooks = _build_hooks(synthesis_agent, research_agent)
-    pipeline = build_pipeline(secs, hooks)
+    if not prompt.system_prompt:
+        raise PromptFileError(
+            "'System Prompt' section not found in agora.md."
+        )
+
+    hooks = _build_hooks()
+    pipeline = build_pipeline(prompt, hooks)
 
     try:
-        meta = await asyncio.to_thread(backend.get_meta, pid)
+        await asyncio.to_thread(backend.get_meta, pid)
     except MissingMetaError as exc:
         raise PaperNotFoundError(
             f"Paper '{pid}' not found in paperstore. "
@@ -765,12 +761,6 @@ async def agora_paper(
             f"Paper '{pid}' has no converted markdown. "
             f"Run 'paperflow convert {pid}' first."
         ) from exc
-    if not meta.dissect_path:
-        raise PaperNotDissectedError(
-            f"Paper '{pid}' has no dissect output. "
-            f"Run 'paperflow dissect {pid}' first."
-        )
-
     state = PipelineState()
 
     if stop_after is None:
@@ -787,7 +777,7 @@ async def agora_paper(
         }
 
         ctx = StepContext(
-            sections=secs,
+            prompt=prompt,
             agents=agents,
             researcher=researcher,
             backend=backend,
@@ -827,7 +817,6 @@ async def agora_since(
     month: str,
     backend: StorageBackend,
     *,
-    service_overrides: dict[str, str] | None = None,
     on_progress: ProgressCallback | None = None,
     stop_after: int | None = None,
     debug: bool = False,
@@ -852,7 +841,6 @@ async def agora_since(
         try:
             await agora_paper(
                 pid, backend,
-                service_overrides=service_overrides,
                 on_progress=on_progress,
                 stop_after=stop_after,
                 debug=debug,

@@ -1,0 +1,598 @@
+pid,page,num_rows,num_cols,strategy,broken_rows,total_body_rows,status,sample
+p4090r0,10,3,5,html_table,1,2,BROKEN,Partial write preserved | Yes | Yes | No | No (on error Byte count in |  |  | path) |  completion sig | Yes No (side sta
+p4096r0,10,4,3,html_table,1,3,BROKEN,Property | Coroutine executor | execution::task (P3552R3[14]) What throws post(coroutine_handle<>) throws | std::system_
+p4100r0,2,3,3,html_table,1,2,BROKEN,"Library | Role | Status Capy Abstract layer: execution model, buffer concepts, stream | concepts, concurrency primitives"
+p4182r0,11,4,6,html_table,3,3,BROKEN,Toolchain | Coro | TLS | Host | Exc | PMR GCC (g++) Yes Platform |  | ABI | Both hosted and freestanding | Typically on 
+n5035,0,2,4,pipe_table,0,1,OK,Date:​ ​ | ​ | ​ | 2026-01-22 Reply to:​ | ​ | ​ | Guy Davidson (standard.guy@hatcat.com)
+n5035,0,4,2,html_table,0,3,OK,Dates:​ | Monday 2026-03-09 Time:​ ​ | 16:00 London Time Link:​ ​ | https://iso.zoom.us/j/95912638571 Meeting ID:​ 959 1
+n5036,1,3,3,pipe_table,0,2,OK,1 | Scope | 1 2 | Normative references | 2 3 | Terms and definitions | 3
+n5036,4,2,3,pipe_table,0,1,OK,— | (1.1) | IEC Electropedia: available at https://www.electropedia.org/ — | (1.2) | ISO Online browsing platform: avail
+n5036,5,2,3,pipe_table,0,1,OK,4 | General | [general] 4.1 | Implementation compliance | [general.compliance]
+n5036,6,2,3,pipe_table,0,1,OK,5 | Lexical conventions | [lex] 5.1 | Identifiers | [lex.name]
+n5036,7,3,3,pipe_table,0,2,OK,6 | Basics | [basic] 6.9 | Program execution | [basic.exec] 6.9.1 | Sequential execution | [intro.execution]
+n5036,7,2,3,pipe_table,0,1,OK,6.9.2 | Multi-threaded executions and data races | [intro.multithread] 6.9.2.2 | Data races | [intro.races]
+n5036,9,2,3,pipe_table,0,1,OK,8 | Statements | [stmt.stmt] 8.1 | Preamble | [stmt.pre]
+n5036,9,2,3,pipe_table,0,1,OK,"— | (6.1) | an asm-declaration (9.10); — | (6.2) | an invocation of a function, unless"
+n5036,9,6,3,pipe_table,0,5,OK,"— | (6.3) | a virtual function call (7.6.1.3); — | (6.4) | a function call, unless overload resolution selects — | (6.4."
+n5036,11,2,3,pipe_table,0,1,OK,15 | Preprocessor | [cpp] 15.11 | Predefined macro names | [cpp.predefined]
+n5036,12,2,3,pipe_table,0,1,OK,16 | Library introduction | [library] 16.4 | Library-wide requirements | [requirements]
+n5036,12,4,3,pipe_table,0,3,OK,— | (1.1) | error category objects (19.5.3.5) — | (1.2) | time zone database (19.5.3.5) — | (1.3) | clocks (27.7) — | (1
+n5036,12,13,3,pipe_table,0,12,OK,— | (1.6) | system (17.2.2) — | (1.7) | startup and termination (17.5) except abort — | (1.8) | shared_ptr (20.11.3) and
+n5037,0,3,4,pipe_table,0,2,OK,Replaces:​ | ​ | ​ | 5035 Date:​ ​ | ​ | ​ | 2026-03-03 Reply to:​ | ​ | ​ | Guy Davidson (standard.guy@hatcat.com)
+n5037,0,4,2,html_table,0,3,OK,Dates:​ | Monday 2026-03-09 Time:​ ​ | 16:00 London Time Link:​ ​ | https://iso.zoom.us/j/97526023877 Meeting ID:​ 975 2
+n5040,2,2,3,pipe_table,0,1,OK,Document | Editor’s Report | Prospective WD C++26 Working Draft | N5033 | N5032
+n5040,2,3,2,pipe_table,0,2,OK,Meeting | Minutes WG21 Kona | N5031 WG21 pre-Croydon administrative telecon | N5038
+n5040,13,2,3,pipe_table,0,1,OK,72 | P3052 R1 view_interface::at() | Forwarded (C++29) 73 | P3428 R2 Hazard Pointer Batches | Forwarded (with update) (C
+n5040,13,2,3,pipe_table,0,1,OK,76 | P3411 R5 `any_view` | Discussed (C++29) 77 | P1708 R10 Basic Statistics | Discussed (C++29)
+n5040,13,2,3,pipe_table,0,1,OK,80 | P3045 R7 Quantities and units library | Discussed (C++29) 81 | P3242 R1 Copy and fill for mdspan | Forwarded with c
+n5043,0,2,4,pipe_table,0,1,OK,Date:​ ​ | ​ | ​ | 2026-04-08 Reply to:​ | ​ | ​ | Guy Davidson (standard.guy@hatcat.com)
+n5043,0,4,2,html_table,0,3,OK,Dates:​ | Monday 2026-05-25 Time:​ ​ | 16:00 London Time Link:​ ​ | https://iso.zoom.us/j/96298369302 Meeting ID:​ 962 9
+p0876r22,32,2,2,pipe_table,0,1,OK,32.12 fiber_context | [fiber.context] 32.12.1 Overview | [fiber.context.overview]
+p0876r22,33,2,2,pipe_table,0,1,OK,"32.12.3.1 Constructors, move and assignment | [fiber.context.cons] template<class F> explicit fiber_context(F&& entry) |"
+p0876r22,35,2,2,pipe_table,0,1,OK,32.12.3.2 Members | [fiber.context.mem] template<class Fn> fiber_context resume_with(Fn&& fn) && | ;
+p0876r22,37,2,2,pipe_table,0,1,OK,"32.12.3.3 Specialized algorithms | [fiber.context.special] friend void swap(fiber_context& lhs, fiber_context& rhs) noex"
+p2034r6,2,2,5,pipe_table,0,1,OK,SF | F | N | A | SA 21 | 27 | 5 | 0 | 0
+p2034r6,2,2,5,pipe_table,0,1,OK,SF | F | N | A | SA 1 | 10 | 4 | 2 | 1
+p2034r6,2,2,5,pipe_table,0,1,OK,SF | F | N | A | SA 2 | 15 | 3 | 1 | 0
+p2034r6,2,2,5,pipe_table,0,1,OK,SF | F | N | A | SA 2 | 4 | 4 | 1 | 0
+p2034r6,2,2,5,pipe_table,0,1,OK,SF | F | N | A | SA 3 | 7 | 0 | 0 | 0
+p2583r0,0,4,2,pipe_table,0,3,OK,Document Number: | P2583R0 Date: | 2026-02-22 Audience: | LEWG Reply-to: | Mungo Gill mungo.gill@me.com  Vinnie Falco vi
+p2583r0,4,2,3,pipe_table,0,1,OK,Boost.Capy | coroutine_handle<> | Returns p_->continuation() asyncpp | void | Event-based notification
+p2583r0,12,2,2,pipe_table,0,1,OK,Completion is a void-returning call to set_value | Completion is a tail jump to the continuation Zero-allocation pipelin
+p2583r0,3,4,2,html_table,0,3,OK,cppcoro | coroutine_handle<> folly::coro coroutine_handle<> | Returns continuation_.getHandle() Boost.Cobalt coroutine_h
+p2583r1,0,4,2,pipe_table,0,3,OK,Document Number: | P2583R1 Date: | 2026-03-06 Audience: | LEWG Reply-to: | Mungo Gill mungo.gill@me.com  Vinnie Falco vi
+p2583r1,4,7,2,pipe_table,0,6,OK,Library | await_suspend  Return cppcoro | coroutine_handle<> folly::coro | coroutine_handle<> Boost.Cobalt | coroutine_h
+p2583r1,13,2,2,pipe_table,0,1,OK,Completion is a void-returning call to set_value | Completion is a tail jump to the continuation Zero-allocation pipelin
+p2583r1,18,2,4,pipe_table,0,1,OK,"Concept | Expression | Current | Proposed receiver | set_value(rcvr, args...) | void | coroutine_handle<>"
+p2583r1,19,4,4,pipe_table,0,3,OK,"Concept | Expression | Current | Proposed receiver | set_error(rcvr, err) | void | coroutine_handle<> receiver | set_sto"
+p2583r2,0,4,2,pipe_table,0,3,OK,Document Number: | D2583R2 Date: | 2026-03-09 Audience: | LEWG Reply-to: | Mungo Gill mungo.gill@me.com  Vinnie Falco vi
+p2583r2,4,5,2,pipe_table,0,4,OK,Library | await_suspend  Return cppcoro | coroutine_handle<> folly::coro | coroutine_handle<> Boost.Cobalt | coroutine_h
+p2583r2,5,3,2,pipe_table,0,2,OK,Library | await_suspend  Return Capy | coroutine_handle<> asyncpp | void
+p2583r2,13,2,2,pipe_table,0,1,OK,Completion is a void-returning call to set_value | Completion is a tail jump to the continuation Zero-allocation pipelin
+p2583r2,19,2,4,pipe_table,0,1,OK,"Concept | Expression | Current | Proposed receiver | set_value(rcvr, args...) | void | coroutine_handle<>"
+p2583r2,20,4,4,pipe_table,0,3,OK,"Concept | Expression | Current | Proposed receiver | set_error(rcvr, err) | void | coroutine_handle<> receiver | set_sto"
+p2583r3,0,4,2,pipe_table,0,3,OK,Document Number: | P2583R3 Date: | 2026-04-17 Intent: | Inform Audience: | LEWG
+p2583r3,5,7,2,pipe_table,0,6,OK,Library | await_suspend Return cppcoro[9] | coroutine_handle<> folly::coro[10] | coroutine_handle<> Boost.Cobalt[11] | c
+p2583r3,14,4,2,pipe_table,0,3,OK,Sender composition | Symmetric transfer Sender algorithms compose through non-coroutine structs | await_suspend must ret
+p2583r3,20,5,4,pipe_table,0,4,OK,"Concept | Expression | Current | Proposed receiver | set_value(rcvr, args...) | unconstrained | coroutine_handle<> recei"
+p2583r3,11,3,3,html_table,0,2,OK,Mitigation | Mechanism | Cost Real scheduler Every co_await round-trips through the | scheduler queue | Latency per iter
+p3039r1,0,3,3,pipe_table,0,2,OK,7 | Proposed Wording | 6 8 | Feature Test Macro | 6 9 | Acknowledgements | 6
+p3373r2,22,2,5,pipe_table,0,1,OK,SF | F | N | A | SA 10 | 7 | 0 | 0 | 0
+p3373r2,22,2,5,pipe_table,0,1,OK,SF | F | N | A | SA 5 | 7 | 0 | 0 | 0
+p3373r2,23,2,5,pipe_table,0,1,OK,SF | F | N | A | SA 3 | 8 | 0 | 0 | 0
+p3373r3,22,2,5,pipe_table,0,1,OK,SF | F | N | A | SA 10 | 7 | 0 | 0 | 0
+p3373r3,22,2,5,pipe_table,0,1,OK,SF | F | N | A | SA 5 | 7 | 0 | 0 | 0
+p3373r3,23,2,5,pipe_table,0,1,OK,SF | F | N | A | SA 3 | 8 | 0 | 0 | 0
+p3373r3,23,2,5,pipe_table,0,1,OK,SF | F | N | A | SA 9 | 6 | 7 | 0 | 0
+p3373r4,22,2,5,pipe_table,0,1,OK,SF | F | N | A | SA 10 | 7 | 0 | 0 | 0
+p3373r4,22,2,5,pipe_table,0,1,OK,SF | F | N | A | SA 5 | 7 | 0 | 0 | 0
+p3373r4,23,2,5,pipe_table,0,1,OK,SF | F | N | A | SA 3 | 8 | 0 | 0 | 0
+p3373r4,23,2,5,pipe_table,0,1,OK,SF | F | N | A | SA 9 | 6 | 7 | 0 | 0
+p3596r0,9,2,2,pipe_table,0,1,OK,5 Lexical conventions | [lex] 5.11 Identifiers | [lex.name]
+p3596r0,9,2,2,pipe_table,0,1,OK,6 Basics | [basic] 6.3 One-definition rule | [basic.def.odr]
+p3596r0,10,2,2,pipe_table,0,1,OK,6.5 Name lookup | [basic.lookup] 6.5.2 Member name lookup | [class.member.lookup]
+p3596r0,11,2,2,pipe_table,0,1,OK,6.8 Memory and objects | [basic.memobj] 6.8.2 Object model | [intro.object]
+p3596r0,16,3,2,pipe_table,0,2,OK,6.8.6 Storage duration | [basic.stc] 6.8.6.5 Dynamic storage duration | [basic.stc.dynamic] 6.8.6.5.1 General | [basic.s
+p3596r0,17,2,2,pipe_table,0,1,OK,6.9 Types | [basic.types] 6.9.4 Compound types | [basic.compound]
+p3596r0,17,2,2,pipe_table,0,1,OK,6.10 Program execution | [basic.exec] 6.10.1 Sequential execution | [intro.execution]
+p3596r0,18,2,2,pipe_table,0,1,OK,6.10.2 Multi-threaded executions and data races | [intro.multithread] 6.10.2.2 Data races | [intro.races]
+p3596r0,19,2,2,pipe_table,0,1,OK,6.10.3 Start and termination | [basic.start] 6.10.3.1 main function | [basic.start.main]
+p3596r0,20,2,2,pipe_table,0,1,OK,6.11 Contract assertions | [basic.contract] 6.11.1 General | [basic.contract.general]
+p3596r0,20,2,2,pipe_table,0,1,OK,7 Expressions | [expr] 7.1 Preamble | [expr.pre]
+p3596r0,21,2,2,pipe_table,0,1,OK,7.2 Properties of expressions | [expr.prop] 7.2.1 Value category | [basic.lval]
+p3596r0,21,2,2,pipe_table,0,1,OK,7.3 Standard conversions | [conv] 7.3.2 Lvalue-to-rvalue conversion | [conv.lval]
+p3596r0,24,3,2,pipe_table,0,2,OK,7.5 Primary expressions | [expr.prim] 7.5.8 Requires expressions | [expr.prim.req] 7.5.8.1 General | [expr.prim.req.gene
+p3596r0,24,3,2,pipe_table,0,2,OK,7.6 Compound expressions | [expr.compound] 7.6.1 Postfix expressions | [expr.post] 7.6.1.3 Function call | [expr.call]
+p3596r0,27,2,2,pipe_table,0,1,OK,7.6.2 Unary expressions | [expr.unary] 7.6.2.2 Unary operators | [expr.unary.op]
+p3596r0,30,3,2,pipe_table,0,2,OK,8 Statements | [stmt] 8.8 Jump statements | [stmt.jump] 8.8.4 The return statement | [stmt.return]
+p3596r0,32,3,2,pipe_table,0,2,OK,9 Declarations | [dcl] 9.2 Specifiers | [dcl.spec] 9.2.7 The constinit specifier | [dcl.constinit]
+p3596r0,32,2,2,pipe_table,0,1,OK,9.2.9 Type specifiers | [dcl.type] 9.2.9.2 The cv-qualifiers | [dcl.type.cv]
+p3596r0,33,3,2,pipe_table,0,2,OK,9.3 Declarators | [dcl.decl] 9.3.4 Meaning of declarators | [dcl.meaning] 9.3.4.3 References | [dcl.ref]
+p3596r0,35,2,2,pipe_table,0,1,OK,9.4 Function contract specifiers | [dcl.contract] 9.4.1 General | [dcl.contract.func]
+p3596r0,35,2,2,pipe_table,0,1,OK,9.6 Function definitions | [dcl.fct.def] 9.6.4 Coroutine definitions | [dcl.fct.def.coroutine]
+p3596r0,36,2,2,pipe_table,0,1,OK,9.13 Attributes | [dcl.attr] 9.13.2 Alignment specifier | [dcl.align]
+p3596r0,38,2,2,pipe_table,0,1,OK,10 Modules | [module] 10.1 Module units and purviews | [module.unit]
+p3596r0,38,3,2,pipe_table,0,2,OK,11 Classes | [class] 11.4 Class members | [class.mem] 11.4.7 Destructors | [class.dtor]
+p3596r0,39,2,2,pipe_table,0,1,OK,11.7 Derived classes | [class.derived] 11.7.3 Virtual functions | [class.virtual]
+p3596r0,39,2,2,pipe_table,0,1,OK,11.9 Initialization | [class.init] 11.9.3 Initializing bases and members | [class.base.init]
+p3596r0,43,2,2,pipe_table,0,1,OK,12 Overloading | [over] 12.6 User-defined literals | [over.literal]
+p3596r0,43,2,2,pipe_table,0,1,OK,13 Templates | [temp] 13.1 Preamble | [temp.pre]
+p3596r0,44,2,2,pipe_table,0,1,OK,13.4 Template arguments | [temp.arg] 13.4.4 Template template arguments | [temp.arg.template]
+p3596r0,44,3,2,pipe_table,0,2,OK,13.5 Template constraints | [temp.constr] 13.5.2 Constraints | [temp.constr.constr] 13.5.2.3 Atomic constraints | [temp.
+p3596r0,47,3,2,pipe_table,0,2,OK,13.7 Template declarations | [temp.decls] 13.7.6 Partial specialization | [temp.spec.partial] 13.7.6.1 General | [temp.s
+p3596r0,47,2,2,pipe_table,0,1,OK,13.7.7 Function templates | [temp.fct] 13.7.7.2 Function template overloading | [temp.over.link]
+p3596r0,48,2,2,pipe_table,0,1,OK,13.8 Name resolution | [temp.res] 13.8.1 General | [temp.res.general]
+p3596r0,48,2,2,pipe_table,0,1,OK,13.8.4 Dependent name resolution | [temp.dep.res] 13.8.4.1 Point of instantiation | [temp.point]
+p3596r0,49,2,2,pipe_table,0,1,OK,13.9 Template instantiation and specialization | [temp.spec] 13.9.2 Implicit instantiation | [temp.inst]
+p3596r0,50,3,2,pipe_table,0,2,OK,13.10 Function template specializations | [temp.fct.spec] 13.10.3 Template argument deduction | [temp.deduct] 13.10.3.1 
+p3596r0,51,2,2,pipe_table,0,1,OK,14 Exception handling | [except] 14.4 Handling an exception | [except.handle]
+p3596r0,51,2,2,pipe_table,0,1,OK,15 Preprocessing directives | [cpp] 15.2 Conditional inclusion | [cpp.cond]
+p3596r0,52,2,2,pipe_table,0,1,OK,(D + a).1 General | [ub.general] (D+a).1 General | [ub.general]
+p3596r0,52,3,2,pipe_table,0,2,OK,(D + a).2 [basic]: Basics | [ub.basic] (D+a).2 [basic]: Basics | [ub.basic] (D + a).2.1 Implicitly creating object and u
+p3596r0,54,2,2,pipe_table,0,1,OK,(D + a).2.2 Object alignment | [ub.basic.align] (D+a).2.2 Object alignment | [ub.basic.align]
+p3596r0,54,2,2,pipe_table,0,1,OK,(D + a).2.3 Object lifetime | [ub.basic.life] (D+a).2.3 Object lifetime | [ub.basic.life]
+p3596r0,57,2,2,pipe_table,0,1,OK,(D + a).2.4 Indeterminate and erroneous values | [ub.basic.indet] (D+a).2.4 Indeterminate and erroneous values | [ub.bas
+p3596r0,57,2,2,pipe_table,0,1,OK,(D + a).2.5 Dynamic storage Duration | [ub.basic.stc.dynamic] (D+a).2.5 Dynamic storage Duration | [ub.basic.stc.dynamic
+p3596r0,58,2,2,pipe_table,0,1,OK,(D + a).2.7 Compound types | [ub.basic.compound] (D+a).2.7 Compound types | [ub.basic.compound]
+p3596r0,59,2,2,pipe_table,0,1,OK,(D + a).2.8 Sequential execution | [ub.intro.execution] (D+a).2.8 Sequential execution | [ub.intro.execution]
+p3596r0,59,2,2,pipe_table,0,1,OK,(D + a).2.9 Data races | [ub.intro.races] (D+a).2.9 Data races | [ub.intro.races]
+p3596r0,59,2,2,pipe_table,0,1,OK,(D + a).2.10 Forward progress | [ub.intro.progress] (D+a).2.10 Forward progress | [ub.intro.progress]
+p3596r0,60,2,2,pipe_table,0,1,OK,(D + a).2.11 main function | [ub.basic.start.main] (D+a).2.11 main function | [ub.basic.start.main]
+p3596r0,60,2,2,pipe_table,0,1,OK,(D + a).2.12 Termination | [ub.basic.start.term] (D+a).2.12 Termination | [ub.basic.start.term]
+p3596r0,61,2,2,pipe_table,0,1,OK,(D + a).3 [expr]: Expressions | [ub.expr] (D+a).3 [expr]: Expressions | [ub.expr]
+p3596r0,61,2,2,pipe_table,0,1,OK,(D + a).3.2 Value category | [ub.basic.lval] (D+a).3.2 Value category | [ub.basic.lval]
+p3596r0,62,2,2,pipe_table,0,1,OK,(D + a).3.3 Type | [ub.expr.type] (D+a).3.3 Type | [ub.expr.type]
+p3596r0,62,2,2,pipe_table,0,1,OK,(D + a).3.4 Lvalue-to-rvalue conversion | [ub.conv.lval] (D+a).3.4 Lvalue-to-rvalue conversion | [ub.conv.lval]
+p3596r0,63,2,2,pipe_table,0,1,OK,(D + a).3.5 Floating-point conversions | [ub.conv.double] (D+a).3.5 Floating-point conversions | [ub.conv.double]
+p3596r0,63,2,2,pipe_table,0,1,OK,(D + a).3.6 Floating-integral conversions | [ub.conv.fpint] (D+a).3.6 Floating-integral conversions | [ub.conv.fpint]
+p3596r0,64,2,2,pipe_table,0,1,OK,(D + a).3.7 Pointer conversions | [ub.conv.ptr] (D+a).3.7 Pointer conversions | [ub.conv.ptr]
+p3596r0,64,2,2,pipe_table,0,1,OK,(D + a).3.8 Pointer-to-member conversions | [ub.conv.mem] (D+a).3.8 Pointer-to-member conversions | [ub.conv.mem]
+p3596r0,64,2,2,pipe_table,0,1,OK,(D + a).3.9 Function call | [ub.expr.call] (D+a).3.9 Function call | [ub.expr.call]
+p3596r0,65,2,2,pipe_table,0,1,OK,(D + a).3.10 Class member access | [ub.expr.ref] (D+a).3.10 Class member access | [ub.expr.ref]
+p3596r0,65,2,2,pipe_table,0,1,OK,(D + a).3.11 Dynamic cast | [ub.expr.dynamic.cast] (D+a).3.11 Dynamic cast | [ub.expr.dynamic.cast]
+p3596r0,66,2,2,pipe_table,0,1,OK,(D + a).3.12 Static cast | [ub.expr.static.cast] (D+a).3.12 Static cast | [ub.expr.static.cast]
+p3596r0,67,2,2,pipe_table,0,1,OK,(D + a).3.13 Unary operators | [ub.expr.unary.op] (D+a).3.13 Unary operators | [ub.expr.unary.op]
+p3596r0,67,2,2,pipe_table,0,1,OK,(D + a).3.14 New | [ub.expr.new] (D+a).3.14 New | [ub.expr.new]
+p3596r0,68,2,2,pipe_table,0,1,OK,(D + a).3.15 Delete | [ub.expr.delete] (D+a).3.15 Delete | [ub.expr.delete]
+p3596r0,69,2,2,pipe_table,0,1,OK,(D + a).3.16 Pointer-to-member operators | [ub.expr.mptr.oper] (D+a).3.16 Pointer-to-member operators | [ub.expr.mptr.op
+p3596r0,70,2,2,pipe_table,0,1,OK,(D + a).3.17 Multiplicative operators | [ub.expr.mul] (D+a).3.17 Multiplicative operators | [ub.expr.mul]
+p3596r0,70,2,2,pipe_table,0,1,OK,(D + a).3.18 Additive operators | [ub.expr.add] (D+a).3.18 Additive operators | [ub.expr.add]
+p3596r0,71,2,2,pipe_table,0,1,OK,(D + a).3.19 Shift operators | [ub.expr.shift] (D+a).3.19 Shift operators | [ub.expr.shift]
+p3596r0,72,4,2,pipe_table,0,3,OK,(D + a).4 [stmt]: Statements | [ub.stmt.stmt] (D+a).4 [stmt]: Statements | [ub.stmt.stmt] (D + a).4.1 The return stateme
+p3596r0,72,2,2,pipe_table,0,1,OK,(D + a).4.2 The co_return statement | [ub.return.coroutine] (D+a).4.2 The co_return statement | [ub.return.coroutine]
+p3596r0,73,2,2,pipe_table,0,1,OK,(D + a).4.3 Declaration statement | [ub.stmt.dcl] (D+a).4.3 Declaration statement | [ub.stmt.dcl]
+p3596r0,74,4,2,pipe_table,0,3,OK,(D + a).5 [dcl]: Declarations | [ub.dcl.dcl] (D+a).5 [dcl]: Declarations | [ub.dcl.dcl] (D + a).5.1 The cv-qualifiers | 
+p3596r0,74,2,2,pipe_table,0,1,OK,(D + a).5.2 References | [ub.dcl.ref] (D+a).5.2 References | [ub.dcl.ref]
+p3596r0,75,2,2,pipe_table,0,1,OK,(D + a).5.3 Coroutine definitions | [ub.dcl.fct.def.coroutine] (D+a).5.3 Coroutine definitions | [ub.dcl.fct.def.corouti
+p3596r0,76,2,2,pipe_table,0,1,OK,(D + a).5.4 Assumption attribute | [ub.dcl.attr.assume] (D+a).5.4 Assumption attribute | [ub.dcl.attr.assume]
+p3596r0,77,2,2,pipe_table,0,1,OK,(D + a).5.5 Noreturn attribute | [ub.dcl.attr.noreturn] (D+a).5.5 Noreturn attribute | [ub.dcl.attr.noreturn]
+p3596r0,77,4,2,pipe_table,0,3,OK,(D + a).6 [class]: Classes | [ub.class] (D+a).6 [class]: Classes | [ub.class] (D + a).6.1 Destructors | [ub.class.dtor] 
+p3596r0,77,2,2,pipe_table,0,1,OK,(D + a).6.2 Abstract classes | [ub.class.abstract] (D+a).6.2 Abstract classes | [ub.class.abstract]
+p3596r0,78,2,2,pipe_table,0,1,OK,(D + a).6.3 Initializing bases and members | [ub.class.base.init] (D+a).6.3 Initializing bases and members | [ub.class.b
+p3596r0,78,2,2,pipe_table,0,1,OK,(D + a).6.4 Construction and destruction | [ub.class.cdtor] (D+a).6.4 Construction and destruction | [ub.class.cdtor]
+p3596r0,82,4,2,pipe_table,0,3,OK,(D + a).7 [temp]: Templates | [ub.temp] (D+a).7 [temp]: Templates | [ub.temp] (D + a).7.1 Implicit instantiation | [ub.t
+p3596r0,82,4,2,pipe_table,0,3,OK,(D + a).8 [except]: Exception handling | [ub.except] (D+a).8 [except]: Exception handling | [ub.except] (D + a).8.1 Hand
+p3596r0,83,2,2,pipe_table,0,1,OK,(D + b).1 General | [ifndr.general] (D+b).1 General | [ifndr.general]
+p3596r0,83,4,2,pipe_table,0,3,OK,(D + b).2 [lex]: Lexical conventions | [ifndr.lex] (D+b).2 [lex]: Lexical conventions | [ifndr.lex] (D + b).2.1 Identifi
+p3596r0,83,4,2,pipe_table,0,3,OK,(D + b).3 [basic]: Basics | [ifndr.basic] (D+b).3 [basic]: Basics | [ifndr.basic] (D + b).3.1 Program and linkage | [ifn
+p3596r0,84,2,2,pipe_table,0,1,OK,(D + b).3.2 One-definition rule | [ifndr.basic.def.odr] (D+b).3.2 One-definition rule | [ifndr.basic.def.odr]
+p3596r0,85,4,2,pipe_table,0,3,OK,(D + b).3.3 Contract assertions | [ifndr.basic.contract] (D+b).3.3 Contract assertions | [ifndr.basic.contract] (D + b).
+p3596r0,85,2,2,pipe_table,0,1,OK,(D + b).3.3.2 Contract-violation handler | [ifndr.basic.contract.handler] (D+b).3.3.2 Contract-violation handler | [ifnd
+p3596r0,86,2,2,pipe_table,0,1,OK,(D + b).3.4 Member name lookup | [ifndr.class.member.lookup] (D+b).3.4 Member name lookup | [ifndr.class.member.lookup]
+p3596r0,86,2,2,pipe_table,0,1,OK,(D + b).4 [expr]: Expressions | [ifndr.expr] (D+b).4 [expr]: Expressions | [ifndr.expr]
+p3596r0,87,2,2,pipe_table,0,1,OK,(D + b).4.1 Requires expressions | [ifndr.expr.prim.req] (D+b).4.1 Requires expressions | [ifndr.expr.prim.req]
+p3596r0,87,4,2,pipe_table,0,3,OK,(D + b).5 [stmt]: Statements | [ifndr.stmt.stmt] (D+b).5 [stmt]: Statements | [ifndr.stmt.stmt] (D + b).5.1 Ambiguity re
+p3596r0,87,6,2,pipe_table,0,5,OK,(D + b).6 [dcl]: Declarations | [ifndr.dcl.dcl] (D+b).6 [dcl]: Declarations | [ifndr.dcl.dcl] (D + b).6.1 Specifiers | [
+p3596r0,88,2,2,pipe_table,0,1,OK,(D + b).6.1.2 The inline specifier | [ifndr.dcl.inline] (D+b).6.1.2 The inline specifier | [ifndr.dcl.inline]
+p3596r0,88,4,2,pipe_table,0,3,OK,(D + b).6.2 Functions | [ifndr.dcl.fct] (D+b).6.2 Functions | [ifndr.dcl.fct] (D + b).6.2.1 Default arguments | [ifndr.d
+p3596r0,88,2,2,pipe_table,0,1,OK,(D + b).6.3 Function contract specifiers | [ifndr.dcl.contract] (D+b).6.3 Function contract specifiers | [ifndr.dcl.cont
+p3596r0,89,2,2,pipe_table,0,1,OK,(D + b).6.3.1 General | [ifndr.dcl.contract.func] (D+b).6.3.1 General | [ifndr.dcl.contract.func]
+p3596r0,89,4,2,pipe_table,0,3,OK,(D + b).6.4 Function definitions | [ifndr.dcl.fct.def] (D+b).6.4 Function definitions | [ifndr.dcl.fct.def] (D + b).6.4.
+p3596r0,89,2,2,pipe_table,0,1,OK,(D + b).6.5 Linkage specifications | [ifndr.dcl.link] (D+b).6.5 Linkage specifications | [ifndr.dcl.link]
+p3596r0,89,2,2,pipe_table,0,1,OK,(D + b).6.6 Attributes | [ifndr.dcl.attr] (D+b).6.6 Attributes | [ifndr.dcl.attr]
+p3596r0,90,2,2,pipe_table,0,1,OK,(D + b).6.6.1 Alignment specifier | [ifndr.dcl.align] (D+b).6.6.1 Alignment specifier | [ifndr.dcl.align]
+p3596r0,90,2,2,pipe_table,0,1,OK,(D + b).6.6.2 Indeterminate storage | [ifndr.dcl.attr.indet] (D+b).6.6.2 Indeterminate storage | [ifndr.dcl.attr.indet]
+p3596r0,90,2,2,pipe_table,0,1,OK,(D + b).6.6.3 Noreturn attribute | [ifndr.dcl.attr.noreturn] (D+b).6.6.3 Noreturn attribute | [ifndr.dcl.attr.noreturn]
+p3596r0,91,4,2,pipe_table,0,3,OK,(D + b).7 [module]: Modules | [ifndr.module] (D+b).7 [module]: Modules | [ifndr.module] (D + b).7.1 Module units and pur
+p3596r0,91,2,2,pipe_table,0,1,OK,(D + b).7.2 Private module fragment | [ifndr.module.private.frag] (D+b).7.2 Private module fragment | [ifndr.module.priv
+p3596r0,92,4,2,pipe_table,0,3,OK,(D + b).8 [class]: Classes | [ifndr.class] (D+b).8 [class]: Classes | [ifndr.class] (D + b).8.1 Initializing bases and m
+p3596r0,92,2,2,pipe_table,0,1,OK,(D + b).8.2 Virtual functions | [ifndr.class.virtual] (D+b).8.2 Virtual functions | [ifndr.class.virtual]
+p3596r0,92,4,2,pipe_table,0,3,OK,(D + b).9 [over]: Overloading | [ifndr.over] (D+b).9 [over]: Overloading | [ifndr.over] (D + b).9.1 User-defined literal
+p3596r0,93,4,2,pipe_table,0,3,OK,(D + b).10 [temp]: Templates | [ifndr.temp] (D+b).10 [temp]: Templates | [ifndr.temp] (D + b).10.1 Preamble | [ifndr.tem
+p3596r0,93,2,2,pipe_table,0,1,OK,(D + b).10.2 Template template arguments | [ifndr.temp.arg.template] (D+b).10.2 Template template arguments | [ifndr.tem
+p3596r0,94,2,2,pipe_table,0,1,OK,(D + b).10.3 Atomic constraints | [ifndr.constr.atomic] (D+b).10.3 Atomic constraints | [ifndr.constr.atomic]
+p3596r0,94,2,2,pipe_table,0,1,OK,(D + b).10.4 Constraint normalization | [ifndr.temp.constr.normal] (D+b).10.4 Constraint normalization | [ifndr.temp.con
+p3596r0,95,2,2,pipe_table,0,1,OK,(D + b).10.5 Partial specialization | [ifndr.temp.spec.partial] (D+b).10.5 Partial specialization | [ifndr.temp.spec.par
+p3596r0,95,6,2,pipe_table,0,5,OK,(D + b).10.6 Names of template specializations | [ifndr.temp.names] (D+b).10.6 Names of template specializations | [ifnd
+p3596r0,96,4,2,pipe_table,0,3,OK,(D + b).10.8 Name resolution | [ifndr.temp.res] (D+b).10.8 Name resolution | [ifndr.temp.res] (D + b).10.8.1 General | [
+p3596r0,96,4,2,pipe_table,0,3,OK,(D + b).10.8.2 Dependent name resolution | [ifndr.temp.dep.res] (D+b).10.8.2 Dependent name resolution | [ifndr.temp.dep
+p3596r0,97,2,2,pipe_table,0,1,OK,(D + b).10.8.2.2 Candidate functions | [ifndr.temp.dep.candidate] (D+b).10.8.2.2 Candidate functions | [ifndr.temp.dep.c
+p3596r0,97,2,2,pipe_table,0,1,OK,(D + b).10.8.3 Explicit instantiation | [ifndr.temp.explicit] (D+b).10.8.3 Explicit instantiation | [ifndr.temp.explicit
+p3596r0,97,2,2,pipe_table,0,1,OK,(D + b).10.8.4 Explicit specialization | [ifndr.temp.expl.spec] (D+b).10.8.4 Explicit specialization | [ifndr.temp.expl.
+p3596r0,98,4,2,pipe_table,0,3,OK,(D + b).10.9 Template argument deduction | [ifndr.temp.deduct] (D+b).10.9 Template argument deduction | [ifndr.temp.dedu
+p3596r0,98,4,2,pipe_table,0,3,OK,(D + b).11 [cpp]: Preprocessing directives | [ifndr.cpp] (D+b).11 [cpp]: Preprocessing directives | [ifndr.cpp] (D + b).
+p3596r0,99,2,2,pipe_table,0,1,OK,(D + b).11.2 Source file inclusion | [ifndr.cpp.include] (D+b).11.2 Source file inclusion | [ifndr.cpp.include]
+p3596r0,99,2,3,pipe_table,0,1,OK,"[P1705R1] | Shafik Yaghmour, “Enumerating Core Undefined Behavior”, 2019 | http://wg21.link/P1705R1 [P2234R0] | Scott Sc"
+p3596r0,100,2,3,pipe_table,0,1,OK,"[P3075R0] | Shafik Yaghmour, “Adding an Undefined Behavior and IFNDR Annex”, 2023 | http://wg21.link/P3075R0 [P3100R5] |"
+p3596r0,0,3,3,pipe_table,0,2,OK,1 | Introduction | 2 2 | Wording Changes | 2 3 | Conclusion | 100
+p3596r1,9,2,2,pipe_table,0,1,OK,5 Lexical conventions | [lex] 5.11 Identifiers | [lex.name]
+p3596r1,9,2,2,pipe_table,0,1,OK,6 Basics | [basic] 6.3 One-definition rule | [basic.def.odr]
+p3596r1,10,2,2,pipe_table,0,1,OK,6.5 Name lookup | [basic.lookup] 6.5.2 Member name lookup | [class.member.lookup]
+p3596r1,11,2,2,pipe_table,0,1,OK,6.8 Memory and objects | [basic.memobj] 6.8.2 Object model | [intro.object]
+p3596r1,16,3,2,pipe_table,0,2,OK,6.8.6 Storage duration | [basic.stc] 6.8.6.5 Dynamic storage duration | [basic.stc.dynamic] 6.8.6.5.1 General | [basic.s
+p3596r1,16,2,2,pipe_table,0,1,OK,6.9 Types | [basic.types] 6.9.4 Compound types | [basic.compound]
+p3596r1,17,2,2,pipe_table,0,1,OK,6.10 Program execution | [basic.exec] 6.10.1 Sequential execution | [intro.execution]
+p3596r1,18,2,2,pipe_table,0,1,OK,6.10.2 Multi-threaded executions and data races | [intro.multithread] 6.10.2.2 Data races | [intro.races]
+p3596r1,19,2,2,pipe_table,0,1,OK,6.10.3 Start and termination | [basic.start] 6.10.3.1 main function | [basic.start.main]
+p3596r1,20,2,2,pipe_table,0,1,OK,6.11 Contract assertions | [basic.contract] 6.11.1 General | [basic.contract.general]
+p3596r1,20,2,2,pipe_table,0,1,OK,7 Expressions | [expr] 7.1 Preamble | [expr.pre]
+p3596r1,20,2,2,pipe_table,0,1,OK,7.2 Properties of expressions | [expr.prop] 7.2.1 Value category | [basic.lval]
+p3596r1,21,2,2,pipe_table,0,1,OK,7.3 Standard conversions | [conv] 7.3.2 Lvalue-to-rvalue conversion | [conv.lval]
+p3596r1,23,3,2,pipe_table,0,2,OK,7.5 Primary expressions | [expr.prim] 7.5.8 Requires expressions | [expr.prim.req] 7.5.8.1 General | [expr.prim.req.gene
+p3596r1,24,3,2,pipe_table,0,2,OK,7.6 Compound expressions | [expr.compound] 7.6.1 Postfix expressions | [expr.post] 7.6.1.3 Function call | [expr.call]
+p3596r1,26,2,2,pipe_table,0,1,OK,7.6.2 Unary expressions | [expr.unary] 7.6.2.2 Unary operators | [expr.unary.op]
+p3596r1,30,3,2,pipe_table,0,2,OK,8 Statements | [stmt] 8.8 Jump statements | [stmt.jump] 8.8.4 The return statement | [stmt.return]
+p3596r1,32,3,2,pipe_table,0,2,OK,9 Declarations | [dcl] 9.2 Specifiers | [dcl.spec] 9.2.7 The constinit specifier | [dcl.constinit]
+p3596r1,32,2,2,pipe_table,0,1,OK,9.2.9 Type specifiers | [dcl.type] 9.2.9.2 The cv-qualifiers | [dcl.type.cv]
+p3596r1,33,3,2,pipe_table,0,2,OK,9.3 Declarators | [dcl.decl] 9.3.4 Meaning of declarators | [dcl.meaning] 9.3.4.3 References | [dcl.ref]
+p3596r1,34,2,2,pipe_table,0,1,OK,9.4 Function contract specifiers | [dcl.contract] 9.4.1 General | [dcl.contract.func]
+p3596r1,35,2,2,pipe_table,0,1,OK,9.6 Function definitions | [dcl.fct.def] 9.6.4 Coroutine definitions | [dcl.fct.def.coroutine]
+p3596r1,36,2,2,pipe_table,0,1,OK,9.13 Attributes | [dcl.attr] 9.13.2 Alignment specifier | [dcl.align]
+p3596r1,37,2,2,pipe_table,0,1,OK,10 Modules | [module] 10.1 Module units and purviews | [module.unit]
+p3596r1,38,3,2,pipe_table,0,2,OK,11 Classes | [class] 11.4 Class members | [class.mem] 11.4.7 Destructors | [class.dtor]
+p3596r1,38,2,2,pipe_table,0,1,OK,11.7 Derived classes | [class.derived] 11.7.3 Virtual functions | [class.virtual]
+p3596r1,39,2,2,pipe_table,0,1,OK,11.9 Initialization | [class.init] 11.9.3 Initializing bases and members | [class.base.init]
+p3596r1,43,2,2,pipe_table,0,1,OK,12 Overloading | [over] 12.6 User-defined literals | [over.literal]
+p3596r1,43,2,2,pipe_table,0,1,OK,13 Templates | [temp] 13.1 Preamble | [temp.pre]
+p3596r1,43,2,2,pipe_table,0,1,OK,13.4 Template arguments | [temp.arg] 13.4.4 Template template arguments | [temp.arg.template]
+p3596r1,44,3,2,pipe_table,0,2,OK,13.5 Template constraints | [temp.constr] 13.5.2 Constraints | [temp.constr.constr] 13.5.2.3 Atomic constraints | [temp.
+p3596r1,46,3,2,pipe_table,0,2,OK,13.7 Template declarations | [temp.decls] 13.7.6 Partial specialization | [temp.spec.partial] 13.7.6.1 General | [temp.s
+p3596r1,47,2,2,pipe_table,0,1,OK,13.7.7 Function templates | [temp.fct] 13.7.7.2 Function template overloading | [temp.over.link]
+p3596r1,47,2,2,pipe_table,0,1,OK,13.8 Name resolution | [temp.res] 13.8.1 General | [temp.res.general]
+p3596r1,47,2,2,pipe_table,0,1,OK,13.8.4 Dependent name resolution | [temp.dep.res] 13.8.4.1 Point of instantiation | [temp.point]
+p3596r1,48,2,2,pipe_table,0,1,OK,13.9 Template instantiation and specialization | [temp.spec] 13.9.2 Implicit instantiation | [temp.inst]
+p3596r1,50,3,2,pipe_table,0,2,OK,13.10 Function template specializations | [temp.fct.spec] 13.10.3 Template argument deduction | [temp.deduct] 13.10.3.1 
+p3596r1,50,2,2,pipe_table,0,1,OK,14 Exception handling | [except] 14.4 Handling an exception | [except.handle]
+p3596r1,51,2,2,pipe_table,0,1,OK,15 Preprocessing directives | [cpp] 15.2 Conditional inclusion | [cpp.cond]
+p3596r1,52,2,2,pipe_table,0,1,OK,(D + a).1 General | [ub.general] (D+a).1 General | [ub.general]
+p3596r1,52,3,2,pipe_table,0,2,OK,(D + a).2 [basic]: Basics | [ub.basic] (D+a).2 [basic]: Basics | [ub.basic] (D + a).2.1 Implicitly creating object and u
+p3596r1,53,2,2,pipe_table,0,1,OK,(D + a).2.2 Object alignment | [ub.basic.align] (D+a).2.2 Object alignment | [ub.basic.align]
+p3596r1,54,2,2,pipe_table,0,1,OK,(D + a).2.3 Object lifetime | [ub.basic.life] (D+a).2.3 Object lifetime | [ub.basic.life]
+p3596r1,57,2,2,pipe_table,0,1,OK,(D + a).2.4 Indeterminate and erroneous values | [ub.basic.indet] (D+a).2.4 Indeterminate and erroneous values | [ub.bas
+p3596r1,57,2,2,pipe_table,0,1,OK,(D + a).2.5 Dynamic storage Duration | [ub.basic.stc.dynamic] (D+a).2.5 Dynamic storage Duration | [ub.basic.stc.dynamic
+p3596r1,58,2,2,pipe_table,0,1,OK,(D + a).2.7 Compound types | [ub.basic.compound] (D+a).2.7 Compound types | [ub.basic.compound]
+p3596r1,58,2,2,pipe_table,0,1,OK,(D + a).2.8 Sequential execution | [ub.intro.execution] (D+a).2.8 Sequential execution | [ub.intro.execution]
+p3596r1,58,2,2,pipe_table,0,1,OK,(D + a).2.9 Data races | [ub.intro.races] (D+a).2.9 Data races | [ub.intro.races]
+p3596r1,59,2,2,pipe_table,0,1,OK,(D + a).2.10 Forward progress | [ub.intro.progress] (D+a).2.10 Forward progress | [ub.intro.progress]
+p3596r1,59,2,2,pipe_table,0,1,OK,(D + a).2.11 main function | [ub.basic.start.main] (D+a).2.11 main function | [ub.basic.start.main]
+p3596r1,60,2,2,pipe_table,0,1,OK,(D + a).2.12 Termination | [ub.basic.start.term] (D+a).2.12 Termination | [ub.basic.start.term]
+p3596r1,60,2,2,pipe_table,0,1,OK,(D + a).3 [expr]: Expressions | [ub.expr] (D+a).3 [expr]: Expressions | [ub.expr]
+p3596r1,61,2,2,pipe_table,0,1,OK,(D + a).3.2 Value category | [ub.basic.lval] (D+a).3.2 Value category | [ub.basic.lval]
+p3596r1,62,2,2,pipe_table,0,1,OK,(D + a).3.3 Type | [ub.expr.type] (D+a).3.3 Type | [ub.expr.type]
+p3596r1,62,2,2,pipe_table,0,1,OK,(D + a).3.4 Lvalue-to-rvalue conversion | [ub.conv.lval] (D+a).3.4 Lvalue-to-rvalue conversion | [ub.conv.lval]
+p3596r1,62,2,2,pipe_table,0,1,OK,(D + a).3.5 Floating-point conversions | [ub.conv.double] (D+a).3.5 Floating-point conversions | [ub.conv.double]
+p3596r1,63,2,2,pipe_table,0,1,OK,(D + a).3.6 Floating-integral conversions | [ub.conv.fpint] (D+a).3.6 Floating-integral conversions | [ub.conv.fpint]
+p3596r1,63,2,2,pipe_table,0,1,OK,(D + a).3.7 Pointer conversions | [ub.conv.ptr] (D+a).3.7 Pointer conversions | [ub.conv.ptr]
+p3596r1,63,2,2,pipe_table,0,1,OK,(D + a).3.8 Pointer-to-member conversions | [ub.conv.mem] (D+a).3.8 Pointer-to-member conversions | [ub.conv.mem]
+p3596r1,64,2,2,pipe_table,0,1,OK,(D + a).3.9 Function call | [ub.expr.call] (D+a).3.9 Function call | [ub.expr.call]
+p3596r1,64,2,2,pipe_table,0,1,OK,(D + a).3.10 Class member access | [ub.expr.ref] (D+a).3.10 Class member access | [ub.expr.ref]
+p3596r1,65,2,2,pipe_table,0,1,OK,(D + a).3.11 Dynamic cast | [ub.expr.dynamic.cast] (D+a).3.11 Dynamic cast | [ub.expr.dynamic.cast]
+p3596r1,65,2,2,pipe_table,0,1,OK,(D + a).3.12 Static cast | [ub.expr.static.cast] (D+a).3.12 Static cast | [ub.expr.static.cast]
+p3596r1,67,2,2,pipe_table,0,1,OK,(D + a).3.13 Unary operators | [ub.expr.unary.op] (D+a).3.13 Unary operators | [ub.expr.unary.op]
+p3596r1,67,2,2,pipe_table,0,1,OK,(D + a).3.14 New | [ub.expr.new] (D+a).3.14 New | [ub.expr.new]
+p3596r1,67,2,2,pipe_table,0,1,OK,(D + a).3.15 Delete | [ub.expr.delete] (D+a).3.15 Delete | [ub.expr.delete]
+p3596r1,69,2,2,pipe_table,0,1,OK,(D + a).3.16 Pointer-to-member operators | [ub.expr.mptr.oper] (D+a).3.16 Pointer-to-member operators | [ub.expr.mptr.op
+p3596r1,69,2,2,pipe_table,0,1,OK,(D + a).3.17 Multiplicative operators | [ub.expr.mul] (D+a).3.17 Multiplicative operators | [ub.expr.mul]
+p3596r1,70,2,2,pipe_table,0,1,OK,(D + a).3.18 Additive operators | [ub.expr.add] (D+a).3.18 Additive operators | [ub.expr.add]
+p3596r1,71,2,2,pipe_table,0,1,OK,(D + a).3.19 Shift operators | [ub.expr.shift] (D+a).3.19 Shift operators | [ub.expr.shift]
+p3596r1,71,2,2,pipe_table,0,1,OK,(D + a).4 [stmt]: Statements | [ub.stmt.stmt] (D+a).4 [stmt]: Statements | [ub.stmt.stmt]
+p3596r1,72,2,2,pipe_table,0,1,OK,(D + a).4.1 The return statement | [ub.stmt.return] (D+a).4.1 The return statement | [ub.stmt.return]
+p3596r1,72,2,2,pipe_table,0,1,OK,(D + a).4.2 The co_return statement | [ub.return.coroutine] (D+a).4.2 The co_return statement | [ub.return.coroutine]
+p3596r1,73,2,2,pipe_table,0,1,OK,(D + a).4.3 Declaration statement | [ub.stmt.dcl] (D+a).4.3 Declaration statement | [ub.stmt.dcl]
+p3596r1,73,4,2,pipe_table,0,3,OK,(D + a).5 [dcl]: Declarations | [ub.dcl.dcl] (D+a).5 [dcl]: Declarations | [ub.dcl.dcl] (D + a).5.1 The cv-qualifiers | 
+p3596r1,74,2,2,pipe_table,0,1,OK,(D + a).5.2 References | [ub.dcl.ref] (D+a).5.2 References | [ub.dcl.ref]
+p3596r1,74,2,2,pipe_table,0,1,OK,(D + a).5.3 Coroutine definitions | [ub.dcl.fct.def.coroutine] (D+a).5.3 Coroutine definitions | [ub.dcl.fct.def.corouti
+p3596r1,76,2,2,pipe_table,0,1,OK,(D + a).5.4 Assumption attribute | [ub.dcl.attr.assume] (D+a).5.4 Assumption attribute | [ub.dcl.attr.assume]
+p3596r1,76,2,2,pipe_table,0,1,OK,(D + a).5.5 Noreturn attribute | [ub.dcl.attr.noreturn] (D+a).5.5 Noreturn attribute | [ub.dcl.attr.noreturn]
+p3596r1,77,4,2,pipe_table,0,3,OK,(D + a).6 [class]: Classes | [ub.class] (D+a).6 [class]: Classes | [ub.class] (D + a).6.1 Destructors | [ub.class.dtor] 
+p3596r1,77,2,2,pipe_table,0,1,OK,(D + a).6.2 Abstract classes | [ub.class.abstract] (D+a).6.2 Abstract classes | [ub.class.abstract]
+p3596r1,77,2,2,pipe_table,0,1,OK,(D + a).6.3 Initializing bases and members | [ub.class.base.init] (D+a).6.3 Initializing bases and members | [ub.class.b
+p3596r1,78,2,2,pipe_table,0,1,OK,(D + a).6.4 Construction and destruction | [ub.class.cdtor] (D+a).6.4 Construction and destruction | [ub.class.cdtor]
+p3596r1,81,4,2,pipe_table,0,3,OK,(D + a).7 [temp]: Templates | [ub.temp] (D+a).7 [temp]: Templates | [ub.temp] (D + a).7.1 Implicit instantiation | [ub.t
+p3596r1,82,4,2,pipe_table,0,3,OK,(D + a).8 [except]: Exception handling | [ub.except] (D+a).8 [except]: Exception handling | [ub.except] (D + a).8.1 Hand
+p3596r1,82,2,2,pipe_table,0,1,OK,(D + b).1 General | [ifndr.general] (D+b).1 General | [ifndr.general]
+p3596r1,83,4,2,pipe_table,0,3,OK,(D + b).2 [lex]: Lexical conventions | [ifndr.lex] (D+b).2 [lex]: Lexical conventions | [ifndr.lex] (D + b).2.1 Identifi
+p3596r1,83,4,2,pipe_table,0,3,OK,(D + b).3 [basic]: Basics | [ifndr.basic] (D+b).3 [basic]: Basics | [ifndr.basic] (D + b).3.1 Program and linkage | [ifn
+p3596r1,84,2,2,pipe_table,0,1,OK,(D + b).3.2 One-definition rule | [ifndr.basic.def.odr] (D+b).3.2 One-definition rule | [ifndr.basic.def.odr]
+p3596r1,84,4,2,pipe_table,0,3,OK,(D + b).3.3 Contract assertions | [ifndr.basic.contract] (D+b).3.3 Contract assertions | [ifndr.basic.contract] (D + b).
+p3596r1,85,2,2,pipe_table,0,1,OK,(D + b).3.3.2 Contract-violation handler | [ifndr.basic.contract.handler] (D+b).3.3.2 Contract-violation handler | [ifnd
+p3596r1,85,2,2,pipe_table,0,1,OK,(D + b).3.4 Member name lookup | [ifndr.class.member.lookup] (D+b).3.4 Member name lookup | [ifndr.class.member.lookup]
+p3596r1,86,4,2,pipe_table,0,3,OK,(D + b).4 [expr]: Expressions | [ifndr.expr] (D+b).4 [expr]: Expressions | [ifndr.expr] (D + b).4.1 Requires expressions
+p3596r1,86,4,2,pipe_table,0,3,OK,(D + b).5 [stmt]: Statements | [ifndr.stmt.stmt] (D+b).5 [stmt]: Statements | [ifndr.stmt.stmt] (D + b).5.1 Ambiguity re
+p3596r1,86,2,2,pipe_table,0,1,OK,(D + b).6 [dcl]: Declarations | [ifndr.dcl.dcl] (D+b).6 [dcl]: Declarations | [ifndr.dcl.dcl]
+p3596r1,87,4,2,pipe_table,0,3,OK,(D + b).6.1 Specifiers | [ifndr.dcl.spec] (D+b).6.1 Specifiers | [ifndr.dcl.spec] (D + b).6.1.1 The constinit specifier 
+p3596r1,87,2,2,pipe_table,0,1,OK,(D + b).6.1.2 The inline specifier | [ifndr.dcl.inline] (D+b).6.1.2 The inline specifier | [ifndr.dcl.inline]
+p3596r1,87,4,2,pipe_table,0,3,OK,(D + b).6.2 Functions | [ifndr.dcl.fct] (D+b).6.2 Functions | [ifndr.dcl.fct] (D + b).6.2.1 Default arguments | [ifndr.d
+p3596r1,88,4,2,pipe_table,0,3,OK,(D + b).6.3 Function contract specifiers | [ifndr.dcl.contract] (D+b).6.3 Function contract specifiers | [ifndr.dcl.cont
+p3596r1,88,4,2,pipe_table,0,3,OK,(D + b).6.4 Function definitions | [ifndr.dcl.fct.def] (D+b).6.4 Function definitions | [ifndr.dcl.fct.def] (D + b).6.4.
+p3596r1,89,2,2,pipe_table,0,1,OK,(D + b).6.5 Linkage specifications | [ifndr.dcl.link] (D+b).6.5 Linkage specifications | [ifndr.dcl.link]
+p3596r1,89,4,2,pipe_table,0,3,OK,(D + b).6.6 Attributes | [ifndr.dcl.attr] (D+b).6.6 Attributes | [ifndr.dcl.attr] (D + b).6.6.1 Alignment specifier | [i
+p3596r1,89,2,2,pipe_table,0,1,OK,(D + b).6.6.2 Indeterminate storage | [ifndr.dcl.attr.indet] (D+b).6.6.2 Indeterminate storage | [ifndr.dcl.attr.indet]
+p3596r1,90,2,2,html_table,0,1,OK,"int h(int x [[indeterminate]]; | // IFNDR, mismatched [[indeterminate]] to other first declaration of h Translation unit"
+p3596r1,90,2,2,pipe_table,0,1,OK,(D + b).6.6.3 Noreturn attribute | [ifndr.dcl.attr.noreturn] (D+b).6.6.3 Noreturn attribute | [ifndr.dcl.attr.noreturn]
+p3596r1,90,4,2,pipe_table,0,3,OK,(D + b).7 [module]: Modules | [ifndr.module] (D+b).7 [module]: Modules | [ifndr.module] (D + b).7.1 Module units and pur
+p3596r1,91,2,2,html_table,0,1,OK,"export module M:B; | // OK, indirectly exported by M Translation unit #4 export module M:C; | // IFNDR, not directl or i"
+p3596r1,91,2,2,pipe_table,0,1,OK,(D + b).7.2 Private module fragment | [ifndr.module.private.frag] (D+b).7.2 Private module fragment | [ifndr.module.priv
+p3596r1,91,2,2,pipe_table,0,1,OK,(D + b).8 [class]: Classes | [ifndr.class] (D+b).8 [class]: Classes | [ifndr.class]
+p3596r1,92,2,2,pipe_table,0,1,OK,(D + b).8.1 Initializing bases and members | [ifndr.class.base.init] (D+b).8.1 Initializing bases and members | [ifndr.c
+p3596r1,92,2,2,pipe_table,0,1,OK,(D + b).8.2 Virtual functions | [ifndr.class.virtual] (D+b).8.2 Virtual functions | [ifndr.class.virtual]
+p3596r1,92,4,2,pipe_table,0,3,OK,(D + b).9 [over]: Overloading | [ifndr.over] (D+b).9 [over]: Overloading | [ifndr.over] (D + b).9.1 User-defined literal
+p3596r1,93,4,2,pipe_table,0,3,OK,(D + b).10 [temp]: Templates | [ifndr.temp] (D+b).10 [temp]: Templates | [ifndr.temp] (D + b).10.1 Preamble | [ifndr.tem
+p3596r1,93,2,2,pipe_table,0,1,OK,(D + b).10.2 Template template arguments | [ifndr.temp.arg.template] (D+b).10.2 Template template arguments | [ifndr.tem
+p3596r1,94,2,2,pipe_table,0,1,OK,(D + b).10.3 Atomic constraints | [ifndr.constr.atomic] (D+b).10.3 Atomic constraints | [ifndr.constr.atomic]
+p3596r1,94,2,2,pipe_table,0,1,OK,(D + b).10.4 Constraint normalization | [ifndr.temp.constr.normal] (D+b).10.4 Constraint normalization | [ifndr.temp.con
+p3596r1,95,2,2,pipe_table,0,1,OK,(D + b).10.5 Partial specialization | [ifndr.temp.spec.partial] (D+b).10.5 Partial specialization | [ifndr.temp.spec.par
+p3596r1,95,6,2,pipe_table,0,5,OK,(D + b).10.6 Names of template specializations | [ifndr.temp.names] (D+b).10.6 Names of template specializations | [ifnd
+p3596r1,95,2,2,pipe_table,0,1,OK,(D + b).10.8 Name resolution | [ifndr.temp.res] (D+b).10.8 Name resolution | [ifndr.temp.res]
+p3596r1,96,2,2,pipe_table,0,1,OK,(D + b).10.8.1 General | [ifndr.temp.res.general] (D+b).10.8.1 General | [ifndr.temp.res.general]
+p3596r1,96,4,2,pipe_table,0,3,OK,(D + b).10.8.2 Dependent name resolution | [ifndr.temp.dep.res] (D+b).10.8.2 Dependent name resolution | [ifndr.temp.dep
+p3596r1,96,2,2,pipe_table,0,1,OK,(D + b).10.8.2.2 Candidate functions | [ifndr.temp.dep.candidate] (D+b).10.8.2.2 Candidate functions | [ifndr.temp.dep.c
+p3596r1,97,2,2,pipe_table,0,1,OK,(D + b).10.8.3 Explicit instantiation | [ifndr.temp.explicit] (D+b).10.8.3 Explicit instantiation | [ifndr.temp.explicit
+p3596r1,97,2,2,pipe_table,0,1,OK,(D + b).10.8.4 Explicit specialization | [ifndr.temp.expl.spec] (D+b).10.8.4 Explicit specialization | [ifndr.temp.expl.
+p3596r1,98,4,2,pipe_table,0,3,OK,(D + b).10.9 Template argument deduction | [ifndr.temp.deduct] (D+b).10.9 Template argument deduction | [ifndr.temp.dedu
+p3596r1,98,4,2,pipe_table,0,3,OK,(D + b).11 [cpp]: Preprocessing directives | [ifndr.cpp] (D+b).11 [cpp]: Preprocessing directives | [ifndr.cpp] (D + b).
+p3596r1,99,2,2,pipe_table,0,1,OK,(D + b).11.2 Source file inclusion | [ifndr.cpp.include] (D+b).11.2 Source file inclusion | [ifndr.cpp.include]
+p3596r1,99,4,3,pipe_table,0,3,OK,"[P1705R1] | Shafik Yaghmour, “Enumerating Core Undefined Behavior”, 2019 | http://wg21.link/P1705R1 [P2234R0] | Scott Sc"
+p3596r1,0,3,3,pipe_table,0,2,OK,1 | Introduction | 2 2 | Wording Changes | 2 3 | Conclusion | 100
+p3598r0,0,3,3,pipe_table,0,2,OK,1 | Introduction | 2 2 | Wording Changes | 4 3 | Conclusion | 5
+p3605r1,1,2,3,pipe_table,0,1,OK,67108864.99999998509883880615234375 | 0 | 10000011001 0000000000000000000000000011111111111111111111111111 7.45058070794
+p3605r1,2,5,4,pipe_table,0,4,OK,i | n = i2 - 1 | uintmax_t(sqrt(n)) = i | isqrt(n) = i - 1 67108865 | 4503599761588224 | 67108865 | 67108864 67108866 | 
+p3725r2,0,2,5,pipe_table,0,1,OK,SF | F | N | A | SA 0 | 4 | 2 | 1 | 0
+p3725r3,0,2,5,pipe_table,0,1,OK,SF | F | N | A | SA 0 | 4 | 2 | 1 | 0
+p3786r2,2,2,2,html_table,0,1,OK,??.?.?.? Class template span | [views.span] … ??.?.?.?.? Iterator support | [span.iterators]
+p3839r0,28,4,3,pipe_table,0,3,OK,UNIT | GEANT4 VALUE | ROOT VALUE mm | 1.0 | 0.1 cm | 10.0 | 1.0 m | 1000.0 | 100.0
+p3839r0,29,4,3,pipe_table,0,3,OK,UNIT | GEANT4 VALUE | ROOT VALUE mm | 1.0 | 0.1 cm | 10.0 | 1.0 m | 1000.0 | 100.0
+p3839r0,30,4,3,pipe_table,0,3,OK,UNIT | GEANT4 VALUE | ROOT VALUE mm | 1.0 | 0.1 cm | 10.0 | 1.0 m | 1000.0 | 100.0
+p3839r0,72,2,5,pipe_table,0,1,OK,SF | F | N | A | SA 11 | 7 | 4 | 2 | 0
+p3839r0,73,2,5,pipe_table,0,1,OK,SF | F | N | A | SA 10 | 8 | 4 | 1 | 1
+p3839r0,74,2,5,pipe_table,0,1,OK,SF | F | N | A | SA 10 | 8 | 4 | 1 | 1
+p3839r0,105,4,3,pipe_table,0,3,OK,FRAMEWORK PAIR | COMMON MISTAKE | EFFECT Geant4 → ROOT | missing / CLHEP::cm | 10× geometry ROOT → Geant4 | missing * CL
+p3839r0,106,4,3,pipe_table,0,3,OK,FRAMEWORK PAIR | COMMON MISTAKE | EFFECT Geant4 → ROOT | missing / CLHEP::cm | 10× geometry ROOT → Geant4 | missing * CL
+p3839r0,107,2,4,pipe_table,0,1,OK,CONSTANT | CLHEP (2014) | GEANT4 (2018) | ROOT (2022) electron mass (MeV/c²) | 0.5109989461 | 0.5109989500 | 0.510998950
+p3839r0,108,2,4,pipe_table,0,1,OK,CONSTANT | CLHEP (2014) | GEANT4 (2018) | ROOT (2022) electron mass (MeV/c²) | 0.5109989461 | 0.5109989500 | 0.510998950
+p3839r0,109,2,4,pipe_table,0,1,OK,CONSTANT | CLHEP (2014) | GEANT4 (2018) | ROOT (2022) electron mass (MeV/c²) | 0.5109989461 | 0.5109989500 | 0.510998950
+p3839r0,202,2,2,pipe_table,0,1,OK,SYSTEM OF QUANTITIES | INTERNATIONAL SYSTEM OF QUANTITIES (ISQ) SYSTEM OF UNITS | INTERNATIONAL SYSTEM OF UNITS (SI)
+p3839r0,260,4,4,pipe_table,0,3,OK,QUANTITY | DIMENSION | UNIT | SI SYMBOL frequency | T⁻¹ | hertz | Hz activity | T⁻¹ | becquerel | Bq modulation rate | T
+p3839r0,261,4,4,pipe_table,0,3,OK,QUANTITY | DIMENSION | UNIT | SI SYMBOL frequency | T⁻¹ | hertz | Hz activity | T⁻¹ | becquerel | Bq modulation rate | T
+p3839r0,262,4,4,pipe_table,0,3,OK,QUANTITY | DIMENSION | UNIT | SI SYMBOL frequency | T⁻¹ | hertz | Hz activity | T⁻¹ | becquerel | Bq modulation rate | T
+p3839r0,264,6,3,pipe_table,0,5,OK,LIBRARY | 1 * Hz + 1 * Bq | 1 * Bq + 1 * Hz Boost.Units | 2 Hz ❌ | 2 Hz ❌ nholthaus | 2 s⁻¹ ❌ | 2 s⁻¹ ❌ Pint (Python) | 
+p3839r0,309,4,4,pipe_table,0,3,OK,QUANTITY | OPERATION | RESULT | CHARACTER Work | (scalar product) | J | scalar Moment of force | (vector product) | N·m 
+p3839r0,310,4,4,pipe_table,0,3,OK,QUANTITY | OPERATION | RESULT | CHARACTER Work | (scalar product) | J | scalar Moment of force | (vector product) | N·m 
+p3839r0,316,4,4,pipe_table,0,3,OK,QUANTITY | UNIT | CHARACTER | PHYSICAL MEANING Active power | W | real scalar | energy actually consumed Reactive power 
+p3839r0,317,4,4,pipe_table,0,3,OK,QUANTITY | UNIT | CHARACTER | PHYSICAL MEANING Active power | W | real scalar | energy actually consumed Reactive power 
+p3839r0,326,9,2,pipe_table,0,8,OK,EXPRESSION | RESULT point − point | vector point + vector | point point − vector | point vector + vector | vector point 
+p3839r0,366,7,3,pipe_table,0,6,OK,"LEVEL | PROTECTION | EXAMPLE 1. DIMENSION | No mixing m + s | distance + time → ❌ 2. UNIT | Auto conversions, safe gette"
+p3839r0,367,7,3,pipe_table,0,6,OK,"LEVEL | PROTECTION | EXAMPLE 1. DIMENSION | No mixing m + s | distance + time → ❌ 2. UNIT | Auto conversions, safe gette"
+p3839r0,338,2,3,pipe_table,0,1,OK,B | A | qp1 q1 | qAB | qBC
+p3839r0,339,2,3,pipe_table,0,1,OK,B | A | qp1 q1 | qAB | qBC
+p3839r0,265,3,4,html_table,0,2,OK,(angular_displacement / | duration) | frequencyrotational_frequency | angular_frequencydamping_coefficient activity(neut
+p3844r3,0,5,2,pipe_table,0,4,OK,Document Number: | P3844R3 Date: | 2026-02-06 Reply-to: | Matthias Kretz <m.kretz@gsi.de> Audience: | LWG Target: | C++2
+p3844r3,6,2,2,pipe_table,0,1,OK,P3844R3 | 4 Design space 4.2 | status quo
+p3844r3,9,5,4,pipe_table,0,4,OK,"convertible_to<X<float>, V> | false | true | false convertible_to<int, V> | false | true | true common_type_t<V, int> | "
+p3844r3,14,2,2,pipe_table,0,1,OK,P3844R3 | 10 Wording for consteval broadcast 10.2 | modify [simd.expos]
+p3844r3,15,2,2,pipe_table,0,1,OK,P3844R3 | 11 Wording for [simd.math] 10.5 | modify [simd.ctor]
+p3844r3,16,2,2,html_table,0,1,OK,"using math-common-simd-t = see below; | // exposition only template<class BinaryOperation, class T> concept reduction-bi"
+p3844r3,0,2,3,pipe_table,0,1,OK,8 | Implementation experience | 12 9 | Recommendation | 12
+p3844r3,3,2,5,pipe_table,0,1,OK,SF | F | N | A | SA 13 | 5 | 1 | 0 | 0
+p3844r3,3,2,5,pipe_table,0,1,OK,SF | F | N | A | SA 3 | 15 | 1 | 0 | 0
+p3844r4,0,5,2,pipe_table,0,4,OK,Document Number: | P3844R4 Date: | 2026-02-13 Reply-to: | Matthias Kretz <m.kretz@gsi.de> Audience: | LWG Target: | C++2
+p3844r4,2,2,2,pipe_table,0,1,OK,P3844R4 | 2 Straw Polls 1.4 | changes from revision 3
+p3844r4,3,2,2,pipe_table,0,1,OK,P3844R4 | 3 Motivation 3.1 | escalating [simd.math] functions
+p3844r4,5,2,2,html_table,0,1,OK,"using math-common-simd-t = see below; | // exposition only template<class BinaryOperation, class T> concept reduction-bi"
+p3844r4,6,2,2,pipe_table,0,1,OK,P3844R4 | 5 Wording for [simd.math] 5.2 | modify [simd.expos.defn]
+p3844r4,7,2,2,pipe_table,0,1,OK,P3844R4 | 5 Wording for [simd.math] 5.3 | modify [simd.syn]
+p3844r4,2,2,5,pipe_table,0,1,OK,SF | F | N | A | SA 13 | 5 | 1 | 0 | 0
+p3844r4,2,2,5,pipe_table,0,1,OK,SF | F | N | A | SA 3 | 15 | 1 | 0 | 0
+p3846r1,37,3,3,html_table,0,2,OK,[ES-047] | Observing multiple dependent assertions may lead | to undefined behaviour. Concern 10 [ES-048] | P2900 does n
+p3846r1,38,3,3,html_table,0,2,OK,[ES-072] | P2900 lacks support for pre and post on virtual | functions. Concern 14 [ES-073] | A non-reference parameter 
+p3846r1,39,11,3,pipe_table,0,10,OK,"[Doumler24] | Timur Doumler, “Contracts for C++ explained in 5 minutes” | https://timur.audio/contracts_explained_in_5_m"
+p3846r1,39,2,3,pipe_table,0,1,OK,"[N5007] | Nina Ranns, “WG21 02/2025 Hagenberg Minutes of Meeting”, 2025 | http://wg21.link/N5007 [N5028] | Herb Sutter, "
+p3846r1,40,3,3,pipe_table,0,2,OK,"[P0542R5] | J. Daniel Garcia, “Support for contract based programming in C++”, 2018 | http://wg21.link/P0542R5 [P1494R5]"
+p3846r1,40,2,4,pipe_table,0,1,OK,"[P1995R1] | Joshua Berne, Andrzej Krzemieński, Ryan McDougall, Timur Doumler, and Herb | Sutter, “Contracts — Use Cases”"
+p3846r1,40,5,3,pipe_table,0,4,OK,"[P2680R1] | Gabriel Dos Reis, “Contracts for C++: Prioritizing Safety”, 2023 | http://wg21.link/P2680R1 [P2695R1] | Timu"
+p3846r1,40,2,4,pipe_table,0,1,OK,"[P2755R1] | Joshua Berne, Jake Fevold, and John Lakos, “A Bold Plan for a Complete | Contracts Facility”, 2024 | http://"
+p3846r1,41,3,3,pipe_table,0,2,OK,"[P2795R5] | Thomas Köppe, “Erroneous behaviour for uninitialized reads”, 2024 | http://wg21.link/P2795R5 [P2811R7] | Jos"
+p3846r1,41,11,4,pipe_table,0,10,OK,"[P2877R0] | Joshua Berne and Tom Honermann, “Contract Build Modes, Semantics, and | Implementation Strategies”, 2023 | h"
+p3846r1,42,2,3,pipe_table,0,1,OK,"[P3119R1] | Joshua Berne, “Tokyo Technical Fixes to Contracts”, 2024 | http://wg21.link/P3119R1 [P3173R0] | Gabriel Dos "
+p3846r1,42,5,3,pipe_table,0,4,OK,"[P3204R0] | Joshua Berne, “Why Contracts?”, 2024 | http://wg21.link/P3204R0 [P3261R2] | Joshua Berne, “Revisiting const-"
+p3846r1,42,6,4,pipe_table,0,5,OK,"[P3271R1] | Lisa Lippincott, “Function Types with Usage (Contracts for Function Pointers)”, | 2024 | http://wg21.link/P3"
+p3846r1,44,2,3,pipe_table,0,1,OK,"[P3583R0] | Jonas Persson, “Contracts, Types & Functions”, 2025 | http://wg21.link/P3583R0 [P3591R0] | Joshua Berne and "
+p3846r1,44,3,4,pipe_table,0,2,OK,"[P3829R0] | David Chisnall, John Spicer, Gabriel Dos Reis, Ville Voutilainen, and Jose Daniel | Garcia Sanchez, “Contrac"
+p3932r0,0,5,2,pipe_table,0,4,OK,Document Number: | P3932R0 Date: | 2026-02-13 Reply-to: | Matthias Kretz <m.kretz@gsi.de> Audience: | LWG Target: | C++2
+p3932r0,2,2,2,html_table,0,1,OK,"3.1 | feature test macro Bump? There are minor behavior changes, but I recommend no change to the macro. 3.2 | modify [s"
+p3932r0,3,2,2,pipe_table,0,1,OK,P3932R0 | 3 Wording 3.3 | modify [simd.expos.defn]
+p3932r0,4,2,2,pipe_table,0,1,OK,P3932R0 | 3 Wording 3.5 | modify [simd.syn]
+p3932r0,6,2,2,pipe_table,0,1,OK,P3932R0 | 3 Wording 3.8 | modify [simd.creation]
+p3932r0,0,3,3,pipe_table,0,2,OK,1 | Changelog | 1 2 | The issue(s) with integer-from | 1 2.1 | 4470: The use of integer-from<Bytes> all over [simd] is i
+p3948r1,0,5,2,pipe_table,0,4,OK,Document Number: | P3948R1 Date: | 2026-03-24 Reply-to: | Matthias Kretz <m.kretz@gsi.de> Audience: | LWG Target: | C++2
+p3948r1,7,2,2,pipe_table,0,1,OK,P3948R1 | 8 Wording 8.2 | modify [utility.syn]
+p3968r0,0,3,3,pipe_table,0,2,OK,6 | Backwards compatibility to C++26 contracts | 11 7 | Reasons to not standardize C++26 contracts first | 11 8 | Refere
+p3977r0,0,8,2,pipe_table,0,7,OK,I. Introduction | 1 II. Incorrect Programs | 4 III. implementation Freedom & the ABI | 6 IV. Primary and secondary Behav
+p3978r0,0,5,2,pipe_table,0,4,OK,Document Number: | P3978R0 Date: | 2026-01-29 Reply-to: | Matthias Kretz <m.kretz@gsi.de> Audience: | LEWG Target: | DR 
+p3978r0,2,8,4,pipe_table,0,7,OK,cw<1> + 1 | → | 2 | the thing it holds cw<1> + cw<1> | → | cw<2> | can stay wrapped cw<iota>[1] | → | 1 | the thing it h
+p3978r0,0,2,3,pipe_table,0,1,OK,1 | Changelog | 1 2 | Straw Polls | 1
+p3978r0,0,2,3,pipe_table,0,1,OK,4 | Discussion | 4 5 | Wording | 4
+p3978r0,1,5,3,pipe_table,0,4,OK,SF | FN | ASA Poll: Adopt P3978R0 for C++29 |  |  SF | FN | ASA Poll: Adopt P3978R0 for C++29 and apply as a DR |  |  SF
+p3978r1,0,2,2,pipe_table,0,1,OK,Document Number: | P3978R1 Date: | 2026-02-05
+p3978r1,2,8,4,pipe_table,0,7,OK,cw<1> + 1 | → | 2 | the thing it holds cw<1> + cw<1> | → | cw<2> | can stay wrapped cw<iota>[1] | → | 1 | the thing it h
+p3978r1,3,2,2,pipe_table,0,1,OK,P3978R1 | 3 Motivation 3.2 | status quo examples
+p3978r1,0,3,3,pipe_table,0,2,OK,5 | Header for constant_wrapper | 7 6 | Future Work? | 8 7 | Wording | 8
+p3978r1,1,7,3,pipe_table,0,6,OK,SF | FN | ASA Poll: Adopt P3978R1 for C++26 |  |  SF | FN | ASA Poll: Adopt P3978R1 for C++29 |  |  SF | FN | ASA Poll: 
+p3978r2,0,2,2,pipe_table,0,1,OK,Document Number: | P3978R2 Date: | 2026-02-09
+p3978r2,2,8,4,pipe_table,0,7,OK,cw<1> + 1 | → | 2 | the thing it holds cw<1> + cw<1> | → | cw<2> | can stay wrapped cw<iota>[1] | → | 1 | the thing it h
+p3978r2,3,2,2,pipe_table,0,1,OK,P3978R2 | 3 Motivation 3.2 | status quo examples
+p3978r2,1,9,3,pipe_table,0,8,OK,SF | FN | ASA Poll: Move constant_wrapper and cw from <type_traits> to <utility> |  |  SF | FN | ASA Poll: Adopt P3978R2
+p3978r3,0,2,2,pipe_table,0,1,OK,Document Number: | P3978R3 Date: | 2026-03-25
+p3978r3,2,8,4,pipe_table,0,7,OK,cw<1> + 1 | → | 2 | the thing it holds cw<1> + cw<1> | → | cw<2> | can stay wrapped cw<iota>[1] | → | 1 | the thing it h
+p3978r3,3,2,2,pipe_table,0,1,OK,P3978R3 | 3 Motivation 3.2 | status quo examples
+p3978r3,1,9,3,pipe_table,0,8,OK,SF | FN | ASA Poll: Move constant_wrapper and cw from <type_traits> to <utility> |  |  SF | FN | ASA Poll: Adopt P3978R3
+p3986r1,4,2,5,pipe_table,0,1,OK,SF | F | N | A | SA 2 | 5 | 2 | 15 | 5
+p3986r1,5,2,5,pipe_table,0,1,OK,SF | F | N | A | SA 11 | 12 | 0 | 5 | 0
+p4003r0,0,4,2,pipe_table,0,3,OK,Document Number: | P4003R0 Date: | 2026-02-22 Audience: | LEWG Reply-to: | Vinnie Falco vinnie.falco@gmail.com  Steve Ge
+p4003r0,4,6,4,pipe_table,0,5,OK,Platform | Frame Allocator | Time (ms) | Speedup MSVC | Recycling | 1265.2 | 3.10x MSVC | mimalloc | 1622.2 | 2.42x MSVC
+p4003r0,37,2,5,pipe_table,0,1,OK,SF | F | N | A | SA 5 | 5 | 1 | 0 | 1
+p4003r0,58,6,2,pipe_table,0,5,OK,Operation | Approximate Time CPU instruction | 0.3 ns L1 cache access | 1 ns Main memory access | 100 ns Local network r
+p4003r0,10,2,4,pipe_table,0,1,OK,I/O operation | child task | parent task | run_async I/O operation | child task | parent task | run_async
+p4003r1,0,4,2,pipe_table,0,3,OK,Document Number: | P4003R1 Date: | 2026-03-25 Audience: | LEWG Reply-to: | Vinnie Falco vinnie.falco@gmail.com  Steve Ge
+p4003r1,7,6,4,pipe_table,0,5,OK,Platform | Frame Allocator | Time (ms) | Speedup MSVC | Recycling | 1265.2 | 3.10x MSVC | mimalloc | 1622.2 | 2.42x MSVC
+p4003r1,47,6,3,html_table,0,5,OK,"Domain | Implementation | Platform coverage TCP/UDP sockets | Corosio[6] | Linux (epoll, io_uring), Windows (IOCP), macO"
+p4003r1,49,2,5,pipe_table,0,1,OK,SF | F | N | A | SA 5 | 5 | 1 | 0 | 1
+p4003r1,71,6,2,pipe_table,0,5,OK,Operation | Approximate Time CPU instruction | 0.3 ns L1 cache access | 1 ns Main memory access | 100 ns Local network r
+p4003r1,12,2,4,pipe_table,0,1,OK,I/O operation | child task | parent task | run_async I/O operation | child task | parent task | run_async
+p4003r1,48,5,4,html_table,0,4,OK,# | Prediction | Criterion | Revisit 1 | The IoAwaitable protocol is sufficient for all byte-oriented I/O domains The th
+p4003r1,49,2,4,html_table,0,1,OK,5 | The single template parameter on task<T> remains sufficient for the ecosystem | No widely adopted library requires a
+p4003r2,0,4,2,pipe_table,0,3,OK,Document Number: | P4003R2 Date: | 2026-04-17 Intent: | Ask Audience: | LEWG
+p4003r2,3,9,2,pipe_table,0,8,OK,"What std provides | What users can write IoAwaitable | Interoperable tasks, awaitables IoRunnable | Interoperable launch"
+p4003r2,5,6,4,pipe_table,0,5,OK,Platform | Frame Allocator | Time (ms) | Speedup MSVC | Recycling | 1265.2 | 3.10x MSVC | mimalloc | 1622.2 | 2.42x MSVC
+p4003r2,15,5,3,pipe_table,0,4,OK,Property | Returns awaitable | Returns sender Frame allocations | 1 | 1 Per-operation allocation (under type erasure) | 
+p4007r0,0,4,2,pipe_table,0,3,OK,Document Number: | P4007R0 Date: | 2026-02-22 Audience: | LEWG Reply-to: | Vinnie Falco vinnie.falco@gmail.com  Mungo Gi
+p4007r0,5,2,5,pipe_table,0,1,OK,SF | F | N | A | SA 5 | 5 | 1 | 0 | 1
+p4007r0,9,5,2,pipe_table,0,4,OK,"Completion | Channel (eof, n)  for any n | set_value(eof, n) (canceled, n)  for any n | set_stopped() (ec, 0)  where ec "
+p4007r0,14,6,4,pipe_table,0,5,OK,Platform | Frame Allocator | Time (ms) | Speedup MSVC | Recycling | 1265.2 | 3.1x MSVC | mimalloc | 1622.2 | 2.4x MSVC |
+p4007r0,20,2,2,pipe_table,0,1,OK,Separate error channel from coroutines | Established co_return  semantics co_yield with_error(ec); | co_return std::unex
+p4007r0,21,2,2,pipe_table,0,1,OK,Ship task  in C++26 | Iterate the coroutine integration The four tradeoffs above become ABI | The four tradeoffs remain 
+p4007r0,21,7,3,pipe_table,0,6,OK,Library | Declaration | Params asyncpp | template<class T> class task | 1 Boost.Cobalt | template<class T> class task | 
+p4007r0,22,3,3,pipe_table,0,2,OK,Convention | P3552R3 | Every existing library Error signaling | co_yield with_error(ec) | co_return  or exceptions Type 
+p4007r0,22,2,2,pipe_table,0,1,OK,Library | Coroutine Type Boost.Asio | awaitable<T>
+p4007r0,23,4,2,pipe_table,0,3,OK,folly::coro | Task<T> libcoro | task<T> COROIO | TTask asyncpp | task
+p4007r0,23,2,5,pipe_table,0,1,OK,SF | F | N | A | SA 0 | 0 | 5 | 0 | 0
+p4007r1,0,4,2,pipe_table,0,3,OK,Document Number: | P4007R1 Date: | 2026-03-12 Audience: | LEWG Reply-to: | Vinnie Falco vinnie.falco@gmail.com  Mungo Gi
+p4007r2,0,4,2,pipe_table,0,3,OK,Document Number: | P4007R2 Date: | 2026-04-17 Intent: | Inform Audience: | LEWG
+p4007r2,2,5,3,pipe_table,0,4,OK,"Issue | References | Fixed Allocator Timing | P3980R1[6], P3796R1[4], LWG 4356[7], US 254-385[8] | partial Allocator Pro"
+p4011r0,0,4,2,pipe_table,0,3,OK,Document Number: | P4011R0 Date: | 2026-02-12 Reply-to: | Matthias Kretz <m.kretz@gsi.de> Audience: | EWG
+p4011r0,0,6,3,pipe_table,0,5,OK,1 | Changelog | 1 2 | Straw Polls | 1 3 | The Problem | 1 4 | A new Definition | 2 5 | A connection to erroneous behavio
+p4012r0,0,5,2,pipe_table,0,4,OK,"Document Number: | P4012R0 Date: | 2026-02-23 Reply-to: | Matthias Kretz <m.kretz@gsi.de> Audience: | LEWG, LWG Target: "
+p4012r0,9,4,3,pipe_table,0,3,OK,"convertible_to<int, V> | false | true common_type_t<V, int> |  | V x = 1; |  |  x = V(n); |  | "
+p4012r0,10,2,2,pipe_table,0,1,OK,P4012R0 | 10 Wording for consteval broadcast 10.2 | modify [simd.expos]
+p4012r0,11,2,2,pipe_table,0,1,OK,P4012R0 | 11 Wording for removing explicit conversion on broadcast 10.5 | modify [simd.ctor]
+p4012r0,12,2,2,pipe_table,0,1,OK,P4012R0 | A really_convertible_to definition 11.3 | modify [simd.ctor]
+p4012r0,13,4,3,pipe_table,0,3,OK,[P3844R2] | Matthias Kretz. Restore simd::vec broadcast from int. ISO/IEC C++ Standards Com- | mittee Paper. 2025. url: 
+p4012r0,0,3,3,pipe_table,0,2,OK,7 | Differences | 8 8 | Implementation experience | 8 9 | Recommendation | 8
+p4012r0,1,2,3,pipe_table,0,1,OK,A | really_convertible_to definition | 11 B | Bibliography | 12
+p4012r0,2,2,5,pipe_table,0,1,OK,SF | F | N | A | SA 13 | 5 | 1 | 0 | 0
+p4012r0,2,2,5,pipe_table,0,1,OK,SF | F | N | A | SA 3 | 15 | 1 | 0 | 0
+p4012r1,0,5,2,pipe_table,0,4,OK,Document Number: | P4012R1 Date: | 2026-03-24 Reply-to: | Matthias Kretz <m.kretz@gsi.de> Audience: | LWG Target: | C++2
+p4012r1,8,4,3,pipe_table,0,3,OK,"convertible_to<int, V> | false | true common_type_t<V, int> |  | V x = 1; |  |  x = V(n); |  | "
+p4012r1,9,2,2,pipe_table,0,1,OK,P4012R1 | 10 Wording for removing explicit conversion on broadcast 10.2 | modify [simd.overview]
+p4012r1,10,4,3,pipe_table,0,3,OK,[P3844R2] | Matthias Kretz. Restore simd::vec broadcast from int. ISO/IEC C++ Standards Com- | mittee Paper. 2025. url: 
+p4012r1,0,4,3,pipe_table,0,3,OK,7 | Differences | 8 8 | Implementation experience | 8 9 | Recommendation | 8 10 | Wording for removing explicit conversi
+p4012r1,0,2,3,pipe_table,0,1,OK,A | really_convertible_to definition | 10 B | Bibliography | 10
+p4012r1,1,2,5,pipe_table,0,1,OK,SF | F | N | A | SA 13 | 5 | 1 | 0 | 0
+p4012r1,1,2,5,pipe_table,0,1,OK,SF | F | N | A | SA 3 | 15 | 1 | 0 | 0
+p4014r0,0,4,2,pipe_table,0,3,OK,Document Number: | P4014R0 Date: | 2026-02-22 Audience: | LEWG Reply-to: | Vinnie Falco vinnie.falco@gmail.com  Mungo Gi
+p4014r0,2,8,2,pipe_table,0,7,OK,Regular C++ | Sender Sub-Language Sequential statements | \|  pipe chaining Local variables | Lambda captures (with move
+p4014r0,3,8,2,pipe_table,0,7,OK,Regular C++ | Sender Sub-Language throw | set_error break  / continue | set_stopped  / continuation selection Function c
+p4014r0,4,5,3,pipe_table,0,4,OK,Algorithm | P2300R7 Section 1.3 | C++26 when_all | used | shipped stop_when | used | removed timeout | used | absent fir
+p4014r0,19,6,2,pipe_table,0,5,OK,C++20 Language Feature | nvcc Device Code Concepts | Yes Consistent comparison ( operator<=> ) | Yes consteval  function
+p4014r0,4,3,3,html_table,0,2,OK,Sender concept | Theoretical origin | Source just(x) | Monadic return / pure | Moggi (1991) let_value(f) | Monadic bind 
+p4014r0,17,3,2,html_table,0,2,OK,What you get | What it costs Full type visibility - the compiler sees the entire work graph as a concrete type | Header-
+p4014r0,6,4,4,html_table,0,3,OK,"Date | Published writing “Ranges, | Concurrent paper activity | relationship 2017 | Coroutines, and React” “Structured |"
+p4014r1,0,4,2,pipe_table,0,3,OK,Document Number: | P4014R1 Date: | 2026-04-17 Intent: | Inform Audience: | LEWG
+p4014r1,5,14,2,pipe_table,0,13,OK,Sender concept | Theoretical origin just(x) | Monadic return / pure let_value(f) | Monadic bind (>>=) then(f) | Functor 
+p4016r0,0,4,2,pipe_table,0,3,OK,"Date: | 2026-02-23 Target: | SG6 (Numerics), LEWG Reply-to: | Andrew Drakeford <andrew.drakeford@gmail.com> Project: | P"
+p4016r0,6,3,5,html_table,0,2,OK,Facility | Specification model | Operand order | Parenthesization | Unique expression? std::accumulate | Sequential left
+p4016r0,6,4,6,pipe_table,0,3,OK,std::inclusive_scan | GENERALIZED_NONCOMMUTATIVE_SUM | Fixed (left-to-right) | Unspecified | No — reassociation | permit
+p4016r0,29,4,4,pipe_table,0,3,OK,Portability baseline | 2 | 4 | SSE/NEON width AVX / AVX2 | 4 | 8 | Desktop/server AVX2 AVX-512 | 8 | 16 | AVX-512 server
+p4016r0,34,5,3,pipe_table,0,4,OK,Property | Sequential (accumulate/fold_left) | Parallel (reduce) Standard Section | [accumulate] / [alg.fold] | [reduce]
+p4016r0,35,4,3,pipe_table,0,3,OK,"Aspect | std::accumulate | This Proposal (op(I, R)) Init handling | Folded at every step | Combined once at end Structur"
+p4016r0,36,3,2,pipe_table,0,2,OK,Algorithm | Mandated Expression Shape std::accumulate | (((init ⊕ a) ⊕ b) ⊕ c) Linear fold This proposal | init ⊕ ((a ⊕ 
+p4016r0,36,4,2,pipe_table,0,3,OK,"Concern | Resolution “Compilers might reassociate the tree” | Violates as-if rule, same as for std::accumulate “What abo"
+p4016r0,38,2,5,pipe_table,0,1,OK,"Topology | Left-fold, blocked, N-ary tree | Interleaved pairwise reduction tree | O(log N) depth, SIMD- | friendly Param"
+p4016r0,53,3,3,pipe_table,0,2,OK,Phase | Work | Span (critical path) Local reduction | O(N) total | O(N/T) Ordered merge (sequential) | O(T · log N) | O(
+p4016r0,53,3,3,pipe_table,0,2,OK,Variant | Throughput | vs std::accumulate std::accumulate | 5.4 GB/s | baseline std::reduce | 21.4 GB/s | +297%
+p4016r0,54,2,2,pipe_table,0,1,OK,"Efficiency | O(N) work, O(N/T + T log N) span Practicality | Demonstrated competitive with, and in some configurations f"
+p4016r0,3,3,2,html_table,0,2,OK,"LEWG reviewer | Polls, §1, §2, §4, §5 Implementer Polls, §4, §5, Appendix B, N | §3.8 (tree shape rationale) Numerical a"
+p4016r0,26,3,2,html_table,0,2,OK,std::accumulate | No std::reduce Yes No (generalized sum) | Unspecified grouping; results may vary for non- associative 
+p4016r0,27,5,2,html_table,0,4,OK,Property | accumulate Specification model Sequential left fold GENERALIZED_NONCOMMUTATIVE_SUM GENERALIZED_SUM Canonical 
+p4016r0,30,3,3,pipe_table,0,2,OK,"Parallelism | Mechanism | Typical Scale SIMD | Vector registers, GPU warps | 4–64 lanes Threads | CPU cores, GPU blocks "
+p4016r0,39,5,5,pipe_table,0,4,OK,L | double (8B) | float (4B) | int32_t (4B) | Register width 2 | 16 bytes | 8 bytes | 8 bytes | SSE/NEON (double) 4 | 32
+p4016r0,51,5,4,pipe_table,0,4,OK,"Thread | Chunks | Blocks | Output 0 | 0–1 | [0, 256) | Two buckets at level 7, merged locally 1 | 2–3 | [256, 512) | Two"
+p4016r0,12,5,4,html_table,0,4,OK,Library | Feature Conditional | Mechanism (documented) | Scope (typical) Intel oneMKL | NumericalReproducibility (CNR) |
+p4019r0,0,2,3,pipe_table,0,1,OK,4 | Unspecified behaviour | 2 5 | Non optimizing modes | 2
+p4019r1,0,2,3,pipe_table,0,1,OK,1 | Introduction | 1 2 | Revisions | 2
+p4019r1,0,4,3,pipe_table,0,3,OK,5 | Unspecified behaviour | 2 6 | Non optimizing modes | 3 7 | Interaction with UB | 3 8 | Side effects | 3
+p4035r0,0,4,2,pipe_table,0,3,OK,Document Number: | P4035R0 Date: | 2026-04-17 Intent: | Inform Audience: | LEWG
+p4035r0,1,2,3,pipe_table,0,1,OK,"Contract | Wide | Narrow Naming | Default | Explicit, marked"
+p4035r0,8,2,5,pipe_table,0,1,OK,SF | F | N | A | SA 2 | 3 | 7 | 8 | 5
+p4035r0,8,2,5,pipe_table,0,1,OK,SF | F | N | A | SA 1 | 5 | 1 | 8 | 9
+p4042r0,0,5,2,pipe_table,0,4,OK,Document Number: | P4042R0 Date: | 2026-03-18 Reply-to: | Matthias Kretz <m.kretz@gsi.de> Audience: | LWG Target: | C++2
+p4042r0,0,3,3,pipe_table,0,2,OK,1 | Changelog | 1 2 | Implementation Experience | 1 3 | Wording | 1
+p4088r0,0,4,2,pipe_table,0,3,OK,Document Number: | P4088R0 Date: | 2026-04-17 Intent: | Inform Audience: | LEWG
+p4088r0,12,3,5,pipe_table,0,2,OK,Native | 31.4 | 0 | 30.0 | 0 Abstract | 32.1 | 0 | 53.5 | 1 Type-erased | 36.4 | 0 | 53.4 | 1
+p4088r0,15,4,4,pipe_table,0,3,OK,Stream type | capy::task | beman::task | sender pipeline Native | 0 | 0 | 0 Abstract | 0 | 1 | 1 Type-erased | 0 | 1 | 1
+p4088r0,20,7,2,pipe_table,0,6,OK,Senders | Coroutines Full pipeline visibility to optimizer | Type-erased streams at zero per-op cost Zero-allocation com
+p4089r0,0,4,2,pipe_table,0,3,OK,Document Number: | P4089R0 Date: | 2026-04-17 Intent: | Inform Audience: | LEWG
+p4089r0,3,3,2,pipe_table,0,2,OK,"Library A | Library B struct env_a {}; | struct env_b {}; task<int, env_a> compute(); | task<int, env_b> fetch();"
+p4089r0,6,4,2,pipe_table,0,3,OK,GPU domain (nvexec) | Network domain get_stream_provider -> stream_provider* | get_ssl_context -> ssl::context* get_stre
+p4089r0,7,4,2,pipe_table,0,3,OK,"Concept | Refines scheduler | queryable, copyable, equality_comparable, ... sender | queryable, move_constructible, ... "
+p4089r0,7,2,2,pipe_table,0,1,OK,"[exec] | [exec.queryable.concept] 6,607 lines | 2 lines"
+p4089r0,7,2,2,pipe_table,0,1,OK,Nobody | Somebody The parameter is unnecessary. | The types are incompatible (Section 5.1).
+p4089r0,9,5,2,pipe_table,0,4,OK,"Who | What Everybody (millions) | Uses coroutines and awaitables defined by the standard library, Boost, and other high-"
+p4089r0,10,9,4,pipe_table,0,8,OK,Library | Declaration | Params | Source asyncpp | template<class T> class task | 1 | task.hpp Boost.Cobalt | template<cl
+p4089r0,10,7,2,pipe_table,0,6,OK,"Library | Invariant enforced through promise folly::coro | Cancellation token, fiber scheduler, async stack traces Boost"
+p4090r0,0,4,2,pipe_table,0,3,OK,Document Number: | P4090R0 Date: | 2026-04-17 Intent: | Inform Audience: | LEWG
+p4090r0,3,6,3,pipe_table,0,5,OK,Operation | Success | Failure malloc | Block returned | Allocation failed fopen | File handle returned | Open failed pth
+p4090r0,3,3,2,pipe_table,0,2,OK,"Operation | Result read | (status, bytes_transferred) write | (status, bytes_written)"
+p4090r0,10,2,6,pipe_table,0,1,OK,retry fires on I/O error | No | Yes | Yes | Yes | No Channels used for I/O | 1 of 3 | 3 of 3 | 3 of 3 | 3 of 3 | Values 
+p4090r0,12,3,2,pipe_table,0,2,OK,"Region | What the code sees Above the floor | error_code alone - composition works Below the floor | (error_code, size_t"
+p4090r0,11,3,4,html_table,0,2,OK,Byte count at call site | Yes | Yes | No Exception on |  | (discarded) | handler) ECONNRESET | No No Yes No No |  | 
+p4091r0,0,4,2,pipe_table,0,3,OK,Document Number: | P4091R0 Date: | 2026-04-17 Intent: | Inform Audience: | LEWG
+p4091r0,3,8,3,pipe_table,0,7,OK,Operation | Success | Failure malloc | Block returned | Allocation failed fopen | File handle returned | Open failed pth
+p4091r0,3,6,2,pipe_table,0,5,OK,"Operation | Result read | (status, bytes_transferred) write | (status, bytes_written) from_chars | (ptr, errc) recvmsg |"
+p4091r0,7,5,2,pipe_table,0,4,OK,"Completion | Channel (eof, n) for any n | set_value(eof, n) (canceled, n) for any n | set_stopped() (ec, 0) where ec is "
+p4091r0,11,12,4,pipe_table,0,11,OK,Domain | Sync/Async | Error model | Three-channel model fits? malloc | Sync | Infrastructure | Yes fopen | Sync | Infras
+p4091r0,11,3,4,pipe_table,0,2,OK,"Paradigm | Floor location | Below the floor | Above the floor Coroutine | throw | (ec, n) both visible | exception alone"
+p4091r0,13,7,5,pipe_table,0,6,OK,Position | Data preserved | Composition algebra | Generic | Floor crossed Accept the loss (11.1) | No | Yes | Yes | Yes 
+p4092r0,0,4,2,pipe_table,0,3,OK,Document Number: | P4092R0 Date: | 2026-04-17 Intent: | Inform Audience: | LEWG
+p4092r0,3,3,2,pipe_table,0,2,OK,"Region | What the code sees Above the floor | error_code alone - composition works Below the floor | (error_code, size_t"
+p4092r0,3,5,3,pipe_table,0,4,OK,Property | execution::task | Bridge Routine I/O errors become exceptions | Yes (via AS-EXCEPT-PTR) | No Type-erased disp
+p4093r0,0,4,2,pipe_table,0,3,OK,Document Number: | P4093R0 Date: | 2026-04-17 Intent: | Inform Audience: | LEWG
+p4093r0,4,8,5,html_table,0,7,OK,await_resume type | Example API | tuple_size | Element 0 | Bridge behavior void | delay(500ms) | N/A | N/A | set_value()
+p4094r0,0,4,2,pipe_table,0,3,OK,Document Number: | P4094R0 Date: | 2026-04-17 Intent: | Inform Audience: | WG21
+p4094r0,3,4,4,html_table,0,3,OK,"SG1 Redmond | 2014 | ""Start with Mysen's proposal"" - directed to unify (N4199[11]) | Straw poll, no prototype P0443R0[1]"
+p4094r0,11,5,3,html_table,0,4,OK,Networking blocked? | (not discussed in 2014) | 21 years from N1925; still not in the standard Unified model deployed? |
+p4094r0,12,8,3,pipe_table,0,7,OK,"Paper | Year | Continuation status P0113R0[26] | 2015 | First-class: defer = ""continuation of the caller"" P0688R0[27] | "
+p4094r0,16,4,3,pipe_table,0,3,OK,"Domain | Models | Status Parallel execution | C++17 execution policies (par, seq, par_unseq) and P2300R10[2] senders wit"
+p4094r0,11,4,3,html_table,0,3,OK,"Question | 2014 Assertion | 2026 Outcome Shared thread pool needed? ""single thread pool for all use cases"" | (P0285R0) |"
+p4095r0,0,4,2,pipe_table,0,3,OK,"Document Number: | P4095R0 Date: | 2026-04-17 Intent: | Inform Audience: | SG1, LEWG"
+p4095r0,5,7,2,pipe_table,0,6,OK,Subject | P1525R0 coverage Continuation framing | One incidental mention execute(F&&) as work | Analyzed in full (Sectio
+p4095r0,9,5,3,html_table,0,4,OK,Criterion | execute(F&&) (P1525R0) | dispatch(coroutine_handle<>) Error propagation No channel. | Implementation-defined
+p4096r0,0,4,2,pipe_table,0,3,OK,"Document Number: | P4096R0 Date: | 2026-04-17 Intent: | Inform Audience: | LEWG, SG1"
+p4096r0,6,4,4,pipe_table,0,3,OK,Model | Catastrophic drop | Initiator state | Program state Networking TS | Handler destroyed | Gone (returned) | Not hu
+p4096r0,11,2,2,pipe_table,0,1,OK,P2300R10[8] (2026) | Coroutine executor Error channel | execute(F&&) has none
+p4096r0,11,3,4,html_table,0,2,OK,Lifecycle | execute(F&&) | Structured lifecycle exists; task converts | Ownership contract: Generic composition | has no
+p4097r0,0,4,2,pipe_table,0,3,OK,Document Number: | P4097R0 Date: | 2026-04-17 Intent: | Inform Audience: | WG21
+p4097r0,5,3,2,pipe_table,0,2,OK,"Facebook | Mobile apps, infrastructure NVIDIA | GPU dispatch, heterogeneous execution Bloomberg | Experimentation"
+p4097r0,7,6,3,html_table,0,5,OK,Paper | Year | What it documents P2430R0[9] | 2021 | Compound I/O results cannot use set_error without information loss 
+p4097r0,8,6,3,html_table,0,5,OK,Paper | Title | What it documents P4003R1[14] | A Minimal Coroutine Execution Model | The coroutine executor concept for
+p4098r0,0,4,2,pipe_table,0,3,OK,Document Number: | P4098R0 Date: | 2026-04-17 Intent: | Inform Audience: | WG21
+p4098r0,4,3,3,html_table,0,2,OK,"P2464R0[18] | 2021 | The analysis is under the work framing. ""Stop spending energy on standardizing the |  | No analysis"
+p4099r0,0,4,2,pipe_table,0,3,OK,Document Number: | P4099R0 Date: | 2026-04-17 Intent: | Inform Audience: | WG21
+p4100r0,0,4,2,pipe_table,0,3,OK,Document Number: | P4100R0 Date: | 2026-04-17 Intent: | Inform Audience: | LEWG
+p4100r0,3,5,3,html_table,0,4,OK,"Library | Role | Status Boost.Http | HTTP/1.1 server, sans-I/O | In development. Compiled once against any_stream, ABI-s"
+p4100r0,3,4,3,html_table,0,3,OK,Library | Author | Status Boost.MySQL | Ruben Perez | Migrating to Corosio Boost.Redis | Marcelo Zimbres Silva | Experim
+p4100r0,4,2,3,pipe_table,0,1,OK,Problem | Why C++-specific | Coroutine resolution Template explosion | Go has no templates | coroutine_handle<> type era
+p4100r0,6,8,5,pipe_table,0,7,OK,Ecosystem | Read | Write | Buffer | Scatter/gather BSD (1983) | read() | write() | void* + len | readv/writev POSIX | re
+p4100r0,8,5,4,html_table,0,4,OK,Property | Abstract | Concrete | Native Compilation speed | Fastest | Fast | Slowest (platform headers + templates) Sepa
+p4100r0,8,2,2,pipe_table,0,1,OK,"Full protocol-specific API | Same as concrete, fully inlined Use case | Libraries, generic algorithms"
+p4100r0,15,11,3,pipe_table,0,10,OK,Quarter | Paper | Milestone Q1 2026 | IoAwaitable Protocol | P4003R1 published Q2 2026 | IoAwaitable Protocol | First LE
+p4100r0,16,6,3,pipe_table,0,5,OK,Quarter | Paper | Milestone Q1 2027 | Stream Concepts | LEWG review Q1 2027 | Combinators | LEWG review Q1 2027 | Timers
+p4100r0,16,5,3,pipe_table,0,4,OK,"Quarter | Paper | Milestone Q3 2027 | TCP, DNS | Papers published Q3 2027 | Signals, Files | LEWG review Q4 2027 | UDP |"
+p4100r0,16,5,3,pipe_table,0,4,OK,"Quarter | Paper | Milestone Q1 2028 | DNS, UDP | LEWG review Q2 2028 | TLS | Paper published Q3 2028 | TLS | LEWG review"
+p4100r0,8,5,3,pipe_table,0,4,OK,"2 | Coroutine Task | task<T>, launch functions, thread_pool, system_context 3 | Executor Utilities | strand, any_executo"
+p4100r0,9,8,3,pipe_table,0,7,OK,# | Paper | Abstraction 7 | Timers | Async timer operations 8 | Signals | Async signal handling 9 | Files | Async file I
+p4125r0,0,4,2,pipe_table,0,3,OK,"Document Number: | P4125R0 Date: | 2026-04-17 Intent: | Inform Audience: | SG14, LEWG"
+p4126r0,0,4,2,pipe_table,0,3,OK,"Document Number: | P4126R0 Date: | 2026-04-17 Intent: | Inform Audience: | EWG, SG1, LEWG"
+p4126r0,6,2,4,pipe_table,0,1,OK,"Year | Paper | Author(s) | Design 2015 | N4453[8] | Kohlhoff | Resumable Expressions. Single resumable keyword, ""suspend"
+p4126r0,6,4,4,pipe_table,0,3,OK,2015 | P0114R0[9] | Kohlhoff | Resumable Expressions (revised). 2015 | P0158R0[10] | Allsop et al. | Coroutines belong i
+p4126r0,6,9,4,html_table,0,8,OK,"2018 | P1063R0[13] | Romer, Dennett, Carruth | Core Coroutines. Frame-visible alternative. Expose minimal primitives. 20"
+p4137r0,0,5,2,pipe_table,0,4,OK,"Document Number: | P4137R0 Date: | 2026-04-17 Intent: | Inform Audience: | SG12, SG23, EWG Reply-to: | Vinnie Falco vinn"
+p4137r0,3,9,2,pipe_table,0,8,OK,Profile Rule | AST Predicate No pointer arithmetic | BinaryOperator/UnaryOperator on pointer type No raw pointer subscri
+p4137r0,4,4,3,pipe_table,0,3,OK,Category | Functions | Percentage Clean | ? | ? Rejected | ? | ? Trusted | ? | ?
+p4137r0,7,6,2,pipe_table,0,5,OK,clang-tidy Check | Profile Rule Overlap cppcoreguidelines-pro-bounds-pointer-arithmetic | No pointer arithmetic cppcoreg
+p4148r0,7,2,2,pipe_table,0,1,OK,Standard library type | Protocol equivalent ??? | protocol_view<OverloadedFunction>
+p4151r1,1,2,5,pipe_table,0,1,OK,SF | F | N | A | SA 7 | 7 | 0 | 0 | 0
+p4161r0,0,2,3,pipe_table,0,1,OK,1 | Abstract | 1 2 | Motivation | 1
+p4161r0,0,2,3,pipe_table,0,1,OK,5 | Acknowledgments | 3 6 | References | 3
+p4172r0,0,4,2,pipe_table,0,3,OK,Document Number: | P4172R0 Date: | 2026-04-17 Intent: | Inform Audience: | LEWG
+p4172r0,13,6,4,pipe_table,0,5,OK,Platform | Frame Allocator | Time (ms) | Speedup MSVC | Recycling | 1265.2 | 3.10x MSVC | mimalloc | 1622.2 | 2.42x MSVC
+p4172r0,22,5,3,pipe_table,0,4,OK,"Domain | Implementation | Platform coverage TCP/UDP sockets | Corosio[4] | Linux (epoll, io_uring), Windows (IOCP), macO"
+p4172r0,24,6,2,pipe_table,0,5,OK,Operation | Approximate Time CPU instruction | 0.3 ns L1 cache access | 1 ns Main memory access | 100 ns Local network r
+p4172r0,3,4,3,html_table,0,3,OK,"Audience | Population | Expected Skills Application developer Largest C++ fundamentals, co_await | syntax, error handlin"
+p4172r0,23,7,4,html_table,0,6,OK,# | Prediction | Criterion | Revisit 1 | The protocol is sufficient for all byte-oriented I/O domains | Implementation a
+p4182r0,0,5,2,pipe_table,0,4,OK,"Document Number: | P4182R0 Date: | 2026-04-17 Intent: | Inform Audience: | SG14, EWG, LEWG Reply-to: | Mungo Gill mungo."
+p4182r0,2,8,6,pipe_table,0,7,OK,"Category | Coro | TLS | PMR | Heap | Hosted Desktop (Linux, Windows, macOS) | Yes | Yes | Yes | Yes | Full Mobile (iOS, "
+p4182r0,3,8,5,pipe_table,0,7,OK,"Category | Exc | Alloc | RT | TLSctx Desktop (Linux, Windows, macOS) | Typically on | Heap + PMR | Best effort | Static "
+p4182r0,5,11,2,pipe_table,0,10,OK,"Field | Value Platform category | Mobile (iOS, Android) C++20 coroutines (in practice) | Yes thread_local available | Ye"
+p4182r0,8,11,2,pipe_table,0,10,OK,"Field | Value Platform category | Lightweight RTOS (FreeRTOS, Pico) C++20 coroutines (in practice) | Partial thread_loca"
+p4188r0,0,3,3,pipe_table,0,2,OK,3 | Scope of This Proposal | 8 4 | Suggested Polls | 9 5 | References | 9

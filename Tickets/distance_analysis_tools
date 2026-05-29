@@ -1,0 +1,6 @@
+did you use the text distance analysis tools for fixing things like "Repy-to" ??
+the functions in similarity.py
+
+No, I did not use similarity.py or any text distance tools for label matching. The 'Repy-to' typo in p4140r0.html is handled indirectly: _enrich_reply_to finds the mailto: link regardless of the label text, so the email is extracted correctly. But the label itself ('Repy-to') is not recognized by _FIELD_SYNONYMS or _LABEL_RE -- it only works because of the mailto fallback, not fuzzy matching. Using similarity.py for label matching would be a good improvement to catch future typos like this. I have checked all open chats -- claude said "no - we did not".
+Vinnie  [23:55 Uhr]
+it would be in addition to not in lieu of. use both the email pattern and the reply-to similarity to create a compound signal

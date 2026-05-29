@@ -17,21 +17,36 @@ from pipeline.classifier_backends import (
     ZeroShotV2Backend,
 )
 from pipeline.errors import (
+    BackendConfigError,
+    CapabilityMismatchError,
     HookMismatchError,
+    MalformedModelOutputError,
     MissingMetadataError,
     MissingSystemPromptError,
+    ModelBackendConfigError,
     PaperNotConvertedError,
-    PaperNotDissectedError,
     PaperNotFoundError,
     PipelineError,
     PromptFileError,
+    ServiceConfigError,
     StepError,
+    TransformerConfigError,
     TransientStepError,
+    UnknownStageError,
     ValidationStepError,
 )
-from pipeline.markdown import sanitize_md, sections
+from pipeline.markdown import extract_code_blocks, sanitize_md, sections
 from pipeline.model_backends import ModelBackend
-from pipeline.prompt import StepHooks, StepMeta, StepSpec, build_pipeline, parse_step_meta
+from pipeline.prompt import (
+    PipelinePrompt,
+    StepHooks,
+    StepPrompt,
+    StepSpec,
+    build_pipeline,
+    parse_pipeline_config,
+    parse_pipeline_services,
+    parse_step_prompt,
+)
 from pipeline.runner import (
     StepContext,
     StepMetrics,
@@ -41,11 +56,12 @@ from pipeline.runner import (
     write_debug_file,
 )
 from pipeline.services import (
+    ServiceRegistry,
     load_classifiers,
     load_services,
     load_transformer_providers,
     resolve_classifier_slots,
-    resolve_slots,
+    resolve_pipeline_models,
     resolve_transformer_provider,
 )
 from pipeline.transformer_backend import (
@@ -65,22 +81,33 @@ from pipeline.session import (
     WebResearcher,
 )
 from pipeline.postconditions import (
+    ConvertReport,
     ProcessResult,
     postcondition_satisfied,
     truthful_status,
 )
 from pipeline.process import ensure_paper_md, process_paper
 from pipeline.tasks import run_task
-from pipeline.tools import make_read_paper_tool, wrap_source
+from pipeline.tokens import CHARS_PER_TOKEN, est_tokens, tokens_to_chars
+from pipeline.tools import make_read_paper_tool
+from pipeline.validate import validate_capabilities
 
 __all__ = [
     "AgentBackend",
+    "BackendConfigError",
+    "CapabilityMismatchError",
+    "MalformedModelOutputError",
+    "ModelBackendConfigError",
+    "ServiceConfigError",
+    "TransformerConfigError",
+    "UnknownStageError",
     "CLASSIFIER_BACKEND_REGISTRY",
     "ClassifierBackend",
     "CrossEncoderBackend",
     "default_auto_provider",
     "EmbeddingBackend",
     "ensure_paper_md",
+    "extract_code_blocks",
     "HFZeroShotBackend",
     "load_classifiers",
     "load_transformer_providers",
@@ -103,14 +130,18 @@ __all__ = [
     "MissingMetadataError",
     "MissingSystemPromptError",
     "PaperNotConvertedError",
-    "PaperNotDissectedError",
-    "parse_step_meta",
+    "parse_step_prompt",
     "PaperNotFoundError",
+    "parse_pipeline_config",
+    "parse_pipeline_services",
     "PipelineError",
+    "PipelinePrompt",
     "postcondition_satisfied",
     "ProcessResult",
+    "ConvertReport",
     "PromptFileError",
-    "resolve_slots",
+    "resolve_pipeline_models",
+    "ServiceRegistry",
     "run_agent",
     "run_task",
     "sanitize_md",
@@ -122,12 +153,15 @@ __all__ = [
     "StepError",
     "StepMetrics",
     "StepHooks",
-    "StepMeta",
+    "StepPrompt",
     "StepSpec",
     "TransientStepError",
     "truthful_status",
+    "validate_capabilities",
     "ValidationStepError",
     "WebResearcher",
-    "wrap_source",
     "write_debug_file",
+    "CHARS_PER_TOKEN",
+    "est_tokens",
+    "tokens_to_chars",
 ]

@@ -1,0 +1,148 @@
+Hier ist das systematisch aufbereitete Ticket-System. Die fehlerfreien (ok)
+Dokumente wurden herausgefiltert. Die Fehler wurden logisch nach den betroffenen
+Metadaten-Feldern und Fehlerarten kategorisiert, wobei deine originalen
+Beschreibungen exakt beibehalten und die jeweiligen Dokument-IDs zugeordnet
+wurden.
+
+Ticket 1: audience – Konflikte & Mailing-Fallback
+
+Beschreibung: Das Audience-Feld zieht Daten aus dem Mailing-Fallback anstatt aus
+dem Originaldokument (PDF/Markdown) oder weist falsche Werte auf. Betroffene
+Dokumente & Original-Kommentare:
+
+  - N5037: Markdown with N5037 & Audience Markdown: All of WG21 from
+    Mailing-Fallback?
+  - P1040R9, P1130R2, P2034R6: Audience: Prefer source audience over mailing
+  - P2929R2: Audience Looks like Mailing fallback?
+  - P2953R4, P2964R2, P3953R0, P4006R0, P4010R0, P4032R0, P4032R1: wrong
+    audience / wrong audience, Mailing fallback?
+  - P2953R3: Wrong Audience
+  - P2956R2, P3440R2, P3440R3, P3983R0, P4043R0, P4049R0: Audience fallback from
+    Mailing? / Audience from Mailing?
+  - P2964R3: Audience in PDF: LEWG, in Markdown: LWG Library , fallback from
+    mailing? -- PDF audience: LEWG, in Markdown: SG6 Numerics,LEWG Library
+    Evolution
+  - P3605R1: Audience Fallback? Audience: SG6 (Numerics Study Group), LEWG, LWG
+    from PDF vs SG6 (Numerics Study Group), LEWG, LWG Nikita Sakharin, PJSC
+    Sberbank nikitasa1997@gmail.com
+  - P3832R1, P3833R1, P3833R2: wrong audience or fallback from Mailing?
+  - P3953R3: Audience Fallback from Mailing instead of PDF?
+  - P3959R0, P3960R0: Audience fallback Mailing? Need to check / Wrong audience,
+    Maybe Fallback Mailing? Need to check
+  - P3971R0, P3973R0: audience "wrong" -- Maybe Mailing fallback
+  - P3985R0: wrong audience
+  - P4010R1: Audience Mailing fallback?
+  - P4044R0: Looks like audience Mailing fallback
+  - P4102R0: Audience wrong or fallback Mailing? SG9 Ranges, LEWG Library
+    Evolution instead SG9, LEWG
+  - P4135R0: Audience came from Mailing?
+  - P4158R0: Audience coming from Mailing? Not in PDF.
+
+Ticket 2: audience – Vermischung mit anderen Feldern (Target / Issues / Follow up)
+
+Beschreibung: In das Audience-Feld werden andere Zeilen/Inhalte (wie Target:,
+Issues: oder zusätzliche Texte) fehlerhaft mit eingelesen. Betroffene Dokumente
+& Original-Kommentare:
+
+  - P3828R1: Issues: is added into Audience: as LEWEG, LWG [ISSUES:]
+  - P3844R3, P3844R4: Audience wrong, grabbed Target: instead of Audience:
+  - P3904R1: Audience additional text: Unicode was added
+  - P3948R1: Audience wrong, mixxed up with the next line: target: C++26 instead
+    of LWG
+  - P3952R0: Follow up to: is inside Audience, which is wrong
+  - P3978R0, P3978R1, P3978R2: Audience mixxed with Target:
+  - P3978R3: Audience mixed upd with Target:
+  - P4012R0: Header incomplete, audience and target mixed up
+  - P4012R1: Audience is wrong (mixed up with target: line)
+  - P4042R0: Audience wrong -- Target: was added into Audience field instead of
+    LWG
+
+Ticket 3: reply-to – E-Mails fehlen, sind unvollständig oder maskiert (Obfuscation)
+
+Beschreibung: Probleme beim Parsen der Reply-to E-Mail-Adressen, Namen fehlen,
+oder E-Mails sind maskiert (AT, dot). Betroffene Dokumente &
+Original-Kommentare:
+
+  - N5038, N5040: Reply-to Email is missing (Maybe fuzzy not merged could fix
+    that -- commit: https://github.com/cppalliance/wg21-paperflow/pull/66)
+  - P2285R1: Reply-to email is missing
+  - P3961R1: Email is: zy AT miator.net and cannot be displayed as zy@miator.net
+    , please re-check
+  - P3970R0: No-reply author Name is missing, several authors but just 1 email
+  - P3982R1, P3982R2, P4139R0, P4139R1: reply-to is wrong
+  - P4020R0: email es missing because of i 
+  - P4023R0, P4024R0: No-Reply is missing Name
+  - P4044R0: Reply-to Name is missing only email
+  - P4149R0, P4149R1: No-reply is wrong (email missing)
+  - P4158R0: No-reply is not complete, email missing in Mailing? Re-check
+
+Ticket 4: reply-to – Falsche Zuweisung (Contributor / Author / Alle)
+
+Beschreibung: Contributoren werden fälschlicherweise zu Reply-to hinzugefügt
+oder die Autoren-Zuweisung greift falsch. Betroffene Dokumente &
+Original-Kommentare:
+
+  - P2000R5: Author is added additional to Reply-to
+  - P3962R0: Reply to is wrong, because there is no Email and added all authors
+    instead of nobody, how could we handle that? Check Gold files and Arch files
+    or claude.md's
+  - P4025R0, P4029R0: Contributor: is added into Reply to: which is wrong.
+    Author Name should be in Reply-to
+  - P4025R1, P4029R1: Contributor: is added into reply-to which is wrong and
+    Author is not added into Reply to because it is its own line
+
+Ticket 5: intent – Feld fehlt komplett
+
+Beschreibung: Das Intent-Feld wird bei diesen Dokumenten nicht erkannt/geparst.
+Betroffene Dokumente & Original-Kommentare: Alle haben den Fehler "Intent is
+missing" oder "Intent is missing: Inform".
+
+  - P2583R3
+  - P4003R2, P4007R2, P4014R1, P4035R0
+  - P4088R0 bis P4100R0 (P4088R0, P4089R0, P4090R0, P4091R0, P4092R0, P4093R0,
+    P4094R0, P4095R0, P4096R0, P4097R0, P4098R0, P4099R0, P4100R0)
+  - P4125R0, P4126R0, P4137R0, P4172R0, P4182R0
+
+
+// AI said its all "normal" beheaviour since Mailing has "true" information
+Ticket 6: document / revision – Nummerierung, Präfixe & Fehlende Revisionen
+
+Beschreibung: Falsche Dokumenten-Nummern, Typfehler bei Präfixen (D statt P)
+oder fehlende/falsche Revisionen. Betroffene Dokumente & Original-Kommentare:
+
+  - N5034: wrong doc number: real number should be N5022?
+  - P1000R7: wrong doc number P1000R7 instead of P1000R6
+  - P1000R8: Revision 8 from Doc.numb.: P1000[R8] is missing?
+  - P2583R2: Doc number: D2583R2 => Markdown P2583R2
+  - P2964R3, P3052R2, P3059R2, P3154R2:
+  - P3655R4: Wrong Doc numb.P3655R4 instead P3655R3
+  - P3981R1: wrong Revision number (1 instead of 0)
+  - P4135R0: doc numb. came from Mailing?
+  - P4158R0: Document coming from Mailing? Not in PDF.
+  - P4188R0: Document number (D instead P4118R0) Typo?
+
+Ticket 7: date – Datumsfehler & Abweichungen
+
+Beschreibung: Das Datum wird falsch geparst, ist im falschen Format oder stammt
+aus dem Fallback. Betroffene Dokumente & Original-Kommentare:
+
+  - N5040: Date wrong 2026-04-08 instead 2026-04-07 (re-check)
+  - P3161R5: Wrong date
+  - P3181R1: Date wrong, Feb 22, 2026 /= 2026-02-23
+  - P3692R4: Wrong date ( 2026-03-30 instead of March 26, 2026 instead) Maybe
+    fallback?
+  - P3832R1, P3833R1, P3833R2: wrong date
+  - P4021R2: date is wrong.
+  - P4158R0: date coming from Mailing?
+
+Ticket 8: title & Genereller Header-Parse-Fehler
+
+Beschreibung: Header-Blöcke unvollständig, Title unvollständig oder fehlerhafter
+Parse-Start (z.B. Abstract als Header geparst). Betroffene Dokumente &
+Original-Kommentare:
+
+  - P3978R3: Title not complete
+  - P4016R0: Header incomplete.
+  - P4021R0: Abstract used as Header. No Header ? How should we handle such
+    Situation?
+  - P4135R0: title came from Mailing?

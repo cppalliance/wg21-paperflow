@@ -29,6 +29,8 @@ paperflow convert all           # converts only what's not yet converted
 | `--force` / `-f` | mailing, download, convert, full | Redo stage even if already complete |
 | `--verify` | download, full | HEAD-check staged files against Content-Length |
 | `--concurrency N` | download, convert, full | Parallel workers (defaults vary) |
+| `--extract-vector-images` | convert, full | Opt in to vector-figure extraction (heuristic; see Images below) |
+| `--vector-whiteout-text` | convert, full | When extracting vector figures, paint over text inside each cluster |
 | `--workspace-dir DIR` | all | Backend root (default: `$WG21_DATA_DIR`) |
 
 All commands and flags are shown by running `paperflow` with no arguments.
@@ -55,6 +57,18 @@ uv run pytest
 - **mailing** - Scrapes the open-std.org mailing index and downloads paper sources.
 - **tomd** - Converts paper PDFs and HTML to clean markdown.
 - **cli** - Ingestion and conversion CLI (`paperflow`).
+
+## Images
+
+PDFs and HTML papers with embedded raster images get those images extracted to `paperstore/<pid>-fig{page}-{n}.{ext}` and referenced in the converted markdown as `![caption](file)`. PDF captions come from "Figure N: ..."-style labels near the image; HTML captions come from `<figcaption>` or the `alt` attribute. HTML papers also get a `<pid>.html-images.json` sidecar manifest that records the mailing-to-tomd handoff.
+
+**Vector diagrams** drawn with PDF path/line operators (flowcharts, graph diagrams) can be extracted under the opt-in `--extract-vector-images` flag. The extractor clusters spatially adjacent path operators per page, rejects clusters that look like decoration (table borders, running-header rules, ins/del-coloured strokes, regions overlapping text blocks), and rasterises survivors to PNG via `page.get_pixmap`. The output is heuristic by design: each converted paper carries a trailing `<!-- tomd:vector-extraction-uncertain: ... -->` HTML comment disclosing per-paper rejection counts so a reader can see why a diagram might be missed. The opt-in default is deliberate; flip when a fresh corpus re-survey or the layout-aware path (see `packages/tomd/improvements.md` §4) justifies it.
+
+**Out of scope:**
+
+- **Scanned-page PDFs** whose body is one image per page. See `packages/tomd/improvements.md` §4.
+
+Papers with more than 20 unique embedded images keep the first 20 in source order and append a `<!-- tomd:images-truncated: ... -->` HTML comment at end-of-body recording the cap.
 
 ## License
 

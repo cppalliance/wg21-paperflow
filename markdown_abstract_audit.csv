@@ -1,0 +1,271 @@
+pid,md_path,tags,has_structured_abstract_section,opening_has_abstract_word,opening_snippet,abstract_word_count_body,body_chars
+n5034,n5034.md,,False,False,,0,4485
+n5035,n5035.md,,False,False,,0,2559
+n5036,n5036.md,,False,False,,0,14077
+n5037,n5037.md,,False,False,,0,2370
+n5038,n5038.md,,False,False,,0,12885
+n5040,n5040.md,,False,False,,0,42056
+n5043,n5043.md,,False,False,,0,2516
+p0876r22,p0876r22.md,h2_abstract,True,True,abstract . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .,8,140749
+p1000r7,p1000r7.md,,False,False,,0,12097
+p1000r8,p1000r8.md,,False,False,,0,12045
+p1040r9,p1040r9.md,,False,False,,1,80664
+p1130r2,p1130r2.md,,False,False,,0,13388
+p2000r5,p2000r5.md,atx_heading_numbered_space_abstract,True,True,vs Design vs Wording  **Table of Content**  ## 1 Abstract  ###   This is intended as a document updated as times go by and new facts and,2,68959
+p2034r6,p2034r6.md,,False,False,,0,26836
+p2285r1,p2285r1.md,,False,False,,0,16580
+p2583r0,p2583r0.md,h2_abstract,True,True,## Abstract  C++20 provides symmetric transfer ([P0913R1](https://wg21.link/p0913r1)[1]) -,1,28209
+p2583r1,p2583r1.md,h2_abstract,True,True,## Abstract  C++20 provides symmetric transfer ([P0913R1](https://wg21.link/p0913r1)[1]) -,1,45058
+p2583r2,p2583r2.md,h2_abstract,True,True,## Abstract  C++20 provides symmetric transfer ([P0913R1](https://wg21.link/p0913r1)[1]) -,1,45594
+p2583r3,p2583r3.md,h2_abstract,True,True,## Abstract  :::wording-remove  C++20 provides symmetric transfer (P0913R1[1]) - a mechanis,1,64820
+p2728r11,p2728r11.md,,False,True,an skip this section.  The Unicode standard maps *abstract characters* to *code points* in the *Unicode codespace* from `0` to `0x10FFFF`.,1,51321
+p2929r2,p2929r2.md,,False,False,,1,21636
+p2929r3,p2929r3.md,,False,False,,1,21716
+p2953r3,p2953r3.md,,False,False,,0,17485
+p2953r4,p2953r4.md,,False,False,,0,19718
+p2956r2,p2956r2.md,,False,False,,0,6237
+p2964r2,p2964r2.md,,False,False,,0,68376
+p2964r3,p2964r3.md,,False,False,,0,68387
+p3039r1,p3039r1.md,,False,False,,0,14996
+p3045r7,p3045r7.md,,False,False,,0,355683
+p3052r2,p3052r2.md,h2_abstract,True,True,- Abstract   - Revision history   - Discussion   - Design   - Proposed change   - Acknowle,2,6897
+p3059r2,p3059r2.md,h2_abstract,True,True,- Abstract   - Revision history   - Discussion   - Proposed change  ## Abstract  The expos,2,15215
+p3154r2,p3154r2.md,,False,True,## Changelog  ### Changes since R1  - Reword Abstract - Clarify in § 2 Motivation that `int8_t` and `uint8_t` are aliases to `signed,1,27212
+p3161r5,p3161r5.md,h2_abstract,True,True,## Target  C++29  ## Abstract  Addition and uniformization of integer arithmetic functions with overflow beha,1,53615
+p3181r1,p3181r1.md,h2_abstract,True,True,"dience: SG1 Date: Feb 22, 2026  Target: C++26  ## Abstract  The current object lifetime rules insist that the last update to an object hap",1,10284
+p3242r2,p3242r2.md,,False,False,,0,13893
+p3373r2,p3373r2.md,,False,False,,0,47414
+p3373r3,p3373r3.md,,False,False,,0,47929
+p3373r4,p3373r4.md,,False,False,,0,48298
+p3384r1,p3384r1.md,,False,False,,0,20177
+p3385r7,p3385r7.md,,False,False,,0,25025
+p3411r5,p3411r5.md,h1_abstract,True,True,lternative designs  ## R0  - Initial revision.  # Abstract  This paper proposes a new type-erased view: `std::ranges::any_view`. That type,1,55700
+p3427r3,p3427r3.md,,False,False,,0,14704
+p3440r2,p3440r2.md,,False,False,,0,12838
+p3440r3,p3440r3.md,,False,False,,0,12898
+p3450r1,p3450r1.md,,False,False,,0,4118
+p3596r0,p3596r0.md,,False,False,,13,243057
+p3596r1,p3596r1.md,,False,False,,13,249406
+p3598r0,p3598r0.md,,False,False,,0,9593
+p3605r1,p3605r1.md,atx_heading_numbered_dot_abstract,True,True,Remove Complexity; Simplify Returns. ```  ### 1. Abstract  This paper proposes to add an `isqrt` function (template) to calculate the int,1,18178
+p3625r1,p3625r1.md,,False,False,,0,2339
+p3642r4,p3642r4.md,,False,False,,0,24300
+p3647r1,p3647r1.md,,False,False,,0,2953
+p3655r4,p3655r4.md,h1_abstract,True,True,# Abstract  We propose a standard string view type that guarantees null-termination.  # In,1,52962
+p3666r3,p3666r3.md,,False,False,,0,124961
+p3688r6,p3688r6.md,,False,False,,0,36801
+p3692r4,p3692r4.md,,False,True,"iding OOTA cycles. We do this by relating the C++ abstract machine to hardware executions, which of course limits the applicability of our",43,82522
+p3724r3,p3724r3.md,,False,False,,1,52872
+p3725r2,p3725r2.md,,False,False,,0,16378
+p3725r3,p3725r3.md,,False,False,,0,16538
+p3726r2,p3726r2.md,,False,False,,0,20637
+p3732r2,p3732r2.md,h1_abstract,True,True,# Abstract  We propose `ranges` algorithm overloads (both parallel and non-parallel) for t,1,124213
+p3737r3,p3737r3.md,,False,False,,0,18299
+p3769r1,p3769r1.md,,False,False,,0,6138
+p3786r2,p3786r2.md,,False,False,,0,8160
+p3787r1,p3787r1.md,,False,False,,0,5549
+p3787r2,p3787r2.md,,False,False,,0,5538
+p3795r1,p3795r1.md,,False,False,,0,35820
+p3795r2,p3795r2.md,,False,False,,0,36465
+p3804r2,p3804r2.md,h1_abstract,True,True,# Abstract  `parallel_scheduler` [[P2079R10](https://wg21.link/p2079r10)] was a long time,1,26281
+p3816r2,p3816r2.md,h1_abstract,True,True,"ign and support. - Added some more motivation.  # Abstract  This paper proposes a new standard library template, `consteval_hash<T>`, with",1,28841
+p3822r1,p3822r1.md,,False,False,,0,6885
+p3826r3,p3826r3.md,,False,False,,0,98925
+p3826r4,p3826r4.md,,False,False,,0,100889
+p3826r5,p3826r5.md,,False,False,,0,103588
+p3828r1,p3828r1.md,,False,False,,0,4155
+p3832r1,p3832r1.md,h2_abstract,True,True,_time` being reached” in Effects and Returns.  ## Abstract  C++11 introduced `std::lock` and `std::try_lock` (and C++17 introduced `std::s,1,6742
+p3833r1,p3833r1.md,h2_abstract,True,True,"ue`”, “is `false`”) instead of `==` notation.  ## Abstract  This paper proposes `std::multi_lock`, a RAII class template that combines the",1,21968
+p3833r2,p3833r2.md,h2_abstract,True,True,"ue`”, “is `false`”) instead of `==` notation.  ## Abstract  This paper proposes `std::multi_lock`, a RAII class template that combines the",1,22354
+p3842r1,p3842r1.md,h2_abstract,True,True,## Abstract  The papers [P3818](https://open-std.org/JTC1/SC22/WG21/docs/papers/2025/p3818r,1,1535
+p3842r2,p3842r2.md,h2_abstract,True,True,26-03-26*  # A conservative fix for constexpr  ## Abstract  The papers [P3818](https://open-std.org/JTC1/SC22/WG21/docs/papers/2025/p3818r,1,3663
+p3844r3,p3844r3.md,,False,False,,0,91483
+p3844r4,p3844r4.md,,False,False,,0,64998
+p3846r1,p3846r1.md,,False,False,,2,116870
+p3856r4,p3856r4.md,,False,False,,1,19770
+p3856r5,p3856r5.md,,False,False,,1,20419
+p3856r6,p3856r6.md,,False,False,,1,19442
+p3856r7,p3856r7.md,,False,False,,1,21084
+p3856r8,p3856r8.md,,False,False,,1,21109
+p3864r1,p3864r1.md,,False,False,,0,6549
+p3865r1,p3865r1.md,,False,False,,0,11751
+p3865r2,p3865r2.md,,False,False,,0,12626
+p3865r3,p3865r3.md,,False,False,,0,12715
+p3873r0,p3873r0.md,,False,False,,0,2802
+p3874r1,p3874r1.md,h2_abstract,True,True,"en.wikipedia.org/wiki/Voiced_velar_plosive)/)  ## Abstract  In recent years there have been numerous recommendations from industry, academ",6,35696
+p3876r1,p3876r1.md,,False,True,ly some minor improvements were made:  - expanded abstract - considered floating-point overloads when counting the size of the `to_chars`,2,41010
+p3895r1,p3895r1.md,,False,False,,0,4453
+p3899r1,p3899r1.md,,False,False,,1,25115
+p3899r2,p3899r2.md,,False,False,,1,27541
+p3904r1,p3904r1.md,,False,False,,0,5817
+p3911r1,p3911r1.md,h2_abstract,True,True,"r <herb.sutter@gmail.com> **Audience**: EWG    ## Abstract  Building on motivation from EWG Kona 2025, this paper proposes a minimal pure",2,32643
+p3911r2,p3911r2.md,h2_abstract,True,True,"r <herb.sutter@gmail.com> **Audience**: EWG    ## Abstract  Building on motivation from EWG Kona 2025, this paper proposes a minimal pure",2,46005
+p3924r1,p3924r1.md,,False,False,,0,8170
+p3927r0,p3927r0.md,,False,True,wrapper for a scheduler-like object. It uses the abstract base classes `parallel_scheduler_backend` and `receiver_proxy` to punch the `sc,2,13150
+p3927r1,p3927r1.md,,False,True,wrapper for a scheduler-like object. It uses the abstract base classes `parallel_scheduler_backend` and `receiver_proxy` to punch the `sc,2,15165
+p3927r2,p3927r2.md,,False,True,wrapper for a scheduler-like object. It uses the abstract base classes `parallel_scheduler_backend` and `receiver_proxy` to punch the `sc,2,15707
+p3932r0,p3932r0.md,,False,False,,0,11672
+p3936r1,p3936r1.md,,False,False,,0,5118
+p3938r1,p3938r1.md,,False,False,,0,27506
+p3941r1,p3941r1.md,,False,False,,0,30449
+p3941r2,p3941r2.md,,False,False,,0,43334
+p3941r3,p3941r3.md,,False,False,,0,45649
+p3941r4,p3941r4.md,,False,False,,0,50411
+p3948r1,p3948r1.md,,False,False,,0,24384
+p3950r0,p3950r0.md,,False,False,,0,9745
+p3951r0,p3951r0.md,,False,False,,0,46040
+p3951r1,p3951r1.md,,False,False,,0,74530
+p3952r0,p3952r0.md,,False,False,,0,12637
+p3953r0,p3953r0.md,h2_abstract,True,True,nvalidation and naming things. — Phil Karlton  ## Abstract  [P2918] introduced `std::runtime_format` to allow opting out of compile-time f,1,2721
+p3953r1,p3953r1.md,h2_abstract,True,True,nvalidation and naming things. — Phil Karlton  ## Abstract  [P2918] introduced `std::runtime_format` to allow opting out of compile-time f,1,2798
+p3953r2,p3953r2.md,h2_abstract,True,True,nvalidation and naming things. — Phil Karlton  ## Abstract  [P2918] introduced `std::runtime_format` to allow opting out of compile-time f,1,4120
+p3953r3,p3953r3.md,h2_abstract,True,True,nvalidation and naming things. — Phil Karlton  ## Abstract  [P2918] introduced `std::runtime_format` to allow opting out of compile-time f,1,4345
+p3955r0,p3955r0.md,,False,False,,1,38792
+p3959r0,p3959r0.md,,False,False,,0,20353
+p3960r0,p3960r0.md,h1_abstract,True,True,"k Hoemmen (NVIDIA) - Ruslan Arutyunyan (Intel)  # Abstract  Given an object `src` of trivially-copyable type `T`, we can copy the object’s",1,48942
+p3961r0,p3961r0.md,,False,False,,0,7122
+p3961r1,p3961r1.md,,False,False,,0,8097
+p3962r0,p3962r0.md,,False,False,,0,10228
+p3963r0,p3963r0.md,h1_abstract,True,True,# Abstract  This paper proposes making lambdas with captures copy assignable and move assi,1,9466
+p3965r0,p3965r0.md,,False,False,,0,5438
+p3966r0,p3966r0.md,,False,False,,0,4066
+p3967r0,p3967r0.md,,False,False,,0,24273
+p3968r0,p3968r0.md,,False,False,,0,42226
+p3969r0,p3969r0.md,,False,False,,0,19932
+p3970r0,p3970r0.md,,False,False,,0,5922
+p3971r0,p3971r0.md,,False,False,,0,20131
+p3973r0,p3973r0.md,,False,False,,0,17242
+p3977r0,p3977r0.md,standalone_line_abstract,True,True,"WG21 Oliver J. Rosten (oliver.rosten@gmail.com)  Abstract  Historically, contracts have been categorized according to whether they are wi",1,61318
+p3978r0,p3978r0.md,,False,False,,0,10595
+p3978r1,p3978r1.md,,False,False,,0,19437
+p3978r2,p3978r2.md,,False,False,,0,22078
+p3978r3,p3978r3.md,,False,False,,0,23041
+p3980r0,p3980r0.md,,False,False,,0,15013
+p3980r1,p3980r1.md,,False,False,,0,11834
+p3981r0,p3981r0.md,,False,False,,0,15160
+p3981r1,p3981r1.md,,False,False,,0,13915
+p3981r2,p3981r2.md,,False,False,,0,14219
+p3982r0,p3982r0.md,,False,False,,0,27875
+p3982r1,p3982r1.md,,False,False,,0,29011
+p3982r2,p3982r2.md,,False,False,,0,25655
+p3983r0,p3983r0.md,,False,False,,0,29598
+p3983r1,p3983r1.md,,False,False,,0,29856
+p3984r0,p3984r0.md,,False,False,,0,26346
+p3985r0,p3985r0.md,,False,False,,0,12654
+p3986r0,p3986r0.md,,False,False,,0,9235
+p3986r1,p3986r1.md,,False,False,,0,9688
+p4003r0,p4003r0.md,h2_abstract,True,True,"## Abstract  C++20 coroutines have five properties that, taken together, make them uniquely",1,113156
+p4003r1,p4003r1.md,h2_abstract,True,True,"## Abstract  C++20 coroutines have five properties that, taken together, make them uniquely",1,141492
+p4003r2,p4003r2.md,h2_abstract,True,True,## Abstract  This paper asks the committee to advance the *IoAwaitable* protocol as a stand,1,25829
+p4004r0,p4004r0.md,,False,False,,0,6305
+p4004r1,p4004r1.md,,False,False,,0,6841
+p4005r0,p4005r0.md,h2_abstract,True,True,## Abstract  This paper proposes a particular form of guaranteed-enforced contracts.  It fo,1,6634
+p4006r0,p4006r0.md,,False,False,,0,14498
+p4007r0,p4007r0.md,h2_abstract,True,True,## Abstract  `std::execution` serves its domain well. Different asynchronous domains have d,1,75694
+p4007r1,p4007r1.md,h2_abstract,True,True,ledgements  ## References  WG21 Papers  Other  ## Abstract  `std::execution::task` ([P3552R3](https://wg21.link/p3552r3)[1]) has open issu,1,10164
+p4007r2,p4007r2.md,h2_abstract,True,True,## Abstract  `std::execution::task` ([P3552R3](https://www.open-std.org/jtc1/sc22/wg21/docs,1,17438
+p4008r0,p4008r0.md,,False,False,,0,4809
+p4009r0,p4009r0.md,h2_abstract,True,True,## Abstract  We have had a couple of attempts to resolve the Romanian NB comment about the,1,10866
+p4010r0,p4010r0.md,,False,False,,0,21870
+p4010r1,p4010r1.md,,False,False,,0,25454
+p4011r0,p4011r0.md,,False,False,,0,3443
+p4012r0,p4012r0.md,,False,False,,0,29960
+p4012r1,p4012r1.md,,False,False,,0,26234
+p4014r0,p4014r0.md,h2_abstract,True,True,## Abstract  C++26 introduces a rich sub-language for asynchronous programming through `std,1,51110
+p4014r1,p4014r1.md,h2_abstract,True,True,"## Abstract  Every sender algorithm in C++26 - all thirty - explained, demonstrated, and ma",1,75968
+p4015r0,p4015r0.md,h2_abstract,True,True,ditions with Statements  #### Lisa Lippincott  ## Abstract  C++26 contracts come with an enforcement mechanism that provides to certain pa,1,13043
+p4016r0,p4016r0.md,h2_abstract,True,True,3  ## Abstract  C++ today offers two endpoints for reduction:  `std::accumulate`: a specified,97,202993
+p4019r0,p4019r0.md,,False,False,,0,5480
+p4019r1,p4019r1.md,,False,False,,0,6636
+p4020r0,p4020r0.md,,False,False,,0,10240
+p4021r0,p4021r0.md,h2_abstract,True,True,## Abstract  ```cpp main4.c:15:9: note: in expansion of macro ‘compile_assert’  15 | compil,1,12980
+p4021r1,p4021r1.md,h2_abstract,True,True,"imization-enforced conditions at compile time  ## Abstract  It is used for bounds checking, avoiding nullptr dereference, parameter valida",1,28996
+p4021r2,p4021r2.md,h2_abstract,True,True,athan Grant [jg@jguk.org](mailto:jg@jguk.org)  ## Abstract  `compile_assert()` provides a way to specify constraint predicates that are va,1,34503
+p4022r0,p4022r0.md,,False,False,,0,6878
+p4023r0,p4023r0.md,,False,False,,0,6316
+p4024r0,p4024r0.md,,False,False,,0,3653
+p4025r0,p4025r0.md,,False,False,,0,5773
+p4025r1,p4025r1.md,,False,False,,0,7338
+p4026r0,p4026r0.md,,False,False,,0,4357
+p4027r0,p4027r0.md,,False,False,,0,6069
+p4028r0,p4028r0.md,,False,False,,0,12383
+p4029r0,p4029r0.md,,False,True,"r: SG14  # The SG14 Priority List for C++29/32  **Abstract:** This document outlines the strategic priorities for SG14 (Low Latency, Games",1,2184
+p4029r1,p4029r1.md,,False,False,,0,3325
+p4030r0,p4030r0.md,,False,False,,0,7334
+p4031r0,p4031r0.md,h1_abstract,True,True,# Abstract  This paper proposes to rename `system_context_replaceability` namespace.  # Mo,1,3353
+p4031r1,p4031r1.md,h1_abstract,True,True,# Abstract  This paper proposes to rename `system_context_replaceability` namespace.  # Mo,1,10142
+p4032r0,p4032r0.md,,False,False,,0,7990
+p4032r1,p4032r1.md,,False,False,,0,8225
+p4033r0,p4033r0.md,,False,False,,0,10517
+p4035r0,p4035r0.md,h2_abstract,True,True,"## Abstract  C++ should make the safe thing easy, and the unsafe thing possible.  ## Revisi",1,17957
+p4037r0,p4037r0.md,,False,False,,0,16476
+p4037r1,p4037r1.md,,False,False,,0,19569
+p4038r0,p4038r0.md,,False,False,,0,2221
+p4040r0,p4040r0.md,,False,False,,0,11772
+p4042r0,p4042r0.md,,False,False,,0,5184
+p4043r0,p4043r0.md,h1_abstract,True,True,"țu <dariusn@adobe.com> **Audience**: EWG, WG21  # Abstract  The C++ Contracts facility introduced by P2900 represents a major addition to",2,14530
+p4044r0,p4044r0.md,h2_abstract,True,True,"odorescu <lucteo@lucteo.ro> **Audience**: EWG  ## Abstract  C++26 contracts support a wide range of uses, but they currently cannot reliab",2,11205
+p4049r0,p4049r0.md,,False,False,,0,45684
+p4052r0,p4052r0.md,,False,False,,0,6310
+p4088r0,p4088r0.md,bold_inline_abstract_opener;h2_abstract,True,True,## Abstract  C++ already got an asynchronous model: regular C++20 coroutines.  The programm,7,62122
+p4089r0,p4089r0.md,h2_abstract,True,True,## Abstract  The Environment parameter in `std::execution::task` makes cross-library corout,1,33534
+p4090r0,p4090r0.md,h2_abstract,True,True,nvitation  14. Acknowledgments  ## References  ## Abstract  The sender composition algebra does not apply to compound I/O results without,1,45974
+p4091r0,p4091r0.md,h2_abstract,True,True,## Abstract  Both coroutines and senders destroy compound data at an abstraction floor - th,2,34848
+p4092r0,p4092r0.md,h2_abstract,True,True,Appendix A. Bridge Implementation  ## Abstract  A single class template bridges sender-based code into coroutine-native I/O wi,1,18260
+p4093r0,p4093r0.md,h2_abstract,True,True,"## Abstract  Coroutine-native awaitables can be wrapped as senders, but compound I/O result",1,22038
+p4094r0,p4094r0.md,h2_abstract,True,True,## Abstract  The unification of three working executor models had unanticipated downstream,1,55034
+p4095r0,p4095r0.md,h2_abstract,True,True,## Abstract  Of the four deficiencies that [P1525R0](http://www.open-std.org/jtc1/sc22/wg21,2,26781
+p4096r0,p4096r0.md,h2_abstract,True,True,## Abstract  The committee set aside the Networking TS in 2021. The process had no mechanis,1,35555
+p4097r0,p4097r0.md,h2_abstract,True,True,## Abstract  The committee expressed consensus that sender/receiver is a good basis for net,1,21681
+p4098r0,p4098r0.md,h2_abstract,True,True,"## Abstract  Published claims about executors, networking, and unification shaped a decade",1,21308
+p4099r0,p4099r0.md,h2_abstract,True,True,"## Abstract  Four decisions, each locally reasonable, each under-evidenced, produced a deca",1,18399
+p4100r0,p4100r0.md,h2_abstract,True,True,## Abstract  C++ coroutines have five language mechanisms that combine into the ideal subst,8,34905
+p4101r0,p4101r0.md,,False,True,ck of instantiation.  ## Consteval-only Types are Abstract Types  One suggested approach of how to resolve these issues (the incompletenes,12,41465
+p4102r0,p4102r0.md,,False,False,,0,58553
+p4125r0,p4125r0.md,h2_abstract,True,True,## Abstract  A derivatives exchange is porting from Asio callbacks to coroutine-native I/O.,1,15254
+p4126r0,p4126r0.md,h2_abstract,True,True,## Abstract  Senders pay a frame allocation to enter the awaitable protocol. They do not ha,1,32691
+p4135r0,p4135r0.md,,False,True,"ore complicated program, the impact might be more abstract; or in other words, it might be harder to spot your design flaw that resulted i",1,47667
+p4136r0,p4136r0.md,,False,False,,0,3674
+p4136r1,p4136r1.md,,False,False,,0,3696
+p4137r0,p4137r0.md,h2_abstract,True,True,## Abstract  The paper offers a way to measure what the type-safety profile actually covers,1,21321
+p4138r0,p4138r0.md,h1_abstract,True,True,"# Abstract  While looking at [[CWG3103]](https://wg21.link/cwg3103), I got interested how",1,7975
+p4138r1,p4138r1.md,h1_abstract,True,True,"# Abstract  While looking at [[CWG3103]](https://wg21.link/cwg3103), I got interested how",1,8134
+p4138r2,p4138r2.md,h1_abstract,True,True,"# Abstract  While looking at [CWG3103](https://cplusplus.github.io/CWG/issues/3103.html),",1,10703
+p4139r0,p4139r0.md,,False,False,,0,1979
+p4139r1,p4139r1.md,,False,False,,0,3087
+p4140r0,p4140r0.md,,False,False,,0,1543
+p4142r0,p4142r0.md,,False,False,,0,13852
+p4143r0,p4143r0.md,,False,False,,0,8116
+p4144r0,p4144r0.md,,False,False,,0,7724
+p4144r1,p4144r1.md,,False,False,,0,13816
+p4145r0,p4145r0.md,,False,False,,0,170843
+p4146r0,p4146r0.md,,False,False,,0,226091
+p4148r0,p4148r0.md,h2_abstract,True,True,"gmail.com>](mailto:dr.nbanglawala@gmail.com)*  ## Abstract  We propose `protocol<T,` `A>` and `protocol_view<T>`, standard library vocabul",1,26505
+p4149r0,p4149r0.md,,False,False,,0,14106
+p4149r1,p4149r1.md,,False,False,,0,16062
+p4150r0,p4150r0.md,h1_abstract,True,True,Post-Croydon Mailing  - Initial paper revision  # Abstract  <!-- tomd:lossy-table -->  ```cpp std::ranges::for_each(   std::execution::par,1,33383
+p4151r0,p4151r0.md,,False,False,,0,2060
+p4151r1,p4151r1.md,,False,False,,0,2359
+p4154r0,p4154r0.md,,False,False,,0,2054
+p4155r0,p4155r0.md,,False,True,"ct not to its definition within the bounds of the abstract machine, but instead to the bitwise representation of the host environment.  Th",2,14506
+p4156r0,p4156r0.md,h2_abstract,True,True,## Abstract  This paper proposes wording to resolve the NB comment [FR-017-155](https://git,1,831
+p4157r0,p4157r0.md,,False,False,,0,2148
+p4158r0,p4158r0.md,,False,False,,0,3079
+p4159r0,p4159r0.md,,False,False,,0,1176
+p4160r0,p4160r0.md,,False,True,on the implementation 2. Change in 4.1.2 [[intro.abstract](https://wg21.link/intro.abstract#2)] paragraph 2 as follows: Certain aspects a,13,113785
+p4161r0,p4161r0.md,,False,False,,0,5695
+p4168r0,p4168r0.md,,False,False,,0,25109
+p4172r0,p4172r0.md,h2_abstract,True,True,## Abstract  This paper documents the design rationale for the *IoAwaitable* protocol.  [P4,1,71351
+p4173r0,p4173r0.md,h2_abstract,True,True,- Abstract   - Revision history   - Discussion   - Design   - Implementation experience,4,39698
+p4174r0,p4174r0.md,,False,False,,0,339
+p4175r0,p4175r0.md,,False,False,,0,6084
+p4176r0,p4176r0.md,h1_abstract,True,True,# Abstract  7.6.1 [[expr.post]](https://wg21.link/expr.post) lists all the grammar at the,2,46520
+p4179r0,p4179r0.md,h2_abstract,True,True,- Abstract   - Revision history   - Discussion   - Design   - Implementation experience,2,6734
+p4182r0,p4182r0.md,h2_abstract,True,True,## Abstract  Every mailing repeats the same deployment background. This paper puts one cite,1,27674
+p4186r0,p4186r0.md,h1_abstract,True,True,# Abstract  This paper proposes a tentative plan for making progress on safety and profile,1,7071
+p4188r0,p4188r0.md,,False,False,,0,21154
+p4190r0,p4190r0.md,h1_abstract,True,True,submitted for the 2026-04 post-Croydon mailing  # Abstract  [P4144R1](https://isocpp.org/files/papers/P4144R1.html) reverted [P2447R6](htt,1,20265
+p4191r0,p4191r0.md,,False,False,,0,3627
+p4192r0,p4192r0.md,h1_abstract,True,True,# Abstract  There are multiple open Core issues against 6.8.3 [[basic.align]](https://wg21,1,20422
+p4197r0,p4197r0.md,,False,True,ns concern what trivial relocation *means* in the abstract machine.  ### Question 1: Mechanism: byte copying or dedicated operations?  > D,7,46197
+p5000r0,p5000r0.md,,False,False,,0,802

@@ -1,0 +1,59 @@
+# P4197R0 -- Abstract fehlt in der konvertierten Markdown-Ausgabe
+
+## Status
+
+**ROOT CAUSE VERIFIZIERT** (2026-05-12). HTML-Pipeline, nicht PDF.
+**Betrifft:** 27 Bikeshed-generierte HTML-Papers (nicht nur P4197R0).
+
+## Symptom
+
+Nach `paperflow convert` (tomd) fehlt im Body der Abschnitt **Abstract** (Ueberschrift + Text).
+
+## Root Cause (verifiziert)
+
+Datei: `packages/tomd/src/tomd/lib/html/extract.py`, Funktion `strip_boilerplate`, Zeile ~1019-1021.
+
+```python
+if generator == "bikeshed":
+    for div in soup.find_all("div", {"data-fill-with": True}):
+        div.decompose()
+```
+
+Dieser Code entfernt ALLE `<div data-fill-with="...">` bei Bikeshed-Papers. Bikeshed
+wraps den Abstract in `<div data-fill-with="abstract">`. Der Abstract-Container (H2 + P)
+wird zusammen mit echtem Boilerplate (stylesheet, logo, warning, spec-metadata) geloescht.
+
+## Betroffene Papers (27)
+
+p1040r9, p1130r2, p2929r2, p2929r3, p2953r3, p2953r4, p2956r2, p2964r2, p2964r3,
+p3154r2, p3384r1, p3440r2, p3440r3, p3769r1, p3787r1, p3787r2, p3971r0, p3973r0,
+p3983r0, p3983r1, p3985r0, p4006r0, p4010r0, p4010r1, p4049r0, p4102r0, p4197r0
+
+## Fix
+
+In `strip_boilerplate`: `data-fill-with="abstract"` von der Entfernung ausnehmen.
+
+```python
+for div in soup.find_all("div", {"data-fill-with": True}):
+    if div["data-fill-with"] != "abstract":
+        div.decompose()
+```
+
+## Erwartung (Dokumentation)
+
+- **Abstract gehoert in den Body**, nicht in YAML.
+- **Abstract ist eine bekannte WG21-Sektion** und soll als `## Abstract` im Markdown erscheinen.
+
+## Code-Referenzen
+
+| Bereich | Datei | Hinweis |
+|--------|--------|--------|
+| Boilerplate-Entfernung | `packages/tomd/src/tomd/lib/html/extract.py` | `strip_boilerplate`, Zeile ~1019-1021 |
+| Orchestrierung | `packages/tomd/src/tomd/lib/html/convert.py` | `extract_metadata` -> `strip_boilerplate` -> `render_body` |
+| DOM -> Markdown | `packages/tomd/src/tomd/lib/html/render.py` | `render_body` |
+
+## Impact Map
+
+- `strip_boilerplate` wird aufgerufen von: `convert_html` in `convert.py`
+- `strip_boilerplate` ruft auf: `soup.find_all`, `.decompose()`
+- Keine Seiteneffekte auf PDF-Pipeline

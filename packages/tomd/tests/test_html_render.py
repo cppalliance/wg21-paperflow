@@ -10,11 +10,11 @@ class TestHeading:
         md = render_body(soup, "mpark")
         assert "## Introduction" in md
 
-    def test_preserves_section_number_span(self):
+    def test_strips_section_number_span(self):
         soup = parse_html(
             '<h1><span class="header-section-number">1</span> Abstract</h1>')
         md = render_body(soup, "mpark")
-        assert "# 1 Abstract" in md
+        assert "# Abstract" in md
 
     def test_preserves_leading_dotted_number(self):
         soup = parse_html("<h3>2.1.3 Details</h3>")
@@ -292,17 +292,17 @@ class TestStructuralTags:
 
 
 class TestHeadingEdgeCases:
-    def test_secno_preserved_self_link_skipped(self):
+    def test_secno_stripped_self_link_skipped(self):
         html = """<h2><span class="secno">3</span>Sec
         <a class="self-link" href="#x">#</a></h2>"""
         md = render_body(parse_html(html), "mpark")
-        assert "## 3Sec" in md or "## 3 Sec" in md
+        assert "## Sec" in md
         assert "self-link" not in md
 
-    def test_heading_number_only_span_preserved(self):
+    def test_heading_number_only_span_stripped(self):
         soup = parse_html('<h1><span class="header-section-number">1</span></h1>')
         md = render_body(soup, "mpark")
-        assert "# 1" in md
+        assert md.strip() == "" or "# 1" not in md
 
 
 class TestCodeBlockExtended:

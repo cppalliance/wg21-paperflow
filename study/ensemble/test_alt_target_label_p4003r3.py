@@ -31,15 +31,15 @@ SKIP_HYPO = "A heading, list marker, or page metadata."
 
 def main() -> None:
     pid = "p4003r3"
-    sentences = json.loads(
-        Path(f"study/ensemble/data/{pid}_scores.json")
-        .read_text(encoding="utf-8")
-    )
+    data_dir = Path(__file__).parent / "data"
+    sentences_path = data_dir / f"{pid}_sentences.json"
+    if not sentences_path.is_file():
+        sentences_path = data_dir / f"{pid}_scores.json"
+    sentences = json.loads(sentences_path.read_text(encoding="utf-8"))
     gold = {
         r["sid"]: r["gold"]
         for r in json.loads(
-            Path(f"study/ensemble/data/{pid}_gold.json")
-            .read_text(encoding="utf-8")
+            (data_dir / f"{pid}_gold.json").read_text(encoding="utf-8")
         )["labels"]
     }
     texts = [s["text"] for s in sentences]
@@ -50,7 +50,7 @@ def main() -> None:
     slots = resolve_classifier_slots(clfs, defaults, {"selector": "nli-small"})
     classifier = slots["selector"]
 
-    print(f"# Cross-paper validation: alt target labels on P4003R3\n")
+    print("# Cross-paper validation: alt target labels on P4003R3\n")
     g_t = sum(1 for v in gold.values() if v == "TARGET")
     g_c = sum(1 for v in gold.values() if v == "CONTEXT")
     g_s = sum(1 for v in gold.values() if v == "SKIP")

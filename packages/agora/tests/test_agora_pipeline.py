@@ -17,7 +17,6 @@ from paperstore import SqliteBackend
 from agora import agora_paper
 from pipeline.errors import (
     PaperNotConvertedError,
-    PaperNotDissectedError,
     PaperNotFoundError,
 )
 from agora.models import PipelineState
@@ -26,6 +25,18 @@ from agora.pipeline import (
     _route_subreddit,
     _split_paper_id,
 )
+
+
+@pytest.fixture(autouse=True)
+def _placeholder_api_keys(monkeypatch):
+    # Tests in this module invoke ``agora_paper`` to exercise error
+    # paths unrelated to authentication. ``pipeline.resolve_slots``
+    # now validates env vars at slot-binding; placeholder values let
+    # the validation pass so the test reaches the path it actually
+    # cares about. The fail-fast contract itself is covered in
+    # ``packages/pipeline/tests/test_services.py``.
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "placeholder-for-tests")
+    monkeypatch.setenv("RUNPOD_API_KEY", "placeholder-for-tests")
 
 
 def test_guard_encounter_count_skips_when_zero():
@@ -87,15 +98,6 @@ def test_agora_paper_not_converted_raises(tmp_path: Path):
     backend = SqliteBackend(tmp_path)
     backend.upsert_year("2026", [{"paper_id": "P1234R0"}])
     with pytest.raises(PaperNotConvertedError):
-        asyncio.run(agora_paper("P1234R0", backend))
-
-
-def test_agora_paper_not_dissected_raises(tmp_path: Path):
-    """Paper has converted markdown but no dissect output."""
-    backend = SqliteBackend(tmp_path)
-    backend.upsert_year("2026", [{"paper_id": "P1234R0"}])
-    backend.write_paper_md("P1234R0", "# A paper\n\nBody.")
-    with pytest.raises(PaperNotDissectedError):
         asyncio.run(agora_paper("P1234R0", backend))
 
 

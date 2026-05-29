@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import json
 from abc import ABC, abstractmethod
+from collections.abc import Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -85,14 +86,41 @@ class PaperRow:
     url: str = ""
     document_date: str = ""
     mailing_date: str = ""
+    disposition: str = ""
+    previous_version: str = ""
     source_file: str = ""
     markdown_path: str = ""
     dissect_path: str = ""
-    advocatus_path: str = ""
     agora_path: str = ""
+    assay_path: str = ""
     line_count: int = 0
     status: int = 0
     error: str = ""
+
+
+@dataclass(frozen=True)
+class ClearedSet:
+    """Record of which downstream pipelines a ``clear_downstream_outputs`` call wiped.
+
+    The CLI consumes this to build a per-paper summary line such as
+    ``P3556R0 (agora)`` after a re-convert. ``bool(set)`` is True iff
+    anything was cleared (so the CLI can skip empty summaries).
+    """
+
+    agora: bool = False
+    assay: bool = False
+
+    def __bool__(self) -> bool:
+        return self.agora or self.assay
+
+    def names(self) -> list[str]:
+        """Return the pipeline names that were cleared, in stable order."""
+        out: list[str] = []
+        if self.agora:
+            out.append("agora")
+        if self.assay:
+            out.append("assay")
+        return out
 
 
 class StorageBackend(ABC):
@@ -144,6 +172,20 @@ class StorageBackend(ABC):
         The match is case-insensitive.
         """
 
+    # ---- mailing metadata -------------------------------------------------
+
+    @abstractmethod
+    def upsert_mailing_label(self, mailing_id: str, label: str) -> None:
+        """Insert or update the descriptive label for a mailing.
+
+        ``label`` is the human-readable suffix from the open-std heading
+        (e.g. ``"post-Croydon"``). Empty string clears the label.
+        """
+
+    @abstractmethod
+    def get_mailing_label(self, mailing_id: str) -> str:
+        """Return the descriptive label for ``mailing_id``, or ``""``."""
+
     # ---- writes -----------------------------------------------------------
 
     @abstractmethod
@@ -157,30 +199,6 @@ class StorageBackend(ABC):
     @abstractmethod
     def write_paper_md(self, paper_id: str, markdown: str) -> Path:
         """Persist the converted markdown. Atomic write. Returns path."""
-
-    @abstractmethod
-    def write_dissect_md(self, paper_id: str, markdown: str) -> Path:
-        """Persist the dissect markdown. Atomic write. Returns path."""
-
-    @abstractmethod
-    def clear_dissect(self, paper_id: str) -> None:
-        """Delete the dissect file and clear its path in the store.
-
-        Called at the start of a dissect run so a crash does not leave
-        a stale dissect from a previous run.
-        """
-
-    @abstractmethod
-    def write_advocatus_md(self, paper_id: str, markdown: str) -> Path:
-        """Persist the advocatus markdown (Relatio). Atomic write. Returns path."""
-
-    @abstractmethod
-    def clear_advocatus(self, paper_id: str) -> None:
-        """Delete the advocatus file and clear its path in the store.
-
-        Called at the start of an advocatus run so a crash does not leave
-        a stale Relatio from a previous run.
-        """
 
     @abstractmethod
     def write_agora_json(self, paper_id: str, payload: Any) -> Path:
@@ -251,6 +269,76 @@ class StorageBackend(ABC):
         command.
         """
 
+    # ---- image artifacts and downstream invalidation ---------------------
+
+    @abstractmethod
+    def get_paper_image_path(
+        self, paper_id: str, page: int, index: int, ext: str
+    ) -> Path:
+        """Return the canonical path for an extracted paper image.
+
+        File name: ``<pid>-fig{page}-{index}.{ext}`` under the
+        ``paperstore/`` subdirectory, with ``pid`` lowercased. Does not
+        check existence. ``page=0`` is the "HTML, no page concept"
+        sentinel used by the mailing-side HTML image fetcher.
+        """
+
+    @abstractmethod
+    def write_paper_image(
+        self,
+        paper_id: str,
+        page: int,
+        index: int,
+        ext: str,
+        data: bytes,
+    ) -> Path:
+        """Persist extracted image bytes atomically. Returns the final path.
+
+        Caller is the CLI orchestration in :mod:`cli.convert` (for PDF
+        sources) or the mailing fetcher (for HTML sources). Library
+        extractors return bytes; persistence is a CLI concern.
+        """
+
+    @abstractmethod
+    def iter_paper_image_paths(self, paper_id: str) -> Iterator[Path]:
+        """Yield existing image paths for ``paper_id`` in deterministic order.
+
+        Order is alphanumeric on filename, which equals ``(page, index)``
+        ascending by construction. Yields nothing when the paper has no
+        extracted images.
+        """
+
+    @abstractmethod
+    def delete_paper_images(self, paper_id: str) -> int:
+        """Delete all extracted images for ``paper_id``. Returns count removed.
+
+        Called by ``paperflow convert`` before writing the new image set
+        so a re-convert leaves no stale figures from a previous run.
+        """
+
+    @abstractmethod
+    def get_html_images_manifest_path(self, paper_id: str) -> Path:
+        """Return the canonical path for the mailing -> tomd HTML manifest.
+
+        File name: ``<pid>.html-images.json``. Does not check existence.
+        The schema is :class:`paperstore.html_manifest.HtmlImagesManifest`.
+        """
+
+    @abstractmethod
+    def clear_downstream_outputs(self, paper_id: str) -> ClearedSet:
+        """Invalidate agora artifacts for ``paper_id``.
+
+        Called by ``paperflow convert`` after a re-convert that changed
+        the markdown content. This method:
+
+        - Deletes the ``.agora.json`` file (if present) and clears its
+          path column.
+
+        Does not touch ``paper.md`` or extracted images. Returns a
+        :class:`ClearedSet` describing which pipelines had artifacts
+        to clear.
+        """
+
     # ---- reads ------------------------------------------------------------
 
     @abstractmethod
@@ -278,6 +366,17 @@ class StorageBackend(ABC):
         """
 
     @abstractmethod
+    def try_read_paper_md(self, paper_id: str) -> str | None:
+        """Return the converted markdown, or None if not yet written.
+
+        Non-raising alternative to :meth:`get_paper_md`, used by the
+        convert orchestration to perform the byte-equality check that
+        gates downstream invalidation. A first conversion returns None;
+        a re-convert producing the same bytes leaves agora artifacts
+        intact.
+        """
+
+    @abstractmethod
     def get_paper_md_path(self, paper_id: str) -> Path:
         """Return the canonical local path for the converted markdown.
 
@@ -285,22 +384,6 @@ class StorageBackend(ABC):
         (which raises :class:`MissingPaperMdError` if not yet written). This
         accessor exists for callers that need a stable filesystem path
         before the file exists, such as file watchers.
-        """
-
-    @abstractmethod
-    def get_dissect_path(self, paper_id: str) -> Path:
-        """Return the local path to the dissect file.
-
-        Raises:
-            paperstore.MissingDissectError: no dissect for ``paper_id``.
-        """
-
-    @abstractmethod
-    def get_advocatus_path(self, paper_id: str) -> Path:
-        """Return the local path to the advocatus file (Relatio).
-
-        Raises:
-            paperstore.MissingAdvocatusError: no advocatus for ``paper_id``.
         """
 
     @abstractmethod
@@ -312,20 +395,22 @@ class StorageBackend(ABC):
         """
 
     @abstractmethod
-    def get_debug_md_path(self, paper_id: str) -> Path:
+    def get_debug_md_path(self, paper_id: str, tool: str = "") -> Path:
         """Return the canonical path for a paper's unified debug transcript.
 
-        File: ``paperstore/<pid>.debug.md``. The path is returned
-        whether or not the file exists; callers write to it or check
-        ``.exists()`` themselves.
+        File: ``paperstore/<pid>.debug.md``. When ``tool`` is non-empty,
+        the path is ``paperstore/<pid>.debug.<tool>.md``. The path is
+        returned whether or not the file exists; callers write to it or
+        check ``.exists()`` themselves.
         """
 
     @abstractmethod
-    def get_trace_md_path(self, paper_id: str) -> Path:
+    def get_trace_md_path(self, paper_id: str, tool: str = "") -> Path:
         """Return the canonical path for a paper's unified pipeline trace.
 
-        File: ``paperstore/<pid>.trace.md``. Same semantics as
-        :meth:`get_debug_md_path`.
+        File: ``paperstore/<pid>.trace.md``. When ``tool`` is non-empty,
+        the path is ``paperstore/<pid>.trace.<tool>.md``. Same semantics
+        as :meth:`get_debug_md_path`.
         """
 
     @abstractmethod
@@ -353,6 +438,122 @@ class StorageBackend(ABC):
     @abstractmethod
     def set_setting(self, key: str, value: str) -> None:
         """Insert or replace a setting value."""
+
+    # ---- assay writes ---------------------------------------------------------
+
+    @abstractmethod
+    def store_assay_claims(self, paper_id: str, claims) -> None:
+        """Replace assay claim entries for ``paper_id``."""
+
+    @abstractmethod
+    def store_assay_evidence(self, paper_id: str, evidence) -> None:
+        """Replace assay evidence entries for ``paper_id``."""
+
+    @abstractmethod
+    def store_assay_concessions(self, paper_id: str, concessions) -> None:
+        """Replace assay concession entries for ``paper_id``."""
+
+    @abstractmethod
+    def store_assay_gaps(self, paper_id: str, gaps) -> None:
+        """Replace assay gap entries for ``paper_id``."""
+
+    @abstractmethod
+    def store_assay_thesis(self, paper_id: str, thesis) -> None:
+        """Store or replace assay thesis for ``paper_id``."""
+
+    @abstractmethod
+    def store_assay_findings(self, paper_id: str, findings) -> None:
+        """Replace assay finding entries for ``paper_id``."""
+
+    # ---- assay reads ----------------------------------------------------------
+
+    @abstractmethod
+    def get_assay_claims(self, paper_id: str) -> list:
+        """Return all assay claims for ``paper_id``."""
+
+    @abstractmethod
+    def get_assay_evidence(self, paper_id: str) -> list:
+        """Return all assay evidence for ``paper_id``."""
+
+    @abstractmethod
+    def get_assay_concessions(self, paper_id: str) -> list:
+        """Return all assay concessions for ``paper_id``."""
+
+    @abstractmethod
+    def get_assay_gaps(self, paper_id: str) -> list:
+        """Return all assay gaps for ``paper_id``."""
+
+    @abstractmethod
+    def get_assay_thesis(self, paper_id: str):
+        """Return the assay thesis for ``paper_id``, or None."""
+
+    @abstractmethod
+    def get_assay_findings(self, paper_id: str) -> list:
+        """Return all assay findings for ``paper_id``."""
+
+    @abstractmethod
+    def store_assay_asks(self, paper_id: str, asks) -> None:
+        """Replace assay ask entries for ``paper_id``."""
+
+    @abstractmethod
+    def get_assay_asks(self, paper_id: str) -> list:
+        """Return all assay asks for ``paper_id``."""
+
+    @abstractmethod
+    def store_assay_pids(self, paper_id: str, pids) -> None:
+        """Replace assay paper-number references for ``paper_id``."""
+
+    @abstractmethod
+    def get_assay_pids(self, paper_id: str) -> list:
+        """Return all assay paper-number references for ``paper_id``."""
+
+    @abstractmethod
+    def store_assay_urls(self, paper_id: str, urls) -> None:
+        """Replace assay standalone URLs for ``paper_id``."""
+
+    @abstractmethod
+    def get_assay_urls(self, paper_id: str) -> list:
+        """Return all assay standalone URLs for ``paper_id``."""
+
+    @abstractmethod
+    def store_assay_strengths(self, paper_id: str, strengths) -> None:
+        """Replace assay strength entries for ``paper_id``."""
+
+    @abstractmethod
+    def get_assay_strengths(self, paper_id: str) -> list:
+        """Return all assay strengths for ``paper_id``."""
+
+    @abstractmethod
+    def store_assay_checklist(self, paper_id: str, items) -> None:
+        """Replace assay SD-4 checklist entries for ``paper_id``."""
+
+    @abstractmethod
+    def get_assay_checklist(self, paper_id: str) -> list:
+        """Return all assay checklist items for ``paper_id``."""
+
+    @abstractmethod
+    def store_assay_compounds(self, paper_id: str, compounds) -> None:
+        """Replace assay compound dynamic entries for ``paper_id``."""
+
+    @abstractmethod
+    def get_assay_compounds(self, paper_id: str) -> list:
+        """Return all assay compounds for ``paper_id``."""
+
+    @abstractmethod
+    def store_assay_synthesis(self, paper_id: str, synthesis) -> None:
+        """Store or replace assay synthesis (verdict, counts) for ``paper_id``."""
+
+    @abstractmethod
+    def get_assay_synthesis(self, paper_id: str):
+        """Return assay synthesis for ``paper_id``, or None."""
+
+    @abstractmethod
+    def write_assay_md(self, paper_id: str, markdown: str):
+        """Write assay report markdown and update DB path."""
+
+    @abstractmethod
+    def clear_assay(self, paper_id: str) -> None:
+        """Clear all assay artifacts for ``paper_id``."""
 
     # ---- extract writes ---------------------------------------------------
 

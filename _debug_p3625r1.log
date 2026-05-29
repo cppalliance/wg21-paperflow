@@ -1,0 +1,10 @@
+INFO:tomd.lib.pdf.wording:Wording detected: 8 ins, 0 del (0 promoted, 0 preamble dropped), 0 context
+DEBUG:tomd.lib.pdf.wg21:Extracted metadata: ['document', 'date', 'audience', 'reply-to'] (consumed blocks [0])
+DEBUG:tomd.lib.pdf.structure:Body size: 11.0, font ranks: {30.0: 1, 18.0: 2, 16.0: 3, 12.0: 4}
+INFO:tomd.lib.pdf.structure:Nesting fix: h5 -> h3 for '1'
+INFO:tomd.lib.pdf.structure:Nesting fix: h4 -> h3 for '[version.syn] '
+INFO:tomd.lib.pdf.structure:Nesting sibling: h4 -> h3 for '[concepts] '
+INFO:tomd.lib.pdf.structure:Nesting fix: h5 -> h3 for '2'
+DEBUG:tomd.lib.toc:TOC block: 6 entries (4 matched)
+INFO:tomd.lib.toc:Detected TOC: 6 entries detected
+DEBUG:tomd.lib.pdf.pipeline:Protecting 2 section heading(s) from TOC removal: ['Abstract', 'Motivation']

@@ -40,13 +40,6 @@ class PaperNotConvertedError(PipelineError):
     """
 
 
-class PaperNotDissectedError(PipelineError):
-    """Paper has no dissect output.
-
-    Message includes the paperflow dissect command.
-    """
-
-
 class PromptFileError(PipelineError):
     """The prompt file has a structural problem the user must fix.
 
@@ -70,6 +63,53 @@ class HookMismatchError(PromptFileError):
     """A step in the prompt file has no registered Python hook,
     a hook is registered for a step that does not exist,
     or a declared tool has no matching callable in the registry.
+    """
+
+
+class ServiceConfigError(PipelineError):
+    """Raised when SERVICES.toml service or slot resolution fails.
+
+    Covers unknown backend keys, required-api-key-env mismatches, and
+    bound slots whose declared env var is missing, empty, or
+    whitespace-only.
+    """
+
+
+class ModelBackendConfigError(PipelineError):
+    """Raised when a :class:`ModelBackend` receives an invalid runtime value
+    (e.g. ``request_limit < 1``).
+    """
+
+
+class MalformedModelOutputError(PipelineError):
+    """Raised when a model response could not be parsed into the expected
+    structured form even after the backend's internal retries.
+    """
+
+
+class TransformerConfigError(PipelineError):
+    """Raised when a :class:`TransformerProvider` TOML entry is malformed."""
+
+
+class BackendConfigError(PipelineError):
+    """Raised when a search backend (e.g. Brave) is misconfigured at construction."""
+
+
+class UnknownStageError(PipelineError):
+    """Raised when :func:`pipeline.process.run_pipeline` is asked to run an
+    unknown stage.
+    """
+
+
+class CapabilityMismatchError(PipelineError):
+    """A step's declared requirements exceed the assigned agent's capabilities.
+
+    Raised at pipeline-construction time (before any LLM call) when a
+    step declares ``**Tools:**`` but its assigned agent wraps a
+    ``tools_capable=False`` backend, or when an agent carries a
+    ``thinking_budget`` but its backend is ``thinking_capable=False``.
+    The message names the slot, the resolved service, and the
+    backend class so the user can fix the SERVICES.toml binding.
     """
 
 

@@ -20,26 +20,6 @@ from paperstore.stages import STAGE_NAMES
 from cli.targets import MONTH_RE, resolve_pid
 
 
-def _parse_service_overrides(raw: list[str] | None) -> dict[str, str] | None:
-    """Parse ``--service`` flag values into a slot -> service-name dict.
-
-    A bare ``NAME`` (no ``=``) applies to all default slots.
-    ``SLOT=NAME`` overrides one slot.
-    """
-    if not raw:
-        return None
-    overrides: dict[str, str] = {}
-    for item in raw:
-        if "=" in item:
-            slot, name = item.split("=", 1)
-            overrides[slot.strip()] = name.strip()
-        else:
-            overrides["fast"] = item
-            overrides["default"] = item
-            overrides["tool"] = item
-    return overrides
-
-
 def _parse_classifier_overrides(raw: list[str] | None) -> dict[str, str] | None:
     """Parse ``--classifier`` flag values into a slot -> classifier-name dict.
 
@@ -78,7 +58,10 @@ def run_process_command(
     stop_after = step_val
     chunk_index = getattr(args, "chunk", None)
     force = getattr(args, "force", False)
-    service_overrides = _parse_service_overrides(getattr(args, "service", None))
+    keep_downstream = getattr(args, "keep_downstream", False)
+    skip_prompt = getattr(args, "yes", False)
+    extract_vector = getattr(args, "extract_vector_images", False)
+    whiteout_text = getattr(args, "vector_whiteout_text", False)
     classifier_overrides = _parse_classifier_overrides(getattr(args, "classifier", None))
     provider_override = getattr(args, "provider", None)
 
@@ -98,7 +81,7 @@ def run_process_command(
         papers = [paper]
 
     if not force:
-        papers = [p for p in papers if p.status < through]
+        papers = [p for p in papers if 0 <= p.status < through]
 
     if not papers:
         print("No papers need processing.")
@@ -107,16 +90,50 @@ def run_process_command(
     papers.sort(key=lambda p: (p.mailing_date or ""), reverse=True)
     papers.sort(key=lambda p: -(p.status or 0))
 
+    # Pre-batch confirmation gate (plan section 3.1). For multi-paper
+    # convert invocations, count how many papers would have their
+    # downstream artifacts invalidated. We can't predict whether the
+    # convert will produce different markdown bytes, so we treat all
+    # existing-markdown papers as "might change". --yes / non-TTY /
+    # single-paper / --keep-downstream all skip the prompt.
+    if (
+        verb == "convert"
+        and len(papers) > 1
+        and not keep_downstream
+        and not skip_prompt
+        and sys.stdin.isatty()
+    ):
+        agora_n = sum(1 for p in papers if p.markdown_path and p.agora_path)
+        if agora_n > 0:
+            print(
+                f"convert: this batch will invalidate downstream artifacts "
+                f"for {agora_n} paper(s)"
+            )
+            print(f"  - agora outputs: {agora_n} papers")
+            print("re-run those pipelines after convert finishes to refresh.")
+            try:
+                answer = input("Continue? [y/N] ").strip().lower()
+            except EOFError:
+                answer = ""
+            if answer != "y":
+                print("aborted.")
+                return 0
+
     progress_ctx, on_progress = make_progress_handler(verb.capitalize())
+    show_outer = len(papers) > 1
 
     from paperstore.progress import ProgressEvent
 
     failed = 0
     total = len(papers)
     last_result = None
+    # Per-paper convert telemetry, rolled up into the end-of-batch
+    # summaries below. (pid, ConvertReport) pairs - one entry per
+    # paper whose convert stage actually ran.
+    convert_reports: list = []
     with progress_ctx:
         for i, paper in enumerate(papers):
-            if on_progress:
+            if on_progress and show_outer:
                 on_progress(ProgressEvent(
                     step=i, total=total,
                     name=f"{paper.paper_id} - {verb}",
@@ -131,13 +148,17 @@ def run_process_command(
                         trace=trace,
                         stop_after=stop_after,
                         chunk_index=chunk_index,
-                        service_overrides=service_overrides,
                         classifier_overrides=classifier_overrides,
                         provider_override=provider_override,
                         force=force,
-                        on_progress=on_progress,
+                        keep_downstream=keep_downstream,
+                        extract_vector=extract_vector,
+                        whiteout_text=whiteout_text,
+                        on_progress=None if show_outer else on_progress,
                     )
                 )
+                if last_result is not None and last_result.convert_report is not None:
+                    convert_reports.append((paper.paper_id, last_result.convert_report))
             except PipelineError as exc:
                 print(f"{paper.paper_id}: {exc}", file=sys.stderr)
                 failed += 1
@@ -153,10 +174,52 @@ def run_process_command(
                 print(msg, file=sys.stderr)
                 failed += 1
 
-    if on_progress:
+    if on_progress and show_outer:
         on_progress(ProgressEvent(
             step=total, total=total, name="done", pct=1.0,
         ))
+
+    # End-of-batch convert summaries (plan section 3.1). Two
+    # independently-printed blocks: papers truncated to the 20-image
+    # cap, and papers whose downstream artifacts were invalidated.
+    # Suppressed for verbs other than convert (other stages don't
+    # produce ConvertReport).
+    truncated = [(pid, r) for pid, r in convert_reports if r.images_truncated]
+    if truncated:
+        print(
+            f"\nconvert: {len(truncated)} paper(s) truncated to the "
+            f"{truncated[0][1].images_kept}-image cap:"
+        )
+        for pid, r in truncated:
+            # Mixed format only when both kinds contributed at least one
+            # image. A pure-raster paper (or a vector run with zero
+            # raster) gets the simple format so noise stays out.
+            if r.source_raster_count > 0 and r.source_vector_count > 0:
+                print(
+                    f"  {pid} (kept {r.images_kept} of {r.source_image_count}: "
+                    f"{r.source_raster_count} raster + "
+                    f"{r.source_vector_count} vector)"
+                )
+            else:
+                print(
+                    f"  {pid} (kept {r.images_kept} of {r.source_image_count})"
+                )
+        print(
+            "  hint: scanned-page PDFs are not handled - see "
+            "`improvements.md` section 4.\n"
+            "  The dropped images are noted in each paper.md as an HTML comment."
+        )
+    invalidated = [(pid, r) for pid, r in convert_reports if r.downstream_cleared]
+    if invalidated:
+        print(
+            f"\nconvert: {len(invalidated)} paper(s) had downstream artifacts "
+            f"invalidated by re-convert:"
+        )
+        for pid, r in invalidated:
+            print(f"  {pid} ({', '.join(r.downstream_cleared)})")
+        print(
+            "  re-run `paperflow agora` / `paperflow assay` to refresh."
+        )
 
     ok = total - failed
     if total > 1:

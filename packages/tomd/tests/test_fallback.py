@@ -98,7 +98,6 @@ class TestMetadataFallback:
             "---\n"
             "title: T\n"
             "document: P0001R0\n"
-            "revision: 0\n"
             "intent: info\n"
             "audience: EWG\n"
             "reply-to:\n"

@@ -1,0 +1,1357 @@
+{
+  "n5034": {
+    "hash": "04cfdf7ac04a052da6427e7201b0c7d77a24178559003609b2bc706c645072b1",
+    "size": 4629,
+    "head": "---\ntitle: \"WG21 agenda: 23-28 March 2026, Croydon, UK\"\ndocument: N5034\ndate: 2025-11-01\naudience: All of WG21\nreply-to:\n  - \"Nina Dinka Ranns <dinka.ranns@gmail.com>\"\n---\n\n## Meeting notice and locat"
+  },
+  "n5035": {
+    "hash": "86a3fa046f0c14e8845e595de88f12e1e157cf5368769c8e63e64807dd52f00a",
+    "size": 2740,
+    "head": "---\ntitle: \"2026-03 WG21 admin telecon\"\ndocument: N5035\ndate: 2026-01-22\naudience: All of WG21\nreply-to:\n  - \"Guy Davidson <standard.guy@hatcat.com>\"\n---\n\n### Teleconference information\n\n### Agenda\n\n#"
+  },
+  "n5036": {
+    "hash": "9dca68b4dc347a4685592d68f9c7ab782c93204f372c3142303aeb5fec6b8f89",
+    "size": 13391,
+    "head": "---\ntitle: \"ISO/IEC JTC1/SC22/WG21 White Paper N5036, Extensions to C++ for Transactional Memory Version 2\"\ndocument: N5036\ndate: 2026-02-22\naudience: All of WG21\nreply-to:\n  - \"Michael Wong <fraggamu"
+  },
+  "n5037": {
+    "hash": "c69605853703feae71cde524ae58b9d4b7b29a83e8a82473577bf3bdf8349290",
+    "size": 2551,
+    "head": "---\ntitle: \"2026-03 WG21 admin telecon\"\ndocument: N5037\ndate: 2026-03-03\naudience: All of WG21\nreply-to:\n  - \"Guy Davidson <standard.guy@hatcat.com>\"\n---\n\n### Teleconference information\n\n### Agenda\n\n#"
+  },
+  "n5038": {
+    "hash": "675d03eda0f7ea3ce4711c07d94daa2bfd5b620e827d0f13729996a96aebd7dc",
+    "size": 14079,
+    "head": "---\ntitle: \"WG21 2026-03 Croydon admin telecon minutes\"\ndocument: N5038\ndate: 2026-03-09\naudience: All of WG21\nreply-to:\n  - \"Braden Ganetsky <braden.ganetsky@gmail.com>\"\n---\n\n## 1. Opening and introd"
+  },
+  "n5040": {
+    "hash": "d04a3e482d7337bb4f73a3e0b665e1b7b0ccab8472447fb19c983534033cb7cb",
+    "size": 47000,
+    "head": "---\ntitle: \"WG21 2026-03 Croydon Hybrid Meeting Minutes\"\ndocument: N5040\ndate: 2026-04-07\naudience: All of WG21\nreply-to:\n  - \"Braden Ganetsky <braden.ganetsky@gmail.com>\"\n---\n\n## 1. Opening and intro"
+  },
+  "n5043": {
+    "hash": "780b7022263d86e266a5754c153dab8b52ef68ee98df6bb6e8149106b275228c",
+    "size": 2697,
+    "head": "---\ntitle: \"2026-06 WG21 admin telecon\"\ndocument: N5043\ndate: 2026-04-08\naudience: All of WG21\nreply-to:\n  - \"Guy Davidson <standard.guy@hatcat.com>\"\n---\n\n### Teleconference information\n\n### Agenda\n\n#"
+  },
+  "p0876r22": {
+    "hash": "d5026c5f5667e8de5b36383580f17cec1ccd3ba5ad9f2c778d74357a171fc5ac",
+    "size": 131838,
+    "head": "---\ntitle: \"fiber_context - fibers without scheduler\"\ndocument: P0876R22\ndate: 2026-02-22\naudience: LEWG, LWG, CWG\nreply-to:\n  - \"Oliver Kowalke <oliver.kowalke@gmail.com>\"\n  - \"Nat Goodspeed <nat.cog"
+  },
+  "p1000r7": {
+    "hash": "3261c5ecf204abaf1a84104c23e29b6f5b868b07e889285eae7db89114bd743e",
+    "size": 12964,
+    "head": "---\ntitle: \"Proposed C++ IS schedule\"\ndocument: P1000R7\ndate: 2026-01-13\naudience: WG21\nreply-to:\n  - \"Herb Sutter <herb.sutter@gmail.com>\"\n---\n\nR7: Proposing the same as R6, adding 3 years\n\n### IS sc"
+  },
+  "p1000r8": {
+    "hash": "8e83dc44ad243a77d57ddcb98e42a5e127857191abb8e448107193692a38253f",
+    "size": 13010,
+    "head": "---\ntitle: \"Proposed C++ IS schedule\"\ndocument: P1000R8\ndate: 2026-04-13\naudience: WG21\nreply-to:\n  - \"Guy Davidson <standard.guy@hatcat.com>\"\n---\n\nR8: Transferring ownership to new convenor, Guy Davi"
+  },
+  "p1040r9": {
+    "hash": "6627c70bfb3748248d2d48823888d5a76d04e2de1d6afaeec316a95cba1ca1c4",
+    "size": 81347,
+    "head": "---\ntitle: \"std::embed\"\ndocument: P1040R9\ndate: 2026-03-27\naudience: EWG, CWG, LEWG\nreply-to:\n  - \"JeanHeyd Meneide (https://thephd.dev) <phdofthehouse@gmail.com>\"\n---\n\n## Abstract\n\nA proposal for a f"
+  },
+  "p1130r2": {
+    "hash": "108ef3d52076db7ba8ebe7872f2e1139cb1d8bb386af4ea0da7ba8449473738f",
+    "size": 14007,
+    "head": "---\ntitle: \"Module Resource Dependency Propagation\"\ndocument: P1130R2\ndate: 2026-03-27\naudience: EWG, SG15\nreply-to:\n  - \"JeanHeyd Meneide <phdofthehouse@gmail.com>\"\n---\n\n## Abstract\n\nThis proposal pr"
+  },
+  "p2000r5": {
+    "hash": "82856a8bb4e4db65555864aa342079ef5cb984a3ac00ce24835d73a19e462661",
+    "size": 73691,
+    "head": "---\ntitle: \"Directions for ISO C++\"\ndocument: P2000R5\ndate: 2026-02-23\naudience: All WG21\nreply-to:\n  - \"Daveed Vandevoorde <daveed@vandevoorde.com>\"\n---\n\n###### ([daveed@vandevoorde.com](mailto:davee"
+  },
+  "p2034r6": {
+    "hash": "e1b4183aedede22851c09a1747a95c04619ed05e89f760c7ab7eea83a662f364",
+    "size": 25731,
+    "head": "---\ntitle: \"P2034: Partially Mutable Lambda Captures\"\ndocument: P2034R6\ndate: 2026-03-23\naudience: EWG\nreply-to:\n  - \"Ryan McDougall <mcdougall.ryan@gmail.com>\"\n  - \"Lakshay Garg <lakshayg.xyz@gmail.c"
+  },
+  "p2285r1": {
+    "hash": "a95b33b87466ed9d3fa5a8442076d8127324681e677edee2c6556a55c7456437",
+    "size": 16870,
+    "head": "---\ntitle: \"Are default function arguments in the immediate context?\"\ndocument: P2285R1\ndate: 2026-02-23\naudience: EWG\nreply-to:\n  - \"Andrzej Krzemieński <akrzemi1@gmail.com>\"\n  - \"Tomasz Kamiński <to"
+  },
+  "p2583r0": {
+    "hash": "128ba37e2a8f93145947f2a096a8c9a1c62d8f99f6a564627689590c13c7a1b1",
+    "size": 26288,
+    "head": "---\ntitle: \"Symmetric Transfer and Sender Composition\"\ndocument: P2583R0\ndate: 2026-02-22\naudience: LEWG\nreply-to:\n  - \"Mungo Gill <mungo.gill@me.com>\"\n  - \"Vinnie Falco <vinnie.falco@gmail.com>\"\n---\n"
+  },
+  "p2583r1": {
+    "hash": "13fb8415479d6379beac45844c3b61bb5350fddfa44b6370cb87b2e73dee77de",
+    "size": 45078,
+    "head": "---\ntitle: \"Symmetric Transfer and Sender Composition\"\ndocument: P2583R1\ndate: 2026-03-06\naudience: LEWG\nreply-to:\n  - \"Mungo Gill <mungo.gill@me.com>\"\n  - \"Vinnie Falco <vinnie.falco@gmail.com>\"\n---\n"
+  },
+  "p2583r2": {
+    "hash": "b7d8bb175085c575a9e84092a519a3633cf8433f8db08349b17db43add9a4d25",
+    "size": 47946,
+    "head": "---\ntitle: \"Symmetric Transfer and Sender Composition\"\ndocument: P2583R2\ndate: 2026-03-09\naudience: LEWG\nreply-to:\n  - \"Mungo Gill <mungo.gill@me.com>\"\n  - \"Vinnie Falco <vinnie.falco@gmail.com>\"\n---\n"
+  },
+  "p2583r3": {
+    "hash": "1b190d251f2d28059bbb566be5cb7337796e10ead5b80eae95e9cbe9631253d9",
+    "size": 64410,
+    "head": "---\ntitle: \"Symmetric Transfer and Sender Composition\"\ndocument: P2583R3\ndate: 2026-04-17\nintent: inform\naudience: LEWG\nreply-to:\n  - \"Mungo Gill <mungo.gill@me.com>\"\n  - \"Vinnie Falco <vinnie.falco@g"
+  },
+  "p2728r11": {
+    "hash": "6ec305cb533d60060792cae08a46ad011eb7a807b63073e4089adfb36b93c842",
+    "size": 51667,
+    "head": "---\ntitle: \"Unicode in the Library, Part 1: UTF Transcoding\"\ndocument: P2728R11\ndate: 2026-02-22\naudience: SG-16 Unicode,SG-9 Ranges,LEWG\nreply-to:\n  - \"Eddie Nolan <eddiejnolan@gmail.com>\"\n---\n\n# 1 H"
+  },
+  "p2929r2": {
+    "hash": "c9f56723a276fdbd343de9532ae1ed17b77a4a586f49293fc24afd8083a599c9",
+    "size": 22081,
+    "head": "---\ntitle: \"Proposal to add simd_invoke to std::simd\"\ndocument: P2929R2\ndate: 2026-01-26\naudience: LEWG\nreply-to:\n  - \"Daniel Towner <daniel.towner@intel.com>\"\n  - \"Ruslan Arutyunyan <ruslan.arutyunya"
+  },
+  "p2929r3": {
+    "hash": "27a07733c1d7fa2e34907a1b01b6e7ca4e32840c3de0c0faee7a188770f1f804",
+    "size": 22164,
+    "head": "---\ntitle: \"Proposal to add chunked_invoke to std::simd\"\ndocument: P2929R3\ndate: 2026-03-23\naudience: LEWG\nreply-to:\n  - \"Daniel Towner <daniel.towner@intel.com>\"\n  - \"Ruslan Arutyunyan <ruslan.arutyu"
+  },
+  "p2953r3": {
+    "hash": "8510216e778500c4ea108f09306541cd2737b9a8d259ddea9ccf5c5d71d78b71",
+    "size": 18095,
+    "head": "---\ntitle: \"Forbid defaulting operator=(X&&) &&\"\ndocument: P2953R3\ndate: 2026-01-14\naudience: SG17\nreply-to:\n  - \"Matthew Taylor <mjtaylor214@hotmail.com>\"\n  - \"Arthur O'Dwyer <arthur.j.odwyer@gmail.c"
+  },
+  "p2953r4": {
+    "hash": "82b88e763eabf45b06093eeee93441d5bdea07960c0dc439774ae5c98f8c2e02",
+    "size": 20322,
+    "head": "---\ntitle: \"Forbid defaulting operator=(X&&) &&\"\ndocument: P2953R4\ndate: 2026-02-22\naudience: SG17\nreply-to:\n  - \"Matthew Taylor <mjtaylor214@hotmail.com>\"\n  - \"Arthur O'Dwyer <arthur.j.odwyer@gmail.c"
+  },
+  "p2956r2": {
+    "hash": "a47aadc44de80794eac050a0e8346cac2ab4d47aad536808fdbdf653765cc0eb",
+    "size": 6610,
+    "head": "---\ntitle: \"Allow std::simd overloads for saturating operations\"\ndocument: P2956R2\ndate: 2026-03-30\naudience: LEWG\nreply-to:\n  - \"Daniel Towner <daniel.towner@intel.com>\"\n  - \"Ruslan Arutyunyan <rusla"
+  },
+  "p2964r2": {
+    "hash": "c6ee1b8139f22124a03506f009158fda69e7a1d7a14017ad6a73e740d17dc480",
+    "size": 69255,
+    "head": "---\ntitle: \"User-defined element types in std::simd through trait-based vectorizable definition\"\ndocument: P2964R2\ndate: 2026-02-19\naudience: LEWG\nreply-to:\n  - \"Daniel Towner <daniel.towner@intel.com"
+  },
+  "p2964r3": {
+    "hash": "d7dbd0bd6c82063dbb286f4dc406b3b2f462c8a529665a83f0136951bc84443a",
+    "size": 69271,
+    "head": "---\ntitle: \"User-defined element types in std::simd through trait-based vectorizable definition\"\ndocument: P2964R3\ndate: 2026-03-20\naudience: LEWG\nreply-to:\n  - \"Daniel Towner <daniel.towner@intel.com"
+  },
+  "p3039r1": {
+    "hash": "8143fce335b0e7b8e54ce1450b111683b313cc691be8133fdcda549c522b7270",
+    "size": 15594,
+    "head": "---\ntitle: \"Automatically Generate operator->\"\ndocument: P3039R1\ndate: 2026-01-12\naudience: Evolution Working Group Library Evolution Working Group\nreply-to:\n  - \"David Stone <davidfromonline@gmail.co"
+  },
+  "p3045r7": {
+    "hash": "0edaeb989f41aee5563987ed39004d9ea1593d4ac380d064a6ef25f6e8df3a90",
+    "size": 358070,
+    "head": "---\ntitle: \"Quantities and units library\"\ndocument: P3045R7\ndate: 2026-02-23\naudience: LEWG Library Evolution Working Group,SG6 Numerics,SG16 Unicode,SG20 Education\nreply-to:\n  - \"Mateusz Pusz (Train "
+  },
+  "p3052r2": {
+    "hash": "2c66c4508749db7c8c5f051cd55ce9302fa4ea971937c992a76346543d467454",
+    "size": 6974,
+    "head": "---\ntitle: \"view_interface::at()\"\ndocument: P3052R2\ndate: 2025-03-26\naudience: LEWG, SG23 (Safety and Security), SG9 (Ranges)\nreply-to:\n  - \"Hewill Kang <hewillk@gmail.com>\"\n---\n\n## Abstract\n\nThis pap"
+  },
+  "p3059r2": {
+    "hash": "90d0002651205117ac6319a747b602630d9c72b3c339a9bc3a632c0e3a0f97b0",
+    "size": 15330,
+    "head": "---\ntitle: \"Making user-defined constructors of view iterators/sentinels private\"\ndocument: P3059R2\ndate: 2026-03-23\naudience: LEWG\nreply-to:\n  - \"Hewill Kang <hewillk@gmail.com>\"\n---\n\n## Abstract\n\nTh"
+  },
+  "p3154r2": {
+    "hash": "71c6f4f474ea1c0b8edf0bb81da0af50f07c4c38080a83ef415be0cdc6aae1b8",
+    "size": 27777,
+    "head": "---\ntitle: \"Deprecating signed character types in iostreams\"\ndocument: P3154R2\ndate: 2026-03-30\naudience: LWG\nreply-to:\n  - \"Elias Kosunen <isocpp@eliaskosunen.com>\"\n---\n\n## Abstract\n\nThis paper propo"
+  },
+  "p3161r5": {
+    "hash": "52ee5a05ea292e158b0b449416bf4fd8633ac5a8efe92b9a5e982288a33bb462",
+    "size": 53801,
+    "head": "---\ntitle: \"Unified integer overflow arithmetic\"\ndocument: P3161R5\ndate: 2025-03-24\naudience: SG6, LWG\nreply-to:\n  - \"<cpp@kaotic.software>\"\n---\n\n## Target\n\nC++29\n\n## Abstract\n\nAddition and uniformiza"
+  },
+  "p3181r1": {
+    "hash": "0d36ff83324a016d84e878e793efce7faae29ba445d59e51501dbe06c4ec3d47",
+    "size": 10281,
+    "head": "---\ntitle: \"Atomic stores and object lifetimes\"\ndocument: P3181R1\ndate: 2026-02-22\naudience: SG1\nreply-to:\n  - \"Hans Boehm, Dave Clausen, David Goldblatt\"\n  - \"Hans Boehm <hboehm@google.com>\"\n---\n\n## "
+  },
+  "p3242r2": {
+    "hash": "4d903a82b5245e982078a7b9d699f752a3317c00bb9c1a7260c762fa3c59e66f",
+    "size": 14203,
+    "head": "---\ntitle: \"Copy and fill for mdspan\"\ndocument: P3242R2\ndate: 2026-04-16\naudience: LWG\nreply-to:\n  - \"Nicolas Morales <nmmoral@sandia.gov>\"\n  - \"Christian Trott <crtrott@sandia.gov>\"\n  - \"Mark Hoemmen"
+  },
+  "p3373r2": {
+    "hash": "b27448de681d285cf5892f12063320183e828d7904ba530e3777c797b63351e1",
+    "size": 44446,
+    "head": "---\ntitle: \"Of Operation States and Their Lifetimes\"\ndocument: P3373R2\ndate: 2025-12-26\naudience: LEWG\nreply-to:\n  - \"Robert Leahy <rleahy@rleahy.ca>\"\n---\n\n## Abstract\n\nThis paper proposes changes to "
+  },
+  "p3373r3": {
+    "hash": "848cae4e6eaa03284713e69c89b5649c909e1bf98931f6b5dfcfd3d4f41da3bb",
+    "size": 44979,
+    "head": "---\ntitle: \"Of Operation States and Their Lifetimes\"\ndocument: P3373R3\ndate: 2026-03-23\naudience: LWG\nreply-to:\n  - \"Robert Leahy <rleahy@rleahy.ca>\"\n---\n\n## Abstract\n\nThis paper proposes changes to t"
+  },
+  "p3373r4": {
+    "hash": "9716aebaedc974254dce93e915ab16ca71107419f79d0ab80d20ffaafb3fe622",
+    "size": 45348,
+    "head": "---\ntitle: \"Of Operation States and Their Lifetimes\"\ndocument: P3373R4\ndate: 2026-03-27\naudience: LWG\nreply-to:\n  - \"Robert Leahy <rleahy@rleahy.ca>\"\n---\n\n## Abstract\n\nThis paper proposes changes to t"
+  },
+  "p3384r1": {
+    "hash": "a1de5e1d4c55b2c063c3f023445b370e4cede7f5476ae48ba7f6471d0faa99f9",
+    "size": 20621,
+    "head": "---\ntitle: \"__COUNTER__\"\ndocument: P3384R1\ndate: 2025-03-21\naudience: EWG\nreply-to:\n  - \"Jeremy Rifkin <jeremy@rifkin.dev>\"\n---\n\n## Abstract\n\n`__COUNTER__` is a predefined macro provided as a language"
+  },
+  "p3385r7": {
+    "hash": "6fb770fd182ae58a76783c8a7f422d94314b895277922a76c59b92a238270f2a",
+    "size": 25346,
+    "head": "---\ntitle: \"Attributes reflection\"\ndocument: P3385R7\ndate: 2026-01-28\naudience: EWG, LEWG\nreply-to:\n  - \"Aurelien Cassagnes <acassagnes@bloomberg.net>\"\n---\n\n# 1 Revision history\n\nR7\n\n- Remove support "
+  },
+  "p3411r5": {
+    "hash": "1142a53f4d9843e871bdbf5678480b561fe19082faf06d90821c50dc9e0cc5a6",
+    "size": 56098,
+    "head": "---\ntitle: \"any_view\"\ndocument: P3411R5\ndate: 2026-01-25\naudience: SG9, LEWG\nreply-to:\n  - \"Hui Xie <hui.xie1990@gmail.com>\"\n  - \"Louis Dionne <ldionne.2@gmail.com>\"\n  - \"S. Levent Yilmaz <levent.yilm"
+  },
+  "p3427r3": {
+    "hash": "6d697081ebe7633fe01f18b3cd4f650e74f9e65ef27f0ff59a26dde9ab0d28d9",
+    "size": 15412,
+    "head": "---\ntitle: \"Hazard Pointer Synchronous Reclamation\"\ndocument: P3427R3\ndate: 2026-03-26\naudience: LEWG Library Evolution\nreply-to:\n  - \"Maged M. Michael, Michael Wong, Paul McKenney, Mark de Wever\"\n  -"
+  },
+  "p3440r2": {
+    "hash": "67534584eed3745f8ae9432f214de1f8bbc7a7fbd04d93f077e640252522c4bf",
+    "size": 13263,
+    "head": "---\ntitle: \"Add mask_from_count function to std::simd\"\ndocument: P3440R2\ndate: 2026-02-20\naudience: LEWG\nreply-to:\n  - \"Daniel Towner <daniel.towner@intel.com>\"\n---\n\n## Abstract\n\nProposal to add `std:"
+  },
+  "p3440r3": {
+    "hash": "867150e55f152ca196b18b3546abb53e5c81a91683138a1f8d58f2b6aba57490",
+    "size": 13328,
+    "head": "---\ntitle: \"Add mask_from_count function to std::simd\"\ndocument: P3440R3\ndate: 2026-03-23\naudience: LEWG\nreply-to:\n  - \"Daniel Towner <daniel.towner@intel.com>\"\n---\n\n## Abstract\n\nProposal to add `std:"
+  },
+  "p3450r1": {
+    "hash": "ccc9ff3e3db2b435df9ec0c6ac7def2d1edd14b3911a6f708fbd1f1e6018a183",
+    "size": 4282,
+    "head": "---\ntitle: \"Extend std::is_within_lifetime\"\ndocument: P3450R1\ndate: 2026-02-27\naudience: LWG\nreply-to:\n  - \"Barry Revzin <barry.revzin@gmail.com>\"\n---\n\n# 1 Revision History\n\nSince [[P3450R0]](https://"
+  },
+  "p3596r0": {
+    "hash": "f57d5106bfbd636d6d613d83de516fc749855e99c494559d530c6a70caa58fb1",
+    "size": 246182,
+    "head": "---\ntitle: \"Undefined Behavior and IFNDR Annexes\"\ndocument: P3596R0\ndate: 2026-02-20\naudience: CWG\nreply-to:\n  - \"Joshua Berne <jberne4@bloomberg.net>\"\n  - \"Timur Doumler <papers@timur.audio>\"\n  - \"Je"
+  },
+  "p3596r1": {
+    "hash": "c5b5df4ce89b6f08ccbf2308324c093960bc6c110459381f7a5a0845eae098a0",
+    "size": 248190,
+    "head": "---\ntitle: \"Undefined Behavior and IFNDR Annexes\"\ndocument: P3596R1\ndate: 2026-04-19\naudience: CWG\nreply-to:\n  - \"Joshua Berne <jberne4@bloomberg.net>\"\n  - \"Timur Doumler <papers@timur.audio>\"\n  - \"Je"
+  },
+  "p3598r0": {
+    "hash": "8423c31b05744617f8fbe30df73af21814f97c6a32231ca4be4075744bb3f444",
+    "size": 3913,
+    "head": "---\ntitle: \"CWG 3158 — const-ification of Splice Expressions\"\ndocument: P3598R0\ndate: 2026-03-26\naudience: EWG, CWG\nreply-to:\n  - \"Joshua Berne <jberne4@bloomberg.net>\"\n---\n\n## Abstract\n\nThis paper co"
+  },
+  "p3605r1": {
+    "hash": "29c4fc8cba1d0a74ccead81c57aedbba9b379be4abd266e0221fb5ad86e24baf",
+    "size": 18458,
+    "head": "---\ntitle: \"isqrt: A function to calculate integer square root of nonnegative integers\"\ndocument: P3605R1\ndate: 2026-03-02\naudience: SG6 (Numerics Study Group), LEWG, LWG\nreply-to:\n  - \"Nikita Sakhari"
+  },
+  "p3625r1": {
+    "hash": "4559eaf8998dccf1699191ea3a0fbfd39d4e4ebe9db946a75c5f8810253a9cd7",
+    "size": 3567,
+    "head": "---\ntitle: \"either neither\"\ndocument: P3625R1\ndate: 2026-04-07\naudience: LWG\nreply-to:\n  - \"Michael Florian Hava <mfh.cpp@gmail.com>\"\n---\n\n## Abstract\n\nThis paper proposes adding two usability concept"
+  },
+  "p3642r4": {
+    "hash": "17512b2e0b5640942255826b6ae21000dd0442c08f919a71d822f3ac37a52dbf",
+    "size": 24538,
+    "head": "---\ntitle: \"Carry-less product: std::clmul\"\ndocument: P3642R4\ndate: 2026-02-17\naudience: LEWG\nreply-to:\n  - \"Jan Schultke <janschultke@gmail.com>\"\n---\n\n## Abstract\n\nAdd widening and non-widening carry"
+  },
+  "p3647r1": {
+    "hash": "af7e314db5565b7520cef617bdac02931ba68784a14914202d134886bb6ec390",
+    "size": 3120,
+    "head": "---\ntitle: \"Slides for P3642R4 Carry-less product: std::clmul\"\ndocument: P3647R1\ndate: 2026-03-03\naudience: LEWG\nreply-to:\n  - \"Jan Schultke <janschultke@gmail.com>\"\n---\n\n# Carry-less product:std::clm"
+  },
+  "p3655r4": {
+    "hash": "65a6b894811e887214e13d6fe67490942a6784c27bbd5f3d5ba14cb4e4ce3b1d",
+    "size": 53640,
+    "head": "---\ntitle: \"std::cstring_view\"\ndocument: P3655R4\ndate: 2025-10-05\naudience: LEWG Library Evolution,LWG Library\nreply-to:\n  - \"Peter Bindels <dascandy@gmail.com>\"\n  - \"Hana Dusíková <hanicka@hanicka.ne"
+  },
+  "p3666r3": {
+    "hash": "3b5c294f2e2408b1ce3927eef706632f22d793ba3d468b7a41e435f4115366a3",
+    "size": 125481,
+    "head": "---\ntitle: \"Bit-precise integers\"\ndocument: P3666R3\ndate: 2026-02-21\naudience: EWG, LEWG\nreply-to:\n  - \"Jan Schultke <janschultke@gmail.com>\"\n---\n\n## Abstract\n\nC23 has introduced so-called \"bit-precis"
+  },
+  "p3688r6": {
+    "hash": "03ddfd2b0cb81f83542aa9a5d8bb8f5a345a4426b56f7a9b65852cbb40d64657",
+    "size": 37164,
+    "head": "---\ntitle: \"ASCII character utilities\"\ndocument: P3688R6\ndate: 2026-02-21\naudience: LEWG\nreply-to:\n  - \"Jan Schultke <janschultke@gmail.com>\"\n  - \"Corentin Jabot <corentin.jabot@gmail.com>\"\n---\n\n## Ab"
+  },
+  "p3692r4": {
+    "hash": "df92b3c6b4278660bd7dc60e0b8f231d5ffbb0a05a0f824512516f604506c084",
+    "size": 83983,
+    "head": "---\ntitle: \"How to Avoid OOTA Without Really Trying\"\ndocument: P3692R4\ndate: 2026-03-26\naudience: CWG, LWG\nreply-to:\n  - \"Alan Stern <stern@rowland.harvard.edu>\"\n  - \"Paul E. McKenney <paulmckrcu@gmai"
+  },
+  "p3724r3": {
+    "hash": "3ebf873191f7647818e70ce6cef5d4cce2297a0c67d90d29f93c5e3d9d39e74d",
+    "size": 53203,
+    "head": "---\ntitle: \"Integer division\"\ndocument: P3724R3\ndate: 2026-02-20\naudience: LEWG\nreply-to:\n  - \"Jan Schultke <janschultke@gmail.com>\"\n---\n\n## Abstract\n\nC++ currently only offers truncating integer divi"
+  },
+  "p3725r2": {
+    "hash": "d4689d3823102e9de38069e0b9899d6fcf33cb500362497f228f3042828b84b5",
+    "size": 18463,
+    "head": "---\ntitle: \"Filter View Extensions for Safer Use\"\ndocument: P3725R2\ndate: 2026-03-22\naudience: SG9, LEWG, LWG\nreply-to:\n  - \"Nicolai Josuttis <nico@josuttis.de>\"\n---\n\n## Motivation\n\n### Status Quo\n\nUs"
+  },
+  "p3725r3": {
+    "hash": "3516f4b1ae184622a7357075e924ded879c09c9ffa16a1170c70305e0849253b",
+    "size": 18398,
+    "head": "---\ntitle: \"Filter View Extensions for Safer Use, Rev3\"\ndocument: P3725R3\ndate: 2026-03-24\naudience: SG9, LEWG, LWG\nreply-to:\n  - \"Nicolai Josuttis <nico@josuttis.de>\"\n---\n\n## Motivation\n\n### Status Q"
+  },
+  "p3726r2": {
+    "hash": "75eff70ec2044ac195e6190f21c42d4e0ea9f648c8fa9ebcef639f06710cccc7",
+    "size": 20865,
+    "head": "---\ntitle: \"Adjustments to Union Lifetime Rules\"\ndocument: P3726R2\ndate: 2026-03-26\naudience: CWG, LWG\nreply-to:\n  - \"Barry Revzin <barry.revzin@gmail.com>\"\n  - \"Tomasz Kamiński <tomaszkam@gmail.com>\""
+  },
+  "p3732r2": {
+    "hash": "b420e6f77bb68b491d5075121d239972564cda16fa7ee12515320a6a8e6fad01",
+    "size": 124913,
+    "head": "---\ntitle: \"Numeric range algorithms\"\ndocument: P3732R2\ndate: 2026-03-26\naudience: SG1,SG9\nreply-to:\n  - \"Ruslan Arutyunyan <ruslan.arutyunyan@intel.com>\"\n  - \"Mark Hoemmen <mhoemmen@nvidia.com>\"\n  - "
+  },
+  "p3737r3": {
+    "hash": "4aae0e1999227f15a6157371b648ce5035b0df86ceced3883d12e6fdfc9250b4",
+    "size": 18573,
+    "head": "---\ntitle: \"std::array is a wrapper for an array!\"\ndocument: P3737R3\ndate: 2026-02-22\naudience: LEWG\nreply-to:\n  - \"Jan Schultke <janschultke@gmail.com>\"\n---\n\n## Abstract\n\nThe `std::array` class templ"
+  },
+  "p3769r1": {
+    "hash": "5ac2b26247bff9aed56508b93f37c44b707a2d96cdf3d4de670618bffb5757c4",
+    "size": 6410,
+    "head": "---\ntitle: \"Clarification of placement new deallocation\"\ndocument: P3769R1\ndate: 2026-03-27\naudience: CWG\nreply-to:\n  - \"Lauri Vasama <wg21@vasama.org>\"\n---\n\n## Abstract\n\nClarifies wording for selecti"
+  },
+  "p3786r2": {
+    "hash": "4aa31321af0505cdaca0b32712c1515429b47cd384d7eb6974daf9c39aa6bc5b",
+    "size": 9877,
+    "head": "---\ntitle: \"Tuple protocol for fixed-size span\"\ndocument: P3786R2\ndate: 2026-04-10\naudience: LEWG\nreply-to:\n  - \"Michael Florian Hava <mfh.cpp@gmail.com>\"\n  - \"<michael.hava@risc-software.at>\"\n---\n\n##"
+  },
+  "p3787r1": {
+    "hash": "dd7a6c9c39befc1be5cbdd432861313762fc18d50b30e93866197b1f20bf16a2",
+    "size": 5965,
+    "head": "---\ntitle: \"Adjoints to \\\"Enabling list-initialization for algorithms\\\": uninitialized_fill\"\ndocument: P3787R1\ndate: 2026-03-19\naudience: LWG, LEWG\nreply-to:\n  - \"Giuseppe D'Angelo <giuseppe.dangelo@k"
+  },
+  "p3787r2": {
+    "hash": "db3353979900cb4b345d525cc1238318b58b19e3ee51b4f98908bff19a7d905c",
+    "size": 5952,
+    "head": "---\ntitle: \"Adjoints to \\\"Enabling list-initialization for algorithms\\\": uninitialized_fill\"\ndocument: P3787R2\ndate: 2026-03-24\naudience: LWG, LEWG\nreply-to:\n  - \"Giuseppe D'Angelo <giuseppe.dangelo@k"
+  },
+  "p3795r1": {
+    "hash": "77a1d165eef8fce18d1eafc1410ea748a2def17aeb5e6d1233b02b1d77f2b5a7",
+    "size": 35971,
+    "head": "---\ntitle: \"Miscellaneous Reflection Cleanup\"\ndocument: P3795R1\ndate: 2026-01-09\naudience: CWG, LWG\nreply-to:\n  - \"Barry Revzin <barry.revzin@gmail.com>\"\n---\n\n# 1 Revision History\n\nSince [[P3795R0]](h"
+  },
+  "p3795r2": {
+    "hash": "5acd027366dde4ea3e02f80cc9eb19836062f3f57b0b793d33ea11ed518519e9",
+    "size": 36616,
+    "head": "---\ntitle: \"Miscellaneous Reflection Cleanup\"\ndocument: P3795R2\ndate: 2026-03-26\naudience: CWG, LWG\nreply-to:\n  - \"Barry Revzin <barry.revzin@gmail.com>\"\n---\n\n# 1 Revision History\n\nSince [[P3795R1]](h"
+  },
+  "p3804r2": {
+    "hash": "09011dcf99fae74df2f669f0f38d0cb7ea68c3c746d6ddc8e483023377cd3a11",
+    "size": 26524,
+    "head": "---\ntitle: \"Iterating on parallel_scheduler\"\ndocument: P3804R2\ndate: 2026-03-26\naudience: LWG\nreply-to:\n  - \"Lucian Radu Teodorescu (Garmin) <lucteo@lucteo.ro>\"\n  - \"Ruslan Arutyunyan (Intel) <ruslan."
+  },
+  "p3816r2": {
+    "hash": "06442b6f85756a41085469a1cf96603d2bdfe88b58e3d642c0e1ca6b86229467",
+    "size": 29159,
+    "head": "---\ntitle: \"Hashing meta::info\"\ndocument: P3816R2\ndate: 2026-02-23\naudience: SG7 Reflection\nreply-to:\n  - \"Matt Cummins <mcummins16@bloomberg.net>\"\n  - \"Valentyn Yukhymenko <vyuhimenko@bloomberg.net>\""
+  },
+  "p3822r1": {
+    "hash": "4cca27dd818b399f1308031fda5ee0c480325689d03c2b6c5670fafff4078776",
+    "size": 7125,
+    "head": "---\ntitle: \"Conditional noexcept specifiers in compound requirements\"\ndocument: P3822R1\ndate: 2026-02-23\naudience: EWG\nreply-to:\n  - \"Viacheslav Luchkin <someone12469@gmail.com>\"\n  - \"Gašper Ažman <ga"
+  },
+  "p3826r3": {
+    "hash": "bdc7025809c7f4705f191c77b159594a091abd90f9c50a1e7cee73427003abc9",
+    "size": 99301,
+    "head": "---\ntitle: \"Fix Sender Algorithm Customization\"\ndocument: P3826R3\ndate: 2026-01-05\naudience: SG1 Concurrency and Parallelism Working Group,LEWG Library Evolution Working Group,LWG Library Working Grou"
+  },
+  "p3826r4": {
+    "hash": "2911bc730f50343bd67c316c620ce919cb3f92462abacd8943c3485bb617019e",
+    "size": 101291,
+    "head": "---\ntitle: \"Fix Sender Algorithm Customization\"\ndocument: P3826R4\ndate: 2026-03-21\naudience: SG1 Concurrency and Parallelism Working Group,LEWG Library Evolution Working Group,LWG Library Working Grou"
+  },
+  "p3826r5": {
+    "hash": "3dbdbc3be040c7c5e9f8b12be8b4ecb563a71de1514716e4fe28f4498691876d",
+    "size": 103994,
+    "head": "---\ntitle: \"Fix Sender Algorithm Customization\"\ndocument: P3826R5\ndate: 2026-03-26\naudience: SG1 Concurrency and Parallelism Working Group,LEWG Library Evolution Working Group,LWG Library Working Grou"
+  },
+  "p3828r1": {
+    "hash": "3b07f8a9652ce7beb47f1709bf82e9f967dbf79baf0a8404b27318239b7b3f56",
+    "size": 3559,
+    "head": "---\ntitle: \"Rename the to_input view to as_input\"\ndocument: P3828R1\ndate: 2026-03-07\naudience: LEWG, LWG\nreply-to:\n  - \"Nicolai Josuttis <nico@josuttis.de>\"\n---\n\n## Proposed Wording\n\n(All against N494"
+  },
+  "p3832r1": {
+    "hash": "81a81d17ef005b73d1211c84e98fe336fc7b9012b3e89d6503ed4b375a5f426a",
+    "size": 6695,
+    "head": "---\ntitle: \"Timed lock algorithms for multiple lockables\"\ndocument: P3832R1\ndate: 2026-03-26\naudience: Library Evolution Working Group\nreply-to:\n  - \"Ted Lyngmo <ted@lyncon.se>\"\n---\n\n## Revision Histo"
+  },
+  "p3833r1": {
+    "hash": "dfa61e2ee73b19e89c4c3f5c1296e4e0c851855a8e0d8824b9962be8ce17a832",
+    "size": 21920,
+    "head": "---\ntitle: \"std::multi_lock\"\ndocument: P3833R1\ndate: 2026-03-24\naudience: LEWGI/SG1\nreply-to:\n  - \"Ted Lyngmo <ted@lyncon.se>\"\n---\n\n## Revision History\n\n### R1\n\n- Rewrote postconditions throughout the"
+  },
+  "p3833r2": {
+    "hash": "bdfecbd92ea89ac7289ac3253bd2a4a5c9b2233f23a5d8d3488f426788f73716",
+    "size": 22306,
+    "head": "---\ntitle: \"std::multi_lock\"\ndocument: P3833R2\ndate: 2026-03-26\naudience: LEWGI/SG1\nreply-to:\n  - \"Ted Lyngmo <ted@lyncon.se>\"\n---\n\n## Revision History\n\n### R2\n\n- Removed *Attempts to lock all mutexes"
+  },
+  "p3839r0": {
+    "hash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "size": 0,
+    "head": ""
+  },
+  "p3842r1": {
+    "hash": "5d09d2a13bf7cc08fbc68b192f979cab8f5424312ed3dc0c8f54de8555e18ed7",
+    "size": 1743,
+    "head": "---\ntitle: \"A conservative fix for constexpr uncaught_exceptions() and current_exception()\"\ndocument: P3842R1\ndate: 2026-03-25\naudience: LWG\nreply-to:\n  - \"Ville Voutilainen <ville.voutilainen@gmail.c"
+  },
+  "p3842r2": {
+    "hash": "cb512fcd8f44f10ab889136690692ac915286ceaec34578defab70a26afb8e5d",
+    "size": 3800,
+    "head": "---\ntitle: \"A conservative fix for constexpr uncaught_exceptions() and current_exception()\"\ndocument: P3842R2\ndate: 2026-03-26\naudience: LWG\nreply-to:\n  - \"Ville Voutilainen\"\n---\n\n**uncaught_exception"
+  },
+  "p3844r3": {
+    "hash": "866a384d857fa57154a4c561fe4321922238a38ea42f198b90f6a7e337629ae8",
+    "size": 91999,
+    "head": "---\ntitle: \"Restore simd::vec broadcast from int\"\ndocument: P3844R3\ndate: 2026-02-06\naudience: LWG\nreply-to:\n  - \"Matthias Kretz <m.kretz@gsi.de>\"\n---\n\n## ABSTRACT\n\nThe broadcast constructor in the Pa"
+  },
+  "p3844r4": {
+    "hash": "b03532488a51571998a1265b653a94239f10b6b355003e5deec1fa19caf6980c",
+    "size": 62521,
+    "head": "---\ntitle: \"1 Changelog\"\ndocument: P3844R4\ndate: 2026-02-13\naudience: LWG\nreply-to:\n  - \"Matthias Kretz <m.kretz@gsi.de>\"\n---\n\n## 1 Changelog\n\n| 1 | CHANGELOG |\n| --- | --- |\n| 1.1 | changes from revi"
+  },
+  "p3846r1": {
+    "hash": "05c0a7b71156cad344941d966df94f91a1c072228277b35c13a0aefa39a6b075",
+    "size": 118282,
+    "head": "---\ntitle: \"C++26 Contract Assertions, Reasserted\"\ndocument: P3846R1\ndate: 2025-11-03\naudience: EWG\nreply-to:\n  - \"Timur Doumler <papers@timur.audio>\"\n  - \"Joshua Berne <jberne4@bloomberg.net>\"\n  - \"G"
+  },
+  "p3856r4": {
+    "hash": "a31cf76c7ecbba7f0a8d28c43e7f912bf4e2ce8d3e3fd844ad16fce5befbdfbd",
+    "size": 19713,
+    "head": "---\ntitle: \"New reflection metafunction - is_structural_type (US NB comment 49)\"\ndocument: P3856R4\ndate: 2026-01-17\naudience: LEWG/LWG\nreply-to:\n  - \"Jagrut Dave <jdave12@bloomberg.net>\"\n  - \"Alisdair"
+  },
+  "p3856r5": {
+    "hash": "73fa9ccba8583f5c1288b45f3bcae196621b8d9d2ec56033cb6a5a2c98b04a9c",
+    "size": 18598,
+    "head": "---\ntitle: \"New reflection metafunction - is_structural_type (US NB comment 49)\"\ndocument: P3856R5\ndate: 2026-02-10\naudience: LEWG/LWG\nreply-to:\n  - \"Jagrut Dave <jdave12@bloomberg.net>\"\n  - \"Alisdair"
+  },
+  "p3856r6": {
+    "hash": "0d67228e29e8c51d38fbedc78989daa4cd4f84e581f3c0d88eafb39b47dda785",
+    "size": 19124,
+    "head": "---\ntitle: \"New reflection metafunction - is_structural_type (US NB comment 49)\"\ndocument: P3856R6\ndate: 2026-02-10\naudience: LEWG/LWG\nreply-to:\n  - \"Jagrut Dave <jdave12@bloomberg.net>\"\n  - \"Alisdair"
+  },
+  "p3856r7": {
+    "hash": "49626e93c31ee67e0a3ed663ed7b3b5dc38c20d83fafc2698620b46d230d8729",
+    "size": 19247,
+    "head": "---\ntitle: \"New reflection metafunction - is_structural_type (US NB comment 49)\"\ndocument: P3856R7\ndate: 2026-03-21\naudience: LEWG/LWG\nreply-to:\n  - \"Jagrut Dave <jdave12@bloomberg.net>\"\n  - \"Alisdair"
+  },
+  "p3856r8": {
+    "hash": "3829b77619998d2234cca3c518c824cfb83c7cb232afaca7dd55b299a69d36cb",
+    "size": 19579,
+    "head": "---\ntitle: \"New reflection metafunction - is_structural_type (US NB comment 49)\"\ndocument: P3856R8\ndate: 2026-03-27\naudience: LEWG/LWG\nreply-to:\n  - \"Jagrut Dave <jdave12@bloomberg.net>\"\n  - \"Alisdair"
+  },
+  "p3864r1": {
+    "hash": "dfdef9e5ef013e74176af40a511c7dc4eb4a43f64d03ea4e393870af55e4902b",
+    "size": 6785,
+    "head": "---\ntitle: \"Correctly rounded floating-point maths functions\"\ndocument: P3864R1\ndate: 2026-02-22\naudience: SG6\nreply-to:\n  - \"Guy Davidson <gd@6it.dev>\"\n  - \"Jan Schultke <janschultke@gmail.com>\"\n---\n"
+  },
+  "p3865r1": {
+    "hash": "4269a6b9518c0a609b4435fba9b46d777bc4c103bf0a872f37c014b7314ff998",
+    "size": 12329,
+    "head": "---\ntitle: \"Class template argument deduction (CTAD) for type template template parameters\"\ndocument: P3865R1\ndate: 2026-01-13\naudience: EWG\nreply-to:\n  - \"Christof Meerwald <cmeerw@cmeerw.org>\"\n---\n\n"
+  },
+  "p3865r2": {
+    "hash": "b48a7a921275f6d99bd68cbc4975d9855a9afac747f70833dc67aa63bd0791c2",
+    "size": 13247,
+    "head": "---\ntitle: \"Class template argument deduction (CTAD) for type template template parameters\"\ndocument: P3865R2\ndate: 2026-03-25\naudience: EWG, CWG\nreply-to:\n  - \"Christof Meerwald <cmeerw@cmeerw.org>\"\n"
+  },
+  "p3865r3": {
+    "hash": "716d5b98a536045a53d0aa546403d061ecf60015c135168fc6e2f0e1e895322c",
+    "size": 13409,
+    "head": "---\ntitle: \"Class template argument deduction (CTAD) for type template template parameters\"\ndocument: P3865R3\ndate: 2026-03-26\naudience: EWG, CWG\nreply-to:\n  - \"Christof Meerwald <cmeerw@cmeerw.org>\"\n"
+  },
+  "p3873r0": {
+    "hash": "0ca014c09b4cbac18625356bfc7af9d6e179312af7e8996a9a0d5e88597a6a77",
+    "size": 3195,
+    "head": "---\ntitle: \"2025-10 Library Evolution Poll Outcomes\"\ndocument: P3873R0\ndate: 2026-01-16\naudience: WG21\nreply-to:\n  - \"Inbal Levi <sinbal2l@gmail.com>\"\n  - \"Fabio Fracassi <fabio@fracassi.de>\"\n  - \"And"
+  },
+  "p3874r1": {
+    "hash": "0dc8c820a2b2a1af41b7b7248f88234ae29b08cbc0aaf4883eb2bd06fae4ef90",
+    "size": 37628,
+    "head": "---\ntitle: \"Should C++ be a memory-safe language?\"\ndocument: P3874R1\ndate: 2026-02-23\naudience: Evolution Working Group (/uɡ/)\nreply-to:\n  - \"Jon Bauman <jonwg21@shumi.org>\"\n  - \"Timur Doumler <papers"
+  },
+  "p3876r1": {
+    "hash": "88a83939d9f93cb912f1a4daf870e87f622ae69781ac788311d093be69c849bf",
+    "size": 41348,
+    "head": "---\ntitle: \"Extending < charconv > support to more character types\"\ndocument: P3876R1\ndate: 2026-02-22\naudience: SG16\nreply-to:\n  - \"Jan Schultke <janschultke@gmail.com>\"\n  - \"Peter Bindels <dascandy@"
+  },
+  "p3895r1": {
+    "hash": "6574902569923c573f0a31c2943b06b4fe6a88fb7d2f819c70dbc7d0790995b3",
+    "size": 4600,
+    "head": "---\ntitle: \"Slides for P3724R3 — Integer division\"\ndocument: P3895R1\ndate: 2025-03-03\naudience: LEWG\nreply-to:\n  - \"Jan Schultke <janschultke@gmail.com>\"\n---\n\n# Integer division P3724R3\n\nJan Schultke\n"
+  },
+  "p3899r1": {
+    "hash": "1e8b8e360619dcfa192ba1772a39dc6fcd41f0aeb710c97c7bda92b639b88651",
+    "size": 25432,
+    "head": "---\ntitle: \"Clarify the behavior of floating-point overflow\"\ndocument: P3899R1\ndate: 2026-02-20\naudience: SG6, EWG, CWG\nreply-to:\n  - \"Jan Schultke <janschultke@gmail.com>\"\n  - \"Matthias Kretz <m.kret"
+  },
+  "p3899r2": {
+    "hash": "367cd917ba50d10539c0313f139d07a9949a89ad54aa56f5f627c3d8834636b0",
+    "size": 27863,
+    "head": "---\ntitle: \"Clarify the behavior of floating-point overflow\"\ndocument: P3899R2\ndate: 2026-03-25\naudience: EWG, CWG\nreply-to:\n  - \"Jan Schultke <janschultke@gmail.com>\"\n  - \"Matthias Kretz <m.kretz@gsi"
+  },
+  "p3904r1": {
+    "hash": "6e83303c477d14902bbe71654b2a086798d5670fcaffc3fdf733bea440e2a271",
+    "size": 6006,
+    "head": "---\ntitle: \"When paths go WTF: making formatting lossless\"\ndocument: P3904R1\ndate: 2026-01-28\naudience: SG16\nreply-to:\n  - \"Victor Zverovich <victor.zverovich@gmail.com>\"\n---\n\n\"Compatibility means del"
+  },
+  "p3911r1": {
+    "hash": "44b42f54edfa73758d0f47dfc0379e9d7d1935b84f524808e332e35c761d6e63",
+    "size": 32980,
+    "head": "---\ntitle: \"RO 2-056 6.11.2 [basic.contract.eval] Make Contracts Reliably Non-Ignorable\"\ndocument: P3911R1\ndate: 2026-01-05\naudience: EWG\nreply-to:\n  - \"Darius Neațu <dariusn@adobe.com>\"\n  - \"Andrei A"
+  },
+  "p3911r2": {
+    "hash": "4e2ac2ef2fe866c01b35616475fc4cb43dcb301ed976588c0d753a431b126a9d",
+    "size": 46327,
+    "head": "---\ntitle: \"RO 2-056 6.11.2 [basic.contract.eval] Make Contracts Reliably Non-Ignorable\"\ndocument: P3911R2\ndate: 2026-01-14\naudience: EWG\nreply-to:\n  - \"Darius Neațu <dariusn@adobe.com>\"\n  - \"Andrei A"
+  },
+  "p3924r1": {
+    "hash": "309a594963559067ae6b89fd87f69a564555092983cec115a1c35e0b737d87f4",
+    "size": 8353,
+    "head": "---\ntitle: \"Fix inappropriate font choices for \\\"declaration\\\"\"\ndocument: P3924R1\ndate: 2026-03-23\naudience: CWG\nreply-to:\n  - \"Jan Schultke <janschultke@gmail.com>\"\n---\n\n\n\n### 1.1. Changes since R0\n\n"
+  },
+  "p3927r0": {
+    "hash": "fcd50a58979531493aaca9b041d7bbdcd03d0f0d070849027216e693ab2534a1",
+    "size": 13421,
+    "head": "---\ntitle: \"task_scheduler support for parallel bulk execution\"\ndocument: P3927R0\ndate: 2026-01-14\naudience: SG1 Concurrency and Parallelism Working Group,LEWG Library Evolution Working Group,LWG Libr"
+  },
+  "p3927r1": {
+    "hash": "848348d897891289715a626eb665c1d48591ac96992763eee542a84f9512a29b",
+    "size": 15450,
+    "head": "---\ntitle: \"task_scheduler support for parallel bulk execution\"\ndocument: P3927R1\ndate: 2026-03-21\naudience: SG1 Concurrency and Parallelism Working Group,LEWG Library Evolution Working Group,LWG Libr"
+  },
+  "p3927r2": {
+    "hash": "7d3f7d3ea7b5012866c6dc102462bf19daab908b4643e07e7a4f2f26ff536a7f",
+    "size": 15996,
+    "head": "---\ntitle: \"task_scheduler support for parallel bulk execution\"\ndocument: P3927R2\ndate: 2026-03-27\naudience: SG1 Concurrency and Parallelism Working Group,LEWG Library Evolution Working Group,LWG Libr"
+  },
+  "p3932r0": {
+    "hash": "edab59003772c448be1abf33e25906f855b981053030cc39e1dbbffeb5ee2377",
+    "size": 12630,
+    "head": "---\ntitle: \"1 Changelog\"\ndocument: P3932R0\ndate: 2026-02-13\naudience: LWG\nreply-to:\n  - \"Matthias Kretz <m.kretz@gsi.de>\"\n---\n\n## 1 Changelog\n\n## 1\n\nCHANGELOG\n\n### (placeholder)\n\n| 2 | THE ISSUE(S) WI"
+  },
+  "p3936r1": {
+    "hash": "d304544ddfa404f3ddf3de141804518473d4e6377bc2885ac4901303d7b94314",
+    "size": 5516,
+    "head": "---\ntitle: \"Safer atomic_ref::address (FR-030-310)\"\ndocument: P3936R1\ndate: 2026-01-27\naudience: LWG\nreply-to:\n  - \"Corentin Jabot <corentin.jabot@gmail.com>\"\n  - \"Gonzalo Brito Gadeschi <gonzalob@nvi"
+  },
+  "p3938r1": {
+    "hash": "bb5bfe71391d2bf3bdca0c1d90485056aee90fbfa39f6693d4b3fd66cc01a996",
+    "size": 27754,
+    "head": "---\ntitle: \"Values of floating-point types\"\ndocument: P3938R1\ndate: 2026-02-20\naudience: SG6, EWG, CWG\nreply-to:\n  - \"Jan Schultke <janschultke@gmail.com>\"\n---\n\n## Abstract\n\nIt is not specified what v"
+  },
+  "p3941r1": {
+    "hash": "97b09f973b355d253154063f0824b55863d2253e1cb81488f62112ce95312285",
+    "size": 30749,
+    "head": "---\ntitle: \"Scheduler Affinity\"\ndocument: P3941R1\ndate: 2026-01-14\naudience: Concurrency Working Group (SG1),Library Evolution Working Group (LEWG),Library Working Group (LWG)\nreply-to:\n  - \"Dietmar K"
+  },
+  "p3941r2": {
+    "hash": "5157cf2b974e42badc61fda7b31bf5390a633a845c483cb1144d0fb173d6a847",
+    "size": 43644,
+    "head": "---\ntitle: \"Scheduler Affinity\"\ndocument: P3941R2\ndate: 2026-02-23\naudience: Concurrency Working Group (SG1),Library Evolution Working Group (LEWG),Library Working Group (LWG)\nreply-to:\n  - \"Dietmar K"
+  },
+  "p3941r3": {
+    "hash": "def31bbce64f104e6b30878d4e785c46c63e891278cd4c4aec8776c40c5687b0",
+    "size": 45963,
+    "head": "---\ntitle: \"Scheduler Affinity\"\ndocument: P3941R3\ndate: 2026-03-21\naudience: Concurrency Working Group (SG1),Library Evolution Working Group (LEWG),Library Working Group (LWG)\nreply-to:\n  - \"Dietmar K"
+  },
+  "p3941r4": {
+    "hash": "c878e51d3d2c00dbd5bbce5aa7f9a405f7bb7eb6e54bf2ab18e5662e45d5d59e",
+    "size": 50737,
+    "head": "---\ntitle: \"Scheduler Affinity\"\ndocument: P3941R4\ndate: 2026-03-26\naudience: Concurrency Working Group (SG1),Library Evolution Working Group (LEWG),Library Working Group (LWG)\nreply-to:\n  - \"Dietmar K"
+  },
+  "p3948r1": {
+    "hash": "bf777b958dbda5c6c01f59716f6b9c4ed44eb11740b7da1d09ef9419a3d9187b",
+    "size": 18334,
+    "head": "---\ntitle: \"1 Changelog\"\ndocument: P3948R1\ndate: 2026-03-24\naudience: LWG\nreply-to:\n  - \"Matthias Kretz <m.kretz@gsi.de>\"\n---\n\n## 1 Changelog\n\n```cpp\n}\n```\n\nThe commented calls are ill-formed because "
+  },
+  "p3950r0": {
+    "hash": "8a4ae8897065653949688901ecd5deb93e676a8f77d0bd4d6ad39af508555989",
+    "size": 10127,
+    "head": "---\ntitle: \"return_value & return_void Are Not Mutually Exclusive\"\ndocument: P3950R0\ndate: 2025-12-21\naudience: EWG, SG1, SG17\nreply-to:\n  - \"Robert Leahy <rleahy@rleahy.ca>\"\n---\n\n## Abstract\n\nThis pa"
+  },
+  "p3951r0": {
+    "hash": "7bd430cd7bbc7eb5dd2e2225c2e4da5ba4dbda5e18af7fe238d5e4ad618dea77",
+    "size": 46284,
+    "head": "---\ntitle: \"String Interpolation with Template Strings\"\ndocument: P3951R0\ndate: 2026-01-01\naudience: EWG\nreply-to:\n  - \"Barry Revzin <barry.revzin@gmail.com>\"\n---\n\n# 1 Introduction\n\nThe `std::format` "
+  },
+  "p3951r1": {
+    "hash": "752c3158b5ccd1069f7f7773ec7dc6e0e8d5124388c81834b8cff03a3ddd958d",
+    "size": 74847,
+    "head": "---\ntitle: \"String Interpolation with Template Strings\"\ndocument: P3951R1\ndate: 2026-03-15\naudience: EWG\nreply-to:\n  - \"Barry Revzin <barry.revzin@gmail.com>\"\n---\n\n# 1 Revision History\n\nSince [[P3951R"
+  },
+  "p3952r0": {
+    "hash": "95aa78c4075f41541494409e120e9a3b4fc1b6215ec609d64c55a65aea289009",
+    "size": 12864,
+    "head": "---\ntitle: \"is_pointer_in_range\"\ndocument: P3952R0\ndate: 2026-01-08\naudience: LEWG, EWG\nreply-to:\n  - \"Herb Sutter <herb.sutter@gmail.com>\"\n  - \"Glen Joseph Fernandes <glenjofe@gmail.com>\"\n---\n\n## 1 O"
+  },
+  "p3953r0": {
+    "hash": "9e4ea69b5f0c5f21f53d0e5954e12bb3ef70c5346b5a1aef7851059fc9d88e11",
+    "size": 2888,
+    "head": "---\ntitle: \"Rename std::runtime_format\"\ndocument: P3953R0\ndate: 2025-12-28\naudience: LEWG\nreply-to:\n  - \"Victor Zverovich <victor.zverovich@gmail.com>\"\n---\n\nThere are only two hard things in Computer "
+  },
+  "p3953r1": {
+    "hash": "f3bb0285518fd7d0a195ee965d9105e42c4fb69546496972d671f8b5019bb8c8",
+    "size": 2968,
+    "head": "---\ntitle: \"Rename std::runtime_format\"\ndocument: P3953R1\ndate: 2026-01-17\naudience: LEWG\nreply-to:\n  - \"Victor Zverovich <victor.zverovich@gmail.com>\"\n---\n\nThere are only two hard things in Computer "
+  },
+  "p3953r2": {
+    "hash": "4ca12cdcf81b28e9ed8d5d0f0b751db2b202516e48b1376f6fe13f6769e8266e",
+    "size": 4296,
+    "head": "---\ntitle: \"Rename std::runtime_format\"\ndocument: P3953R2\ndate: 2026-03-24\naudience: LEWG\nreply-to:\n  - \"Victor Zverovich <victor.zverovich@gmail.com>\"\n---\n\nThere are only two hard things in Computer "
+  },
+  "p3953r3": {
+    "hash": "91e9bf422eb4999d5fc447a1d22b8dff7c5408904b6c0a625ef9c31f48f4d37a",
+    "size": 4524,
+    "head": "---\ntitle: \"Rename std::runtime_format\"\ndocument: P3953R3\ndate: 2026-03-25\naudience: LEWG\nreply-to:\n  - \"Victor Zverovich <victor.zverovich@gmail.com>\"\n---\n\nThere are only two hard things in Computer "
+  },
+  "p3955r0": {
+    "hash": "55320ae26c4819dad6be213acac7325b10b52b1272dfce1f1686ba14515e1f26",
+    "size": 39151,
+    "head": "---\ntitle: \"It’s Scopes All the Way Down\"\ndocument: P3955R0\ndate: 2026-01-14\naudience: LEWG, SG1\nreply-to:\n  - \"Robert Leahy <rleahy@rleahy.ca>\"\n---\n\n## Abstract\n\nThis paper lays out an approach to ac"
+  },
+  "p3959r0": {
+    "hash": "bfc12d446f27a70ce9671bbcac20167402904b1a3467e21f0e8f331ae66925d8",
+    "size": 20687,
+    "head": "---\ntitle: \"Let layout_stride::mapping with zero extent(s) accept zero strides\"\ndocument: P3959R0\ndate: 2026-01-08\naudience: LEWG Library Evolution\nreply-to:\n  - \"Jacob Faibussowitsch <jfaibussowit@nv"
+  },
+  "p3960r0": {
+    "hash": "d5a7651ca67ca40825590339c2a995c38d6346f7c9846330c307b27123b8ee15",
+    "size": 49394,
+    "head": "---\ntitle: \"Define copy-constructibility-from-bytes\"\ndocument: P3960R0\ndate: 2026-01-15\naudience: \"SG1 Concurrency and Parallelism,EWGI SG17: EWG Incubator,EWG Evolution,LEWG Library Evolution\"\nreply-"
+  },
+  "p3961r0": {
+    "hash": "0de8460c18943cd40cfb2a86de6921823fa29dc640ed669add726c53116752e8",
+    "size": 7199,
+    "head": "---\ntitle: \"Less double indirection in function_ref (RU-220)\"\ndocument: P3961R0\ndate: 2026-01-16\naudience: LEWG\nreply-to:\n  - \"Zhihao Yuan <zy@miator.net>\"\n---\n\nLess double indirection in function_ref"
+  },
+  "p3961r1": {
+    "hash": "20554f4b882f51804a0318951139d86c1a0e6ef3e6a903e95818541d4d7d0448",
+    "size": 8174,
+    "head": "---\ntitle: \"Less double indirection in function_ref (RU-220)\"\ndocument: P3961R1\ndate: 2026-03-24\naudience: LEWG\nreply-to:\n  - \"Zhihao Yuan <zy@miator.net>\"\n---\n\nLess double indirection in function_ref"
+  },
+  "p3962r0": {
+    "hash": "2ee3d2b54782bf43b16bb6deb2e1c520e77f2f7cf9b9da7a65628bb3e130f08a",
+    "size": 11102,
+    "head": "---\ntitle: \"Implementation reality of WG21 standardization\"\ndocument: P3962R0\ndate: 2026-01-13\naudience: All of WG21\nreply-to:\n  - \"Nina Ranns\"\n---\n\n## 1. Introduction\n\nAt the Kona 2025 WG21 meeting, "
+  },
+  "p3963r0": {
+    "hash": "b6fca0ee4869e766c40ce6a0c9f607f6e57d5a8f5e035306c27a01ea2f88b354",
+    "size": 9678,
+    "head": "---\ntitle: \"Assignable lambdas with capture\"\ndocument: P3963R0\ndate: 2026-01-15\naudience: EWG-I, EWG\nreply-to:\n  - \"Ruslan Arutyunyan (Intel) <ruslan.arutyunyan@intel.com>\"\n---\n\n# Abstract\n\nThis paper"
+  },
+  "p3965r0": {
+    "hash": "b90a292bea54118976669d93646838f5bb029d01cd5e088ff53f73bf41e7f991",
+    "size": 5856,
+    "head": "---\ntitle: \"2026-01 Library Evolution Polls\"\ndocument: P3965R0\ndate: 2026-01-16\naudience: WG21\nreply-to:\n  - \"Inbal Levi <sinbal2l@gmail.com>\"\n  - \"Fabio Fracassi <fabio@fracassi.de>\"\n  - \"Andreas Wei"
+  },
+  "p3966r0": {
+    "hash": "d72bf0c0b0d8ff634a754c155868a99e03bb4191746c5b234aa1e9e9e87e0eb8",
+    "size": 4382,
+    "head": "---\ntitle: \"3966R0 2026-01 Library Evolution Poll Outcomes\"\ndocument: P3966R0\ndate: 2026-02-22\naudience: WG21\nreply-to:\n  - \"Inbal Levi <sinbal2l@gmail.com>\"\n  - \"Fabio Fracassi <fabio@fracassi.de>\"\n "
+  },
+  "p3967r0": {
+    "hash": "a573c6ab4f176c3c2be3ec289b3f24333026dab57ed4cad08bbf827bf88abf24",
+    "size": 24390,
+    "head": "---\ntitle: \"Dual compiles of functions with contracts\"\ndocument: P3967R0\ndate: 2026-01-16\naudience: EWGI /SG21\nreply-to:\n  - \"Bengt Gustafsson <bengt.gustafsson@beamways.com>\"\n---\n\n## 1 Introduction\n\n"
+  },
+  "p3968r0": {
+    "hash": "0cd0c9017e608ebec18095e818c57de63eb9923101453c75a693e10b0d751af3",
+    "size": 35133,
+    "head": "---\ntitle: \"A Framework For Contracts\"\ndocument: P3968R0\ndate: 2026-01-16\naudience: EWGI / SG21\nreply-to:\n  - \"Bengt Gustafsson <bengt.gustafsson@beamways.com>\"\n---\n\n<!-- tomd:uncertain:L12-L102 -->\n\n"
+  },
+  "p3969r0": {
+    "hash": "f3eb7f55a47cb65a40048d03c2a180b45c42f33bded39ed297a1f1cf4a1d2f77",
+    "size": 20197,
+    "head": "---\ntitle: \"Fixing std::bit_cast of types with padding bits\"\ndocument: P3969R0\ndate: 2026-02-20\naudience: LEWG\nreply-to:\n  - \"Jan Schultke <janschultke@gmail.com>\"\n---\n\n## Abstract\n\nWhen bit-casting a"
+  },
+  "p3970r0": {
+    "hash": "eef4adab35b2c4d903b0bf28a8aca4f6ab2fb7ec24f8441314a179b034bda799",
+    "size": 6053,
+    "head": "---\ntitle: \"Profiles and Safety: a call to action\"\ndocument: P3970R0\ndate: 2026-01-16\naudience: EWG, SG12, SG20, SG23\nreply-to:\n  - \"David Vandevoorde\"\n  - \"David Vandevoorde <daveed@vandevoorde.com>\""
+  },
+  "p3971r0": {
+    "hash": "9351586ef707f2c5899ef9a6bceb15966e8498bec63fb847dd73eee4a1e4c369",
+    "size": 20821,
+    "head": "---\ntitle: \"std::rebind - Generalized Type Rebinding for Containers and Uniform-Element Types\"\ndocument: P3971R0\ndate: 2026-02-20\naudience: LEWG\nreply-to:\n  - \"Daniel Towner <daniel.towner@intel.com>\""
+  },
+  "p3973r0": {
+    "hash": "081c3d35892980e79ac40c3e7e0ff1fcfd6017e6a689bfd9d89302e005bd6cdc",
+    "size": 18285,
+    "head": "---\ntitle: \"bit_cast_as: Element type reinterpretation for std::simd\"\ndocument: P3973R0\ndate: 2026-01-19\naudience: LEWG, SG1\nreply-to:\n  - \"Daniel Towner <daniel.towner@intel.com>\"\n---\n\n## Abstract\n\nW"
+  },
+  "p3977r0": {
+    "hash": "2fc5325d39f7beb3658ad4237c337914a788034108a23cff2ea15b6e4dcfa714",
+    "size": 67508,
+    "head": "---\ntitle: \"A New Taxonomy for Contracts\"\ndocument: P3977R0\ndate: 2026-01-22\naudience: WG21\nreply-to:\n  - \"Oliver J. Rosten <oliver.rosten@gmail.com>\"\n---\n\n## Abstract\n\nHistorically, contracts have be"
+  },
+  "p3978r0": {
+    "hash": "a529a8a798656a280f3866b201efa3ca94d3622951a37199be130ad8172e1186",
+    "size": 8335,
+    "head": "---\ntitle: \"A ACKNOWLEDGMENTS\"\ndocument: P3978R0\ndate: 2026-01-29\naudience: LEWG\nreply-to:\n  - \"Matthias Kretz <m.kretz@gsi.de>\"\n---\n\n## 1 Changelog\n\n## CHANGELOG\n\n(placeholder)\n\n| 2 | STRAW POLLS |\n|"
+  },
+  "p3978r1": {
+    "hash": "b489313f1f282ce2e87d9b664fadbd7f531e7968b56eed13b9f858016a6b3e36",
+    "size": 19469,
+    "head": "---\ntitle: \"1 Changelog\"\ndocument: P3978R1\ndate: 2026-02-05\naudience: LEWG\nreply-to:\n  - \"Matthias Kretz <m.kretz@gsi.de>\"\n  - \"Tomasz Kamiński <tomaszkam@gmail.com>\"\n---\n\n## 1 Changelog\n\n| 1 | CHANGE"
+  },
+  "p3978r2": {
+    "hash": "1988048bdd4a499db29e5d9711bb77a6e6e10a8907a15bb28738bc6371811f6d",
+    "size": 21191,
+    "head": "---\ntitle: \"1 Changelog\"\ndocument: P3978R2\ndate: 2026-02-09\naudience: LEWG\nreply-to:\n  - \"Matthias Kretz <m.kretz@gsi.de>\"\n  - \"Tomasz Kamiński <tomaszkam@gmail.com>\"\n---\n\n## 1 Changelog\n\n| 1 | CHANGE"
+  },
+  "p3978r3": {
+    "hash": "b10cc295a2fafb86e5d93044cc6a7221985ed4d184f815359abc63a3df0fa496",
+    "size": 22086,
+    "head": "---\ntitle: \"1 Changelog\"\ndocument: P3978R3\ndate: 2026-03-25\naudience: LWG\nreply-to:\n  - \"Matthias Kretz <m.kretz@gsi.de>\"\n  - \"Tomasz Kamiński <tomaszkam@gmail.com>\"\n---\n\n## 1 Changelog\n\n| 1 | CHANGEL"
+  },
+  "p3980r0": {
+    "hash": "29923a698f667d78dc65cf0215d305a98e9c54a46b32a15956b7be197e011e1e",
+    "size": 15253,
+    "head": "---\ntitle: \"Task’s Allocator Use\"\ndocument: P3980R0\ndate: 2026-02-22\naudience: Library Evolution Working Group (LEWG),Library Working Group (LWG)\nreply-to:\n  - \"Dietmar Kühl (Bloomberg) <dkuhl@bloombe"
+  },
+  "p3980r1": {
+    "hash": "7b6d9618b9f04e7ee13ee9ff1d2f313dcca06c0d1a4a4c299e15d9ab331edaf5",
+    "size": 12066,
+    "head": "---\ntitle: \"Task’s Allocator Use\"\ndocument: P3980R1\ndate: 2026-03-24\naudience: Library Evolution Working Group (LEWG),Library Working Group (LWG)\nreply-to:\n  - \"Dietmar Kühl (Bloomberg) <dkuhl@bloombe"
+  },
+  "p3981r0": {
+    "hash": "3aa426d462b9d41f29ab06ef58b1dc0ab95d1b4d5a2af1d26231abb0dec623d1",
+    "size": 15462,
+    "head": "---\ntitle: \"Better return types in std::inplace_vector and std::exception_ptr_cast\"\ndocument: P3981R0\ndate: 2026-01-27\naudience: LEWG\nreply-to:\n  - \"Barry Revzin <barry.revzin@gmail.com>\"\n  - \"Jonatha"
+  },
+  "p3981r1": {
+    "hash": "3e75677359e510912f7954c35764dd19fbf0150cc73d19044e234d8eb86a3f5b",
+    "size": 14219,
+    "head": "---\ntitle: \"Better return types in std::inplace_vector and std::exception_ptr_cast\"\ndocument: P3981R1\ndate: 2026-02-22\naudience: LEWG\nreply-to:\n  - \"Barry Revzin <barry.revzin@gmail.com>\"\n  - \"Jonatha"
+  },
+  "p3981r2": {
+    "hash": "91c80726e7eac38ac44a586e9aedd35111dee2410e8e604316e3a71ffa2c5da1",
+    "size": 14522,
+    "head": "---\ntitle: \"Better return types in std::inplace_vector and std::exception_ptr_cast\"\ndocument: P3981R2\ndate: 2026-03-26\naudience: LWG\nreply-to:\n  - \"Barry Revzin <barry.revzin@gmail.com>\"\n  - \"Jonathan"
+  },
+  "p3982r0": {
+    "hash": "ca5ad23d54bcfc67d7f322dddae5d9abba612e9db2d45ead03fd8b0bdd9a3dfd",
+    "size": 28217,
+    "head": "---\ntitle: \"Fix meaning of strided_slice::extent for C++26\"\ndocument: P3982R0\ndate: 2026-01-30\naudience: Library Evolution Working Group\nreply-to:\n  - \"Tomasz Kamiński <tomaszkam@gmail.com>\"\n  - \"Mark"
+  },
+  "p3982r1": {
+    "hash": "cd07b73a8ab5b627c78cc28d159a7bbd5c4d675a884a9f8d216c6e603120d2a2",
+    "size": 29368,
+    "head": "---\ntitle: \"Split strided_slice into extent_slice and range_slice for C++26\"\ndocument: P3982R1\ndate: 2026-03-20\naudience: Library Evolution Working Group\nreply-to:\n  - \"Tomasz Kamiński <tomaszkam@gmai"
+  },
+  "p3982r2": {
+    "hash": "3cd247c1a441d71253b2e3a26ad4965e4c6e910871ab8d39c6e82d5dc95b423e",
+    "size": 25949,
+    "head": "---\ntitle: \"Split strided_slice into extent_slice and range_slice for C++26\"\ndocument: P3982R2\ndate: 2026-03-24\naudience: Library Evolution Working Group\nreply-to:\n  - \"Tomasz Kamiński <tomaszkam@gmai"
+  },
+  "p3983r0": {
+    "hash": "25cbcad2da6a3af61f7504a7d26347679fb865185155ffa9933b17cc4aab7de4",
+    "size": 30626,
+    "head": "---\ntitle: \"Object Representation for std::simd\"\ndocument: P3983R0\ndate: 2026-01-27\naudience: LWG, LEWG\nreply-to:\n  - \"Daniel Towner <daniel.towner@intel.com>\"\n---\n\n## Abstract\n\nThe Working Draft spec"
+  },
+  "p3983r1": {
+    "hash": "d0039f4a3938123c9df3fc1b574f39d7ade2795f7a3e7a6ee976ebfb10670b5b",
+    "size": 30900,
+    "head": "---\ntitle: \"Object Representation for std::simd\"\ndocument: P3983R1\ndate: 2026-03-20\naudience: LWG, LEWG\nreply-to:\n  - \"Daniel Towner <daniel.towner@intel.com>\"\n  - \"Ruslan Arutyunyan <ruslan.arutyunya"
+  },
+  "p3984r0": {
+    "hash": "5ec13d95f1bbf6234f4ff87337690513b8f30c044228b4c9d6a0a66a5313a2d8",
+    "size": 27300,
+    "head": "---\ntitle: \"Stroustrup Type-safety\"\ndocument: P3984R0\ndate: 2026-02-22\naudience: EWG, SG12, SG20, SG23\nreply-to:\n  - \"Bjarne Stroustrup <bjarne@stroustrup.com>\"\n  - \"Bjarne Stroustrup <bjarne@stroustr"
+  },
+  "p3985r0": {
+    "hash": "9c49d47f20cf9447bb64b53942b1c853db378a875bd8e9ed157393a59b708ca2",
+    "size": 13265,
+    "head": "---\ntitle: \"Concepts for std::simd\"\ndocument: P3985R0\ndate: 2026-01-28\naudience: LEWG, LWG\nreply-to:\n  - \"Daniel Towner <daniel.towner@intel.com>\"\n---\n\n## Abstract\n\nThis paper proposes adding 10 publi"
+  },
+  "p3986r0": {
+    "hash": "472e45a0ad8e8ec3a46ffe76f94e522304ed67a588f71d587e790978e3aa0831",
+    "size": 9499,
+    "head": "---\ntitle: \"A Wording Strategy for Inlinable Receivers\"\ndocument: P3986R0\ndate: 2025-03-07\naudience: LEWG\nreply-to:\n  - \"Robert Leahy <rleahy@rleahy.ca>\"\n---\n\n## Abstract\n\nThis paper proposes a strate"
+  },
+  "p3986r1": {
+    "hash": "d970de131cb432fa2d47ad0c86b25ed4ffd6cb254e2807c7f18aa568984c8496",
+    "size": 9951,
+    "head": "---\ntitle: \"A Wording Strategy for Inlinable Receivers\"\ndocument: P3986R1\ndate: 2025-03-24\naudience: LWG\nreply-to:\n  - \"Robert Leahy <rleahy@rleahy.ca>\"\n---\n\n## Abstract\n\nThis paper proposes a strateg"
+  },
+  "p4003r0": {
+    "hash": "1624626421df6d54078f9abae8d6d16c1738ef93fcbec0dc4616a93e7491d4a3",
+    "size": 114171,
+    "head": "---\ntitle: \"Coroutines for I/O\"\ndocument: P4003R0\ndate: 2026-02-22\naudience: LEWG\nreply-to:\n  - \"Vinnie Falco <vinnie.falco@gmail.com>\"\n  - \"Steve Gerbino <steve@gerbino.co>\"\n  - \"Mungo Gill <mungo.gi"
+  },
+  "p4003r1": {
+    "hash": "c2491753e41b8ff7943f89ac300310f9850316e4354f8e761fb5d5f81b236192",
+    "size": 142697,
+    "head": "---\ntitle: \"Coroutines for I/O\"\ndocument: P4003R1\ndate: 2026-03-25\naudience: LEWG\nreply-to:\n  - \"Vinnie Falco <vinnie.falco@gmail.com>\"\n  - \"Steve Gerbino <steve@gerbino.co>\"\n  - \"Mungo Gill <mungo.gi"
+  },
+  "p4003r2": {
+    "hash": "476aeab86afddaa458564809afcbaa87bef6ca90bdf41e1fce0b700800809d68",
+    "size": 26132,
+    "head": "---\ntitle: \"A Minimal Coroutine Execution Model\"\ndocument: P4003R2\ndate: 2026-04-17\nintent: ask\naudience: LEWG\nreply-to:\n  - \"Vinnie Falco <vinnie.falco@gmail.com>\"\n  - \"Steve Gerbino <steve@gerbino.c"
+  },
+  "p4004r0": {
+    "hash": "72a3778570082815da9c51e23b284e2d7a9346f65f19b1463d1cb7999b387081",
+    "size": 5419,
+    "head": "---\ntitle: \"Reconsider CWG 1395 \\\"Partial ordering of variadic templates reconsidered\\\"\"\ndocument: P4004R0\ndate: 2026-02-22\naudience: EWG\nreply-to:\n  - \"Christof Meerwald <cmeerw@cmeerw.org>\"\n---\n\nLet"
+  },
+  "p4004r1": {
+    "hash": "837bc16aef01d41caf42f4966c76782f5e91c6a1f605d7292809a6e9cf8c05b4",
+    "size": 8203,
+    "head": "---\ntitle: \"Reconsider CWG 1395 \\\"Partial ordering of variadic templates reconsidered\\\"\"\ndocument: P4004R1\ndate: 2026-03-25\naudience: EWG, CWG\nreply-to:\n  - \"Christof Meerwald <cmeerw@cmeerw.org>\"\n---"
+  },
+  "p4005r0": {
+    "hash": "64723229863cc778f1f230c86ba07017f6a49923c3e05ce50a184957ac890bfa",
+    "size": 6816,
+    "head": "---\ntitle: \"A proposal for guaranteed-(quick-)enforced contracts\"\ndocument: P4005R0\ndate: 2026-02-02\naudience: EWG\nreply-to:\n  - \"Ville Voutilainen <ville.voutilainen@gmail.com>\"\n---\n\n## Abstract\n\nThi"
+  },
+  "p4006r0": {
+    "hash": "72ee9f0d4a02884b7efeaefffa905a0ed0862db28250804c2ce7600170166e4a",
+    "size": 15286,
+    "head": "---\ntitle: \"Transparent Function Objects for Shift Operators\"\ndocument: P4006R0\ndate: 2026-02-03\naudience: LEWG\nreply-to:\n  - \"Daniel Towner <daniel.towner@intel.com>\"\n---\n\n## Abstract\n\nThis paper pro"
+  },
+  "p4007r0": {
+    "hash": "18ac435b47857ae759176d8e29a0822f5e5cbdae7d376444dd6656dadde1322c",
+    "size": 76197,
+    "head": "---\ntitle: \"Senders and Coroutines\"\ndocument: P4007R0\ndate: 2026-02-22\naudience: LEWG\nreply-to:\n  - \"Vinnie Falco <vinnie.falco@gmail.com>\"\n  - \"Mungo Gill <mungo.gill@me.com>\"\n---\n\n## Abstract\n\n`std:"
+  },
+  "p4007r1": {
+    "hash": "d21afbf22a55c39a9880dfe7083ec27001c40cc70290673860adcb7d1857cb0d",
+    "size": 8124,
+    "head": "---\ntitle: \"Open Issues in std::execution::task\"\ndocument: P4007R1\ndate: 2026-03-12\naudience: LEWG\nreply-to:\n  - \"Vinnie Falco <vinnie.falco@gmail.com>\"\n  - \"Mungo Gill <mungo.gill@me.com>\"\n---\n\n## Re"
+  },
+  "p4007r2": {
+    "hash": "97e9f881610b0b4282a64ba5928e4e9b09f84ed8979bfb326b6ede76fe4b6684",
+    "size": 13713,
+    "head": "---\ntitle: \"Open Issues in `std::execution::task`\"\ndocument: P4007R2\ndate: 2026-04-17\nintent: inform\naudience: LEWG\nreply-to:\n  - \"Vinnie Falco <vinnie.falco@gmail.com>\"\n  - \"Mungo Gill <mungo.gill@me"
+  },
+  "p4008r0": {
+    "hash": "85c50b3005c4c8d398c7ca06a7901bdd3bbad84f433c04f5c5df7af1434006b4",
+    "size": 5394,
+    "head": "---\ntitle: \"Clean Modular Mode: Legacy Opt-out for C++\"\ndocument: P4008R0\ndate: 2026-02-08\naudience: Evolution Working Group (EWG)\nreply-to:\n  - \"Zhiyi Lin 林志逸\"\n  - \"<lin20101009xv@qq.com>\"\n---\n\nDear "
+  },
+  "p4009r0": {
+    "hash": "6aa652d80f17145f4c54d60b2065289c60180e476968100fa40bcc7141f5bfdb",
+    "size": 11040,
+    "head": "---\ntitle: \"A proposal for solving all of the contracts concerns\"\ndocument: P4009R0\ndate: 2026-02-09\naudience: EWG\nreply-to:\n  - \"Ville Voutilainen <ville.voutilainen@gmail.com>\"\n---\n\n## Abstract\n\nWe "
+  },
+  "p4010r0": {
+    "hash": "ce7b459a60e0406d2de3fcd40c48f4095c07205a6d25b465bfec5bd896c40ed4",
+    "size": 22371,
+    "head": "---\ntitle: \"Funnel Shift Operations\"\ndocument: P4010R0\ndate: 2026-02-09\naudience: SG6, LEWG\nreply-to:\n  - \"Daniel Towner <daniel.towner@intel.com>\"\n---\n\n## Abstract\n\nThis paper proposes adding funnel "
+  },
+  "p4010r1": {
+    "hash": "4fa41043cddc7e51cd40f1cdfcb7a016d8f1a2b74ce5b4466e644337bedf34a0",
+    "size": 25970,
+    "head": "---\ntitle: \"Funnel Shift Operations\"\ndocument: P4010R1\ndate: 2026-02-09\naudience: SG6, LEWG\nreply-to:\n  - \"Daniel Towner <daniel.towner@intel.com>\"\n---\n\n## Abstract\n\nThis paper proposes adding funnel "
+  },
+  "p4011r0": {
+    "hash": "4b438b6b30f28ac6fe67d6e15a62172695c1518d28d0c77156c192863f0c639d",
+    "size": 3604,
+    "head": "---\ntitle: \"Redefining narrow contract\"\ndocument: P4011R0\ndate: 2026-02-12\naudience: EWG\nreply-to:\n  - \"Matthias Kretz <m.kretz@gsi.de>\"\n---\n\n## ABSTRACT\n\nThis paper provides a simple revised definiti"
+  },
+  "p4012r0": {
+    "hash": "2eed0d02882b92db86af6c25ef005b4a6ab086581092fe73d9fbcdb9da8c42b3",
+    "size": 28054,
+    "head": "---\ntitle: \"1 Changelog\"\ndocument: P4012R0\ndate: 2026-02-23\naudience: LEWG, LWG\nreply-to:\n  - \"Matthias Kretz <m.kretz@gsi.de>\"\n---\n\n## 1\n\nCHANGELOG\n\nThis paper was originally published as [P3844R2], "
+  },
+  "p4012r1": {
+    "hash": "7718c77b8421a97fe02bd75878ea1d3f43d658381071acba2c840211759803ac",
+    "size": 24351,
+    "head": "---\ntitle: \"1 Changelog\"\ndocument: P4012R1\ndate: 2026-03-24\naudience: LWG\nreply-to:\n  - \"Matthias Kretz <m.kretz@gsi.de>\"\n---\n\n## 1 Changelog\n\n## 1\n\nCHANGELOG\n\nThis paper was originally published as ["
+  },
+  "p4014r0": {
+    "hash": "a8a4e2b112aaed6744ec90f478306756e9b6ccf5b65e1ecd3eab42476e988782",
+    "size": 49490,
+    "head": "---\ntitle: \"The Sender Sub-Language\"\ndocument: P4014R0\ndate: 2026-02-22\naudience: LEWG\nreply-to:\n  - \"Vinnie Falco <vinnie.falco@gmail.com>\"\n  - \"Mungo Gill <mungo.gill@me.com>\"\n---\n\n## Abstract\n\nC++2"
+  },
+  "p4014r1": {
+    "hash": "1a2bb5e3513b153e91ef38c2804c714f02819dc56e6e260ba8e7f245e6b4a883",
+    "size": 75211,
+    "head": "---\ntitle: \"The Sender Sub-Language For Beginners\"\ndocument: P4014R1\ndate: 2026-04-17\nintent: inform\naudience: LEWG\nreply-to:\n  - \"Vinnie Falco <vinnie.falco@gmail.com>\"\n  - \"Mungo Gill <mungo.gill@me"
+  },
+  "p4015r0": {
+    "hash": "72f7b25684c2cb24be68ee43e3dc46d960fff6d71e76253eec16d229ba3aa3f2",
+    "size": 13356,
+    "head": "---\ntitle: \"Enforcing Contract Conditions with Statements\"\ndocument: P4015R0\ndate: 2026-02-16\naudience: Evolution Working Group\nreply-to:\n  - \"Lisa Lippincott <lisa.e.lippincott@gmail.com>\"\n---\n\n## Ab"
+  },
+  "p4016r0": {
+    "hash": "c4a77b79c9b187e4687d1e9da05fd2fe7a6783ce728f68fe85b9267a059936d7",
+    "size": 204199,
+    "head": "---\ntitle: \"Canonical Parallel Reduction: A Fixed Expression Structure for Run-To-Run Consistency\"\ndocument: P4016R0\ndate: 2026-02-23\naudience: SG6 (Numerics), LEWG\nreply-to:\n  - \"Andrew Drakeford <an"
+  },
+  "p4019r0": {
+    "hash": "c9bd0a1997b62f2f99c6aae407d45a452539358bae062550e0dc5f07415e00e4",
+    "size": 5844,
+    "head": "---\ntitle: \"constant_assert\"\ndocument: P4019R0\ndate: 2026-01-14\naudience: EWG, EWGI\nreply-to:\n  - \"Jonas Persson <jonas.persson@iar.com>\"\n---\n\n## 1 Introduction\n\nThe optimizer has much of the same fun"
+  },
+  "p4019r1": {
+    "hash": "a6843e1255b07ff6b61c3f0e39d736525f10efe742fd0a0e9114b8676024b8ac",
+    "size": 6047,
+    "head": "---\ntitle: \"constant_assert\"\ndocument: P4019R1\ndate: 2026-01-14\naudience: EWG, EWGI\nreply-to:\n  - \"Jonas Persson <jonas.persson@iar.com>\"\n---\n\n## 10 References\n\n**4**\n\nFixed error in the implementatio"
+  },
+  "p4020r0": {
+    "hash": "7779e7dec6ba075081c6af4b8a806027129ca384f8e22a3e30b5451160037abc",
+    "size": 10397,
+    "head": "---\ntitle: \"Concerns about contract assertions\"\ndocument: P4020R0\ndate: 2026-02-23\naudience: EWG\nreply-to:\n  - \"Andrzej Krzemieński <akrzemi1@gmail.com>\"\n---\n\nWith contract assertions ([[P2900R14]](ht"
+  },
+  "p4021r0": {
+    "hash": "9a74e800c22507b54a9e48ed07381eebcef39ca8067dd93fb22a570d684806ac",
+    "size": 14099,
+    "head": "---\ntitle: \"Abstract Following the recent std-proposals discussion of my 2023 compile_assert(), this paper introduces compile_assert(expression, message), a new C++ keyword for enforcing assertions at"
+  },
+  "p4021r1": {
+    "hash": "518fc59f857abb1d7b9c5054d8cbba278de22a91c4023dbf1ad1dfbc81acc05a",
+    "size": 27348,
+    "head": "---\ntitle: \"compile_assert – optimization-enforced conditions at compile time\"\ndocument: P4021R1\ndate: 2026-02-22\naudience: EWGI, EWG\nreply-to:\n  - \"Jonathan Grant <jg@jguk.org>\"\n---\n\n## Abstract\n\nFol"
+  },
+  "p4021r2": {
+    "hash": "d123a53ae4ad25123d7e04378d7e20aa71e20379d72dfb9d0378529bb2a8efe7",
+    "size": 35061,
+    "head": "---\ntitle: \"compile_assert() – control-flow enforced conditions at compile-time\"\ndocument: P4021R2\ndate: 2026-03-09\naudience: \"WG14 Proposal Category: New Features Target Audience: General Developers,"
+  },
+  "p4022r0": {
+    "hash": "60a48b5b3ab406495321cc8a9d14f5fc5396649fc7e6cfd59aeec5e790959398",
+    "size": 7149,
+    "head": "---\ntitle: \"Remove try_append_range from inplace_vector for now\"\ndocument: P4022R0\ndate: 2026-02-22\naudience: LEWG\nreply-to:\n  - \"Barry Revzin <barry.revzin@gmail.com>\"\n  - \"Jonathan Wakely <cxx@kayar"
+  },
+  "p4023r0": {
+    "hash": "b29d6f72eb0894b3440bf5ab2a964c66a4dfa21b214c80ab91a36957512ba832",
+    "size": 6114,
+    "head": "---\ntitle: \"Strategic Direction for AI in C++: Governance, and Ecosystem\"\ndocument: P4023R0\ndate: 2026-02-23\naudience: WG21\nreply-to:\n  - \"Directions Group\"\n  - \"Jeff Garland\"\n  - \"Paul E. McKenney\"\n "
+  },
+  "p4024r0": {
+    "hash": "0654141c0a6346a446e8d7e5aefde1c72fdb87dc4e8eb340029fbb79d2c87f5f",
+    "size": 3689,
+    "head": "---\ntitle: \"Guidance on Building Consensus and Converging Proposals\"\ndocument: P4024R0\ndate: 2026-02-23\naudience: WG21\nreply-to:\n  - \"Directions Group\"\n  - \"Jeff Garland\"\n  - \"Paul E. McKenney\"\n  - \"R"
+  },
+  "p4025r0": {
+    "hash": "251be93d8c8d6d265df4400124a4e7e278d092fb441df0d2ab86af5628ac0177",
+    "size": 3613,
+    "head": "---\ntitle: \"The SG19 Priority List for C++29/32\"\ndocument: P4025R0\ndate: 2026-02-23\naudience: SG19\nreply-to:\n  - \"Michael Wong\"\n  - \"<fraggamuffin@gmail.com>\"\n---\n\n:::wording-add\n\n● Strategic Need: Gr"
+  },
+  "p4025r1": {
+    "hash": "8ed37f8e088f46a8e5e6e7a8f0a0e3e18185d93a95d907a65539ca7e6b13301a",
+    "size": 7142,
+    "head": "---\ntitle: \"The SG19 Priority List for C++29/32\"\ndocument: P4025R1\ndate: 2026-04-20\naudience: SG19\nreply-to:\n  - \"Michael Wong\"\n  - \"<fraggamuffin@gmail.com>\"\n---\n\n## Revision History\n\n**R1 (Current)*"
+  },
+  "p4026r0": {
+    "hash": "15a71106087f17408368dbfa3ddf7a79832f7cd60353bb81aa9f26d2db78b2a5",
+    "size": 4316,
+    "head": "---\ntitle: \"Core Issue 3123\"\ndocument: P4026R0\ndate: 2026-02-23\naudience: EWG\nreply-to:\n  - \"Vlad Serebrennikov <serebrennikov.vladislav@gmail.com>\"\n---\n\n### “Global lookup for `begin` and `end` for e"
+  },
+  "p4027r0": {
+    "hash": "7e1ad8a8e9e627146c2e86a9f41aa87efefd3bc67119d58a3e7184fc43f34514",
+    "size": 6419,
+    "head": "---\ntitle: \"2026-02 Library Evolution Polls\"\ndocument: P4027R0\ndate: 2026-02-22\naudience: WG21\nreply-to:\n  - \"Inbal Levi <sinbal2l@gmail.com>\"\n  - \"Fabio Fracassi <fabio@fracassi.de>\"\n  - \"Andreas Wei"
+  },
+  "p4028r0": {
+    "hash": "a052d92e581205d697e9283a8b67f92c07475bcbe93e2d055ee2325f4b4df792",
+    "size": 12724,
+    "head": "---\ntitle: \"4028R0 2026-02 Library Evolution Poll Outcomes\"\ndocument: P4028R0\ndate: 2026-04-20\naudience: WG21\nreply-to:\n  - \"Inbal Levi <sinbal2l@gmail.com>\"\n  - \"Fabio Fracassi <fabio@fracassi.de>\"\n "
+  },
+  "p4029r0": {
+    "hash": "f4938275890e7ab0b7d452b2c6fa6f56e27d8e467219a1daf9428718fc911137",
+    "size": 4450,
+    "head": "---\ntitle: \"The SG14 Priority List for C++29/32\"\ndocument: P4029R0\ndate: 2026-02-23\naudience: SG14\nreply-to:\n  - \"Michael Wong\"\n  - \"<fraggamuffin@gmail.com>\"\n---\n\n#### 1. The \"Elephant in the Room\": "
+  },
+  "p4029r1": {
+    "hash": "ca0230cc8e28a756513b1388cb2d44ef8cd35a146b627a5bafd5282fbc34d5b1",
+    "size": 9962,
+    "head": "---\ntitle: \"Doc. No.: P4029R1\"\ndocument: P4029R1\ndate: 2026-02-26\naudience: SG14\nreply-to:\n  - \"Michael Wong\"\n  - \"<fraggamuffin@gmail.com>\"\n---\n\n## The SG14 Priority List for C++29/32\n\n## Revision Hi"
+  },
+  "p4030r0": {
+    "hash": "a569de39be28417b8e92c328f40430b014a4c01be8d41ef767f47add24f0fcc0",
+    "size": 7507,
+    "head": "---\ntitle: \"Endian Views\"\ndocument: P4030R0\ndate: 2026-02-22\naudience: SG-9 Ranges,SG-16 Unicode,LEWG\nreply-to:\n  - \"Eddie Nolan <eddiejnolan@gmail.com>\"\n---\n\n# 1 Motivation\n\nThe main reason for addin"
+  },
+  "p4031r0": {
+    "hash": "5ac5a54c68805f8644be4c8a2e429ae6c0bc9fd2baeec214fdc2bb610e6a9265",
+    "size": 3536,
+    "head": "---\ntitle: \"Rename system_context_replaceability namespace\"\ndocument: P4031R0\ndate: 2026-02-23\naudience: LEWG\nreply-to:\n  - \"Ruslan Arutyunyan <ruslan.arutyunyan@intel.com>\"\n---\n\n# Abstract\n\nThis pape"
+  },
+  "p4031r1": {
+    "hash": "62f225f0b427899d6f21d985854715e2f7d6fddf1d34d0fdd72e0cb77341c54f",
+    "size": 10358,
+    "head": "---\ntitle: \"Rename system_context_replaceability namespace\"\ndocument: P4031R1\ndate: 2026-03-24\naudience: LWG\nreply-to:\n  - \"Ruslan Arutyunyan <ruslan.arutyunyan@intel.com>\"\n---\n\n# Abstract\n\nThis paper"
+  },
+  "p4032r0": {
+    "hash": "20ea326609cfa32268e04ebd14110d6d4c7f756dfe614e28aa008b4dd10d4ace",
+    "size": 8194,
+    "head": "---\ntitle: \"Strong ordering for meta::info\"\ndocument: P4032R0\ndate: 2026-02-23\naudience: SG17, EWG\nreply-to:\n  - \"Lénárd Szolnoki <cpp@lenardszolnoki.com>\"\n---\n\n## 1. Proposal\n\nI propose `meta::info` "
+  },
+  "p4032r1": {
+    "hash": "1be47375ecf60644185f8d3479242d080e530fff7a7d3b2b2598fec0a1913d56",
+    "size": 8437,
+    "head": "---\ntitle: \"Strong ordering for meta::info\"\ndocument: P4032R1\ndate: 2026-03-24\naudience: SG17, EWG\nreply-to:\n  - \"Lénárd Szolnoki <cpp@lenardszolnoki.com>\"\n---\n\n## 1. Revision history\n\n### 1.1. R1\n\n- "
+  },
+  "p4033r0": {
+    "hash": "67192587fa0c2b6b75114a75ec62e590ba8bfd19489ded16ea64b7fafbf34947",
+    "size": 10713,
+    "head": "---\ntitle: \"Synthesizing enum at compile time with define_enum\"\ndocument: P4033R0\ndate: 2026-03-30\naudience: SG7\nreply-to:\n  - \"Aurelien Cassagnes\"\n---\n\n## 1. Motivation\n\nThe generative capability of "
+  },
+  "p4035r0": {
+    "hash": "9641ec006029842b4d71014f9124f6425477a7da21ee25832efbc3a4c6329e09",
+    "size": 18154,
+    "head": "---\ntitle: \"The Need for Escape Hatches\"\ndocument: P4035R0\ndate: 2026-04-17\nintent: inform\naudience: LEWG\nreply-to:\n  - \"Vinnie Falco <vinnie.falco@gmail.com>\"\n  - \"C++ Alliance Proposal Team\"\n---\n\n##"
+  },
+  "p4037r0": {
+    "hash": "128d817db4ab35e14c6bc47543cc2e0fcccaef3f1a7b4c76456c860c0de55420",
+    "size": 16731,
+    "head": "---\ntitle: \"Supporting signed char and unsigned char in random number generation\"\ndocument: P4037R0\ndate: 2026-03-06\naudience: LEWG\nreply-to:\n  - \"Jan Schultke <janschultke@gmail.com>\"\n---\n\n## Abstrac"
+  },
+  "p4037r1": {
+    "hash": "ad5fbc3dba75a4e98e5e92eb32427050a34c45acb86add4890f86820f5036d2a",
+    "size": 19831,
+    "head": "---\ntitle: \"Supporting signed char and unsigned char in random number generation\"\ndocument: P4037R1\ndate: 2026-03-26\naudience: LWG\nreply-to:\n  - \"Jan Schultke <janschultke@gmail.com>\"\n---\n\n## Abstract"
+  },
+  "p4038r0": {
+    "hash": "8098dc670c83b00d59cef9e2ae91a4d07956fe1fd2a99f4f272713d9ee8802a7",
+    "size": 2409,
+    "head": "---\ntitle: \"Slides for P3969R0 — Fixing std::bit_cast of types with padding bits\"\ndocument: P4038R0\ndate: 2026-03-10\naudience: LEWG\nreply-to:\n  - \"Jan Schultke <janschultke@gmail.com>\"\n---\n\n# Fixing s"
+  },
+  "p4040r0": {
+    "hash": "73dbb19388abd3532bdaa62f4033af804a591c6c80c5a26a650abb69c39eed14",
+    "size": 11951,
+    "head": "---\ntitle: \"Case ranges\"\ndocument: P4040R0\ndate: 2026-04-01\naudience: SG22\nreply-to:\n  - \"Jan Schultke <janschultke@gmail.com>\"\n---\n\n## Abstract\n\nC2y added ranges in `case` labels, such as `case 0 ..."
+  },
+  "p4042r0": {
+    "hash": "b1dac6ed0759c0f848b54394491fe7ec400c99bb6c16f6d25ddefba8d4e5b765",
+    "size": 5694,
+    "head": "---\ntitle: \"Fix LWG4543: incorrect cast between simd::vec and simd::mask via conversion to and from impl-defined vector types\"\ndocument: P4042R0\ndate: 2026-03-18\naudience: LWG\nreply-to:\n  - \"Matthias "
+  },
+  "p4043r0": {
+    "hash": "ef6d675e484479e1021e808d10df2b94095af938f48270e975a77466df114401",
+    "size": 14611,
+    "head": "---\ntitle: \"Are C++ Contracts Ready to Ship in C++26?\"\ndocument: P4043R0\ndate: 2026-03-07\naudience: EWG, WG21\nreply-to:\n  - \"Darius Neațu <dariusn@adobe.com>\"\n---\n\n# Abstract\n\nThe C++ Contracts facili"
+  },
+  "p4044r0": {
+    "hash": "4fd27388d9794b68dc4bf2b46020b29ee85fe1edb77f456d8e77a667f303fb78",
+    "size": 11267,
+    "head": "---\ntitle: \"P4044R0: Just pre! . Mandatory precondition for contracts\"\ndocument: P4044R0\ndate: 2026-03-08\naudience: EWG\nreply-to:\n  - \"Lucian Radu Teodorescu <lucteo@lucteo.ro>\"\n---\n\n## Abstract\n\nC++2"
+  },
+  "p4049r0": {
+    "hash": "e27491a6fa5f16b6679009fbe7827fde28e8571951fbbc9c8aef494769249cd9",
+    "size": 46416,
+    "head": "---\ntitle: \"Relaxing and extending std::copy\"\ndocument: P4049R0\ndate: 2026-04-02\naudience: SG23, SG9, SG1, SG18, LEWG\nreply-to:\n  - \"Giuseppe D'Angelo <giuseppe.dangelo@kdab.com>\"\n---\n\n## Abstract\n\nTh"
+  },
+  "p4052r0": {
+    "hash": "8cdd06229012f1d6915e6ec766e16eb9cc912547ad2e01a71333081d3abc67b7",
+    "size": 6550,
+    "head": "---\ntitle: \"Renaming saturation arithmetic functions\"\ndocument: P4052R0\ndate: 2026-03-13\naudience: LEWG\nreply-to:\n  - \"Jan Schultke <janschultke@gmail.com>\"\n  - \"Corentin Jabot <corentin.jabot@gmail.c"
+  },
+  "p4088r0": {
+    "hash": "11d874417cda9721885a11df5dec3a308a7deadaea266cc04f3d5b2dc0d51a22",
+    "size": 59048,
+    "head": "---\ntitle: \"What C++20 Coroutines Already Buy The Standard\"\ndocument: P4088R0\ndate: 2026-04-17\nintent: inform\naudience: LEWG\nreply-to:\n  - \"Vinnie Falco <vinnie.falco@gmail.com>\"\n  - \"C++ Alliance Pro"
+  },
+  "p4089r0": {
+    "hash": "4378c3871554ea5052d793bd632efc7cbb15de41bee2fd1c6c251913c0976d69",
+    "size": 33778,
+    "head": "---\ntitle: \"On the Diversity of Coroutine Task Types\"\ndocument: P4089R0\ndate: 2026-04-17\nintent: inform\naudience: LEWG\nreply-to:\n  - \"Vinnie Falco <vinnie.falco@gmail.com>\"\n  - \"C++ Alliance Proposal "
+  },
+  "p4090r0": {
+    "hash": "b76c35658ca54b2519c15c40d78982798865230b928de212f4300ab4b844c161",
+    "size": 46376,
+    "head": "---\ntitle: \"Sender I/O: A Constructed Comparison\"\ndocument: P4090R0\ndate: 2026-04-17\nintent: inform\naudience: LEWG\nreply-to:\n  - \"Vinnie Falco <vinnie.falco@gmail.com>\"\n  - \"Steve Gerbino <steve@gerbi"
+  },
+  "p4091r0": {
+    "hash": "bf96003da26dec47d6f8ce2729b96bea2b479dab4d5b83f7c5cecdecdabd3031",
+    "size": 35074,
+    "head": "---\ntitle: \"Error Models of Regular C++ and the Sender Sub-Language\"\ndocument: P4091R0\ndate: 2026-04-17\nintent: inform\naudience: LEWG\nreply-to:\n  - \"Vinnie Falco <vinnie.falco@gmail.com>\"\n  - \"C++ All"
+  },
+  "p4092r0": {
+    "hash": "15008243a30aec5161da1c94e019830a4ce81ec6ae6fbcd8225492d821b9d727",
+    "size": 18427,
+    "head": "---\ntitle: \"Consuming Senders from Coroutine-Native Code\"\ndocument: P4092R0\ndate: 2026-04-17\nintent: inform\naudience: LEWG\nreply-to:\n  - \"Vinnie Falco <vinnie.falco@gmail.com>\"\n  - \"Steve Gerbino <ste"
+  },
+  "p4093r0": {
+    "hash": "e5ad4c8bb9d4bb8db4f5c4b7b3dd1dd82da2ba097dd124ba0da212c170d771e5",
+    "size": 22712,
+    "head": "---\ntitle: \"Producing Senders from Coroutine-Native Code\"\ndocument: P4093R0\ndate: 2026-04-17\nintent: inform\naudience: LEWG\nreply-to:\n  - \"Vinnie Falco <vinnie.falco@gmail.com>\"\n  - \"Steve Gerbino <ste"
+  },
+  "p4094r0": {
+    "hash": "ff665485dd16bb653ac59ebfed53ea9a9e42db5b62f1825afd76a2b2a22fc622",
+    "size": 55681,
+    "head": "---\ntitle: \"The Unification of Executors and P0443\"\ndocument: P4094R0\ndate: 2026-04-17\nintent: inform\naudience: WG21\nreply-to:\n  - \"Vinnie Falco <vinnie.falco@gmail.com>\"\n  - \"C++ Alliance Proposal Te"
+  },
+  "p4095r0": {
+    "hash": "76ee3a04548f91498740c553144c007e5ef0e09844f9594d7136cb84e0296160",
+    "size": 27057,
+    "head": "---\ntitle: \"The Basis Operation and P1525\"\ndocument: P4095R0\ndate: 2026-04-17\nintent: inform\naudience: SG1, LEWG\nreply-to:\n  - \"Vinnie Falco <vinnie.falco@gmail.com>\"\n  - \"C++ Alliance Proposal Team\"\n"
+  },
+  "p4096r0": {
+    "hash": "4dd075dcb1e3018fbca0e3af2909611c4b125f6a2058c41c86d1b9d8ccb78c4b",
+    "size": 36519,
+    "head": "---\ntitle: \"Coroutine Executors and P2464R0\"\ndocument: P4096R0\ndate: 2026-04-17\nintent: inform\naudience: LEWG, SG1\nreply-to:\n  - \"Vinnie Falco <vinnie.falco@gmail.com>\"\n  - \"C++ Alliance Proposal Team"
+  },
+  "p4097r0": {
+    "hash": "0a517ace4585824a57cc6051cae60de70e937713070d05324098036c8d055e7f",
+    "size": 21676,
+    "head": "---\ntitle: \"The Networking Claim and P2453R0\"\ndocument: P4097R0\ndate: 2026-04-17\nintent: inform\naudience: WG21\nreply-to:\n  - \"Vinnie Falco <vinnie.falco@gmail.com>\"\n  - \"C++ Alliance Proposal Team\"\n--"
+  },
+  "p4098r0": {
+    "hash": "72cdfcbf866c4a8fa6d6e6987b3c1c7f7e4a61ec8b3fcedf469c7468ca2ae1b4",
+    "size": 22324,
+    "head": "---\ntitle: \"Async Claims and Evidence\"\ndocument: P4098R0\ndate: 2026-04-17\nintent: inform\naudience: WG21\nreply-to:\n  - \"Vinnie Falco <vinnie.falco@gmail.com>\"\n  - \"C++ Alliance Proposal Team\"\n---\n\n## A"
+  },
+  "p4099r0": {
+    "hash": "fcce4eb605f9b7a4629b64a2050d56ae2f19f65e86b35e8cc0365175a815c13f",
+    "size": 18795,
+    "head": "---\ntitle: \"The Twenty-One Year Networking Arc\"\ndocument: P4099R0\ndate: 2026-04-17\nintent: inform\naudience: WG21\nreply-to:\n  - \"Vinnie Falco <vinnie.falco@gmail.com>\"\n  - \"C++ Alliance Proposal Team\"\n"
+  },
+  "p4100r0": {
+    "hash": "198aee7abf59826a5a1243841e58f869fcf6d556c500176b0ef1bacce67eeca8",
+    "size": 35544,
+    "head": "---\ntitle: \"Coroutine-Native I/O for C++29 (The Network Endeavor)\"\ndocument: P4100R0\ndate: 2026-04-17\nintent: inform\naudience: LEWG\nreply-to:\n  - \"Vinnie Falco <vinnie.falco@gmail.com>\"\n  - \"Steve Ger"
+  },
+  "p4101r0": {
+    "hash": "5bf3f7302e5666e792b14f6e25c682ed4c312bcef2603317138cbcf458ca6f20",
+    "size": 41765,
+    "head": "---\ntitle: \"Consteval-only Values for C++26\"\ndocument: P4101R0\ndate: 2026-03-24\naudience: EWG, CWG\nreply-to:\n  - \"Barry Revzin <barry.revzin@gmail.com>\"\n  - \"Peter Dimov <pdimov@gmail.com>\"\n  - \"Davee"
+  },
+  "p4102r0": {
+    "hash": "517f858f42523ef8a43999801615f8cda3b6b696651dfe03c963fcc0946f1df2",
+    "size": 59258,
+    "head": "---\ntitle: \"Container insertion and erasure should be allowed to relocate\"\ndocument: P4102R0\ndate: 2026-04-02\naudience: SG9, LEWG\nreply-to:\n  - \"Giuseppe D'Angelo <giuseppe.dangelo@kdab.com>\"\n---\n\n## "
+  },
+  "p4125r0": {
+    "hash": "321b676cccb351824b3a5f7d7935ef75a9bd607aa786667a26e8f9f29b55e2a3",
+    "size": 15278,
+    "head": "---\ntitle: \"Coroutine-Native I/O at a Derivatives Exchange\"\ndocument: P4125R0\ndate: 2026-04-17\nintent: inform\naudience: SG14, LEWG\nreply-to:\n  - \"Mungo Gill <mungo.gill@me.com>\"\n  - \"C++ Alliance Prop"
+  },
+  "p4126r0": {
+    "hash": "934413399353889b36e2d46f3010cd277353c6c94fc0f3a9598aedd4d4e96411",
+    "size": 32446,
+    "head": "---\ntitle: \"A Universal Continuation Model\"\ndocument: P4126R0\ndate: 2026-04-17\nintent: inform\naudience: EWG, SG1, LEWG\nreply-to:\n  - \"Vinnie Falco <vinnie.falco@gmail.com>\"\n  - \"Klemens Morgenstern <k"
+  },
+  "p4135r0": {
+    "hash": "9484aefc024d7eb0be82f8d2fd7eecde72fec909a2a3ed26b5c65f48a2589e5e",
+    "size": 48858,
+    "head": "---\ntitle: \"Consteval-only Types\"\ndocument: P4135R0\ndate: 2026-03-21\naudience: EWG Evolution,CWG Core\nreply-to:\n  - \"Wyatt Childers <wchilders@nvidia.com>\"\n---\n\n### A design space overview\n\n### Forewo"
+  },
+  "p4136r0": {
+    "hash": "0faa0463c8d01aa3dee67f69c778dff4d6eb2119d621fb0cfd373603bec01a18",
+    "size": 4082,
+    "head": "---\ntitle: \"#line is not in line with existing implementation\"\ndocument: P4136R0\ndate: 2026-03-22\naudience: EWG\nreply-to:\n  - \"Corentin Jabot <corentin.jabot@gmail.com>\"\n---\n\n## Abstract\n\nThe restrict"
+  },
+  "p4136r1": {
+    "hash": "48d7e22d61c705511778decb99e39dd35632a8ec030637be50e62e16385270cb",
+    "size": 4159,
+    "head": "---\ntitle: \"#line is not in line with existing implementation\"\ndocument: P4136R1\ndate: 2026-03-23\naudience: CWG\nreply-to:\n  - \"Corentin Jabot <corentin.jabot@gmail.com>\"\n---\n\n## History\n\nFix typos (in"
+  },
+  "p4137r0": {
+    "hash": "5e656ae6776b4999d817a09db4c6311d9747d400da33bf1e15cc714d958359b3",
+    "size": 21519,
+    "head": "---\ntitle: \"Profile Analysis and Verification Evidence (PAVE)\"\ndocument: P4137R0\ndate: 2026-04-17\nintent: inform\naudience: SG12, SG23, EWG\nreply-to:\n  - \"Vinnie Falco <vinnie.falco@gmail.com>\"\n---\n\n##"
+  },
+  "p4138r0": {
+    "hash": "d190f1202b19e956561d5e595836420e18e5dbbb902354c7f9cbd8973d268080",
+    "size": 8213,
+    "head": "---\ntitle: \"CWG3103 “Corresponding members and by-value object parameters”\"\ndocument: P4138R0\ndate: 2026-03-23\naudience: Core Working Group\nreply-to:\n  - \"Vlad Serebrennikov <serebrennikov.vladislav@g"
+  },
+  "p4138r1": {
+    "hash": "6f3ff1465b16a100ec08eb5427946d32e3c38f95841f3199c3cf7be5e2743924",
+    "size": 8372,
+    "head": "---\ntitle: \"CWG3103 “Corresponding members and by-value object parameters”\"\ndocument: P4138R1\ndate: 2026-03-24\naudience: Core Working Group\nreply-to:\n  - \"Vlad Serebrennikov <serebrennikov.vladislav@g"
+  },
+  "p4138r2": {
+    "hash": "d2ba45003d314c715fb90124c8120c1bb184859d6c62fa625da39ec3a4bb1fce",
+    "size": 10946,
+    "head": "---\ntitle: \"CWG3103 “Corresponding members and by-value object parameters”\"\ndocument: P4138R2\ndate: 2026-04-20\naudience: Evolution Working Group\nreply-to:\n  - \"Vlad Serebrennikov <serebrennikov.vladis"
+  },
+  "p4139r0": {
+    "hash": "323d3fdffd472a79d0c5d3234f910ab52ecadf4705c72076fae14e9849be2fb1",
+    "size": 1939,
+    "head": "---\ntitle: \"Better better lookup\"\ndocument: P4139R0\ndate: 2026-03-23\naudience: LEWG\nreply-to:\n  - \"<ncm@cantrip.org>\"\n---\n\nTitle:      Better better lookup\n```\n\n# Better better lookup\n\nP3091 institute"
+  },
+  "p4139r1": {
+    "hash": "0337ee868ae0100ed1ed74adb7302ac7b1420df3d4c37d78fc87c5a3fe46ddb0",
+    "size": 3000,
+    "head": "---\ntitle: \"Better better lookup\"\ndocument: P4139R1\ndate: 2026-03-23\naudience: LEWG\nreply-to:\n  - \"<ncm@cantrip.org>\"\n---\n\nTitle:       Better better lookup\n```\n\n# Better better lookup\n\nP3091 proposed"
+  },
+  "p4140r0": {
+    "hash": "5ca4f2e0fded0ded639cd62930823585221822f8e6f893a96ba4e989f2111d4f",
+    "size": 1764,
+    "head": "---\ntitle: \"Proposed resolution for US70-126: allow incomplete types in type_order\"\ndocument: P4140R0\ndate: 2026-03-23\naudience: LEWG Library Evolution,LWG Library\nreply-to:\n  - \"Gašper Ažman <gasper."
+  },
+  "p4142r0": {
+    "hash": "a455a719c8c21cf51f8e789a30b68345681b7d0b30f7607cc08d60e6028a28e4",
+    "size": 12489,
+    "head": "---\ntitle: \"Consteval-only Types\"\ndocument: P4142R0\ndate: 2026-03-24\naudience: EWG Evolution\nreply-to:\n  - \"Wyatt Childers\"\n---\n\nWyatt Childers\n\n<!-- tomd:uncertain:L13-L32 -->\n\nWho are you?\n\n●Minecra"
+  },
+  "p4143r0": {
+    "hash": "f0c524d98f56168b7c20f59646874269058b677fb7053569e4cee8124517c214",
+    "size": 8143,
+    "head": "---\ntitle: \"P4143R0: Constant evaluation when?\"\ndocument: P4143R0\ndate: 2026-03-27\naudience: CWG Core\nreply-to:\n  - \"S. Davis Herring <herring@lanl.gov>\"\n---\n\n# Introduction\n\nThis paper partially addr"
+  },
+  "p4144r0": {
+    "hash": "820c8171cca0b5d7c74639c09f5765141a2c91a01ccd3326a6339f22b919649d",
+    "size": 7968,
+    "head": "---\ntitle: \"Breaking change in std::span ’s new initializer_list constructor\"\ndocument: P4144R0\ndate: 2026-03-25\naudience: LEWG Library Evolution\nreply-to:\n  - \"Mark Hoemmen <mhoemmen@nvidia.com>\"\n---"
+  },
+  "p4144r1": {
+    "hash": "5cc0b1e15a59c2e9221f1f1a1c22a0b4e75ae021121749f7e58682739c6f5f08",
+    "size": 14178,
+    "head": "---\ntitle: \"Remove span ’s initializer_list constructor for C++26\"\ndocument: P4144R1\ndate: 2026-03-26\naudience: LWG Library\nreply-to:\n  - \"Mark Hoemmen <mark.hoemmen@gmail.com>\"\n  - \"Tomasz Kamiński <"
+  },
+  "p4145r0": {
+    "hash": "5a1e211426deb4c61c27ef28f5513f9d55682d5599c09685dcb197cf2d516fb4",
+    "size": 167905,
+    "head": "---\ntitle: \"C++ Standard Library Ready Issues to be moved in Croydon, Mar. 2026\"\ndocument: P4145R0\ndate: 2026-03-25\naudience: WG21\nreply-to:\n  - \"Jonathan Wakely <lwgchair@gmail.com>\"\n---\n\n## Ready Is"
+  },
+  "p4146r0": {
+    "hash": "a74619d0366e0b74a761a3d60e4dc6a7688e6e7bc0d9ef57591f45beea75de92",
+    "size": 223890,
+    "head": "---\ntitle: \"C++ Standard Library Immediate Issues to be moved in Croydon, Mar. 2026\"\ndocument: P4146R0\ndate: 2026-03-27\naudience: WG21\nreply-to:\n  - \"Jonathan Wakely <lwgchair@gmail.com>\"\n---\n\n## Imme"
+  },
+  "p4148r0": {
+    "hash": "5cda560efece625e9f75ca3cb703db92039592b639bc8287a29cdcd0c107f28e",
+    "size": 26330,
+    "head": "---\ntitle: \"protocol: Structural Subtyping for C++\"\ndocument: P4148R0\ndate: 2026-04-20\naudience: \"SG7 Reflection,LEWGI SG18: LEWG Incubator\"\nreply-to:\n  - \"Jonathan Coe <jonathanbcoe@gmail.com>\"\n  - \""
+  },
+  "p4149r0": {
+    "hash": "4f72941b40250ad7bf928696a482f154fea89a5c9c392137d82c52d859191654",
+    "size": 14324,
+    "head": "---\ntitle: \"Define \\\"immediate context\\\"\"\ndocument: P4149R0\ndate: 2026-03-25\naudience: EWG, CWG\nreply-to:\n  - \"Andrzej Krzemieński <akrzemi1@gmail.com>\"\n  - \"Brian Bi <bbi5291@gmail.com>\"\n---\n\nThis pa"
+  },
+  "p4149r1": {
+    "hash": "c11f1c98a32d7468995502805978febcc55a5584ec079b0a0dcd31f6a624f450",
+    "size": 16300,
+    "head": "---\ntitle: \"Define \\\"immediate context\\\"\"\ndocument: P4149R1\ndate: 2026-03-27\naudience: EWG, CWG\nreply-to:\n  - \"Andrzej Krzemieński <akrzemi1@gmail.com>\"\n  - \"Brian Bi <bbi5291@gmail.com>\"\n---\n\nThis pa"
+  },
+  "p4150r0": {
+    "hash": "d387a916621860c501ad82c6220b341ba0cd7a52ef9865e15c71b2b9fc0ad511",
+    "size": 33800,
+    "head": "---\ntitle: \"Multidimensional Index-based For Each\"\ndocument: P4150R0\ndate: 2026-04-16\naudience: Library Evolution\nreply-to:\n  - \"Nicolas Morales <nmmoral@sandia.gov>\"\n  - \"Mark Hoemmen <mhoemmen@nvidi"
+  },
+  "p4151r0": {
+    "hash": "772a656138cd483d273a3896b6b66f68dfe95b4285d8a87114f0e24b72863b27",
+    "size": 2290,
+    "head": "---\ntitle: \"Rename affine_on\"\ndocument: P4151R0\ndate: 2026-03-26\naudience: LEWG\nreply-to:\n  - \"Robert Leahy <rleahy@rleahy.ca>\"\n---\n\n## Abstract\n\n`std::execution::affine_on` should be named `std::exec"
+  },
+  "p4151r1": {
+    "hash": "c7ff524cbbfc4927fed7726189b727491fa32d7780188215a85945f3f0c2261b",
+    "size": 2589,
+    "head": "---\ntitle: \"Rename affine_on\"\ndocument: P4151R1\ndate: 2026-03-27\naudience: LEWG\nreply-to:\n  - \"Robert Leahy <rleahy@rleahy.ca>\"\n---\n\n## Abstract\n\n`std::execution::affine_on` should be named `std::exec"
+  },
+  "p4154r0": {
+    "hash": "078317502ab657cc38732f3b14c804682f1c87361d8d8076753e708569feef9f",
+    "size": 2312,
+    "head": "---\ntitle: \"Renaming various execution things\"\ndocument: P4154R0\ndate: 2026-03-27\naudience: LWG\nreply-to:\n  - \"Tim Song <t.canens.cpp@gmail.com>\"\n  - \"Ruslan Arutyunyan <ruslan.arutyunyan@intel.com>\"\n"
+  },
+  "p4155r0": {
+    "hash": "806cbc1827f8197b89f32f72c7630cc0bc6cd6a1833770a578b38dede7b2e13b",
+    "size": 14763,
+    "head": "---\ntitle: \"Responding to type erasure requirements for trivial relocation\"\ndocument: P4155R0\ndate: 2026-03-26\naudience: EWG\nreply-to:\n  - \"Oliver Hunt <oliver@apple.com>\"\n  - \"Corentin Janot <corenti"
+  },
+  "p4156r0": {
+    "hash": "15ee517fa2043a3beb5783814b1dd12bf28466571f18a20dbf4730c8fa11ad7e",
+    "size": 1024,
+    "head": "---\ntitle: \"Rename meta::has_ellipsis_parameter to meta::is_vararg_function\"\ndocument: P4156R0\ndate: 2026-03-27\naudience: LWG\nreply-to:\n  - \"Ville Voutilainen <ville.voutilainen@gmail.com>\"\n---\n\n## Ab"
+  },
+  "p4157r0": {
+    "hash": "54718b9ff9aa9fd6897d4a069692c15138bf4e4ac83a467918f70a1e302b770a",
+    "size": 2301,
+    "head": "---\ntitle: \"Slides for P3666R3 Bit-precise integers\"\ndocument: P4157R0\ndate: 2026-03-26\naudience: LEWG\nreply-to:\n  - \"Jan Schultke <janschultke@gmail.com>\"\n---\n\n# Bit-precise integers P3666R3\n\nJan Sch"
+  },
+  "p4158r0": {
+    "hash": "bfb52b15b7245f037e0c745c1edd6846c06edfec22c94b683247acfa60b52680",
+    "size": 3673,
+    "head": "---\ntitle: \"Subsetting and restricting C++ for memory safety\"\ndocument: P4158R0\ndate: 2026-03-27\naudience: EWG Evolution\nreply-to:\n  - \"Oliver Hunt\"\n---\n\n##### • Incrementally adopted\n\n##### • 98% ado"
+  },
+  "p4159r0": {
+    "hash": "7a4ff9929a4407f0986a39ae8778e121e0e356d764e0de5e36ab9ed37202d89f",
+    "size": 1344,
+    "head": "---\ntitle: \"Make sender_in and receiver_of exposition-only\"\ndocument: P4159R0\ndate: 2026-03-27\naudience: LWG\nreply-to:\n  - \"Tim Song <t.canens.cpp@gmail.com>\"\n---\n\n# 1 Introduction\n\nIn response to LEW"
+  },
+  "p4160r0": {
+    "hash": "15afedee328f83ae2151ce9fd97bcb8bdbd827820851c0e422335f87c0f89c68",
+    "size": 114216,
+    "head": "---\ntitle: \"Core Language Working Group \\\"ready\\\" Issues for the March, 2026 meeting\"\ndocument: P4160R0\ndate: 2026-03-27\naudience: CWG Core\nreply-to:\n  - \"Jens Maurer <jens.maurer@gmx.net>\"\n---\n\n\n## C"
+  },
+  "p4161r0": {
+    "hash": "96dac008fc4bd758b4eacd4ff70e498635962cf2d1d871f6f48ce6bdf0ce83e1",
+    "size": 5006,
+    "head": "---\ntitle: \"std::fewer\"\ndocument: P4161R0\ndate: 2026-04-01\naudience: LEWG, LWG\nreply-to:\n  - \"Jeff Snyder <jeff-isocpp@caffeinated.me.uk>\"\n  - \"Jonathan B. Coe <jonathanbcoe@gmail.com>\"\n  - \"Neelofer "
+  },
+  "p4168r0": {
+    "hash": "f515e5352ffbd48156b0fd23ede929a5b7dffa7df324a5df11e9299d4653f00c",
+    "size": 25368,
+    "head": "---\ntitle: \"Fix defects in floating-point std::from_chars (LWG3081, LWG3082, LWG3456)\"\ndocument: P4168R0\ndate: 2026-04-05\naudience: SG6\nreply-to:\n  - \"Jan Schultke <janschultke@gmail.com>\"\n---\n\n## Abs"
+  },
+  "p4172r0": {
+    "hash": "2f62e8dd6ed1266167e268eb233bcebb70ca7ce9860a4b4f26f8c710bd022cf9",
+    "size": 72643,
+    "head": "---\ntitle: \"IoAwaitable for Coroutine-Native Byte-Oriented I/O\"\ndocument: P4172R0\ndate: 2026-04-17\nintent: inform\naudience: LEWG\nreply-to:\n  - \"Vinnie Falco <vinnie.falco@gmail.com>\"\n  - \"Steve Gerbin"
+  },
+  "p4173r0": {
+    "hash": "f172811bf748a7ac3ce9f1b03cb89e4b4038ea8d0328e77fcc4b5de321bccd4f",
+    "size": 39710,
+    "head": "---\ntitle: \"A range facility for mdspan\"\ndocument: P4173R0\ndate: 2026-04-15\naudience: LEWG\nreply-to:\n  - \"Hewill Kang <hewillk@gmail.com>\"\n---\n\n## Abstract\n\nStandard `mdspan` accessors, such as `defau"
+  },
+  "p4174r0": {
+    "hash": "4ca22e20abd521b360214e7af26255ca5aadda0a199b040dac1b7f632e49f746",
+    "size": 6388,
+    "head": "---\ntitle: \"Named, composable type sets for concept constraints\"\ndocument: P4174R0\ndate: 2026-04-02\naudience: LEWG\nreply-to:\n  - \"Emanuel Spiridon <spiridonemanuel23@gmail.com>\"\n---\n\n## Abstract\n\nThis"
+  },
+  "p4175r0": {
+    "hash": "c2d0a90e97ad9f5e3918d61d70b841539b425e4510cf74b758e8b98f835b4eaa",
+    "size": 6291,
+    "head": "---\ntitle: \"Lift some arbitrary CTAD restrictions\"\ndocument: P4175R0\ndate: 2026-04-04\naudience: Evolution Working Group,Core Working Group\nreply-to:\n  - \"Matheus Izvekov <mizvekov@gmail.com>\"\n---\n\n# 1"
+  },
+  "p4176r0": {
+    "hash": "e3e90f0f51ceb53b21819f12001613d25fb0394d1422d26218c20a8e0b5cea6c",
+    "size": 46967,
+    "head": "---\ntitle: \"Grammar non-terminals for postfix-expressions\"\ndocument: P4176R0\ndate: 2026-04-20\naudience: Core Working Group\nreply-to:\n  - \"Vlad Serebrennikov <serebrennikov.vladislav@gmail.com>\"\n---\n\n#"
+  },
+  "p4179r0": {
+    "hash": "c0e0bd3c84fa9af07da1263a0659f34374275887a67ee0d4c43da71e216f9533",
+    "size": 6772,
+    "head": "---\ntitle: \"view_interface::[c]rbegin()\"\ndocument: P4179R0\ndate: 2026-04-20\naudience: LEWG, SG9\nreply-to:\n  - \"Hewill Kang <hewillk@gmail.com>\"\n---\n\n## Abstract\n\nThis paper provides `rbegin()`/`rend()"
+  },
+  "p4182r0": {
+    "hash": "c5e67253ba4062943d56d11d4b2b9efbad3247f6a414ed1b56ae314963863200",
+    "size": 24946,
+    "head": "---\ntitle: \"A Citable Inventory of Platforms, Operating Systems, and Compiler Toolchains\"\ndocument: P4182R0\ndate: 2026-04-17\nintent: inform\naudience: SG14, EWG, LEWG\nreply-to:\n  - \"Mungo Gill <mungo.g"
+  },
+  "p4186r0": {
+    "hash": "859bbbcd550881477ec5958e6108646a4ca151be0eea01dfaeda746f4086d44a",
+    "size": 7249,
+    "head": "---\ntitle: \"A proposed plan for profiles in C++\"\ndocument: P4186R0\ndate: 2026-04-13\naudience: SG23 Safety and Security\nreply-to:\n  - \"Peter Bindels <cpp@dascandy.nl>\"\n---\n\n# 1 Abstract\n\nThis paper pro"
+  },
+  "p4188r0": {
+    "hash": "7aece29d9c005f8d7056a804a04ccb640f8b3f86f33400b5a51752727b1c91ff",
+    "size": 21962,
+    "head": "---\ntitle: \"Extensible Math Functions for C++\"\ndocument: P4188R0\ndate: 2026-03-30\naudience: SG6 SG18 LEWG\nreply-to:\n  - \"Stéphane Gros-Lemesre <stephane.groslemesre@gmail.com>\"\n---\n\n## Abstract\n\nThis "
+  },
+  "p4190r0": {
+    "hash": "efda69f56e170e599d5ea43b4c123c0ddab2cf8f12bc1978f2da0e3f701a154e",
+    "size": 20634,
+    "head": "---\ntitle: \"Restore span ’s initializer_list constructor for C++29\"\ndocument: P4190R0\ndate: 2026-04-16\naudience: LEWG Library Evolution\nreply-to:\n  - \"Mark Hoemmen <mark.hoemmen-MILD-OBFUSCATION@gmail"
+  },
+  "p4191r0": {
+    "hash": "5ca067d3b04d056c8cca9c7440e110aa809be33941c08571ae0f5432723eb465",
+    "size": 2712,
+    "head": "---\ntitle: \"is_nothrow_connectable_in\"\ndocument: P4191R0\ndate: 2026-04-17\naudience: SG1, LEWG\nreply-to:\n  - \"Robert Leahy <rleahy@rleahy.ca>\"\n---\n\n<!-- tomd:uncertain:L12-L57 -->\n\nDiscussion \n\nThe sta"
+  },
+  "p4192r0": {
+    "hash": "7c5ea838a77a62af0f880a4f2c2d352f617df2270461e57eabdf70ea7f70dce1",
+    "size": 20629,
+    "head": "---\ntitle: \"Better specification of alignment\"\ndocument: P4192R0\ndate: 2026-04-20\naudience: Core Working Group\nreply-to:\n  - \"Vlad Serebrennikov <serebrennikov.vladislav@gmail.com>\"\n---\n\n# 1 Abstract\n"
+  },
+  "p4197r0": {
+    "hash": "5e7dc7ed935d2521d49397f2324d44a334081a11b03feaa337d302393ee6ef0c",
+    "size": 46847,
+    "head": "---\ntitle: \"Design questions for trivial relocation in C++29\"\ndocument: P4197R0\ndate: 2026-04-19\naudience: EWG, LEWG\nreply-to:\n  - \"Giuseppe D'Angelo <giuseppe.dangelo@kdab.com>\"\n---\n\n## Abstract\n\nTri"
+  },
+  "p5000r0": {
+    "hash": "f3fbf7eb6627a25f8937a6d47e390ecab87d372df80e4aa6086891285348590f",
+    "size": 5061,
+    "head": "---\ntitle: \"Directions for ISO C++ 29\"\ndocument: P5000R0\ndate: 2026-02-18\naudience: All WG21\nreply-to:\n  - \"D. Vandevoorde <daveed@vandevoorde.com>\"\n---\n\n## Revision History:\n\n***** **R0: this paper ("
+  }
+}

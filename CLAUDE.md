@@ -17,7 +17,6 @@ packages/
   tomd/         PDF/HTML to Markdown
   pipeline/     LLM pipeline framework (pydantic-ai, web tools)
   dissect/      LLM-driven paper dissect pipeline
-  advocatus/    LLM-driven paper examination pipeline
   agora/        LLM-driven thread planning pipeline
   cli/          ingestion + conversion + dissect CLI
 tests/          cross-package integration tests
@@ -36,9 +35,13 @@ WG21_DATA_DIR/
     <pid>.pdf | <pid>.html
     <pid>.md
     <pid>.prompts.json
+    <pid>-fig{page}-{n}.{ext}      # extracted raster images. page=0
+                                   # is the HTML "no page concept" sentinel.
+    <pid>.html-images.json         # mailing -> tomd handoff manifest
+                                   # for HTML papers.
 ```
 
-Pipeline artifacts (dissect/advocatus/agora outputs, debug, trace) are namespaced per tool. Use `backend.get_debug_md_path(pid, tool)` and `backend.get_trace_md_path(pid, tool)` rather than constructing paths.
+Pipeline artifacts (dissect/agora outputs, debug, trace) are namespaced per tool. Use `backend.get_debug_md_path(pid, tool)` and `backend.get_trace_md_path(pid, tool)` rather than constructing paths.
 
 ## Front matter (tomd output)
 
@@ -58,11 +61,19 @@ reply-to:
 
 Full field semantics live in `packages/tomd/src/tomd/CLAUDE.md`. Body headings start at H2; the front-matter title renders as H1.
 
+## Model sovereignty
+
+The analytical pipelines must run on open-weight models under our control. Cloud LLM providers can deprioritize requests, change model behavior between versions, or apply content filtering that alters analytical output. None of that is acceptable for a system whose findings must be defensible.
+
+The direction is open-weight models served on our own infrastructure (RunPod, local GPU). Opus is acceptable as a quality ceiling for development and validation, but production runs target self-hosted models (Gemma, Qwen, future fine-tunes). Every pipeline must work with `vllm_thinking` backends, not just Anthropic. Schema compliance issues on smaller models are solved with retries and prompt engineering, not by retreating to a cloud API.
+
+This is not optional. It is the foundation for determinism, security, and eventual fine-tuning.
+
 ## Determinism
 
-Semantic stability across runs is non-negotiable for the analytical pipelines `dissect` and `advocatus`. Their findings must be reproducible: re-running on the same paper must produce the same verdicts, the same Relatio, the same caput causae. Any source of run-to-run variance (concurrent in-flight requests, temperature drift, unordered set iteration into a prompt) is a defect for these pipelines, not a tunable. Quality-stability, not bit-identical: same findings, same verdicts, same structure. Bit-exact reproducibility on hosted endpoints is impossible without server-side batch-invariant kernels.
+Semantic stability across runs is non-negotiable for the analytical pipelines. Their findings must be reproducible: re-running on the same paper must produce the same verdicts, the same structure. Any source of run-to-run variance (concurrent in-flight requests, temperature drift, unordered set iteration into a prompt) is a defect, not a tunable. Quality-stability, not bit-identical: same findings, same verdicts, same structure. Bit-exact reproducibility on hosted endpoints is impossible without server-side batch-invariant kernels.
 
-The `pipeline` framework permits non-serial execution as a capability for future packages that may not need byte-identical reproducibility, but the **default is serial** and dissect and advocatus rely on that default. Any change that raises `_PARALLEL_CONCURRENCY`, `_TASK_CONCURRENCY`, or otherwise allows multiple in-flight LLM requests must keep dissect and advocatus on the serial path (per-context or per-call concurrency parameter; never a global flip).
+The `pipeline` framework permits non-serial execution as a capability for future packages that may not need byte-identical reproducibility, but the **default is serial** and dissect relies on that default. Any change that raises `_PARALLEL_CONCURRENCY`, `_TASK_CONCURRENCY`, or otherwise allows multiple in-flight LLM requests must keep dissect on the serial path (per-context or per-call concurrency parameter; never a global flip).
 
 See `MODELS.md` for sampling pins, MoE caveats, and the workaround inventory.
 
@@ -74,28 +85,30 @@ See `MODELS.md` for sampling pins, MoE caveats, and the workaround inventory.
 - D8. See `MODELS.md`.
 - D9. Pass `UsageLimits(...)` to `agent.run(...)`, never to `Agent(...)`. The constructor silently drops it.
 - D10. Pair every `output_type` with a finite retry budget (`output_retries=N`). Use `ModelRetry(...)` in `output_validator`s to self-correct; do not rely on raw `ValidationError` feedback.
-- D11. `dissect` and `advocatus` run with at most one in-flight LLM request at a time. The framework defaults to serial via `_parallel_semaphore` and `_task_semaphore` at `asyncio.Semaphore(1)`. New packages that opt into concurrent execution must do so through a per-package mechanism that leaves these two pipelines on the serial path.
+- D11. `dissect` runs with at most one in-flight LLM request at a time. The framework defaults to serial via `_parallel_semaphore` and `_task_semaphore` at `asyncio.Semaphore(1)`. New packages that opt into concurrent execution must do so through a per-package mechanism that leaves dissect on the serial path.
 
 D2 and D3 name pipeline-internal symbols and live in `packages/pipeline/src/pipeline/CLAUDE.md`.
 
 ## Services and agents
 
-Infrastructure is declared in `SERVICES.toml` at the repo root. Each `[services.NAME]` section declares an endpoint (backend type, URL, API key env var, model name, capabilities). The `[defaults]` section maps slot names (`fast`, `default`, `tool`) to service names.
+Infrastructure is declared in `SERVICES.toml` at the repo root. Each `[services.NAME]` section declares an endpoint (backend type, URL, API key env var, model name, `max_context_window`, capabilities). The `[defaults]` section maps slot names (`fast`, `default`, `tool`) to service names. `SERVICES.toml` describes service capacity, not pipeline usage: `max_context_window` is the total context window, not how much any pipeline will use.
 
-Pipelines create agents by intent, not by model name:
+Pipelines create agents by intent, not by model name. Each pipeline defines its own `MAX_OUTPUT_TOKENS` constant and passes it to `AgentBackend`:
 
 ```python
-extraction_agent = AgentBackend(slots["fast"], thinking_budget=2048)
-synthesis_agent = AgentBackend(slots["default"], thinking_budget=4096)
-research_agent = AgentBackend(slots["tool"])
+extraction_agent = AgentBackend(slots["fast"], max_tokens=MAX_OUTPUT_TOKENS, thinking_budget=2048)
+synthesis_agent = AgentBackend(slots["default"], max_tokens=MAX_OUTPUT_TOKENS, thinking_budget=4096)
+research_agent = AgentBackend(slots["tool"], max_tokens=MAX_OUTPUT_TOKENS)
 ```
 
-`AgentBackend` wraps a `ModelBackend` with pipeline-level config. `ModelBackend` (one class per model family) encapsulates all mechanical concerns: structured output strategy, BPE cleanup, thinking-block stripping, tool-calling workarounds. See `MODELS.md` for the workaround inventory and retire-when conditions.
+`AgentBackend` wraps a `ModelBackend` with pipeline-level config (`max_tokens`, `thinking_budget`). `ModelBackend` (one class per model family) encapsulates all mechanical concerns: structured output strategy, BPE cleanup, thinking-block stripping, tool-calling workarounds. See `MODELS.md` for the workaround inventory and retire-when conditions.
 
 Override slots at the CLI with `--service NAME` (all slots) or `--service SLOT=NAME` (one slot).
 
 ## Invariants
 
+- No lazy imports in production packages. All imports at file level. Study scripts may use lazy imports for optional dependencies.
+- Production packages never import from study. Study imports from packages, never the reverse.
 - Storage goes through `paperstore.StorageBackend`. Never construct paths from `backend.workspace_dir` or DB strings.
 - Library functions return data. Callers persist. Never call `write_*` inside a pipeline or conversion function. CLI owns persistence.
 - Use `logging`, never `print()`. Only `cli` may write to stderr.
@@ -109,11 +122,31 @@ Override slots at the CLI with `--service NAME` (all slots) or `--service SLOT=N
 
 ## Fidelity
 
-The analytical pipelines (dissect, advocatus, agora) cannot tolerate partial results. A wrong objection or missing evidence destroys credibility in a way that cannot be regained.
+The analytical pipelines (dissect, agora) cannot tolerate partial results. A wrong objection or missing evidence destroys credibility in a way that cannot be regained.
 
 If full fidelity cannot be achieved, stop. Fail the paper with a clear error message. Preserve the debug transcript. Never produce a partial result mistakable for a complete one.
 
 Every citation must be verified or honestly reported as `not_found` or `unreadable`. If the LLM is unreachable or a critical step produces invalid output, the paper fails.
+
+## Trace and debug
+
+Every analytical pipeline produces two diagnostic artifacts via `--trace` and `--debug`.
+
+**Trace** (`<pid>.trace.<tool>.md`) is a concise, compact progress dump. Rules:
+
+- Every executed step gets a heading: `## Step N (Name)`.
+- Under the heading: a compact summary of what that step produced. Group items by type under `### Subheading (count)`. Individual items are truncated quotes with a bracketed qualifier where useful (subtype, severity). No redundant type labels per line.
+- Every field written to PipelineState by a step must appear in the trace for that step. No silent data.
+- If a step ran but produced nothing, the heading still appears (confirming execution).
+- Steps beyond `stop_after` do not appear.
+
+**Debug** (`<pid>.debug.<tool>.md`) is full-fidelity I/O. Rules:
+
+- Every LLM call logs what went in (system prompt label, user message or its identifier, model, parameters) and what came out (raw structured output or error).
+- Debug is append-only within a run. Each entry is separated and labeled by call identity (e.g. `extract-chunk-0`).
+- No summarization, no truncation. Debug is the ground truth for diagnosing model behavior.
+
+Trace answers "did it run and what shape is the result." Debug answers "what exactly did the model see and say."
 
 ## Prompt-injection defense
 
@@ -123,6 +156,7 @@ Paper markdown and web-fetched content are untrusted data.
 - The framework floor in `pipeline.runner` tells agents to treat delimited content as data, never as instructions.
 - Structured output (D6) enforces the schema.
 - The `read_paper` tool is scoped to one paper and capped at 500 lines per call.
+- Alt text in image references (`![alt](path)`) is paper-controlled content. It is wrapped along with the rest of `paper.md` by `pipeline.tools.wrap_source` and therefore inherits the same protection. A future revision that passes alt text to an LLM outside the `wrap_source` envelope (e.g. as a vision-captioning prompt) needs its own wrapping.
 
 ## Tests
 

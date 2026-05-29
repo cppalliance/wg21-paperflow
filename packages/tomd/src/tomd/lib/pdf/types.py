@@ -1,11 +1,17 @@
 """Shared data types, constants, and precompiled regex patterns for PDF conversion."""
 
+from __future__ import annotations
+
 import re
 from collections import Counter
 from dataclasses import dataclass, field
 from enum import Enum
+from typing import TYPE_CHECKING
 
 from tomd.lib import DOC_NUM_PATTERN, SECTION_NUM_PATTERN
+
+if TYPE_CHECKING:
+    from .images import ExtractedImage
 
 
 class Confidence(Enum):
@@ -90,6 +96,7 @@ class SectionKind(Enum):
     LIST = "list"
     CODE = "code"
     TABLE = "table"
+    IMAGE = "image"
     UNCERTAIN = "uncertain"
     WORDING = "wording"
     WORDING_ADD = "wording-add"
@@ -158,6 +165,7 @@ class Section:
     table_source: str | None = None
     table_continuation: bool = False
     figure_graph: FigureGraph | None = None
+    image_ref: "ExtractedImage | None" = None
 
 
 @dataclass

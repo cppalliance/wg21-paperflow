@@ -25,6 +25,11 @@ from __future__ import annotations
 import asyncio
 import logging
 from datetime import datetime, timezone
+from pathlib import Path
+
+import httpx
+
+from cli.errors import EmptyTargetsError, MixedTargetsError
 from paperstore import parse_authors_raw
 from paperstore.backend import PaperRow, StorageBackend
 from paperstore.errors import (
@@ -46,11 +51,11 @@ DEFAULT_DOWNLOAD_CONCURRENCY = 8
 def _validate_targets(targets: list[str]) -> str:
     """Return the target type: 'all', 'years', or 'papers'.
 
-    Raises ValueError if targets are empty, mix years and paper IDs, or
-    contain an unrecognized format.
+    Raises :class:`EmptyTargetsError` if targets are empty, or
+    :class:`MixedTargetsError` if years and paper IDs are mixed.
     """
     if not targets:
-        raise ValueError("At least one target is required.")
+        raise EmptyTargetsError("At least one target is required.")
     if targets == ["all"]:
         return "all"
     # Check all are years (4 digits) or all are paper IDs.
@@ -59,7 +64,7 @@ def _validate_targets(targets: list[str]) -> str:
         return "years"
     if not any(are_years):
         return "papers"
-    raise ValueError(
+    raise MixedTargetsError(
         "Cannot mix years and paper IDs in one command. "
         f"Got: {targets!r}"
     )
@@ -236,7 +241,12 @@ async def run_download(
                         "suffix": suffix,
                         "status": "ok",
                     }
-                # Batch robustness: one bad paper must not crash the run
+                except httpx.HTTPStatusError as exc:
+                    logger.error(
+                        "%s: HTTP %d %s", pid,
+                        exc.response.status_code, exc.response.reason_phrase,
+                    )
+                    return {"paper_id": pid, "status": "error", "error": str(exc)}
                 except Exception as exc:
                     logger.exception("Download failed for %s", pid)
                     return {"paper_id": pid, "status": "error", "error": str(exc)}
@@ -288,6 +298,8 @@ async def run_convert(
     force: bool = False,
     concurrency: int = 4,
     write_prompts: bool = True,
+    extract_vector: bool = False,
+    whiteout_text: bool = False,
     on_progress: ProgressCallback | None = None,
 ) -> dict:
     """Convert staged source files to markdown. Workers run in threads.
@@ -295,6 +307,11 @@ async def run_convert(
     ``write_prompts`` controls whether the ``<pid>.prompts.json``
     intermediate is persisted (default True). Set False from CLI flows
     that explicitly opt out via ``--no-prompts``.
+
+    ``extract_vector`` and ``whiteout_text`` are forwarded to the tomd
+    PDF pipeline via :func:`convert_one_paper`. Default off; opting
+    in extracts vector figures (path-operator clusters) as PNGs
+    alongside raster images.
 
     ``on_progress`` is invoked after each task completion with a
     :class:`~paperstore.progress.ProgressEvent`.
@@ -342,7 +359,11 @@ async def run_convert(
                 # Worker reads the source but does no backend writes;
                 # the main coroutine persists through the backend below.
                 result = await asyncio.wait_for(
-                    asyncio.to_thread(convert_one_paper, paper),
+                    asyncio.to_thread(
+                        convert_one_paper, paper,
+                        extract_vector=extract_vector,
+                        whiteout_text=whiteout_text,
+                    ),
                     timeout=120,
                 )
                 return {
@@ -351,6 +372,7 @@ async def run_convert(
                     "prompts": result.prompts,
                     "intent": result.intent,
                     "title": result.title,
+                    "images": result.images,
                     "status": "ok",
                 }
             except RuntimeError as exc:
@@ -381,6 +403,16 @@ async def run_convert(
         result = await coro
         if result["status"] == "ok":
             pid = result["paper_id"]
+            # Persist extracted images first so the markdown's image
+            # references resolve when a reader opens the file. Mirrors
+            # the delete-then-write rebuild in pipeline._stage_convert.
+            pdf_images = [img for img in result.get("images", []) if img.bytes]
+            if pdf_images:
+                backend.delete_paper_images(pid)
+                for img in pdf_images:
+                    backend.write_paper_image(
+                        pid, img.page, img.index_on_page, img.ext, img.bytes,
+                    )
             md_path = backend.write_paper_md(pid, result["markdown"])
             if write_prompts and result["prompts"]:
                 backend.write_intermediate(pid, "prompts", result["prompts"])
@@ -403,6 +435,101 @@ async def run_convert(
                 on_progress = None
 
     return {"succeeded": succeeded, "skipped": skipped, "failed": failed}
+
+
+# ---------------------------------------------------------------------------
+# run_content_check
+# ---------------------------------------------------------------------------
+
+def _rows_for_content_check_targets(
+    targets: list[str], backend: StorageBackend,
+) -> list[PaperRow]:
+    """Resolve CLI targets (paper id, year, year-month) to paper rows.
+
+    Mirrors the dispatch in :func:`cli._process.run_process_command` so
+    every target shape `paperflow convert` advertises (paper id, year,
+    year-month) reaches :func:`run_content_check`. The older
+    :func:`_papers_from_scope` predates year-month targets.
+    """
+    from cli.targets import MONTH_RE, resolve_pid
+
+    seen: set[str] = set()
+    rows: list[PaperRow] = []
+
+    def _add(row: PaperRow) -> None:
+        if row.paper_id in seen:
+            return
+        seen.add(row.paper_id)
+        rows.append(row)
+
+    for target in targets:
+        if MONTH_RE.match(target):
+            for row in backend.list_papers_since(target):
+                _add(row)
+        elif target.isdigit() and len(target) == 4:
+            try:
+                for row in backend.list_papers_for_year(target):
+                    _add(row)
+            except MissingMailingIndexError:
+                logger.warning(
+                    "No papers found for year %s; run 'paperflow mailing' first.",
+                    target,
+                )
+        else:
+            pid = resolve_pid(target, backend)
+            result = backend.resolve_year_for_paper(pid)
+            if result is None:
+                logger.warning("Paper %s not found in database.", target)
+                continue
+            _add(result[1])
+
+    return rows
+
+
+def run_content_check(
+    targets: list[str],
+    backend: StorageBackend,
+    *,
+    json_path: Path | None = None,
+    workers: int = 1,
+    timeout: int = 120,
+) -> dict:
+    """Compare source text against converted markdown for the given targets.
+
+    Synchronous. ``run_content_check_report`` does its own
+    ``ProcessPoolExecutor`` parallelism; workers re-open the backend
+    from the workspace path. Skips papers missing either source or
+    markdown.
+    """
+    from tomd.lib.check_content import run_content_check_report
+
+    workers = max(1, workers)
+    rows = _rows_for_content_check_targets(targets, backend)
+
+    items: list[tuple[str, Path]] = []
+    skipped: list[dict] = []
+    workspace_dir = backend.workspace_dir
+    for row in rows:
+        pid = row.paper_id
+        if not row.source_file:
+            skipped.append({"paper_id": pid, "reason": "no_source"})
+            continue
+        if not row.markdown_path:
+            skipped.append({"paper_id": pid, "reason": "no_markdown"})
+            continue
+        items.append((pid, workspace_dir))
+
+    if not items:
+        return {"succeeded": [], "skipped": skipped, "failed": []}
+
+    run_content_check_report(
+        items, json_path=json_path, workers=workers, timeout=timeout,
+    )
+    return {
+        "succeeded": [pid for pid, _ in items],
+        "skipped": skipped,
+        "failed": [],
+    }
 
 
 # ---------------------------------------------------------------------------

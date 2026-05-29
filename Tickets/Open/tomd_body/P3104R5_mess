@@ -1,0 +1,21 @@
+P3104R5 is a mess
+
+*Constraints*: 'T' is an unsiged integer type ([basic.fundamental])........
+..............................
+
+compressed
+(
+
+x 
+
+
+
+,
+
+
+
+m 
+
+
+
+is the problem, we need to have "ordered and good structured output.

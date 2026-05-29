@@ -112,7 +112,6 @@ def dedup_paragraphs(md: str) -> str:
 DEFAULT_FENCE_LANG = "cpp"
 
 
-
 def strip_leading_h1(body: str, title: str = "") -> str:
     """Remove a leading H1 from body text if it duplicates the front-matter title.
 
