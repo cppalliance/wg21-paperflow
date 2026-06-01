@@ -45,7 +45,7 @@ What we deliberately do NOT do here:
 from __future__ import annotations
 
 import logging
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from typing import TYPE_CHECKING
 
 import pymupdf
@@ -73,10 +73,15 @@ _log = logging.getLogger(__name__)
 # _MAX_TEXT_OVERLAP_FRACTION, _MAX_CLUSTER_AREA_FRACTION) and the
 # pipeline-level structural-overlap filter that drops vectors covering
 # TABLE/CODE regions. Real diagrams can be quite sparse: P3556R0's
-# page-3 flowchart clocks only ~115 items (boxes + arrowheads + labels).
-# 100 admits sparse flowcharts while still skipping pages whose entire
-# vector content is page chrome (running rules, header underlines).
-_MIN_PAGE_DRAWING_ITEMS = 100
+# page-3 flowchart clocks ~115 items (boxes + arrowheads + labels);
+# P3127R1's page-10 Figure 4 with three sub-panels only adds up to 98
+# items total. 50 admits multi-panel sub-figure pages while still
+# skipping pages whose entire vector content is page chrome (running
+# rules, header underlines - typically 4-20 items). False positives
+# on pages in the 50-99 range are blocked downstream by the per-
+# cluster tiny-cov gate (corpus scan: only P3127R1 page 10 admits
+# anything in this range).
+_MIN_PAGE_DRAWING_ITEMS = 50
 
 # Single-linkage clustering distance: drawings whose bboxes are within
 # this many pt of each other are merged. Calibrated against the corpus
@@ -117,8 +122,12 @@ _MAX_TEXT_OVERLAP_FRACTION = 0.35
 # the cluster is a real diagram whose own boxes/nodes enclose the
 # labels.
 #
-# Two paths, both requiring _DIAGRAM_MIN_AREA_PT2 to rule out small
-# annotation boxes:
+# Four paths to is_diagram. Paths 1 and 2 share the area gate
+# (_DIAGRAM_MIN_AREA_PT2 rules out small annotation boxes) and differ on
+# items / density / overlap. Paths 3 and 4 (compact-cov and tiny-cov)
+# drop the area and overlap gates and instead use sum-of-drawing-
+# coverage as the orthogonal "this is a layered drawing, not body
+# prose" signal; they differ on the items / cov_sum tradeoff.
 #
 # 1. Dense path (P3556R0 page 3 "Process" flowchart style, where a
 #    flowchart packs many strokes into its bbox and labels inside the
@@ -134,13 +143,39 @@ _MAX_TEXT_OVERLAP_FRACTION = 0.35
 #      items >= _DIAGRAM_SPARSE_MIN_ITEMS
 #      AND overlap < _DIAGRAM_SPARSE_MAX_OVERLAP
 #
-# Calibration: against the full P4003R1 + P3556R0 + P3127R1 corpus,
-# the dense path admits P3556R0 Fig 2 (114 items / 39kpt^2 / d=0.0029
-# / ov=0.56) and the sparse path admits P3127R1 Fig 1 (58 items /
-# 78kpt^2 / d=0.00074 / ov=0.46) while neither admits the P4003R1
-# code-block-background false positives (typically items < 50 once
-# area >= 30kpt^2, or overlap > 0.8). Loosen any threshold only
-# after re-validating against the calibration corpus (see
+# 3. Compact-cov path (P3127R1 page 11 Figure 5 right half style:
+#    adjacency tables and lists pack hundreds of small rectangles
+#    into a small bbox, and the figure-internal cell numbers drive
+#    the spatial-path text overlap to ~1.0 - which is the wrong
+#    signal here because the "overlapping text" IS the figure's
+#    content). The distinguishing feature is the drawing-coverage
+#    SUM: real data-table figures have layered drawings (cell
+#    borders + arrows + fills overlapping in space), so the sum of
+#    drawing-rect intersections with the cluster exceeds 2x the
+#    cluster area. Code-block-style false positives where one
+#    drawing covers one region stay near 1.0:
+#      items >= _DIAGRAM_COMPACT_MIN_ITEMS
+#      AND coverage_sum >= _DIAGRAM_COMPACT_MIN_COVERAGE
+#
+# Calibration: against the P4003R1 + P3556R0 + P3127R1 + P2583R1 +
+# P4007R0 corpus, all three paths together admit:
+#   - P3556R0 Fig 2 via dense (114 / 39kpt^2 / d=0.0029 / ov=0.56 /
+#     cov_sum=0.34 - low cov_sum for a flowchart is fine because
+#     dense admits it via area+density).
+#   - P3127R1 Fig 1 via sparse (158 / 136kpt^2 / ov=0.66 /
+#     cov_sum=1.93 - high enough that the dense path also admits).
+#   - P3127R1 Figure 5 right half via compact-cov (140 / 18.5kpt^2
+#     / ov=0.997 / cov_sum=3.27). Neither the dense (area gate)
+#     nor sparse (overlap gate) path admits this geometry; only
+#     compact-cov does.
+#   - P3127R1 Figure 3 page-8 adjacency-list via compact-cov (132 /
+#     8kpt^2 / ov=1.00 / cov_sum=3.04).
+# And rejects every P4003R1 inline-code-decoration false positive
+# (max cov_sum=1.86 against the compact-cov 2.0 floor). The 2.0
+# threshold gives a 0.07 absolute margin to both the worst real
+# figure (Fig 1's main cluster at 1.93) and the worst false positive
+# (P4003R1 page 57 at 1.86). Loosen any threshold only after
+# re-validating against the calibration corpus (see
 # notes/preview-tool-abstract-images-vector-images-plan.md §7.1).
 _DIAGRAM_MIN_AREA_PT2 = 30_000.0
 _DIAGRAM_DENSE_MIN_DENSITY = 0.0010
@@ -148,6 +183,36 @@ _DIAGRAM_DENSE_MIN_ITEMS = 100
 _DIAGRAM_DENSE_MAX_OVERLAP = 0.70
 _DIAGRAM_SPARSE_MIN_ITEMS = 50
 _DIAGRAM_SPARSE_MAX_OVERLAP = 0.50
+_DIAGRAM_COMPACT_MIN_ITEMS = 100
+_DIAGRAM_COMPACT_MIN_COVERAGE = 2.0
+
+# Tiny-cov bypass: a SUB-FIGURE-sized cluster (smaller than the
+# regular min-dim floor) is admitted when it carries the layered-
+# drawing signature (cov_sum >= 3.0, even higher than the regular
+# compact-cov 2.0 to compensate for the lower item count). Calibrated
+# against the WG21 multi-panel-figure pattern - e.g. P3127R1 Figure 2
+# has four sub-panels (a)(b)(c)(d) at widths 34-130pt and heights
+# 58-90pt, each 22-206 items with cov_sum 3.27-3.94. Each sub-panel
+# is a real figure; emitting them as separate PNGs sharing the same
+# "Figure N:" alt-text is the practical outcome (merging would
+# require widening _CLUSTER_LINK_DISTANCE_PT past the 30pt gap, which
+# chains code-block decorations on P4003R1).
+#
+# The sub-floor at _DIAGRAM_TINY_SUB_FLOOR_PT (30pt) is the key
+# distinguishing geometry: the corpus's font-as-paths false
+# positives (P4003R0/R1/P4007R0) have one dimension at body-line
+# height (9-13pt), while real sub-figures have minimum dimension
+# >= 30pt. The 30pt floor cleanly separates these without affecting
+# any known real figure.
+#
+# Tiny-cov participates in two places:
+# - Min-dim gate: bypasses _MIN_CLUSTER_DIM_PT when the cluster is
+#   tiny-cov substantial (and both dims >= the sub-floor).
+# - is_diagram check: provides a fourth diagram path so sub-figures
+#   aren't subsequently dropped by the text-overlap gate.
+_DIAGRAM_TINY_MIN_ITEMS = 20
+_DIAGRAM_TINY_MIN_COVERAGE = 3.0
+_DIAGRAM_TINY_SUB_FLOOR_PT = 30.0
 
 # Per-constituent thresholds for the post-clustering merge pass
 # (:func:`_merge_close_clusters`). Both clusters being merged must
@@ -638,6 +703,48 @@ def _text_overlap_fraction(
     return min(total_overlap / cluster_area, 1.0)
 
 
+def _drawing_coverage_sum(
+    cluster_bbox: tuple[float, float, float, float],
+    drawings: Sequence[Mapping[str, object]],
+) -> float:
+    """Sum of drawing-rect intersection-with-cluster areas / cluster area.
+
+    Allows overlap (a region covered by N drawings contributes N times),
+    so the result can exceed 1.0. Used by the compact-cov diagram path
+    as the orthogonal "layered drawings" signal: real data-table
+    figures pack cell borders + arrows + fills that overlap in space,
+    driving cov_sum above 2.0. Code-block-style false positives - one
+    drawing per region - stay near 1.0 (the calibration corpus's
+    worst false positive sits at 1.86, the worst real figure at 1.93).
+
+    NOT clamped to 1.0 (deliberately, unlike :func:`_text_overlap_fraction`):
+    the layered-vs-flat distinction is exactly what the unclamped sum
+    measures. Drawings outside the cluster contribute 0 (their
+    intersection with the cluster bbox is empty).
+
+    O(N) over ``drawings``; called at most once per surviving cluster
+    in :func:`extract_page_vector_images`. Drawings without a ``rect``
+    field are skipped.
+    """
+    cx0, cy0, cx1, cy1 = cluster_bbox
+    cluster_area = (cx1 - cx0) * (cy1 - cy0)
+    if cluster_area <= 0:
+        return 0.0
+    total = 0.0
+    for drawing in drawings:
+        rect = drawing.get("rect")
+        if rect is None:
+            continue
+        ix0 = max(cx0, rect.x0)
+        iy0 = max(cy0, rect.y0)
+        ix1 = min(cx1, rect.x1)
+        iy1 = min(cy1, rect.y1)
+        if ix1 <= ix0 or iy1 <= iy0:
+            continue
+        total += (ix1 - ix0) * (iy1 - iy0)
+    return total / cluster_area
+
+
 # ---- Pre-clustering ins/del-coloured drop ---------------------------------
 
 
@@ -1044,10 +1151,23 @@ def extract_page_vector_images(
         # Min-dim floor: virtual clusters get the lower
         # _VIRTUAL_MIN_CLUSTER_DIM_PT so an intentionally thin
         # container (e.g. a labels-in-one-row flow diagram) survives.
+        # Tiny-cov bypass: a small cluster with very layered drawings
+        # (cov_sum >= _DIAGRAM_TINY_MIN_COVERAGE) bypasses the regular
+        # floor, dropping to _DIAGRAM_TINY_SUB_FLOOR_PT. Calibrated
+        # against WG21 multi-panel sub-figures (P3127R1 Figure 2/3/4)
+        # where each panel is 34-130pt wide / 47-115pt tall but
+        # carries a clearly-layered drawing signature.
         min_dim = _VIRTUAL_MIN_CLUSTER_DIM_PT if is_virtual else _MIN_CLUSTER_DIM_PT
         if width < min_dim or height < min_dim:
-            reasons[REASON_TOO_SMALL] = reasons.get(REASON_TOO_SMALL, 0) + 1
-            continue
+            if not (
+                width >= _DIAGRAM_TINY_SUB_FLOOR_PT
+                and height >= _DIAGRAM_TINY_SUB_FLOOR_PT
+                and item_count >= _DIAGRAM_TINY_MIN_ITEMS
+                and _drawing_coverage_sum(cluster_bbox, after_edge)
+                    >= _DIAGRAM_TINY_MIN_COVERAGE
+            ):
+                reasons[REASON_TOO_SMALL] = reasons.get(REASON_TOO_SMALL, 0) + 1
+                continue
         if page_area > 0 and width * height >= _MAX_CLUSTER_AREA_FRACTION * page_area:
             # Single-linkage chaining symptom: a page-frame stroke or
             # margin marker pulled the cluster bbox out to span the
@@ -1071,16 +1191,43 @@ def extract_page_vector_images(
             continue
         cluster_area = width * height
         overlap = _text_overlap_fraction(cluster_bbox, page_blocks)
-        is_diagram = cluster_area >= _DIAGRAM_MIN_AREA_PT2 and (
-            (
-                item_count >= _DIAGRAM_DENSE_MIN_ITEMS
-                and item_count / cluster_area >= _DIAGRAM_DENSE_MIN_DENSITY
-                and overlap < _DIAGRAM_DENSE_MAX_OVERLAP
+        is_diagram = (
+            cluster_area >= _DIAGRAM_MIN_AREA_PT2 and (
+                (
+                    item_count >= _DIAGRAM_DENSE_MIN_ITEMS
+                    and item_count / cluster_area >= _DIAGRAM_DENSE_MIN_DENSITY
+                    and overlap < _DIAGRAM_DENSE_MAX_OVERLAP
+                )
+                or (
+                    item_count >= _DIAGRAM_SPARSE_MIN_ITEMS
+                    and overlap < _DIAGRAM_SPARSE_MAX_OVERLAP
+                )
             )
-            or (
-                item_count >= _DIAGRAM_SPARSE_MIN_ITEMS
-                and overlap < _DIAGRAM_SPARSE_MAX_OVERLAP
-            )
+        ) or (
+            # Compact-cov bypass: drops the area gate AND the overlap
+            # gate. The sum-of-drawing-coverage signal distinguishes a
+            # data-table figure (whose internal cell numbers inflate
+            # text overlap to ~1.0) from a code-block-style false
+            # positive: real figures have layered drawings (cov_sum
+            # >= 2.0), false positives stay near 1.0. ``after_edge`` is
+            # the page-level drawing list - cov_sum naturally returns
+            # 0 for drawings whose rects don't intersect the cluster.
+            item_count >= _DIAGRAM_COMPACT_MIN_ITEMS
+            and _drawing_coverage_sum(cluster_bbox, after_edge)
+                >= _DIAGRAM_COMPACT_MIN_COVERAGE
+        ) or (
+            # Tiny-cov bypass: same shape as compact-cov but with a
+            # lower item floor (20) and a stricter cov_sum floor (3.0).
+            # Calibrated for sub-figures of multi-panel WG21 figures
+            # (each panel has 22-66 items with cov_sum 3.27-3.96). The
+            # higher cov_sum compensates for the lower item count;
+            # font-as-paths false positives (P4003R1) sit at cov_sum
+            # ~1.3-1.9, well below this floor. The earlier min-dim
+            # sub-floor (30pt) keeps body-text-height font-as-paths
+            # decorations (height 9-13pt) out of contention.
+            item_count >= _DIAGRAM_TINY_MIN_ITEMS
+            and _drawing_coverage_sum(cluster_bbox, after_edge)
+                >= _DIAGRAM_TINY_MIN_COVERAGE
         )
         if not is_diagram and overlap >= _MAX_TEXT_OVERLAP_FRACTION:
             reasons[REASON_TEXT_OVERLAP] = reasons.get(REASON_TEXT_OVERLAP, 0) + 1
