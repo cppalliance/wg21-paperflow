@@ -18,6 +18,14 @@ from .images import (
     finalize_extraction,
 )
 from .vector_images import extract_page_vector_images
+from .glyphs import (
+    GlyphPassStats,
+    collect_glyph_candidates,
+    collect_text_emoji_bboxes,
+    drop_glyphs_in_code_and_tables,
+    filter_coincident,
+    inject_glyph_spans,
+)
 from .mono import propagate_monospace
 from .figures import detect_figure_regions
 from .wording import classify_wording, collect_line_drawings
@@ -225,17 +233,35 @@ _STANDARDS_DRAFT_MIN_PAGES = 200
 def _is_slide_deck(doc) -> bool:
     """Detect presentation / slide-deck PDFs from page geometry.
 
-    A PDF is a slide deck when most pages are landscape and smaller
-    than standard paper sizes (width < 600pt ≈ 8.3in).
+    Two rules, either is sufficient:
+
+    1. At least :data:`_SLIDE_DECK_LANDSCAPE_FRACTION` of pages are
+       landscape AND narrower than :data:`_SLIDE_DECK_MAX_WIDTH`. This
+       catches classic Beamer / Keynote 4:3 decks where the small
+       page width is itself diagnostic (a portrait title page is
+       fine).
+    2. Every page in the document is landscape. This catches modern
+       widescreen decks (720x405, 960x540, 1024x768, 1280x720,
+       1920x1080) that exceed the width cap of rule 1. Strict
+       all-landscape avoids false positives on mixed-orientation
+       technical documents (e.g. N5028 - 105/114 landscape A4 pages,
+       but the 9 portrait pages keep it out of the deck bucket).
     """
     if doc.page_count == 0:
         return False
-    landscape_count = 0
+    # Rule 1: small-width landscape dominant.
+    small_landscape_count = 0
+    all_landscape = True
     for pg_num in range(doc.page_count):
         r = doc[pg_num].rect
-        if r.width > r.height and r.width < _SLIDE_DECK_MAX_WIDTH:
-            landscape_count += 1
-    return landscape_count / doc.page_count >= _SLIDE_DECK_LANDSCAPE_FRACTION
+        if r.width <= r.height:
+            all_landscape = False
+        elif r.width < _SLIDE_DECK_MAX_WIDTH:
+            small_landscape_count += 1
+    if small_landscape_count / doc.page_count >= _SLIDE_DECK_LANDSCAPE_FRACTION:
+        return True
+    # Rule 2: every page is landscape (any width).
+    return all_landscape
 
 
 def _is_standards_draft(doc) -> bool:
@@ -673,6 +699,7 @@ class PipelineResult:
     source_image_count: int = 0
     images_truncated: bool = False
     vector_uncertainty: VectorUncertaintyStats | None = None
+    glyph_stats: GlyphPassStats | None = None
 
 
 def _parse_pdf_info_date(raw: str) -> str:
@@ -817,6 +844,12 @@ def run_pipeline(
         all_edge_items = []
         page_widths: dict[int, float] = {}
         per_page_image_candidates: list = []
+        # Sub-threshold raster glyphs (font-replacement emoji) and the
+        # text-layer emoji bboxes used to skip coincident positions.
+        # Both gathered while the doc is open; injected after the
+        # readability gate so unreadable PDFs discard glyph state too.
+        glyph_candidates: list = []
+        text_emoji_by_page: dict[int, list] = {}
 
         for pg_num in range(result.page_count):
             page = doc[pg_num]
@@ -848,6 +881,13 @@ def run_pipeline(
                 )
             else:
                 per_page_image_candidates.append(raster_candidates)
+
+            page_glyphs = collect_glyph_candidates(page)
+            if page_glyphs:
+                glyph_candidates.extend(page_glyphs)
+                # Only pages carrying glyphs need the coincidence check,
+                # so the rawdict emoji scan is scoped to them.
+                text_emoji_by_page[pg_num + 1] = collect_text_emoji_bboxes(page)
 
             all_mupdf_blocks.extend(mupdf_blocks)
             all_spatial_blocks.extend(spatial_blocks)
@@ -940,6 +980,32 @@ def run_pipeline(
     result.source_image_count = extraction_result.source_image_count
     result.images_truncated = extraction_result.images_truncated
     result.vector_uncertainty = extraction_result.vector_uncertainty
+
+    # Inject U+FFFD placeholders for sub-threshold raster glyphs (emoji
+    # the figure path drops) into both extraction paths, skipping rects
+    # already covered by a text-layer emoji codepoint. Runs after the
+    # readability gate (so unreadable PDFs discard glyph state) and
+    # after the font_counts snapshot above (so the synthetic font never
+    # enters body_fonts/dominant_font), but before cleanup/structure so
+    # each placeholder is treated as ordinary body text. Placement runs
+    # independently per path; compare_extractions is page-level word
+    # multiset, so the same token added to both paths stays balanced.
+    if glyph_candidates:
+        orphans, skipped_coincident = filter_coincident(
+            glyph_candidates, text_emoji_by_page,
+        )
+        glyph_stats = inject_glyph_spans(all_mupdf_blocks, orphans)
+        inject_glyph_spans(all_spatial_blocks, orphans)
+        result.glyph_stats = GlyphPassStats(
+            injected=glyph_stats.injected,
+            skipped_coincident=skipped_coincident,
+            free_standing=glyph_stats.free_standing,
+        )
+        if result.glyph_stats.fired:
+            _log.info("Glyph placeholders: injected=%d skipped_coincident=%d "
+                      "free_standing=%d", result.glyph_stats.injected,
+                      result.glyph_stats.skipped_coincident,
+                      result.glyph_stats.free_standing)
 
     repeating = detect_repeating(all_edge_items, result.page_count)
     if repeating:
@@ -1057,6 +1123,16 @@ def run_pipeline(
     for k, v in body_metadata.items():
         if k not in metadata:
             metadata[k] = v
+
+    # Glyph placeholders that attached (before structure ran) to a line
+    # now classified CODE or folded into a TABLE are removed: a U+FFFD in
+    # a fenced block reads as a syntax error, and tables render
+    # structurally. The marker discloses the count so the loss is not
+    # silent. Runs after structure has assigned section kinds.
+    if result.glyph_stats is not None:
+        result.glyph_stats.skipped_code_section = (
+            drop_glyphs_in_code_and_tables(sections)
+        )
 
     # Vector-image post-processing
     if result.images:
@@ -1281,6 +1357,7 @@ def run_pipeline(
         images_truncated=result.images_truncated,
         source_image_count=result.source_image_count,
         vector_uncertainty=result.vector_uncertainty,
+        glyph_stats=result.glyph_stats,
     )
     prompts = emit_prompts(sections)
 

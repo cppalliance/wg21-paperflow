@@ -9,8 +9,23 @@ paperflow assay P4003R3
 paperflow assay P4003R3 --debug --trace
 paperflow assay P4003R3 --step 4          # stop after Derive, implies --trace
 paperflow assay P4003R3 --force           # re-run even if already complete
-paperflow assay P4003R3 --service fast=h200-qwen3-32b
 ```
+
+## C++ Standard Access
+
+Assay requires the cpp-mcp server for normative text lookups,
+mechanism verification, and specification analysis grounding. The
+server URL is configured in `SERVICES.toml` under `[services.cpp-mcp]`.
+
+Set the API key in your environment:
+
+```bash
+export CPP_MCP_API_KEY="<your-api-key>"
+```
+
+Assay will hard-error if the MCP server is not reachable or the API
+key is missing. This is intentional: running without standard access
+degrades finding quality in ways that cannot be detected downstream.
 
 ## Architecture
 

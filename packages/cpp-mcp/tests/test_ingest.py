@@ -141,3 +141,132 @@ def test_include_order_from_std_tex(source_dir, backend):
     basic_idx = labels.index("basic")
     expr_idx = labels.index("expr")
     assert basic_idx < expr_idx
+
+
+# -----------------------------------------------------------------------
+# Atomic vs non-atomic ingest and extracted data tests
+# -----------------------------------------------------------------------
+
+
+FIXTURE_DUPLICATE_DEFN_TEX = r"""
+\rSec0[defns]{Terms and definitions}
+
+\pnum
+\defn{well-formed} A program that follows all syntax and semantic rules.
+
+\rSec0[basic]{Basic concepts}
+
+\pnum
+A \defn{well-formed} program is one that is correct according to the language rules.
+
+\rSec1[basic.types]{Types}
+
+\pnum
+An \defn{entity} is a value, object, reference, or function.
+
+\pnum
+An \defn{entity} is also used here to test same-section dedup.
+"""
+
+
+FIXTURE_RICH_TEX = r"""
+\rSec0[basic]{Basic concepts}
+
+\pnum
+Introductory text. See \iref{expr.prim} for primary expressions.
+
+\indextext{lifetime}
+\keyword{constexpr}
+
+\defn{well-formed}
+
+\begin{bnf}
+\nontermdef{simple-declaration}
+declaration: block-declaration
+\end{bnf}
+
+\rSec1[basic.life]{Object lifetime}
+
+\pnum
+The lifetime of an object \iref{basic.types} begins when storage is obtained.
+
+\indextext{object lifetime}
+\libglobal{move}
+"""
+
+
+@pytest.fixture
+def rich_source_dir(tmp_path):
+    src = tmp_path / "rich_source"
+    src.mkdir()
+    (src / "std.tex").write_text(r"\input{basic}", encoding="utf-8")
+    (src / "basic.tex").write_text(FIXTURE_RICH_TEX, encoding="utf-8")
+    return src
+
+
+def test_atomic_ingest(rich_source_dir, backend):
+    count = ingest_from_directory(backend, rich_source_dir, "n9999", atomic=True)
+    assert count > 0
+    assert backend.lookup_section("basic", "n9999") is not None
+    assert backend.lookup_section("basic.life", "n9999") is not None
+
+    staging_rows = backend.conn.execute(
+        "SELECT COUNT(*) as c FROM standard_sections WHERE draft_tag LIKE '_staging_%'"
+    ).fetchone()
+    assert staging_rows["c"] == 0
+
+
+def test_non_atomic_ingest(rich_source_dir, backend):
+    count = ingest_from_directory(backend, rich_source_dir, "n9999", atomic=False)
+    assert count > 0
+    assert backend.lookup_section("basic", "n9999") is not None
+    assert backend.lookup_section("basic.life", "n9999") is not None
+
+
+def test_version_metadata_populated(rich_source_dir, backend):
+    ingest_from_directory(backend, rich_source_dir, "n5008", atomic=True)
+    drafts = backend.list_drafts()
+    assert len(drafts) == 1
+    d = drafts[0]
+    assert d.standard_version == "C++26"
+    assert d.version_note == "working draft"
+
+
+def test_extracted_data_populated(rich_source_dir, backend):
+    ingest_from_directory(backend, rich_source_dir, "n5008", atomic=True)
+
+    xrefs = backend.get_references_from("basic", "n5008")
+    assert "expr.prim" in xrefs
+
+    mechanisms = backend.verify_mechanism("constexpr", "n5008")
+    assert len(mechanisms) > 0
+
+    index_hits = backend.search_index("lifetime", draft_tag="n5008")
+    assert len(index_hits) > 0
+
+
+def test_duplicate_defined_terms_across_sections(tmp_path):
+    """A term defined in multiple sections must not crash ingestion.
+
+    Both definition sites should be stored and retrievable.
+    """
+    src = tmp_path / "source"
+    src.mkdir()
+    (src / "std.tex").write_text(r"\input{basic}", encoding="utf-8")
+    (src / "basic.tex").write_text(FIXTURE_DUPLICATE_DEFN_TEX, encoding="utf-8")
+
+    db_path = tmp_path / "test.db"
+    b = SqliteStandardBackend(db_path)
+    b.create_schema()
+
+    count = ingest_from_directory(b, src, "test-tag", atomic=False)
+    assert count > 0
+
+    sites = b.lookup_definition("well-formed", "test-tag")
+    assert len(sites) == 2
+    labels = [s.stable_label for s in sites]
+    assert "defns" in labels
+    assert "basic" in labels
+
+    entity_sites = b.lookup_definition("entity", "test-tag")
+    assert len(entity_sites) == 1, "same-section duplicate should be deduped"

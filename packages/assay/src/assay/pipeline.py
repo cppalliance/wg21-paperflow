@@ -75,11 +75,64 @@ from assay.rag import (
     query_index,
     query_for_research, query_for_challenge, IndexStats,
 )
+from assay.standard import StandardClient, from_service_config
 from assay.triage import should_analyze
 from pipeline import tokens_to_chars
 from assay.render import render_report, render_trace
 
 logger = logging.getLogger(__name__)
+
+_MCP_TOML_SECTION = "mcp"
+_MCP_ENTRY_NAME = "cpp-standard"
+
+
+def _load_cpp_mcp_client() -> StandardClient:
+    """Load the cpp-mcp config from SERVICES.toml ``[mcp.cpp-standard]``.
+
+    Raises ``ValueError`` if the entry is missing or the API key is
+    not set. The C++ standard MCP server is required for assay.
+    """
+    import os
+    from pathlib import Path
+
+    try:
+        import tomllib
+    except ModuleNotFoundError:
+        import tomli as tomllib  # type: ignore[no-redef]
+
+    toml_path = Path(__file__).resolve().parents[4] / "SERVICES.toml"
+    if not toml_path.exists():
+        raise ValueError(
+            f"SERVICES.toml not found at {toml_path}. "
+            f"The C++ standard MCP server ([{_MCP_TOML_SECTION}.{_MCP_ENTRY_NAME}]) "
+            f"is required for assay."
+        )
+    with open(toml_path, "rb") as f:
+        config = tomllib.load(f)
+
+    mcp_section = config.get(_MCP_TOML_SECTION) or {}
+    entry = mcp_section.get(_MCP_ENTRY_NAME)
+    if entry is None:
+        raise ValueError(
+            f"[{_MCP_TOML_SECTION}.{_MCP_ENTRY_NAME}] not found in SERVICES.toml. "
+            f"The C++ standard MCP server is required for assay."
+        )
+
+    base_url = entry.get("base_url", "")
+    api_key_raw = entry.get("api_key", "")
+    if api_key_raw.startswith("$"):
+        env_var = api_key_raw[1:]
+        api_key = os.environ.get(env_var, "").strip()
+        if not api_key:
+            raise ValueError(
+                f"Environment variable ${env_var} is not set (required by "
+                f"[{_MCP_TOML_SECTION}.{_MCP_ENTRY_NAME}] in SERVICES.toml)."
+            )
+    else:
+        api_key = api_key_raw
+
+    return from_service_config(base_url=base_url, api_key=api_key)
+
 
 # -- Step name constants (must match assay.md headers) -----------------------
 
@@ -572,6 +625,12 @@ async def _custom_decide(state: PipelineState, ctx: StepContext, spec) -> None:
             f"{ctx.inject_untrusted(numbered)}\n\n"
             f"## Claims to judge\n\n{claims_block}\n"
         )
+        if state.std_client is not None:
+            std_context = await state.std_client.prefetch_standard_context(
+                claims_block + "\n" + numbered
+            )
+            if std_context:
+                user_msg += f"\n\n{std_context}"
         result = await agent.run(
             system_prompt=system_prompt,
             user_message=user_msg,
@@ -1032,6 +1091,22 @@ async def _custom_research(state: PipelineState, ctx: StepContext, spec) -> None
             if evidence:
                 user_msg += f"\n\n{evidence}"
 
+        tools = None
+        if lens == "Specification" and state.std_client is not None:
+            sc = state.std_client
+            tools = {
+                "guide_query": sc.guide_query_tool,
+                "search_standard": sc.search_standard_tool,
+                "verify_mechanism": sc.verify_mechanism_tool,
+                "lookup_section": sc.lookup_section_tool,
+                "lookup_declaration": sc.lookup_declaration_tool,
+                "lookup_definition": sc.lookup_definition_tool,
+                "search_index": sc.search_index_tool,
+                "search_grammar": sc.search_grammar_tool,
+                "get_cross_references": sc.get_cross_references_tool,
+                "get_ancestors": sc.get_ancestors_tool,
+            }
+
         try:
             result = await agent.run(
                 system_prompt=system_prompt,
@@ -1039,6 +1114,7 @@ async def _custom_research(state: PipelineState, ctx: StepContext, spec) -> None
                 output_type=ResearchLensOutput,
                 max_tokens=max_output,
                 thinking_budget=thinking,
+                tools=tools,
                 label=f"research-{lens}",
                 debug_log=ctx.debug_log if ctx.debug else None,
             )
@@ -1191,6 +1267,17 @@ async def _custom_challenge(state: PipelineState, ctx: StepContext, spec) -> Non
                             parts.append(f"\n**{f.title}:**\n{evidence_map[f.title]}\n")
                     if len(parts) > 1:
                         user_msg += "".join(parts)
+
+            if state.std_client is not None:
+                batch_text = "\n".join(
+                    f.explanation or f.title or "" for f in batch
+                )
+                mech_block = await state.std_client.prefetch_mechanism_verification(batch_text)
+                if mech_block:
+                    user_msg += f"\n\n{mech_block}"
+                std_block = await state.std_client.prefetch_standard_context(batch_text)
+                if std_block:
+                    user_msg += f"\n\n{std_block}"
 
             result = await agent.run(
                 system_prompt=system_prompt,
@@ -1554,7 +1641,10 @@ async def assay_paper(
     embedder_name = embedder_defaults.get("default")
     embedder = embedders.get(embedder_name) if embedder_name else None
 
-    state = PipelineState()
+    std_client = _load_cpp_mcp_client()
+    await std_client.connect()
+
+    state = PipelineState(std_client=std_client)
 
     ctx = StepContext(
         prompt=prompt,
@@ -1576,22 +1666,26 @@ async def assay_paper(
         else None
     )
 
-    await dispatch(
-        pipeline,
-        state,
-        ctx,
-        tool_name="assay",
-        stop_after=stop_after,
-        on_progress=on_progress,
-        on_step_complete=lambda spec, st: _persist_step(spec, st, ctx),
-        render_trace_fn=lambda st, step: render_trace(st, step, step_durations=[m.duration_s for m in ctx.step_metrics]),
-        trace_path=trace_path,
-        debug_path=debug_path if debug else None,
-    )
+    try:
+        await dispatch(
+            pipeline,
+            state,
+            ctx,
+            tool_name="assay",
+            stop_after=stop_after,
+            on_progress=on_progress,
+            on_step_complete=lambda spec, st: _persist_step(spec, st, ctx),
+            render_trace_fn=lambda st, step: render_trace(st, step, step_durations=[m.duration_s for m in ctx.step_metrics]),
+            trace_path=trace_path,
+            debug_path=debug_path if debug else None,
+        )
 
-    if stop_after is not None:
-        return render_trace(state, stop_after)
-    return state.report or ""
+        if stop_after is not None:
+            return render_trace(state, stop_after)
+        return state.report or ""
+    finally:
+        if std_client is not None:
+            await std_client.close()
 
 
 async def assay_since(
