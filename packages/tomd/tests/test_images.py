@@ -1486,6 +1486,7 @@ class TestLowOverlapAdmitFloor:
         assert len(cands) == 1
 
 
+
 class TestDrawingCoverageSum:
     """Unit tests for the :func:`_drawing_coverage_sum` helper.
 
