@@ -70,6 +70,8 @@ _PARTIAL_ROW_MAX_Y_GAP = 25.0
 
 # Side-by-side table constants
 _SBS_MAX_SCAN_GAP = 30.0  # max y-gap before stopping body scan
+_SBS_MAX_SCAN_GAP_ALIGNED = 50.0  # larger tolerance for column-aligned blocks
+_SBS_COL_ALIGN_TOL = 25.0  # max x-distance to count as column-aligned
 _SBS_ROW_Y_BAND = 10.0    # max y-gap between col-0 blocks in the same row
 _ATOMIZED_HDR_MAX_HEIGHT = 60.0  # max header region height for recovery
 _ATOMIZED_HDR_MAX_CONSEC_SINGLE = 3  # stop after N consecutive 1-col rows
@@ -84,6 +86,12 @@ _BARE_HEADING_NUM_RE = re.compile(
 )
 _HEADING_NUM_MAX_WORDS = 8
 
+# WG21 stable name in brackets: [basic.memobj], [intro.object], etc.
+# These appear as bold right-aligned text on WG21 section heading lines.
+_STABLE_NAME_RE = re.compile(
+    r"^\[[\w.]+\]$"
+)
+
 
 # ---------------------------------------------------------------------------
 # Table classification (integrated from table_analyzer.py)
@@ -93,10 +101,13 @@ _HEADING_NUM_MAX_WORDS = 8
 class TableKind(Enum):
     """What kind of table this section represents."""
     CLEAN_MATRIX = "clean_matrix"
+    INLINE_GRID = "inline_grid"
     PROSE_TABLE = "prose_table"
     CODE_COMPARISON = "code_comparison"
     SPEC_TABLE = "spec_table"
     KEY_VALUE = "key_value"
+    BIBLIOGRAPHY = "bibliography"
+    NB_BALLOT = "nb_ballot"
     FALSE_POSITIVE = "false_positive"
 
 
@@ -114,6 +125,8 @@ _STRATEGY_MAP = {
     TableKind.CODE_COMPARISON: TableStrategy.HTML_TABLE,
     TableKind.SPEC_TABLE: TableStrategy.HTML_TABLE,
     TableKind.KEY_VALUE: TableStrategy.PIPE_TABLE,
+    TableKind.BIBLIOGRAPHY: TableStrategy.PIPE_TABLE,
+    TableKind.NB_BALLOT: TableStrategy.HTML_TABLE,
     TableKind.FALSE_POSITIVE: TableStrategy.SKIP,
 }
 
@@ -121,6 +134,16 @@ _EMPTY_RATIO_THRESHOLD = 0.50
 _MONO_RATIO_THRESHOLD = 0.70
 _PROSE_WORD_THRESHOLD = 15
 _KV_COL0_MAX_WORDS = 8
+
+# Bibliography: col-0 cells are bracketed reference labels.
+_BIBLIOGRAPHY_LABEL_RE = re.compile(r"^\[[\w\d.+\-]+\]$")
+_BIBLIOGRAPHY_LABEL_RATIO = 0.60
+
+# NB-Ballot: col-0 cells are national body comment IDs like [ES-047]
+# or bare country codes like [SE], [FI]. Also matches the header "NB number".
+_NB_BALLOT_ID_RE = re.compile(
+    r"^\[(?:[A-Z]{2}(?:[-\s]\d{2,3})?)\]$|^NB\s+number$"
+)
 
 
 def _render_table_text(rows: list[list[list]]) -> str:
@@ -245,6 +268,15 @@ def _block_column_positions(block: Block) -> list[float] | None:
                 and len(line1.text.split()) <= _HEADING_NUM_MAX_WORDS):
             return None
 
+    # Guard: WG21 section headings where line 0 is the section title
+    # (e.g. "6.8 Memory and objects") and line 1 is a bold stable name
+    # in brackets (e.g. "[basic.memobj]") far to the right.
+    if len(block.lines) == 2:
+        line1 = block.lines[1]
+        if (line1.is_bold
+                and _STABLE_NAME_RE.match(line1.text.strip())):
+            return None
+
     x_starts = []
     for line in block.lines:
         if not line.spans:
@@ -348,16 +380,23 @@ def _nearest_column(x: float, col_xs: list[float]) -> int:
     return min(range(len(col_xs)), key=lambda ci: abs(x - col_xs[ci]))
 
 
+_SBS_MUPDF_DEFER_MIN_ROWS = 5
+
 def _detect_side_by_side_tables(
     blocks: list[Block],
     *,
     atomized_only: bool = False,
+    page_mupdf_tables: dict[int, list[dict]] | None = None,
 ) -> tuple[list[Section], set[int]]:
     """Detect tables where each cell is a separate side-by-side block.
 
     When *atomized_only* is True, only tables whose headers required
     atomized-header recovery are emitted; regular side-by-side tables
     are skipped so that Pass 1 (horizontal rows) gets first dibs.
+
+    When *page_mupdf_tables* is provided, candidate table regions that
+    overlap a MuPDF ``find_tables()`` bbox with >= ``_SBS_MUPDF_DEFER_MIN_ROWS``
+    rows are skipped so MuPDF Native (Pass 5) can handle them intact.
 
     Returns (table_sections, used_block_indices).
     """
@@ -529,10 +568,13 @@ def _detect_side_by_side_tables(
 
         for idx, blk in body_sorted:
             col = _nearest_column(blk.bbox[0], col_xs)
-            if blk.bbox[1] - last_bottom > _SBS_MAX_SCAN_GAP:
-                if current_row:
-                    rows.append(current_row)
-                break
+            gap = blk.bbox[1] - last_bottom
+            if gap > _SBS_MAX_SCAN_GAP:
+                col_dist = abs(blk.bbox[0] - col_xs[col])
+                if col_dist > _SBS_COL_ALIGN_TOL or gap > _SBS_MAX_SCAN_GAP_ALIGNED:
+                    if current_row:
+                        rows.append(current_row)
+                    break
             if col == 0:
                 new_page = blk.page_num != last_col0_page and last_col0_page >= 0
                 gap_exceeds = blk.bbox[1] - last_col0_y1 > _SBS_ROW_Y_BAND
@@ -638,8 +680,62 @@ def _detect_side_by_side_tables(
             table_row = [col_spans.get(ci, []) for ci in range(num_cols)]
             all_rows_data.append(table_row)
 
+        # MuPDF-overlap guard: if the body blocks overlap a substantial
+        # MuPDF find_tables() region, defer to MuPDF Native (Pass 5) which
+        # handles bordered tables with proper row/cell extraction.
+        # Skip deferral for predominantly monospace tables (code
+        # comparisons) where SBS/Pass 1 produces better results.
+        if page_mupdf_tables:
+            sbs_mono = 0
+            sbs_total = 0
+            for ln in all_lines:
+                for sp in ln.spans:
+                    if sp.text.strip():
+                        sbs_total += 1
+                        if sp.monospace:
+                            sbs_mono += 1
+            sbs_mono_ratio = sbs_mono / sbs_total if sbs_total else 0
+            if sbs_mono_ratio < _MONO_RATIO_THRESHOLD:
+                body_block_set = {idx for row in consumed_rows for idx, _ in row}
+                body_y0 = min(blocks[idx].bbox[1] for idx in body_block_set
+                              if idx < len(blocks))
+                body_y1 = max(blocks[idx].bbox[3] for idx in body_block_set
+                              if idx < len(blocks))
+                body_x0 = min(blocks[idx].bbox[0] for idx in body_block_set
+                              if idx < len(blocks))
+                body_x1 = max(blocks[idx].bbox[2] for idx in body_block_set
+                              if idx < len(blocks))
+                deferred = False
+                for tbl in page_mupdf_tables.get(page, []):
+                    tb = tbl["bbox"]
+                    if tbl.get("row_count", 0) < _SBS_MUPDF_DEFER_MIN_ROWS:
+                        continue
+                    overlap_x = max(0, min(body_x1, tb[2]) - max(body_x0, tb[0]))
+                    overlap_y = max(0, min(body_y1, tb[3]) - max(body_y0, tb[1]))
+                    if overlap_x > 0 and overlap_y > 0:
+                        body_area = max((body_x1 - body_x0) * (body_y1 - body_y0), 1)
+                        overlap_ratio = (overlap_x * overlap_y) / body_area
+                        if overlap_ratio > 0.30:
+                            _log.debug(
+                                "SBS deferred to MuPDF Native: page %d, "
+                                "overlap=%.0f%%, MuPDF rows=%d",
+                                page, overlap_ratio * 100,
+                                tbl.get("row_count", 0))
+                            deferred = True
+                            break
+                if deferred:
+                    i = j
+                    continue
+
         kind_val, strategy_val, all_rows_data = _classify_and_annotate(
             all_rows_data)
+
+        # Bibliography: not a real table, skip so prose pipeline handles it.
+        if kind_val == TableKind.BIBLIOGRAPHY.value:
+            _log.debug("SBS bibliography bypass: page %d", page)
+            i = j
+            continue
+
         text = _render_table_text(all_rows_data)
 
         table_sections.append(Section(
@@ -663,6 +759,140 @@ def _detect_side_by_side_tables(
                 used.add(idx)
 
         i = j
+
+    return table_sections, used
+
+
+# ---------------------------------------------------------------------------
+# Inline-grid tables: a single block whose lines alternate between N fixed
+# x-positions, forming an implicit grid.  MuPDF delivers bordered tables
+# with short cells as one block where e.g. lines 0,2,4 are at x=105 and
+# lines 1,3,5 are at x=184.  Each pair at the same y-level is one row.
+# ---------------------------------------------------------------------------
+_INLINE_GRID_MIN_LINES = 4        # at least 2 rows x 2 cols
+_INLINE_GRID_COL_GAP = 30.0       # min x-gap to count as distinct column
+_INLINE_GRID_Y_BAND = 5.0         # max y-difference for same-row lines
+_INLINE_GRID_MIN_ROWS = 2
+
+
+def _detect_inline_grid_tables(
+    blocks: list[Block],
+    page_mupdf_tables: dict[int, list[dict]] | None = None,
+) -> tuple[list[Section], set[int]]:
+    """Detect tables encoded as alternating-x lines in a single block.
+
+    Pattern: one MuPDF block contains 2*N or more lines that cycle through
+    K distinct x-positions (K >= 2).  Lines at the same y-level belong to
+    the same table row.  Only fires when MuPDF find_tables() independently
+    confirms a table at the same location (bordered table confirmation).
+
+    Returns (table_sections, used_block_indices).
+    """
+    table_sections: list[Section] = []
+    used: set[int] = set()
+
+    # Pre-build set of (page, y_mid) ranges from MuPDF tables for fast lookup.
+    mupdf_ranges: list[tuple[int, float, float, float, float]] = []
+    for pg, tbls in (page_mupdf_tables or {}).items():
+        for tbl in tbls:
+            bbox = tbl["bbox"]
+            mupdf_ranges.append((pg, bbox[0], bbox[1], bbox[2], bbox[3]))
+
+    for bi, block in enumerate(blocks):
+        if len(block.lines) < _INLINE_GRID_MIN_LINES:
+            continue
+
+        # Gate: block must overlap a MuPDF-detected table region.
+        # This ensures we only catch bordered tables, not code listings
+        # or prose blocks with indented lines.
+        bmid_y = (block.bbox[1] + block.bbox[3]) / 2.0
+        bmid_x = (block.bbox[0] + block.bbox[2]) / 2.0
+        margin = 10.0
+        has_mupdf = False
+        for pg, mx0, my0, mx1, my1 in mupdf_ranges:
+            if (block.page_num == pg
+                    and mx0 - margin <= bmid_x <= mx1 + margin
+                    and my0 - margin <= bmid_y <= my1 + margin):
+                has_mupdf = True
+                break
+        if not has_mupdf:
+            continue
+
+        # Cluster line x0 positions into columns.
+        x_positions: list[float] = [ln.bbox[0] for ln in block.lines]
+        col_xs = _cluster_x_positions(x_positions)
+        if len(col_xs) < 2:
+            continue
+
+        # Verify the gap between the two nearest columns is large enough.
+        sorted_xs = sorted(col_xs)
+        min_gap = min(sorted_xs[i + 1] - sorted_xs[i]
+                      for i in range(len(sorted_xs) - 1))
+        if min_gap < _INLINE_GRID_COL_GAP:
+            continue
+
+        # Group lines into rows by y-position.
+        rows: list[list[Line]] = []
+        for ln in block.lines:
+            placed = False
+            for row in rows:
+                if abs(ln.bbox[1] - row[0].bbox[1]) <= _INLINE_GRID_Y_BAND:
+                    row.append(ln)
+                    placed = True
+                    break
+            if not placed:
+                rows.append([ln])
+
+        if len(rows) < _INLINE_GRID_MIN_ROWS:
+            continue
+
+        # Each row must span 2+ columns.
+        num_cols = len(col_xs)
+        valid_rows = 0
+        for row in rows:
+            row_col_set = set()
+            for ln in row:
+                ci = _nearest_column(ln.bbox[0], col_xs)
+                row_col_set.add(ci)
+            if len(row_col_set) >= 2:
+                valid_rows += 1
+
+        if valid_rows < _INLINE_GRID_MIN_ROWS:
+            continue
+
+        # Strict guard: at least 75% of rows must be multi-column.
+        if valid_rows < len(rows) * 0.75:
+            continue
+
+        # Build cell data: rows x cols.
+        all_rows_data: list[list[list]] = []
+        all_lines: list[Line] = []
+        for row_lines in rows:
+            cell_spans: dict[int, list] = defaultdict(list)
+            for ln in row_lines:
+                ci = _nearest_column(ln.bbox[0], col_xs)
+                if cell_spans[ci] and ln.spans:
+                    cell_spans[ci].append(Span(text="\n"))
+                cell_spans[ci].extend(ln.spans)
+                all_lines.append(ln)
+            table_row = [cell_spans.get(ci, []) for ci in range(num_cols)]
+            all_rows_data.append(table_row)
+
+        text = _render_table_text(all_rows_data)
+
+        table_sections.append(Section(
+            kind=SectionKind.TABLE,
+            text=text,
+            confidence=Confidence.HIGH,
+            lines=all_lines,
+            page_num=block.page_num,
+            columns=all_rows_data,
+            table_kind=TableKind.INLINE_GRID.value,
+            table_strategy=TableStrategy.PIPE_TABLE.value,
+        ))
+        used.add(bi)
+        _log.debug("Inline-grid table: %d rows x %d cols on page %d",
+                    len(all_rows_data), num_cols, block.page_num)
 
     return table_sections, used
 
@@ -802,15 +1032,18 @@ def _detect_mupdf_native_tables(
             if len(valid_cells) < 2:
                 continue
 
-            # Cluster y-midpoints into rows.
-            y_mids = sorted(set(
-                round((c[1] + c[3]) / 2.0, 1) for c in valid_cells))
+            # Cluster y-top positions into rows. Using y_top (c[1])
+            # instead of y_mid avoids misclassification of merged cells
+            # that span multiple logical rows (their tall y_mid drifts
+            # into a separate cluster from the smaller sibling cells).
+            y_tops = sorted(set(
+                round(c[1], 1) for c in valid_cells))
             y_clusters: list[float] = []
-            for ym in y_mids:
-                if not y_clusters or abs(ym - y_clusters[-1]) > 10.0:
-                    y_clusters.append(ym)
+            for yt in y_tops:
+                if not y_clusters or abs(yt - y_clusters[-1]) > 10.0:
+                    y_clusters.append(yt)
                 else:
-                    y_clusters[-1] = (y_clusters[-1] + ym) / 2.0
+                    y_clusters[-1] = (y_clusters[-1] + yt) / 2.0
 
             # Cluster x-midpoints into columns.
             x_mids = sorted(set(
@@ -828,11 +1061,12 @@ def _detect_mupdf_native_tables(
                 continue
 
             # Assign each cell to (row_idx, col_idx) by closest cluster.
+            # Use y_top for row assignment (matches y_top clustering).
             cell_grid: list[list[tuple[float, float, float, float] | None]] = [
                 [None] * actual_cols for _ in range(actual_rows)
             ]
             for c in valid_cells:
-                cy = (c[1] + c[3]) / 2.0
+                cy = c[1]  # y_top
                 cx = (c[0] + c[2]) / 2.0
                 ri = min(range(actual_rows),
                          key=lambda r: abs(cy - y_clusters[r]))
@@ -948,22 +1182,45 @@ def _detect_mupdf_native_tables(
             # headers and corresponding data fills the columns below.
             non_empty_rows = _maybe_transpose_label_table(non_empty_rows)
 
-            used.update(table_block_indices)
-
             text = _render_table_text(non_empty_rows)
 
             # Exclude a short header row from classification signals
             # so non-monospace labels don't dilute mono_ratio.
             classify_rows = non_empty_rows
+            header_excluded = False
             if (len(non_empty_rows) > 1
                     and all(len(cell) <= 1 for cell in non_empty_rows[0])
                     and sum(len("".join(s.text for s in cell).split())
                             for cell in non_empty_rows[0]) <= col_count):
                 classify_rows = non_empty_rows[1:]
+                header_excluded = True
 
             kind_val, strategy_val, classify_rows = (
                 _classify_and_annotate(classify_rows))
-            non_empty_rows = classify_rows
+
+            # Bibliography: not a real table, skip so prose pipeline handles it.
+            # Do NOT mark blocks as used so they stay in remaining.
+            if kind_val == TableKind.BIBLIOGRAPHY.value:
+                _log.debug("MuPDF native bibliography bypass: page %d",
+                            page_num)
+                continue
+
+            # False positive: classification rejected the table.
+            # Do NOT mark blocks as used so they stay in remaining
+            # for the prose pipeline.
+            if kind_val == TableKind.FALSE_POSITIVE.value:
+                _log.debug(
+                    "MuPDF native table: %d rows x %d cols on page %d "
+                    "(false_positive, skipped)",
+                    len(non_empty_rows), col_count, page_num)
+                continue
+
+            used.update(table_block_indices)
+
+            if header_excluded:
+                non_empty_rows = [non_empty_rows[0]] + classify_rows
+            else:
+                non_empty_rows = classify_rows
 
             table_sections.append(Section(
                 kind=SectionKind.TABLE,
@@ -980,11 +1237,81 @@ def _detect_mupdf_native_tables(
                 len(non_empty_rows), col_count, page_num, kind_val,
             )
 
+    # Cross-page merge: when consecutive MuPDF-native table sections
+    # have the same table_kind and col count, and the first ends near
+    # the page bottom while the second starts near the page top, they
+    # are a single table split across a page break.  Merge by appending
+    # the continuation rows (skipping any duplicate header) to the
+    # first table and dropping the continuation section.
+    _CROSS_PAGE_BOTTOM_Y = 600.0
+    _CROSS_PAGE_TOP_Y = 200.0
+    if len(table_sections) >= 2:
+        merged_indices: set[int] = set()
+        for si in range(len(table_sections) - 1):
+            if si in merged_indices:
+                continue
+            sec_a = table_sections[si]
+            sec_b = table_sections[si + 1]
+            if (sec_a.table_kind and sec_b.table_kind
+                    and sec_a.table_kind == sec_b.table_kind
+                    and sec_b.page_num == sec_a.page_num + 1
+                    and sec_a.columns and sec_b.columns
+                    and len(sec_a.columns[0]) == len(sec_b.columns[0])):
+                a_max_y = max(
+                    (ln.bbox[3] for ln in sec_a.lines), default=0)
+                b_min_y = min(
+                    (ln.bbox[1] for ln in sec_b.lines), default=999)
+                if a_max_y > _CROSS_PAGE_BOTTOM_Y and b_min_y < _CROSS_PAGE_TOP_Y:
+                    # Skip duplicate header row in continuation:
+                    # if first row of B textually matches header of A, drop it.
+                    start = 0
+                    if len(sec_b.columns) > 1:
+                        hdr_a = [
+                            "".join(s.text for s in cell).strip()
+                            for cell in sec_a.columns[0]
+                        ]
+                        hdr_b = [
+                            "".join(s.text for s in cell).strip()
+                            for cell in sec_b.columns[0]
+                        ]
+                        if hdr_a == hdr_b:
+                            start = 1
+                    sec_a.columns.extend(sec_b.columns[start:])
+                    sec_a.lines.extend(sec_b.lines)
+                    sec_a.text = _render_table_text(sec_a.columns)
+                    merged_indices.add(si + 1)
+                    _log.debug(
+                        "Cross-page merge: page %d + %d (%s), "
+                        "now %d rows",
+                        sec_a.page_num, sec_b.page_num,
+                        sec_a.table_kind, len(sec_a.columns))
+        if merged_indices:
+            table_sections = [
+                s for i, s in enumerate(table_sections)
+                if i not in merged_indices
+            ]
+
     return table_sections, used
 
 
 _HORIZONTAL_ROW_Y_TOLERANCE = 3.0
+_HORIZONTAL_ROW_Y_TOLERANCE_WIDE = 12.0
+_HORIZONTAL_ROW_WIDE_X_SPREAD = 150.0
 _HORIZONTAL_ROW_MIN_CELLS = 3
+
+# Spanning-header absorption: when a valid run is found, the
+# immediately preceding block may be a multi-column header with
+# fewer columns (e.g. 2-col header over 3-col data table).
+_SPANNING_HEADER_X_TOLERANCE = 40.0
+_SPANNING_HEADER_Y_GAP_MAX = 30.0
+_SPANNING_HEADER_MIN_COLS = 2
+
+# Trailing horizontal-row split: blocks where MuPDF merged a table
+# header into the preceding paragraph (happens when data cells are
+# empty, e.g. P4012R0 §2.2 "Suggested Polls").
+_TRAILING_HR_MIN_CELLS = 3
+_TRAILING_HR_MAX_CELL_LEN = 4
+_TRAILING_HR_Y_GAP = 8.0
 
 
 def _block_horizontal_row(block: Block) -> list[float] | None:
@@ -994,13 +1321,146 @@ def _block_horizontal_row(block: Block) -> list[float] | None:
     the same y-band (within _HORIZONTAL_ROW_Y_TOLERANCE). This
     catches narrow poll/vote tables where column gaps are too small
     for _block_column_positions.
+
+    When the strict tolerance fails, a relaxed check fires: if the
+    lines span a wide horizontal range (>150pt) and the y-spread is
+    within _HORIZONTAL_ROW_Y_TOLERANCE_WIDE, the block still qualifies.
+    MuPDF sometimes reports slightly different y-positions for cells
+    in the same visual row (observed 8pt spread on P4003R1 §9.4).
     """
     if len(block.lines) < _HORIZONTAL_ROW_MIN_CELLS:
         return None
     y_centers = [(ln.bbox[1] + ln.bbox[3]) / 2 for ln in block.lines]
-    if max(y_centers) - min(y_centers) > _HORIZONTAL_ROW_Y_TOLERANCE:
+    if max(y_centers) - min(y_centers) <= _HORIZONTAL_ROW_Y_TOLERANCE:
+        return [ln.bbox[0] for ln in block.lines]
+
+    # Relaxed: non-overlapping x-ranges (true side-by-side cells)
+    # with moderate y jitter.  MuPDF sometimes reports slightly
+    # different y-positions for cells in the same visual row
+    # (observed 8pt spread on P4003R1 §9.4).  Only fires when
+    # each line occupies a distinct horizontal lane: sorted by x0,
+    # each line's x0 must exceed the previous line's x2 (right edge).
+    y_spread = max(y_centers) - min(y_centers)
+    if y_spread <= _HORIZONTAL_ROW_Y_TOLERANCE_WIDE:
+        by_x = sorted(block.lines, key=lambda ln: ln.bbox[0])
+        non_overlapping = True
+        for k in range(len(by_x) - 1):
+            if by_x[k + 1].bbox[0] < by_x[k].bbox[2]:
+                non_overlapping = False
+                break
+        if non_overlapping:
+            return [ln.bbox[0] for ln in by_x]
+
+    return None
+
+
+def _block_horizontal_row_relaxed(
+    block: Block, min_cells: int,
+) -> list[float] | None:
+    """Like _block_horizontal_row but with a caller-supplied min_cells.
+
+    Used for spanning-header detection where the header may have only
+    2 lines (below the default _HORIZONTAL_ROW_MIN_CELLS=3).
+    """
+    if len(block.lines) < min_cells:
         return None
-    return [ln.bbox[0] for ln in block.lines]
+    y_centers = [(ln.bbox[1] + ln.bbox[3]) / 2 for ln in block.lines]
+    if max(y_centers) - min(y_centers) <= _HORIZONTAL_ROW_Y_TOLERANCE:
+        return [ln.bbox[0] for ln in block.lines]
+    y_spread = max(y_centers) - min(y_centers)
+    if y_spread <= _HORIZONTAL_ROW_Y_TOLERANCE_WIDE:
+        by_x = sorted(block.lines, key=lambda ln: ln.bbox[0])
+        non_overlapping = True
+        for k in range(len(by_x) - 1):
+            if by_x[k + 1].bbox[0] < by_x[k].bbox[2]:
+                non_overlapping = False
+                break
+        if non_overlapping:
+            return [ln.bbox[0] for ln in by_x]
+    return None
+
+
+def _split_trailing_horizontal_rows(
+    blocks: list[Block],
+) -> tuple[list[Section], list[Block]]:
+    """Split blocks where trailing lines form a merged table header.
+
+    MuPDF sometimes merges table header cells into the preceding
+    paragraph block when the data cells are empty.  Detects trailing
+    lines that are (a) on the same y-band, (b) very short text,
+    (c) separated by a y-gap from the paragraph text, and (d)
+    non-overlapping in x.  Creates a header-only TABLE section and
+    returns the shortened paragraph block.
+    """
+    table_sections: list[Section] = []
+    result_blocks: list[Block] = []
+
+    for block in blocks:
+        if len(block.lines) < _TRAILING_HR_MIN_CELLS + 1:
+            result_blocks.append(block)
+            continue
+
+        best_start = None
+        for start in range(max(1, len(block.lines) - 10),
+                           len(block.lines) - _TRAILING_HR_MIN_CELLS + 1):
+            trailing = block.lines[start:]
+            if len(trailing) < _TRAILING_HR_MIN_CELLS:
+                continue
+            y_centers = [(ln.bbox[1] + ln.bbox[3]) / 2 for ln in trailing]
+            if max(y_centers) - min(y_centers) > _HORIZONTAL_ROW_Y_TOLERANCE:
+                continue
+            if not all(len(ln.text.strip()) <= _TRAILING_HR_MAX_CELL_LEN
+                       for ln in trailing):
+                continue
+            prev_y_c = (block.lines[start - 1].bbox[1]
+                        + block.lines[start - 1].bbox[3]) / 2
+            gap = min(y_centers) - prev_y_c
+            if gap < _TRAILING_HR_Y_GAP:
+                continue
+            by_x = sorted(trailing, key=lambda ln: ln.bbox[0])
+            if any(by_x[k + 1].bbox[0] < by_x[k].bbox[2]
+                   for k in range(len(by_x) - 1)):
+                continue
+            best_start = start
+            break
+
+        if best_start is None:
+            result_blocks.append(block)
+            continue
+
+        para_lines = block.lines[:best_start]
+        header_lines = block.lines[best_start:]
+
+        para_block = Block(
+            lines=para_lines,
+            bbox=(block.bbox[0], block.bbox[1],
+                  block.bbox[2], para_lines[-1].bbox[3]),
+            page_num=block.page_num,
+        )
+        result_blocks.append(para_block)
+
+        header_row = [list(ln.spans) for ln in header_lines]
+        empty_row: list[list] = [[] for _ in header_lines]
+        text = " | ".join(ln.text.strip() for ln in header_lines)
+
+        kind_val, strategy_val, rows = _classify_and_annotate(
+            [header_row, empty_row])
+
+        table_sections.append(Section(
+            kind=SectionKind.TABLE,
+            text=text,
+            confidence=Confidence.MEDIUM,
+            lines=list(header_lines),
+            page_num=block.page_num,
+            columns=[header_row, empty_row],
+            table_kind=kind_val,
+            table_strategy=strategy_val,
+        ))
+        _log.debug(
+            "Trailing horizontal-row split: page %d, %d header cells",
+            block.page_num, len(header_lines))
+
+    return table_sections, result_blocks
 
 
 def _detect_horizontal_row_tables(
@@ -1022,6 +1482,7 @@ def _detect_horizontal_row_tables(
             continue
 
         run = [i]
+        continuation_blocks: set[int] = set()
         ncols = len(cols)
         j = i + 1
         while j < len(blocks):
@@ -1031,6 +1492,23 @@ def _detect_horizontal_row_tables(
                     and blocks[j].page_num == blocks[i].page_num):
                 run.append(j)
                 j += 1
+            elif (blocks[j].page_num == blocks[i].page_num
+                  and len(blocks[j].lines) == 1
+                  and blocks[j].lines[0].text.strip()):
+                # Single-line block that is a wrapped parenthetical
+                # from the previous row's cell (e.g. "(kqueue)"
+                # continuing "macOS" above).  Only absorb when the
+                # text starts with '(' and x-aligns with a column.
+                txt = blocks[j].lines[0].text.strip()
+                if txt.startswith("("):
+                    ln_x = blocks[j].lines[0].bbox[0]
+                    col_dist = min(abs(ln_x - c) for c in cols)
+                    if col_dist < 20.0:
+                        run.append(j)
+                        continuation_blocks.add(j)
+                        j += 1
+                        continue
+                break
             else:
                 break
 
@@ -1039,12 +1517,40 @@ def _detect_horizontal_row_tables(
             all_lines = []
             for idx in run:
                 blk = blocks[idx]
+
+                if idx in continuation_blocks:
+                    # Merge this single-line block into the
+                    # previous row's nearest column cell.
+                    if rows:
+                        ln = blk.lines[0]
+                        all_lines.append(ln)
+                        best_col = min(
+                            range(ncols),
+                            key=lambda ci: abs(ln.bbox[0] - cols[ci]),
+                        )
+                        prev = rows[-1]
+                        if prev[best_col]:
+                            prev[best_col].append(Span(text=" "))
+                        prev[best_col].extend(ln.spans)
+                    continue
+
                 row = []
                 for ln in blk.lines[:ncols]:
                     row.append(list(ln.spans))
                     all_lines.append(ln)
                 while len(row) < ncols:
                     row.append([])
+                # Merge extra lines (beyond ncols) into nearest cell.
+                for ln in blk.lines[ncols:]:
+                    all_lines.append(ln)
+                    ln_x = ln.bbox[0]
+                    best_col = min(
+                        range(ncols),
+                        key=lambda ci: abs(ln_x - cols[ci]),
+                    )
+                    if row[best_col]:
+                        row[best_col].append(Span(text=" "))
+                    row[best_col].extend(ln.spans)
                 rows.append(row)
 
             kind_val, strategy_val, rows = _classify_and_annotate(rows)
@@ -1134,6 +1640,34 @@ def _compute_table_signals(rows: list[list[list]]) -> dict:
             col1_spec = any(k in hdr[1] for k in ("return", "type"))
             header_matches_spec = col0_spec and col1_spec
 
+    # Bibliography signal: fraction of col-0 cells matching [Label] pattern.
+    # Multi-ID cells (newline-separated) count as a match when every line
+    # individually matches the bracket pattern.
+    col0_bracket_count = 0
+    col0_non_empty = 0
+    for row in rows:
+        if row and row[0]:
+            text = "".join(s.text for s in row[0]).strip()
+            if text:
+                col0_non_empty += 1
+                sub_lines = [ln.strip() for ln in text.split("\n") if ln.strip()]
+                if sub_lines and all(
+                    _BIBLIOGRAPHY_LABEL_RE.match(sl) for sl in sub_lines
+                ):
+                    col0_bracket_count += 1
+    col0_bracket_ratio = (col0_bracket_count / col0_non_empty
+                          if col0_non_empty else 0.0)
+
+    # NB-ballot signal: fraction of col-0 cells matching [CC-NNN] pattern.
+    col0_ballot_count = 0
+    for row in rows:
+        if row and row[0]:
+            text = "".join(s.text for s in row[0]).strip()
+            if text and _NB_BALLOT_ID_RE.match(text):
+                col0_ballot_count += 1
+    col0_ballot_ratio = (col0_ballot_count / col0_non_empty
+                         if col0_non_empty else 0.0)
+
     return {
         "empty": False,
         "empty_ratio": empty_cells / total_cells if total_cells > 0 else 0,
@@ -1146,6 +1680,8 @@ def _compute_table_signals(rows: list[list[list]]) -> dict:
         "avg_spans_per_cell": total_spans / total_cells if total_cells > 0 else 0,
         "col0_max_words": col0_max_words,
         "header_matches_spec": header_matches_spec,
+        "col0_bracket_ratio": col0_bracket_ratio,
+        "col0_ballot_ratio": col0_ballot_ratio,
     }
 
 
@@ -1185,6 +1721,20 @@ def _classify_table(signals: dict) -> TableKind:
     # of cell length.
     if signals.get("header_matches_spec"):
         return TableKind.SPEC_TABLE
+
+    # NB-ballot tables: >= 50% of col-0 cells are national body comment IDs
+    # like [ES-047], [FI-071], [SE]. Checked before bibliography because
+    # short country-code labels also match the bibliography bracket regex.
+    if (signals.get("col0_ballot_ratio", 0) >= 0.50
+            and signals.get("num_rows", 0) >= 3):
+        return TableKind.NB_BALLOT
+
+    # Bibliography tables: >= 60% of col-0 cells are bracketed references
+    # like [CodeQL], [P2900R14], [Das16]. Checked before KEY_VALUE because
+    # 2-column bibliographies also match the key-value pattern.
+    if (signals.get("col0_bracket_ratio", 0) >= _BIBLIOGRAPHY_LABEL_RATIO
+            and signals.get("num_rows", 0) >= 2):
+        return TableKind.BIBLIOGRAPHY
 
     # Key-value tables: exactly 2 columns where col-0 holds short field
     # labels and col-1 holds longer descriptive values.
@@ -1566,13 +2116,22 @@ def _detect_column_aligned_tables(
 
             # Merge visual rows into logical rows.  A new logical row
             # starts when the leftmost column (col 0) has non-empty
-            # content, indicating a new table entry.
+            # content, indicating a new table entry.  A col-0 value
+            # that looks like a wrapped continuation of the previous
+            # cell (starts with '(' or ',') is merged instead of
+            # starting a new row — fixes P4003R1 §9.4 where "(kqueue)"
+            # wraps from the previous cell's "macOS" line.
             logical_rows: list[list[list[Span]]] = []
             current_logical: list[list[Span]] | None = None
 
             for _, cells in visual_rows:
                 col0_text = "".join(s.text for s in cells[0]).strip()
-                if col0_text:
+                is_continuation = (
+                    col0_text
+                    and current_logical is not None
+                    and col0_text[0] in "(,;"
+                )
+                if col0_text and not is_continuation:
                     if current_logical is not None:
                         logical_rows.append(current_logical)
                     current_logical = [list(c) for c in cells]
@@ -2593,7 +3152,8 @@ def detect_tables(
     # block columnar rows as independent mini-tables, stealing body
     # blocks that belong to the larger atomized-header table.
     sbs_pre_tables, sbs_pre_used = _detect_side_by_side_tables(
-        blocks, atomized_only=True)
+        blocks, atomized_only=True,
+        page_mupdf_tables=page_mupdf_tables)
     if sbs_pre_tables:
         table_sections.extend(sbs_pre_tables)
         blocks = [b for idx, b in enumerate(blocks)
@@ -2912,7 +3472,69 @@ def detect_tables(
                     k += 1
             rows = merged
 
+            # MuPDF-overlap guard (Pass 1): if the table blocks overlap a
+            # substantial MuPDF find_tables() region, defer to Pass 5.
+            # Skip deferral for predominantly monospace tables (code
+            # comparisons) where Pass 1 produces better results.
+            p1_page = table_blocks[0].page_num
+            p1_deferred = False
+            if page_mupdf_tables:
+                mono_spans = 0
+                total_spans = 0
+                for blk in table_blocks:
+                    for ln in blk.lines:
+                        for sp in ln.spans:
+                            if sp.text.strip():
+                                total_spans += 1
+                                if sp.monospace:
+                                    mono_spans += 1
+                p1_mono_ratio = mono_spans / total_spans if total_spans else 0
+                if p1_mono_ratio < _MONO_RATIO_THRESHOLD:
+                    p1_y0 = min(b.bbox[1] for b in table_blocks)
+                    p1_y1 = max(b.bbox[3] for b in table_blocks)
+                    p1_x0 = min(b.bbox[0] for b in table_blocks)
+                    p1_x1 = max(b.bbox[2] for b in table_blocks)
+                    for tbl in page_mupdf_tables.get(p1_page, []):
+                        tb = tbl["bbox"]
+                        if tbl.get("row_count", 0) < _SBS_MUPDF_DEFER_MIN_ROWS:
+                            continue
+                        # Phantom guard: if MuPDF's table is much
+                        # taller than what Pass 1 detected, MuPDF has
+                        # merged prose with the real table. Keep the
+                        # Pass 1 detection.
+                        mupdf_h = tb[3] - tb[1]
+                        p1_h = max(p1_y1 - p1_y0, 1.0)
+                        if mupdf_h > p1_h * 3.0:
+                            continue
+                        ov_x = max(0, min(p1_x1, tb[2]) - max(p1_x0, tb[0]))
+                        ov_y = max(0, min(p1_y1, tb[3]) - max(p1_y0, tb[1]))
+                        if ov_x > 0 and ov_y > 0:
+                            p1_area = max(
+                                (p1_x1 - p1_x0) * (p1_y1 - p1_y0), 1)
+                            if (ov_x * ov_y) / p1_area > 0.30:
+                                _log.debug(
+                                    "Pass 1 deferred to MuPDF Native: "
+                                    "page %d, MuPDF rows=%d",
+                                    p1_page, tbl.get("row_count", 0))
+                                p1_deferred = True
+                                break
+            if p1_deferred:
+                for blk in table_blocks:
+                    remaining.append(blk)
+                i = j
+                continue
+
             kind_val, strategy_val, rows = _classify_and_annotate(rows)
+
+            # Bibliography: not a real table, return blocks to prose pipeline.
+            if kind_val == TableKind.BIBLIOGRAPHY.value:
+                _log.debug("Pass 1 bibliography bypass: %d blocks on page %d",
+                            len(table_blocks), p1_page)
+                for blk in table_blocks:
+                    remaining.append(blk)
+                i = j
+                continue
+
             text = _render_table_text(rows)
 
             table_sections.append(Section(
@@ -2920,20 +3542,21 @@ def detect_tables(
                 text=text,
                 confidence=Confidence.HIGH,
                 lines=all_lines,
-                page_num=table_blocks[0].page_num,
+                page_num=p1_page,
                 columns=rows,
                 table_kind=kind_val,
                 table_strategy=strategy_val,
             ))
             _log.debug("Table detected: %d rows x %d cols on page %d",
-                        len(rows), num_cols, table_blocks[0].page_num)
+                        len(rows), num_cols, p1_page)
             i = j
         else:
             remaining.append(blocks[i])
             i += 1
 
     # Pass 2: side-by-side block tables (non-atomized) on remaining blocks
-    sbs_tables, sbs_used = _detect_side_by_side_tables(remaining)
+    sbs_tables, sbs_used = _detect_side_by_side_tables(
+        remaining, page_mupdf_tables=page_mupdf_tables)
     if sbs_tables:
         table_sections.extend(sbs_tables)
         remaining = [b for idx, b in enumerate(remaining)
@@ -2970,6 +3593,24 @@ def detect_tables(
                 "Stripped duplicate header from side-by-side "
                 "table continuation on page %d", t2.page_num)
 
+    # Pass 2b: inline-grid tables (alternating-x lines in one block).
+    # Runs before MuPDF native (Pass 5) which would mishandle them
+    # via _maybe_transpose_label_table.  Requires MuPDF confirmation
+    # to avoid false positives on code listings and prose.
+    ig_tables, ig_used = _detect_inline_grid_tables(
+        remaining, page_mupdf_tables=page_mupdf_tables)
+    if ig_tables:
+        table_sections.extend(ig_tables)
+        remaining = [b for idx, b in enumerate(remaining)
+                     if idx not in ig_used]
+
+    # Pass 3a: split blocks with trailing horizontal-row headers
+    # (MuPDF merges table headers into paragraph blocks when cells
+    # are empty, e.g. P4012R0 §2.2 "Suggested Polls").
+    thr_tables, remaining = _split_trailing_horizontal_rows(remaining)
+    if thr_tables:
+        table_sections.extend(thr_tables)
+
     # Pass 3: narrow horizontal-row tables (e.g. vote/poll grids)
     hr_tables, hr_used = _detect_horizontal_row_tables(remaining)
     if hr_tables:
@@ -2995,6 +3636,73 @@ def detect_tables(
         table_sections.extend(mupdf_tables)
         remaining = [b for idx, b in enumerate(remaining)
                      if idx not in mupdf_used]
+
+    # Post-pass: spanning-header absorption.  After all passes,
+    # check whether any remaining block sits directly above a
+    # detected TABLE section and looks like a multi-column header
+    # with fewer columns (e.g. "status quo | Section 6.3" above a
+    # 3-col data table).  Pass-agnostic: works regardless of
+    # which pass produced the table.
+    absorbed: set[int] = set()
+    for ts in table_sections:
+        if not ts.columns or len(ts.columns) < 2:
+            continue
+        ncols = len(ts.columns[0])
+        ts_y_top = min(ln.bbox[1] for ln in ts.lines) if ts.lines else 0
+        # Get column x-positions from the first data row's spans.
+        first_row = ts.columns[0]
+        col_xs: list[float] = []
+        for cell in first_row:
+            xs = [sp.bbox[0] for sp in cell
+                  if hasattr(sp, "bbox") and any(sp.bbox)]
+            col_xs.append(min(xs) if xs else 999.0)
+        if all(x >= 999 for x in col_xs):
+            continue
+
+        for bi, blk in enumerate(remaining):
+            if bi in absorbed:
+                continue
+            if blk.page_num != ts.page_num:
+                continue
+            y_gap = ts_y_top - blk.bbox[3]
+            if not (0 <= y_gap <= _SPANNING_HEADER_Y_GAP_MAX):
+                continue
+            blk_cols = _block_horizontal_row_relaxed(
+                blk, _SPANNING_HEADER_MIN_COLS)
+            if blk_cols is None or len(blk_cols) >= ncols:
+                continue
+            # Map each header col to its nearest table col.
+            mapping = [
+                min(range(ncols),
+                    key=lambda ci, hx=hx: abs(hx - col_xs[ci]))
+                for hx in blk_cols
+            ]
+            dists = [
+                min(abs(hx - col_xs[ci]) for ci in range(ncols))
+                for hx in blk_cols
+            ]
+            if (len(set(mapping)) != len(mapping)
+                    or not all(d < _SPANNING_HEADER_X_TOLERANCE
+                               for d in dists)):
+                continue
+            # Absorb: prepend header row to table.
+            header_row: list[list] = [[] for _ in range(ncols)]
+            for li, ln in enumerate(blk.lines):
+                if li < len(mapping):
+                    header_row[mapping[li]] = list(ln.spans)
+                ts.lines.insert(0, ln)
+            ts.columns.insert(0, header_row)
+            ts.text = _render_table_text(ts.columns)
+            absorbed.add(bi)
+            _log.debug(
+                "Spanning header absorbed: page %d, "
+                "%d-col header over %d-col table",
+                blk.page_num, len(blk_cols), ncols)
+            break  # one header per table
+
+    if absorbed:
+        remaining = [b for bi, b in enumerate(remaining)
+                     if bi not in absorbed]
 
     if table_sections:
         kinds = {}

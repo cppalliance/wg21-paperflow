@@ -389,6 +389,48 @@ def _render_wording_section(sec: Section) -> str:
     return f":::{div_class}\n\n{inner}\n\n:::"
 
 
+_DINGBATS_MAP: dict[int, str] = {
+    0x14: "✓",
+    0x18: "✗",
+}
+
+
+def _decode_dingbats(span: Span) -> Span:
+    """Replace Dingbats-encoded control chars with Unicode equivalents.
+
+    MuPDF passes through raw byte values for ZapfDingbats glyphs
+    (e.g. 0x14 → ✓, 0x18 → ✗).  These are C0 control characters in
+    Unicode and would be invisible or stripped.  Only fires for spans
+    with font_name containing "Dingbats".
+    """
+    if "Dingbats" not in (span.font_name or ""):
+        return span
+    out: list[str] = []
+    changed = False
+    for ch in span.text:
+        mapped = _DINGBATS_MAP.get(ord(ch))
+        if mapped:
+            out.append(mapped)
+            changed = True
+        else:
+            out.append(ch)
+    if not changed:
+        return span
+    return Span(
+        text="".join(out),
+        font_name=span.font_name,
+        font_size=span.font_size,
+        bold=span.bold,
+        italic=span.italic,
+        monospace=span.monospace,
+        bbox=span.bbox,
+        origin=span.origin,
+        color=span.color,
+        link_url=span.link_url,
+        wording_role=span.wording_role,
+    )
+
+
 def _render_cell_spans(spans: list, suppress_bold: bool = False) -> str:
     """Render a table cell's spans with inline formatting.
 
@@ -398,6 +440,8 @@ def _render_cell_spans(spans: list, suppress_bold: bool = False) -> str:
     """
     if not spans:
         return ""
+    # Decode Dingbats font control chars (✓/✗) before rendering
+    spans = [_decode_dingbats(s) for s in spans]
     # Replace newline markers with spaces for pipe-table rendering
     flat_spans = []
     for s in spans:
@@ -425,6 +469,7 @@ def _spans_to_code_lines(spans: list) -> str:
     """
     if not spans:
         return ""
+    spans = [_decode_dingbats(s) for s in spans]
     parts: list[str] = []
     for sp in spans:
         if sp.text == "\n":
@@ -501,6 +546,13 @@ def _render_table_as_text(sec: Section) -> str:
     return "\n\n".join(parts)
 
 
+def _cell_text(row: list, ci: int) -> str:
+    """Extract plain text from a cell's span list."""
+    if ci >= len(row):
+        return ""
+    return "".join(s.text for s in row[ci]).strip()
+
+
 def _render_html_table(sec: Section) -> str:
     """Render a table as HTML with <pre> blocks for multi-line code cells.
 
@@ -525,12 +577,39 @@ def _render_html_table(sec: Section) -> str:
         ' style="border-collapse: collapse; width: 100%;">',
     ]
 
+    # NB-ballot cells: newlines are MuPDF line-wrapping artifacts from
+    # narrow PDF columns, not semantic breaks. Collapse to spaces.
+    is_nb_ballot = getattr(sec, "table_kind", None) == "nb_ballot"
+    collapse_newlines = is_nb_ballot
+
+    # Pre-compute rowspan for col-0 in NB-ballot tables: when consecutive
+    # data rows have an empty col-0 they are continuations of the same NB
+    # number, so the first row's col-0 cell spans them all (like the PDF).
+    col0_rowspan: dict[int, int] = {}  # ri -> span count (only for starters)
+    col0_skip: set[int] = set()        # ri values to skip col-0 rendering
+    if is_nb_ballot:
+        ri = 1 if not is_continuation else 0  # skip header row
+        while ri < len(rows):
+            span_start = ri
+            span_count = 1
+            while (ri + span_count < len(rows)
+                   and _cell_text(rows[ri + span_count], 0) == ""):
+                span_count += 1
+            if span_count > 1:
+                col0_rowspan[span_start] = span_count
+                for k in range(span_start + 1, span_start + span_count):
+                    col0_skip.add(k)
+            ri += span_count
+
     for ri, row in enumerate(rows):
         parts.append("<tr>")
         is_header = (ri == 0 and not is_continuation)
         tag = "th" if is_header else "td"
         for ci in range(num_cols):
+            if ci == 0 and ri in col0_skip:
+                continue
             cell_spans = row[ci] if ci < len(row) else []
+            cell_spans = [_decode_dingbats(s) for s in cell_spans]
             cell_lines: list[str] = []
             current_line: list[str] = []
             for span in cell_spans:
@@ -541,13 +620,23 @@ def _render_html_table(sec: Section) -> str:
                     current_line.append(span.text)
             if current_line:
                 cell_lines.append("".join(current_line))
-            text = "\n".join(cell_lines).strip()
+            if collapse_newlines:
+                text = " ".join(
+                    part for line in cell_lines
+                    for part in [line.strip()] if part
+                ).strip()
+            else:
+                text = "\n".join(cell_lines).strip()
             escaped = _html.escape(text)
+            rs_attr = ""
+            if ci == 0 and ri in col0_rowspan:
+                rs_attr = f' rowspan="{col0_rowspan[ri]}"'
             if is_header or not text:
-                parts.append(f'<{tag} style="{_S}">{escaped}</{tag}>')
+                parts.append(
+                    f'<{tag} style="{_S}"{rs_attr}>{escaped}</{tag}>')
             else:
                 parts.append(
-                    f'<{tag} style="{_S}">'
+                    f'<{tag} style="{_S}"{rs_attr}>'
                     f'<pre style="margin: 0;">{escaped}</pre></{tag}>')
         parts.append("</tr>")
 

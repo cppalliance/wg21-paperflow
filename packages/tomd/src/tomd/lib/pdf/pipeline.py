@@ -942,7 +942,8 @@ def run_pipeline(
                          "row_count": t.row_count,
                          "col_count": t.col_count,
                          "cells": [tuple(c) if c else None for c in t.cells],
-                         "header_names": t.header.names if t.header else None}
+                         "header_names": t.header.names if t.header else None,
+                         "extract": t.extract()}
                         for t in ft.tables
                     ]
             except Exception:
@@ -1257,7 +1258,11 @@ def run_pipeline(
                     numbered += 1
             if j_dot or has_numbered:
                 candidate.add(j)
+                if j_dot and not has_numbered:
+                    numbered += 1
             elif jfl.lower() in ('ii', 'iii', 'iv', 'v', 'vi', 'vii', 'viii'):
+                candidate.add(j)
+            elif sec_j.kind == SectionKind.TABLE and not j_dot:
                 candidate.add(j)
             elif sec_j.kind == SectionKind.HEADING and not has_numbered and not j_dot:
                 break
