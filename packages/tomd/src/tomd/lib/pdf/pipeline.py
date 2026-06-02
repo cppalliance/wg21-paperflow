@@ -663,6 +663,7 @@ def _sub_caption_owns(
     return _line_in_caption_band(line_bbox, im.bbox)
 
 
+
 def _normalize_caption(text: str) -> str:
     """Normalize a caption string for equality comparison.
 
