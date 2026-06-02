@@ -2226,11 +2226,12 @@ def _ext_img(
     bbox: tuple[float, float, float, float],
     source: str = "vector",
     fn: str = "test.png",
+    suggested_alt: str = "",
 ) -> ExtractedImage:
     """Compact ExtractedImage builder for filter tests."""
     return ExtractedImage(
         page=page, index_on_page=1, ext="png", bytes=b"PNG",
-        bbox=bbox, suggested_alt="",
+        bbox=bbox, suggested_alt=suggested_alt,
         stored_filename=fn, xref=-1, source=source,
     )
 
@@ -2856,7 +2857,10 @@ class TestFilterSectionsInsideVectorImages:
         caption band of a vector is dropped wholesale. The caption
         text is already on the IMAGE as alt-text via _caption_for;
         keeping the body paragraph would duplicate it."""
-        img = _ext_img(page=6, bbox=(86, 0, 506, 284))
+        img = _ext_img(
+            page=6, bbox=(86, 0, 506, 284),
+            suggested_alt="Figure 1: Graph models of an airline route system.",
+        )
         # Caption sits ~60pt below the cluster (P3127R1 page 6 layout).
         caption = Section(
             kind=SectionKind.PARAGRAPH,
@@ -2876,7 +2880,10 @@ class TestFilterSectionsInsideVectorImages:
         """A bold ``Figure N:`` caption that trips the heading
         heuristic is the same duplication failure family. The drop
         applies to HEADING as well as PARAGRAPH."""
-        img = _ext_img(page=6, bbox=(86, 0, 506, 284))
+        img = _ext_img(
+            page=6, bbox=(86, 0, 506, 284),
+            suggested_alt="Figure 1: Graph models of an airline route system.",
+        )
         caption_h = Section(
             kind=SectionKind.HEADING,
             text="Figure 1: Graph models of an airline route system.",
@@ -2922,7 +2929,10 @@ class TestFilterSectionsInsideVectorImages:
         predicate is identical to ``_caption_for``'s match predicate,
         so alt-text attribution and body-drop fire on the same set
         of caption lines."""
-        img = _ext_img(page=6, bbox=(86, 100, 506, 300))
+        img = _ext_img(
+            page=6, bbox=(86, 100, 506, 300),
+            suggested_alt="Figure 1: A graph model.",
+        )
         # line.y0 = 390 (90pt below cluster, well within 100pt radius)
         # line.y1 = 402 (102pt below; past any "every line inside" reading)
         caption = Section(
@@ -3128,7 +3138,10 @@ class TestFilterSectionsInsideVectorImages:
         future refactor that adds a horizontal gate must add it to
         BOTH helpers or the duplication invariant reopens."""
         # Narrow cluster: 200pt wide, centred.
-        img = _ext_img(page=6, bbox=(206, 100, 406, 300))
+        img = _ext_img(
+            page=6, bbox=(206, 100, 406, 300),
+            suggested_alt="Figure 1: A figure with a wide centred caption.",
+        )
         # Wide caption: 520pt wide, centred. Horizontal overlap with
         # the cluster's x-range is ~38%, well under any horizontal
         # threshold.
@@ -3143,6 +3156,334 @@ class TestFilterSectionsInsideVectorImages:
             )],
         )
         kept, captures = _filter_sections_inside_vector_images([img], [caption])
+        assert kept == []
+
+    # ---------------------------------------------------------------
+    # Raster-image caption cleanup. The filter handles caption-shaped
+    # drops and sub-caption capture for raster images too; only Fix A
+    # and the per-line filter remain vector-only. Bordering on a
+    # rename of the class (it now covers raster and vector), but kept
+    # as-is to avoid a rename churn.
+    # ---------------------------------------------------------------
+
+    def test_raster_caption_dropped_on_raster_only_page(self):
+        """Regression guard for the per-page guard restructure. The
+        old guard short-circuited on raster-only pages because it
+        only checked ``vector_images_by_page``; the new guard checks
+        both maps. Without this test, every existing test in this
+        class still passes (they pass an explicit vector image) and
+        the feature ships silently no-opped on raster-only pages."""
+        img = _ext_img(
+            page=3, bbox=(86, 100, 506, 200), source="raster",
+            suggested_alt="Figure 1: Hello World!",
+        )
+        caption = Section(
+            kind=SectionKind.PARAGRAPH,
+            text="Figure 1: Hello World!",
+            confidence=Confidence.HIGH, page_num=2,
+            lines=[Line(
+                spans=[Span(text="Figure 1: Hello World!",
+                            bbox=(86, 220, 506, 232))],
+                bbox=(86, 220, 506, 232),
+            )],
+        )
+        kept, captures = _filter_sections_inside_vector_images([img], [caption])
+        assert kept == []
+        assert captures == {}
+
+    def test_raster_sub_caption_captured_and_dropped(self):
+        img = _ext_img(
+            page=3, bbox=(86, 100, 506, 200), source="raster",
+            suggested_alt="Figure 1: a multi-panel raster",
+        )
+        sub = Section(
+            kind=SectionKind.PARAGRAPH,
+            text="(a) the left panel",
+            confidence=Confidence.HIGH, page_num=2,
+            lines=[Line(
+                spans=[Span(text="(a) the left panel",
+                            bbox=(86, 220, 506, 232))],
+                bbox=(86, 220, 506, 232),
+            )],
+        )
+        kept, captures = _filter_sections_inside_vector_images([img], [sub])
+        assert kept == []
+        assert captures == {id(img): [("a", "(a) the left panel")]}
+
+    def test_raster_plus_vector_mixed_page_attribution(self):
+        """Sub-caption between a raster (upper) and a vector (lower)
+        attributes to the raster - the upper image (smaller y1) wins
+        by the y1-sort built at indexing time."""
+        raster = _ext_img(
+            page=3, bbox=(86, 100, 506, 200), source="raster",
+            fn="raster.png",
+        )
+        vector = _ext_img(
+            page=3, bbox=(86, 400, 506, 500), source="vector",
+            fn="vector.png",
+        )
+        # Sub-caption at y=220: inside raster's caption region,
+        # outside vector's (vector band starts at y=500).
+        sub = Section(
+            kind=SectionKind.PARAGRAPH,
+            text="(a) only the raster's region matches",
+            confidence=Confidence.HIGH, page_num=2,
+            lines=[Line(
+                spans=[Span(text="(a) only the raster's region matches",
+                            bbox=(86, 220, 506, 232))],
+                bbox=(86, 220, 506, 232),
+            )],
+        )
+        kept, captures = _filter_sections_inside_vector_images(
+            [raster, vector], [sub])
+        assert kept == []
+        assert captures == {
+            id(raster): [("a", "(a) only the raster's region matches")],
+        }
+
+    def test_raster_bbox_not_used_for_fix_a(self):
+        """A CODE section wholly inside a raster bbox is KEPT.
+        Behavioral inversion vs the equivalent vector case: raster
+        bboxes are resource-dictionary rectangles, not claims of
+        region ownership over overlapping text. The Fix A drop
+        remains vector-only."""
+        raster = _ext_img(
+            page=3, bbox=(86, 100, 506, 300), source="raster",
+        )
+        # CODE wholly inside the raster bbox (overlap fraction 1.0).
+        code = Section(
+            kind=SectionKind.CODE,
+            text="auto x = foo();",
+            confidence=Confidence.HIGH, page_num=2,
+            lines=[Line(
+                spans=[Span(text="auto x = foo();",
+                            bbox=(150, 150, 450, 170))],
+                bbox=(150, 150, 450, 170),
+            )],
+        )
+        kept, _ = _filter_sections_inside_vector_images([raster], [code])
+        assert kept == [code]
+
+    def test_raster_bbox_not_used_for_per_line_filter(self):
+        """A PARAGRAPH whose lines are mostly inside a raster bbox is
+        kept verbatim. The per-line filter remains vector-only for
+        the same reason as Fix A."""
+        raster = _ext_img(
+            page=3, bbox=(86, 100, 506, 300), source="raster",
+        )
+        # Lines wholly inside the raster bbox.
+        body = Section(
+            kind=SectionKind.PARAGRAPH,
+            text="text overlapping the raster",
+            confidence=Confidence.HIGH, page_num=2,
+            lines=[Line(
+                spans=[Span(text="text overlapping the raster",
+                            bbox=(150, 150, 450, 170))],
+                bbox=(150, 150, 450, 170),
+            )],
+        )
+        kept, _ = _filter_sections_inside_vector_images([raster], [body])
+        assert kept == [body]
+
+    def test_html_image_zero_bbox_skipped(self):
+        """HTML images carry ``bbox=(0,0,0,0)`` as a sentinel. The
+        y-only band predicate would false-fire on them, so the
+        indexer skips them entirely."""
+        html_img = _ext_img(
+            page=0, bbox=(0.0, 0.0, 0.0, 0.0), source="raster",
+            suggested_alt="Figure 1: ignored",
+        )
+        caption = Section(
+            kind=SectionKind.PARAGRAPH,
+            text="Figure 1: ignored",
+            confidence=Confidence.HIGH, page_num=-1,
+            lines=[Line(
+                spans=[Span(text="Figure 1: ignored",
+                            bbox=(0.0, 0.0, 0.0, 0.0))],
+                bbox=(0.0, 0.0, 0.0, 0.0),
+            )],
+        )
+        kept, captures = _filter_sections_inside_vector_images(
+            [html_img], [caption])
+        assert kept == [caption]
+        assert captures == {}
+
+    def test_raster_body_paragraph_past_band_kept(self):
+        raster = _ext_img(
+            page=3, bbox=(86, 100, 506, 200), source="raster",
+            suggested_alt="Figure 1: Far away",
+        )
+        # 150pt below the cluster's y1, past the 100pt caption band
+        # (band runs y1 .. y1 + _CAPTION_SEARCH_RADIUS_BELOW_PT).
+        caption = Section(
+            kind=SectionKind.PARAGRAPH,
+            text="Figure 1: Far away",
+            confidence=Confidence.HIGH, page_num=2,
+            lines=[Line(
+                spans=[Span(text="Figure 1: Far away",
+                            bbox=(86, 350, 506, 362))],
+                bbox=(86, 350, 506, 362),
+            )],
+        )
+        kept, _ = _filter_sections_inside_vector_images([raster], [caption])
+        assert kept == [caption]
+
+    def test_raster_caption_heading_dropped(self):
+        raster = _ext_img(
+            page=3, bbox=(86, 100, 506, 200), source="raster",
+            suggested_alt="Figure 2: Foo",
+        )
+        heading = Section(
+            kind=SectionKind.HEADING,
+            text="Figure 2: Foo",
+            confidence=Confidence.HIGH, page_num=2,
+            heading_level=2,
+            lines=[Line(
+                spans=[Span(text="Figure 2: Foo",
+                            bbox=(86, 220, 506, 232), bold=True)],
+                bbox=(86, 220, 506, 232),
+            )],
+        )
+        kept, _ = _filter_sections_inside_vector_images([raster], [heading])
+        assert kept == []
+
+    def test_mixed_page_raster_caption_under_vector_flag_path(self):
+        """Behavior change to the existing --extract-vector-images
+        path: on a mixed page (raster + vector), a caption near the
+        raster image is now dropped where it was previously kept.
+        Existing vector golden tests do not exercise this because
+        their synthetic fixtures contain no raster images."""
+        raster = _ext_img(
+            page=3, bbox=(86, 100, 506, 200), source="raster",
+            fn="raster.png", suggested_alt="Figure 1: Raster",
+        )
+        vector = _ext_img(
+            page=3, bbox=(86, 400, 506, 500), source="vector",
+            fn="vector.png", suggested_alt="Figure 2: Vector",
+        )
+        # Caption in raster's band, outside vector's.
+        caption = Section(
+            kind=SectionKind.PARAGRAPH,
+            text="Figure 1: Raster",
+            confidence=Confidence.HIGH, page_num=2,
+            lines=[Line(
+                spans=[Span(text="Figure 1: Raster",
+                            bbox=(86, 220, 506, 232))],
+                bbox=(86, 220, 506, 232),
+            )],
+        )
+        kept, _ = _filter_sections_inside_vector_images(
+            [raster, vector], [caption])
+        assert kept == []
+
+    @pytest.mark.xfail(reason="raster lacks per-line backstop "
+                              "(non-goal #2); buried-caption regex-miss "
+                              "is a known limitation")
+    def test_raster_caption_buried_mid_paragraph_leaks(self):
+        """The structure pass can prepend a sentence onto the caption
+        line. The merged paragraph's first line no longer matches
+        ``_CAPTION_LABEL_RE`` ("Figure 1:" is no longer at the start
+        of the line), so the whole-section drop cannot fire. Vector
+        has a per-line filter as backstop; raster does not. xfail."""
+        raster = _ext_img(
+            page=3, bbox=(86, 100, 506, 200), source="raster",
+            suggested_alt="Figure 1: Hello World!",
+        )
+        merged = Section(
+            kind=SectionKind.PARAGRAPH,
+            text="Some preceding sentence. Figure 1: Hello World!",
+            confidence=Confidence.HIGH, page_num=2,
+            lines=[Line(
+                spans=[Span(
+                    text="Some preceding sentence. Figure 1: Hello World!",
+                    bbox=(86, 220, 506, 232))],
+                bbox=(86, 220, 506, 232),
+            )],
+        )
+        kept, _ = _filter_sections_inside_vector_images([raster], [merged])
+        assert kept == []  # WILL FAIL - known limitation
+
+    def test_caption_with_trailing_continuation_kept_by_equality_gate(self):
+        """Content-loss guard. ``_caption_for`` returns only the
+        first text line, so a caption that the structure pass joined
+        with trailing prose has body text strictly longer than the
+        alt-text. The equality gate then skips the drop, the
+        duplicate survives as body text, and no content is lost.
+
+        Pins the P3100R4/R5/R6 and P3064R3 Fig 5 cases. THE single
+        most important test in this batch: without it, a future
+        refactor that drops the gate passes the whole suite and
+        silently reopens content loss in production."""
+        raster = _ext_img(
+            page=3, bbox=(86, 100, 506, 200), source="raster",
+            suggested_alt="Figure 4: Overview of the proposed strategy:",
+        )
+        merged_text = (
+            "Figure 4: Overview of the proposed strategy: seven "
+            "orthogonal tools plus Profiles as a higher-level feature."
+        )
+        para = Section(
+            kind=SectionKind.PARAGRAPH,
+            text=merged_text,
+            confidence=Confidence.HIGH, page_num=2,
+            lines=[Line(
+                spans=[Span(text=merged_text,
+                            bbox=(86, 220, 506, 232))],
+                bbox=(86, 220, 506, 232),
+            )],
+        )
+        kept, captures = _filter_sections_inside_vector_images(
+            [raster], [para])
+        # Section preserved verbatim (not even partial-line filtered;
+        # the per-line filter is vector-only).
+        assert kept == [para]
+        # No sub-caption captured against the image either.
+        assert captures == {}
+        # The returned section text is unchanged (no normalization
+        # leaks into the output).
+        assert kept[0].text == merged_text
+
+    def test_clean_caption_duplicate_dropped_under_gate(self):
+        """The gate's positive case. Body text equals alt-text
+        exactly; the drop fires. This is the canonical case
+        (P3556R0)."""
+        raster = _ext_img(
+            page=3, bbox=(86, 100, 506, 200), source="raster",
+            suggested_alt="Figure 1: Hello World!",
+        )
+        caption = Section(
+            kind=SectionKind.PARAGRAPH,
+            text="Figure 1: Hello World!",
+            confidence=Confidence.HIGH, page_num=2,
+            lines=[Line(
+                spans=[Span(text="Figure 1: Hello World!",
+                            bbox=(86, 220, 506, 232))],
+                bbox=(86, 220, 506, 232),
+            )],
+        )
+        kept, _ = _filter_sections_inside_vector_images([raster], [caption])
+        assert kept == []
+
+    def test_whitespace_drift_normalized_and_dropped(self):
+        """The gate's normalization. Body carries extra whitespace
+        runs (a structure-pass artifact); alt-text has single spaces.
+        After ``_normalize_caption`` collapses runs, they compare
+        equal and the drop fires."""
+        raster = _ext_img(
+            page=3, bbox=(86, 100, 506, 200), source="raster",
+            suggested_alt="Figure 1: Hello World!",
+        )
+        caption = Section(
+            kind=SectionKind.PARAGRAPH,
+            text="Figure 1:  Hello   World!",  # double + triple spaces
+            confidence=Confidence.HIGH, page_num=2,
+            lines=[Line(
+                spans=[Span(text="Figure 1:  Hello   World!",
+                            bbox=(86, 220, 506, 232))],
+                bbox=(86, 220, 506, 232),
+            )],
+        )
+        kept, _ = _filter_sections_inside_vector_images([raster], [caption])
         assert kept == []
 
 
