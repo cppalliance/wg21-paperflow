@@ -286,7 +286,8 @@ Enums:
 - Normalizes entries: strips dot leaders, page numbers, section prefixes, collapses whitespace
 - Fast path: exact-match set lookup (`_exact_set`) against normalized headings. O(1) per section.
 - Fuzzy fallback: only when heading count is below `_MAX_FUZZY_HEADINGS` (200). Uses dual-algorithm OR-gate (SequenceMatcher >= 0.75 OR Jaccard >= 0.65). Without this guard, large documents (2000+ pages, 40k sections) hang on O(sections * headings) fuzzy comparisons.
-- Requires 3+ consecutive matches. Bridges gaps up to 3 non-matching entries.
+- Requires 3+ consecutive matches. Bridges gaps up to 3 non-matching entries, but only when each bridged entry is trivial (`_bridgeable`: blank, a bare/numeric label, or <= `_MAX_BRIDGE_ENTRY_WORDS` words with no terminal punctuation). A real prose paragraph breaks the run instead of being swallowed.
+- A section that is itself a body heading (`is_heading[i]`) is excluded from matching, *unless* its own text is shaped like a TOC line (`_TOC_LINE_RE`: a dot leader followed by a page number, e.g. `Foo .... 7`). Without this, every body heading matched itself in the reference set and the gap-fill deleted the prose between headings, destroying the body of short papers (#122). The shipped predicate keys on the dot-leader-then-page-number shape, not a bare trailing number, so body headings like `Step 1` / `Phase 2` are never eligible.
 - Stops on duplicate first-line (second occurrence = real heading, not TOC entry)
 - Includes preceding "Table of Contents" / "Contents" label
 
@@ -335,7 +336,7 @@ Enums:
 - `pipeline.py:run_pipeline`
 - Strict ordering of all pipeline steps. Early exit via `SkipReason` on empty PDF, slide deck, standards draft, or unreadable text.
 - Metadata merging: `{**structure_metadata, **wg21_metadata}` - WG21 metadata takes precedence.
-- TOC heading collection: only HEADING sections used as the reference set for TOC matching.
+- TOC heading collection: only HEADING sections used as the reference set for TOC matching. The per-section `is_heading` flags are also passed to `find_toc_indices` so a body heading cannot match itself out of existence (#122).
 
 ### Layer 11: Quality Assurance (1 technique)
 
