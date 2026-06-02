@@ -1116,6 +1116,7 @@ class TestPageScanGuards:
         # Bypass min: monkeypatch min to 1, max to 10. With 12 items
         # we trip the max-bailout path.
         monkeypatch.setattr(vector_images, "_MIN_PAGE_DRAWING_ITEMS", 1)
+        monkeypatch.setattr(vector_images, "_LOW_OVERLAP_ADMIT_MIN_ITEMS", 1)
         monkeypatch.setattr(vector_images, "_MAX_DRAWINGS_PER_PAGE", 10)
         drawings = [_drawing(0, y, 10, y + 10) for y in range(0, 120, 10)]
         page = _mock_page(drawings)
@@ -1134,6 +1135,7 @@ class TestPerClusterFilter:
     def _setup(monkeypatch):
         """Bypass page-scan guards so we test the cluster filter itself."""
         monkeypatch.setattr(vector_images, "_MIN_PAGE_DRAWING_ITEMS", 1)
+        monkeypatch.setattr(vector_images, "_LOW_OVERLAP_ADMIT_MIN_ITEMS", 1)
         monkeypatch.setattr(vector_images, "_MAX_DRAWINGS_PER_PAGE", 100_000)
 
     def test_too_small_drops_cluster(self, monkeypatch):
@@ -1419,6 +1421,69 @@ class TestPerClusterFilter:
         assert len(cands) == 1
 
 
+class TestLowOverlapAdmitFloor:
+    """The low-overlap admit path (overlap < _MAX_TEXT_OVERLAP_FRACTION
+    AND is_diagram is False) carries a separate item-count floor to
+    distinguish real sparse figures from low-density background fills
+    (ToC body, code-block background, structured callout). Real
+    figures admitted via this path carry items >= 30 in the calibration
+    corpus; FPs (P4003R1/P4007R0 background fills) carry items 12-24."""
+
+    @staticmethod
+    def _setup(monkeypatch):
+        monkeypatch.setattr(vector_images, "_MIN_PAGE_DRAWING_ITEMS", 1)
+        monkeypatch.setattr(vector_images, "_MAX_DRAWINGS_PER_PAGE", 100_000)
+
+    def test_low_overlap_drops_below_min_items(self, monkeypatch):
+        """A 480x200 cluster with low text overlap and 24 items - the
+        P4003R1 page-77 code-block-background shape. Must reject."""
+        self._setup(monkeypatch)
+        drawings = [_drawing(60, 60, 540, 260, items=24)]
+        page = _mock_page(drawings)
+        # No text block -> overlap = 0, well below _MAX_TEXT_OVERLAP_FRACTION.
+        cands, stats = extract_page_vector_images(page, [])
+        assert cands == [], (
+            "low-overlap path requires items >= _LOW_OVERLAP_ADMIT_MIN_ITEMS"
+        )
+        assert stats.reasons.get(REASON_TOO_FEW_ITEMS) == 1
+
+    def test_low_overlap_admits_at_min_items(self, monkeypatch):
+        """30 items at the same shape: admits via low-overlap."""
+        self._setup(monkeypatch)
+        drawings = [_drawing(60, 60, 540, 260, items=30)]
+        page = _mock_page(drawings)
+        cands, _stats = extract_page_vector_images(page, [])
+        assert len(cands) == 1
+
+    def test_compact_cov_bypasses_low_overlap_floor(self, monkeypatch):
+        """A small cluster admitted via compact-cov path (items >= 100
+        AND cov_sum >= 2.0) doesn't go through the low-overlap floor.
+        Items can be 100-200 with shape passing dense-path geometry
+        but high text overlap - admitted via compact-cov, low-overlap
+        floor doesn't apply."""
+        self._setup(monkeypatch)
+        # Two layered drawings at 130x130 -> cov_sum=2.0, items=100.
+        drawings = [
+            _drawing(100, 100, 230, 230, items=50),
+            _drawing(100, 100, 230, 230, items=50),
+        ]
+        page = _mock_page(drawings)
+        text_block = Block(bbox=(100.0, 100.0, 230.0, 230.0))
+        cands, _stats = extract_page_vector_images(page, [text_block])
+        assert len(cands) == 1
+
+    def test_tiny_cov_bypasses_low_overlap_floor(self, monkeypatch):
+        """A sub-figure-sized cluster admitted via tiny-cov path
+        (items >= 20 AND cov_sum >= 3.0) doesn't go through the
+        low-overlap floor."""
+        self._setup(monkeypatch)
+        # Three layered drawings at 50x50 -> cov_sum=3.0, items=21.
+        drawings = [_drawing(100, 100, 150, 150, items=7) for _ in range(3)]
+        page = _mock_page(drawings)
+        cands, _stats = extract_page_vector_images(page, [])
+        assert len(cands) == 1
+
+
 class TestDrawingCoverageSum:
     """Unit tests for the :func:`_drawing_coverage_sum` helper.
 
@@ -1478,6 +1543,7 @@ class TestBboxTooLargeFilter:
     @staticmethod
     def _setup(monkeypatch):
         monkeypatch.setattr(vector_images, "_MIN_PAGE_DRAWING_ITEMS", 1)
+        monkeypatch.setattr(vector_images, "_LOW_OVERLAP_ADMIT_MIN_ITEMS", 1)
         monkeypatch.setattr(vector_images, "_MAX_DRAWINGS_PER_PAGE", 100_000)
 
     def test_cluster_covering_more_than_half_page_drops(self, monkeypatch):
@@ -1523,6 +1589,7 @@ class TestAspectExtremeFilter:
     @staticmethod
     def _setup(monkeypatch):
         monkeypatch.setattr(vector_images, "_MIN_PAGE_DRAWING_ITEMS", 1)
+        monkeypatch.setattr(vector_images, "_LOW_OVERLAP_ADMIT_MIN_ITEMS", 1)
         monkeypatch.setattr(vector_images, "_MAX_DRAWINGS_PER_PAGE", 100_000)
 
     def test_wide_strip_drops(self, monkeypatch):
@@ -1583,6 +1650,7 @@ class TestContainerDetection:
     @staticmethod
     def _setup(monkeypatch):
         monkeypatch.setattr(vector_images, "_MIN_PAGE_DRAWING_ITEMS", 1)
+        monkeypatch.setattr(vector_images, "_LOW_OVERLAP_ADMIT_MIN_ITEMS", 1)
         monkeypatch.setattr(vector_images, "_MAX_DRAWINGS_PER_PAGE", 100_000)
 
     def test_thin_frame_with_nested_content_recovered_as_virtual(
@@ -1796,6 +1864,7 @@ class TestEdgeBand:
 
     def test_drawing_wholly_in_top_band_drops(self, monkeypatch):
         monkeypatch.setattr(vector_images, "_MIN_PAGE_DRAWING_ITEMS", 1)
+        monkeypatch.setattr(vector_images, "_LOW_OVERLAP_ADMIT_MIN_ITEMS", 1)
         # 8% of 792pt = 63.36pt; place a small running-header underline at y=10.
         drawings = [_drawing(0, 5, 200, 15, items=8)]
         page = _mock_page(drawings, height=792)
@@ -1806,6 +1875,7 @@ class TestEdgeBand:
 
     def test_drawing_straddling_band_survives(self, monkeypatch):
         monkeypatch.setattr(vector_images, "_MIN_PAGE_DRAWING_ITEMS", 1)
+        monkeypatch.setattr(vector_images, "_LOW_OVERLAP_ADMIT_MIN_ITEMS", 1)
         # 8% of 792pt = 63.36pt; drawing from y=10 to y=200 straddles the band.
         drawings = [_drawing(100, 10, 200, 200, items=8)]
         page = _mock_page(drawings, height=792)
@@ -1821,6 +1891,7 @@ class TestPreClusteringInsDelExclusion:
 
     def test_ins_green_color_drops_drawing(self, monkeypatch):
         monkeypatch.setattr(vector_images, "_MIN_PAGE_DRAWING_ITEMS", 1)
+        monkeypatch.setattr(vector_images, "_LOW_OVERLAP_ADMIT_MIN_ITEMS", 1)
         # mpark/wg21 ins green #006e28 -> (0.0, 0.43, 0.16) as float tuple.
         drawings = [_drawing(100, 100, 200, 200, items=8,
                              color=(0.0, 110.0 / 255.0, 40.0 / 255.0))]
@@ -1831,6 +1902,7 @@ class TestPreClusteringInsDelExclusion:
 
     def test_del_red_color_drops_drawing(self, monkeypatch):
         monkeypatch.setattr(vector_images, "_MIN_PAGE_DRAWING_ITEMS", 1)
+        monkeypatch.setattr(vector_images, "_LOW_OVERLAP_ADMIT_MIN_ITEMS", 1)
         # mpark/wg21 del red #bf0303 -> (0.75, 0.01, 0.01).
         drawings = [_drawing(100, 100, 200, 200, items=8,
                              color=(191.0 / 255.0, 3.0 / 255.0, 3.0 / 255.0))]
@@ -1842,6 +1914,7 @@ class TestPreClusteringInsDelExclusion:
     def test_ins_green_fill_drops_drawing(self, monkeypatch):
         # Wording colour can be in the fill, not just the stroke.
         monkeypatch.setattr(vector_images, "_MIN_PAGE_DRAWING_ITEMS", 1)
+        monkeypatch.setattr(vector_images, "_LOW_OVERLAP_ADMIT_MIN_ITEMS", 1)
         drawings = [_drawing(100, 100, 200, 200, items=8,
                              color=(0.0, 0.0, 0.0),
                              fill=(0.0, 110.0 / 255.0, 40.0 / 255.0))]
@@ -1852,6 +1925,7 @@ class TestPreClusteringInsDelExclusion:
 
     def test_black_drawing_survives(self, monkeypatch):
         monkeypatch.setattr(vector_images, "_MIN_PAGE_DRAWING_ITEMS", 1)
+        monkeypatch.setattr(vector_images, "_LOW_OVERLAP_ADMIT_MIN_ITEMS", 1)
         drawings = [_drawing(100, 100, 200, 200, items=8,
                              color=(0.0, 0.0, 0.0))]
         page = _mock_page(drawings)
@@ -1868,6 +1942,7 @@ class TestClustersOverflowCap:
 
     def test_overflow_drops_bottom_clusters(self, monkeypatch):
         monkeypatch.setattr(vector_images, "_MIN_PAGE_DRAWING_ITEMS", 1)
+        monkeypatch.setattr(vector_images, "_LOW_OVERLAP_ADMIT_MIN_ITEMS", 1)
         monkeypatch.setattr(vector_images, "_MAX_CLUSTERS_PER_PAGE", 3)
         # Five well-separated 80x80 clusters at different y positions.
         # All pass the filter; only the top 3 by (y0, x0) survive the cap.
@@ -1895,6 +1970,7 @@ class TestExtractPageRasterisation:
         ``draw_outside_page`` adds a stroke extending past the page's
         right edge to test the bbox clamp."""
         monkeypatch.setattr(vector_images, "_MIN_PAGE_DRAWING_ITEMS", 1)
+        monkeypatch.setattr(vector_images, "_LOW_OVERLAP_ADMIT_MIN_ITEMS", 1)
         monkeypatch.setattr(vector_images, "_MIN_CLUSTER_ITEM_COUNT", 1)
         doc = pymupdf.open()
         page = doc.new_page(width=612, height=792)

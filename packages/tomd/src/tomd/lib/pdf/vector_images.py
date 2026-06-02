@@ -214,6 +214,22 @@ _DIAGRAM_TINY_MIN_ITEMS = 20
 _DIAGRAM_TINY_MIN_COVERAGE = 3.0
 _DIAGRAM_TINY_SUB_FLOOR_PT = 30.0
 
+# Minimum item count for the low-overlap admit path (clusters that
+# pass because text overlap < _MAX_TEXT_OVERLAP_FRACTION but don't
+# meet any is_diagram path). Without this floor, a low-density
+# background fill (ToC body, code-block background, structured
+# callout) with items 8-24 lands in the markdown unannotated. The
+# floor of 30 matches the lower-bound real-figure shape: P3127R1 Fig
+# 5 left half (items=38, cs=2.29, ovl=0.30) passes the floor. The
+# corpus FPs from the _MIN_PAGE_DRAWING_ITEMS=50 fast-path widening
+# (P4003R1/P4007R0 pages 1/77/19 ToC + code-block fills) all carry
+# items 12-24, well below the floor.
+#
+# Clusters admitted via the dense/sparse/compact-cov/tiny-cov diagram
+# paths bypass this floor; their is_diagram=True is the stronger
+# structural signal.
+_LOW_OVERLAP_ADMIT_MIN_ITEMS = 30
+
 # Per-constituent thresholds for the post-clustering merge pass
 # (:func:`_merge_close_clusters`). Both clusters being merged must
 # individually carry at least this many items and area; otherwise the
@@ -1229,9 +1245,18 @@ def extract_page_vector_images(
             and _drawing_coverage_sum(cluster_bbox, after_edge)
                 >= _DIAGRAM_TINY_MIN_COVERAGE
         )
-        if not is_diagram and overlap >= _MAX_TEXT_OVERLAP_FRACTION:
-            reasons[REASON_TEXT_OVERLAP] = reasons.get(REASON_TEXT_OVERLAP, 0) + 1
-            continue
+        if not is_diagram:
+            if overlap >= _MAX_TEXT_OVERLAP_FRACTION:
+                reasons[REASON_TEXT_OVERLAP] = reasons.get(REASON_TEXT_OVERLAP, 0) + 1
+                continue
+            # Low-overlap admit gate: require enough drawing items to
+            # distinguish a real (but sparse) figure from a low-density
+            # background fill that happens to have low text overlap
+            # (ToC body, code-block background). Clusters that meet
+            # any is_diagram path skip this gate.
+            if item_count < _LOW_OVERLAP_ADMIT_MIN_ITEMS:
+                reasons[REASON_TOO_FEW_ITEMS] = reasons.get(REASON_TOO_FEW_ITEMS, 0) + 1
+                continue
         surviving_clusters.append((cluster_bbox, item_count))
 
     # Page-cluster cap: keep top-of-page survivors, drop the rest.
