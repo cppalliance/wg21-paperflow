@@ -354,17 +354,19 @@ def compare_extractions(mupdf_blocks: list[Block],
             promoted.add(next_pg)
 
     if promoted:
+        # `promoted` holds both the uncertain pages and the confident neighbours
+        # they paired with. Only pages that carry an UNCERTAIN section have it
+        # removed by the filter below and need their blocks re-emitted as
+        # paragraphs; a confident neighbour still holds the PARAGRAPH sections
+        # built for it on the first pass, so re-emitting it here would place
+        # every block on that page twice.
+        promoted_uncertain = {s.page_num for s in sections
+                              if s.kind == SectionKind.UNCERTAIN
+                              and s.page_num in promoted}
         kept = [s for s in sections
                 if not (s.kind == SectionKind.UNCERTAIN
                         and s.page_num in promoted)]
-        # Only re-add blocks for pages that were actually uncertain.
-        # Pages pulled into the promoted set as neighbors may already
-        # have high-confidence sections; re-adding would duplicate them.
-        already_covered = {s.page_num for s in kept
-                           if s.page_num in promoted}
-        for pg in sorted(promoted):
-            if pg in already_covered:
-                continue
+        for pg in sorted(promoted_uncertain):
             for block in mupdf_by_page.get(pg, []):
                 kept.append(_make_paragraph_section(block))
         sections = kept
@@ -385,14 +387,17 @@ def compare_extractions(mupdf_blocks: list[Block],
                      >= SIMILARITY_THRESHOLD)
         if doc_match:
             bulk_promoted = set(still_uncertain)
+            # Defence-in-depth only: `still_uncertain` pages all carry an
+            # UNCERTAIN section by construction, so `promoted_uncertain` here
+            # always equals `bulk_promoted` and this guard is a no-op. It mirrors
+            # the pairwise block above so the two re-insertion paths cannot drift.
+            promoted_uncertain = {s.page_num for s in sections
+                                  if s.kind == SectionKind.UNCERTAIN
+                                  and s.page_num in bulk_promoted}
             kept = [s for s in sections
                     if not (s.kind == SectionKind.UNCERTAIN
                             and s.page_num in bulk_promoted)]
-            already_covered = {s.page_num for s in kept
-                               if s.page_num in bulk_promoted}
-            for pg in sorted(bulk_promoted):
-                if pg in already_covered:
-                    continue
+            for pg in sorted(promoted_uncertain):
                 for block in mupdf_by_page.get(pg, []):
                     kept.append(_make_paragraph_section(block))
             sections = kept

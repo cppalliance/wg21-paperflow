@@ -154,6 +154,80 @@ class TestCompareExtractionsOrdering:
         )
 
 
+class TestPromotionConfidentNeighbour:
+    """A confident page paired into a promotion must not be emitted twice.
+
+    The pairwise promotion loop adds both the uncertain page and its
+    forward neighbour to the promoted set. The re-insertion only re-emits
+    pages that actually carried an UNCERTAIN section, so a confident
+    neighbour (whose PARAGRAPH sections already exist from the first pass)
+    keeps its single copy.
+    """
+
+    def test_confident_neighbour_not_duplicated_on_promotion(self):
+        # Page 0: confident anchor (identical paths).
+        p0 = " ".join(f"anchor{i}" for i in range(12))
+        p0_m = [make_block([p0], page_num=0)]
+        p0_s = [make_block([p0], page_num=0)]
+
+        # Page 1: uncertain alone (paths fully disjoint, each >= 10 words).
+        p1_m = [make_block([" ".join(f"alpha{i}" for i in range(12))], page_num=1)]
+        p1_s = [make_block([" ".join(f"beta{i}" for i in range(12))], page_num=1)]
+
+        # Page 2: confident (identical paths) and large enough that the
+        # combined (page1 + page2) similarity clears SIMILARITY_THRESHOLD:
+        # 80 / (12 + 80) = 0.87 >= 0.82, so the pair promotes.
+        p2 = " ".join(f"gamma{i}" for i in range(80))
+        p2_m = [make_block([p2], page_num=2)]
+        p2_s = [make_block([p2], page_num=2)]
+
+        mupdf = p0_m + p1_m + p2_m
+        spatial = p0_s + p1_s + p2_s
+
+        sections = compare_extractions(mupdf, spatial)
+
+        # Promotion actually fired: page 1's UNCERTAIN section is gone and its
+        # content is emitted as PARAGRAPH. Without this assertion a future
+        # SIMILARITY_THRESHOLD retune that stops the pair promoting would make
+        # the no-duplication check below pass trivially (green while testing
+        # nothing).
+        assert not any(s.kind == SectionKind.UNCERTAIN for s in sections)
+        page1 = [s for s in sections if s.page_num == 1]
+        assert page1 and all(s.kind == SectionKind.PARAGRAPH for s in page1), (
+            "page 1 should have been rescued to PARAGRAPH by promotion"
+        )
+
+        # The confident neighbour (page 2) appears exactly once.
+        page2 = [s for s in sections
+                 if s.page_num == 2 and s.kind == SectionKind.PARAGRAPH]
+        assert len(page2) == 1, (
+            f"confident neighbour emitted {len(page2)} times, expected 1"
+        )
+
+    def test_both_neighbours_uncertain_each_emitted_once(self):
+        """The genuine cross-page-split case: both pages uncertain alone but
+        agreeing combined are each rescued exactly once (no under-rescue)."""
+        first = " ".join(f"aaa{i}" for i in range(10))
+        second = " ".join(f"bbb{i}" for i in range(10))
+
+        # Page 1 and page 2 each disagree per-page (swapped halves) but agree
+        # combined, so both are uncertain alone and both promote.
+        p1_m = [make_block([first], page_num=1)]
+        p1_s = [make_block([second], page_num=1)]
+        p2_m = [make_block([second], page_num=2)]
+        p2_s = [make_block([first], page_num=2)]
+
+        sections = compare_extractions(p1_m + p2_m, p1_s + p2_s)
+
+        assert not any(s.kind == SectionKind.UNCERTAIN for s in sections)
+        for pg in (1, 2):
+            rescued = [s for s in sections
+                       if s.page_num == pg and s.kind == SectionKind.PARAGRAPH]
+            assert len(rescued) == 1, (
+                f"page {pg} emitted {len(rescued)} times, expected 1"
+            )
+
+
 class TestParagraphMerging:
     def test_merges_continuation(self):
         sections = [
