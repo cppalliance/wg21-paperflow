@@ -704,6 +704,33 @@ def _is_pure_code_table(el: Tag) -> bool:
     return all(td.find(list(_CODE_BLOCK_TAGS)) for td in td_cells)
 
 
+_ALLOWED_CELL_TAGS = frozenset({
+    "a", "ins", "del", "em", "strong", "b", "i", "code",
+    "sub", "sup", "br", "span", "mark", "s", "u",
+})
+
+
+def _cell_inner_html(cell: Tag) -> str:
+    """Return sanitized inner HTML for a non-code table cell.
+
+    Keeps safe inline tags (links, ins/del, emphasis) as HTML so they
+    render correctly inside an HTML table. Strips all other tags but
+    keeps their text content. Text nodes are HTML-escaped.
+    """
+    parts: list[str] = []
+    for child in cell.children:
+        if isinstance(child, Comment):
+            continue
+        if isinstance(child, NavigableString):
+            parts.append(_html.escape(str(child)))
+        elif isinstance(child, Tag):
+            if child.name in _ALLOWED_CELL_TAGS:
+                parts.append(str(child))
+            else:
+                parts.append(_html.escape(child.get_text()))
+    return _COLLAPSE_WS_RE.sub(" ", "".join(parts)).strip()
+
+
 def _render_mixed_code_table(el: Tag) -> str | None:
     """Render a table with mixed code and text cells as an HTML table.
 
@@ -752,10 +779,8 @@ def _render_mixed_code_table(el: Tag) -> str | None:
                     f'<pre style="margin: 0;"><code>{escaped}</code></pre>'
                     f'</{tag}>')
             else:
-                text = _inline_text(cell).strip()
-                text = _COLLAPSE_WS_RE.sub(" ", text)
-                escaped = _html.escape(text)
-                parts.append(f'<{tag} style="{_S}">{escaped}</{tag}>')
+                inner = _cell_inner_html(cell)
+                parts.append(f'<{tag} style="{_S}">{inner}</{tag}>')
         parts.append("</tr>")
 
     parts.append("</table>")
