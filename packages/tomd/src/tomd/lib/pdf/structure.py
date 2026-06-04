@@ -442,19 +442,87 @@ def _section_is_trivial(sec: Section) -> bool:
     return len(sec.text.strip()) < _TOC_ENTRY_MAX_BODY_CHARS
 
 
+# A physical line that is *only* a section number ("8", "3.1", "15."). When a
+# heading or leaked TOC entry renders the number on its own line and wraps the
+# title to the next, the title (not the bare number) must drive recurrence
+# matching; see `_entry_title`.
+_BARE_SECTION_NUM_RE = re.compile(r"^\d+(?:\.\d+)*\.?$")
+
+
+# Max physical lines a PARAGRAPH/LIST section may have to still count as a
+# leaked TOC entry. A leaked entry the heading classifier left as body text
+# (a title line such as "3. The Rationale for Unification") is at most a title
+# that wrapped once; three or more physical lines is real prose and is never an
+# entry, whatever its first line matches. This is the load-bearing protection
+# against absorbing real single-line-ish content through the emptiness bridging
+# below. Coupling caveat: corpus-tuned alongside `_TOC_ENTRY_MAX_BODY_CHARS`
+# and `MIN_TOC_RUN` (toc.py); a paper needing a different bound changes the
+# constant, not the call sites.
+_TOC_ENTRY_MAX_LINES = 2
+
+
+def _entry_title(sec: Section) -> str:
+    """The single-line title used as a section's TOC recurrence key.
+
+    Usually a section's title is its first physical line. But a heading and its
+    leaked TOC counterpart frequently render the section number on its own
+    physical line with the title wrapped to the next (`"1\\nComparison table"`).
+    First-line-only normalization would reduce that to the bare number `"1"`,
+    which then matches *any* other number-on-its-own-line section: a wording
+    paragraph `"8\\nEffects: Equivalent to: ..."` would falsely match an
+    `"8\\nAcknowledgements"` heading (both reduce to `"8"`) and the real wording
+    be deleted as a phantom entry (observed on p2988r9). When the first physical
+    line is only a section number, fold in the next line so the real title
+    drives the match: `"1\\nComparison table"` -> `"1 Comparison table"`
+    (-> `"comparison table"`), while `"8\\nEffects: ..."` keeps its prose and
+    matches no heading title.
+    """
+    lines = [ln.strip() for ln in sec.text.split("\n") if ln.strip()]
+    if not lines:
+        return ""
+    if len(lines) > 1 and _BARE_SECTION_NUM_RE.match(lines[0]):
+        return lines[0] + " " + lines[1]
+    return lines[0]
+
+
+def _is_paragraphish(sec: Section) -> bool:
+    """True for the body-text kinds a leaked TOC entry can hide in.
+
+    A Table of Contents line the heading classifier did not promote stays a
+    PARAGRAPH, or a LIST when it carries a list-marker shape ("3. The
+    Rationale ..." matches NUMBERED_LIST_RE). Both must be candidate
+    non-heading entries; a PARAGRAPH-only check misses the LIST-kind entries
+    that dominate papers like P4094R0.
+    """
+    return sec.kind in (SectionKind.PARAGRAPH, SectionKind.LIST)
+
+
 def drop_leaked_toc_headings(sections: list[Section]) -> list[Section]:
-    """Remove a leaked heading-kind Table of Contents.
+    """Remove a leaked Table of Contents left behind as mixed heading/body kinds.
 
     Companion to `toc.find_toc_indices` (the dot-leader structural detector,
     shared `MIN_TOC_RUN`). #122 stopped `find_toc_indices` from matching a
     heading-kind section unless it carries a dot-leader page-number shape, so a
-    Table of Contents whose entries are headings without that shape now leaks:
-    each entry survives as an empty duplicate heading. This pass removes such
-    entries, but only when they form a contiguous run of at least `MIN_TOC_RUN`
-    *empty* headings whose titles *recur* as later headings (a TOC block), and
-    never when the run is a strictly-deepening container stack (`15`/`15.1`/
-    `15.1.1`). It is body-safe by construction: an empty heading has no body, so
-    no prose, code, table, or list can be removed or re-parented.
+    Table of Contents whose entries lack that shape leaks past it. Such a leaked
+    TOC is in fact a *mix* of kinds: some entries become empty duplicate
+    HEADINGs, others stay short title-like PARAGRAPH or LIST sections ("3. The
+    Rationale for Unification"). This pass removes the whole block.
+
+    The single discriminator is **recurrence as a later heading**, shared by
+    both entry kinds (`_is_toc_entry`). A run is a contiguous sequence of such
+    entries (only trivial fragments or other entries may sit between members),
+    of length at least `MIN_TOC_RUN`, that is **not** a strictly-deepening
+    all-heading container stack (`15`/`15.1`/`15.1.1`).
+
+    Safety: pt2 removed only empty headings and so was body-safe by
+    construction. This pass also removes PARAGRAPH/LIST sections, so that
+    guarantee no longer holds outright. It is restored mostly by the **heading
+    anchor**: a run is removable only if it contains at least one empty-heading
+    entry, so paragraph/list entries are deleted only within the span of a
+    confirmed heading-kind TOC block, never as a free-floating cluster. Combined
+    with exact normalized match, the title-like line cap (`_TOC_ENTRY_MAX_LINES`),
+    and the run-length floor, removal is confined to a structurally-bounded
+    region. See the pt4 plan for the residual-risk analysis.
 
     "Empty" is interpreted loosely: non-trivial sections that are themselves
     heading titles recurring later (neighbour TOC entries that `find_toc_indices`
@@ -466,22 +534,46 @@ def drop_leaked_toc_headings(sections: list[Section]) -> list[Section]:
     """
     n = len(sections)
 
-    # 1. normalized heading title -> ordered list of section indices.
+    # 1. normalized heading title (fold-aware, see `_entry_title`) -> ordered
+    #    list of HEADING indices.
     title_indices: dict[str, list[int]] = {}
     for i, sec in enumerate(sections):
         if sec.kind == SectionKind.HEADING:
-            title_indices.setdefault(normalize_toc_entry(sec.text), []).append(i)
+            title_indices.setdefault(
+                normalize_toc_entry(_entry_title(sec)), []).append(i)
 
-    def _is_toc_neighbour(j: int) -> bool:
-        """True if sections[j] is a non-heading that is itself a heading title
-        recurring later — i.e. another leaked TOC entry, not body prose."""
-        norm_j = normalize_toc_entry(sections[j].text)
-        return any(k > j for k in title_indices.get(norm_j, []))
+    def _recurs_later(sec: Section, i: int) -> bool:
+        norm = normalize_toc_entry(_entry_title(sec))
+        # A TOC entry's title is real words. Require at least one letter in the
+        # normalized form, so a section that reduces to a bare number or a stray
+        # extraction glyph ("8", "■", "?") cannot recurrence-match. Combined
+        # with `_entry_title`'s number-line folding, this blocks the phantom
+        # match between a wording paragraph and an unrelated numbered heading
+        # while still matching real titled entries.
+        if not norm or not any(c.isalpha() for c in norm):
+            return False
+        return any(k > i for k in title_indices.get(norm, []))
 
-    # 2. mark removable-eligible headings: empty (no substantial body before the
-    #    next heading, where neighbour TOC entries count as transparent) AND
-    #    title recurs as a *later* heading.
-    eligible = [False] * n
+    # 2. non-heading entry-ness (PARAGRAPH/LIST): title-like AND recurs as a
+    #    later heading. Computed FIRST because heading-emptiness (step 3)
+    #    consumes it, while it does not itself depend on heading-emptiness.
+    #    Title-like = at most `_TOC_ENTRY_MAX_LINES` physical lines; this is the
+    #    load-bearing guard that keeps a multi-line body block from being an
+    #    entry just because its first line echoes a heading.
+    nonheading_entry = [False] * n
+    for i, sec in enumerate(sections):
+        if (_is_paragraphish(sec)
+                and len(sec.lines) <= _TOC_ENTRY_MAX_LINES
+                and _recurs_later(sec, i)):
+            nonheading_entry[i] = True
+
+    # 3. heading emptiness, then heading entry-ness. A heading is empty when
+    #    every section before the next heading is trivial OR itself a
+    #    non-heading TOC entry, so a heading followed only by leaked
+    #    paragraph/list entries (P4094R0's `3.7 Summary` over a `LIST`-kind
+    #    entry) still counts as empty. A heading entry is an empty heading whose
+    #    title recurs as a later heading.
+    heading_entry = [False] * n
     for i, sec in enumerate(sections):
         if sec.kind != SectionKind.HEADING:
             continue
@@ -489,58 +581,72 @@ def drop_leaked_toc_headings(sections: list[Section]) -> list[Section]:
         for j in range(i + 1, n):
             if sections[j].kind == SectionKind.HEADING:
                 break
-            if not _section_is_trivial(sections[j]) and not _is_toc_neighbour(j):
+            if not (_section_is_trivial(sections[j]) or nonheading_entry[j]):
                 empty = False
                 break
-        if not empty:
-            continue
-        norm = normalize_toc_entry(sec.text)
-        if any(k > i for k in title_indices.get(norm, [])):
-            eligible[i] = True
+        if empty and _recurs_later(sec, i):
+            heading_entry[i] = True
 
-    # 3. group eligible headings into contiguous runs (only trivial sections or
-    #    TOC-neighbour sections sit between consecutive members), keep runs >=
-    #    MIN_TOC_RUN, reject a strictly-deepening container stack, and sweep the
-    #    run's in-span fragments plus a preceding label.
-    heading_idx = [i for i in range(n) if sections[i].kind == SectionKind.HEADING]
+    # The single source of truth: a section is a TOC entry iff it is an empty
+    # recurring heading or a title-like recurring paragraph/list.
+    entry = [heading_entry[i] or nonheading_entry[i] for i in range(n)]
+
+    # 4. group entries into contiguous runs (only non-heading trivial fragments
+    #    bridge consecutive members), keep runs >= MIN_TOC_RUN that clear the
+    #    heading anchor, reject a strictly-deepening all-heading stack, and sweep
+    #    the run's in-span trivial fragments plus a preceding label.
     to_remove: set[int] = set()
 
     def _flush(run: list[int]) -> None:
         if len(run) < MIN_TOC_RUN:
             return
-        levels = [sections[i].heading_level for i in run]
-        if all(b > a for a, b in zip(levels, levels[1:])):
-            return  # strictly-deepening clause hierarchy, not a TOC
+        # Heading anchor: a removable run must contain at least one empty-heading
+        # entry. Paragraph/list entries are deleted only inside the span of a
+        # confirmed heading-kind TOC block, never as a free-floating cluster.
+        if not any(heading_entry[i] for i in run):
+            return
+        # Strictly-deepening rejection applies only to an all-heading run (a
+        # 15/15.1/15.1.1 clause-container stack). A mixed run is never a pure
+        # ascent and is always a TOC.
+        if all(sections[i].kind == SectionKind.HEADING for i in run):
+            levels = [sections[i].heading_level for i in run]
+            if all(b > a for a, b in zip(levels, levels[1:])):
+                return
         for i in run:
             to_remove.add(i)
-        # Trivial fragments and TOC-neighbour entries within the run's span,
-        # up to the next real heading after the last entry.
-        end = next((k for k in heading_idx if k > run[-1]), n)
+        # Trivial fragments (split page numbers) within the run's span, up to
+        # the next *real* (non-entry) heading after the last member.
+        end = next((k for k in range(run[-1] + 1, n)
+                    if sections[k].kind == SectionKind.HEADING and not entry[k]),
+                   n)
         for j in range(run[0] + 1, end):
-            if sections[j].kind != SectionKind.HEADING:
-                if _section_is_trivial(sections[j]) or _is_toc_neighbour(j):
-                    to_remove.add(j)
-        # A "Table of Contents" / "Contents" label immediately preceding the
-        # run. Paragraph-kind labels are caught by sweeping back through trivial
-        # non-headings; heading-kind labels (e.g. "### Table of Contents") are
-        # caught by the explicit heading check.
+            if (j not in to_remove
+                    and sections[j].kind != SectionKind.HEADING
+                    and _section_is_trivial(sections[j])):
+                to_remove.add(j)
+        # A "Table of Contents" / "Contents" label immediately preceding the run,
+        # whether it is paragraph-kind or heading-kind (P4003R1's leaked
+        # `### Table of Contents`). Walk back over trivial filler to reach it.
         p = run[0] - 1
         while p >= 0:
-            sec_p = sections[p]
-            if sec_p.kind == SectionKind.HEADING:
-                if is_toc_label(sec_p.text):
-                    to_remove.add(p)
-                break
-            if not _section_is_trivial(sec_p):
-                break
-            if is_toc_label(sec_p.text):
+            if is_toc_label(sections[p].text):
                 to_remove.add(p)
-            p -= 1
+                p -= 1
+                continue
+            if (sections[p].kind != SectionKind.HEADING
+                    and _section_is_trivial(sections[p])):
+                p -= 1
+                continue
+            break
 
     run: list[int] = []
-    for h in heading_idx:
-        if eligible[h]:
-            run.append(h)
+    for i in range(n):
+        if entry[i]:
+            run.append(i)
+        elif sections[i].kind != SectionKind.HEADING and _section_is_trivial(sections[i]):
+            # Non-heading trivial filler (a split page number) bridges
+            # consecutive entries; it neither opens nor closes a run.
+            continue
         else:
             _flush(run)
             run = []
