@@ -279,7 +279,7 @@ Enums:
 - Body size: most common font size by character count (fallback 11.0)
 - Font ranking: sizes > body * 1.05 ranked descending (rank 1 = largest = shallowest heading)
 
-### Layer 8: TOC Detection (1 technique)
+### Layer 8: TOC Detection (2 techniques)
 
 **T29. TOC detection with exact-match + fuzzy fallback**
 - `toc.py:find_toc_indices`
@@ -287,9 +287,15 @@ Enums:
 - Fast path: exact-match set lookup (`_exact_set`) against normalized headings. O(1) per section.
 - Fuzzy fallback: only when heading count is below `_MAX_FUZZY_HEADINGS` (200). Uses dual-algorithm OR-gate (SequenceMatcher >= 0.75 OR Jaccard >= 0.65). Without this guard, large documents (2000+ pages, 40k sections) hang on O(sections * headings) fuzzy comparisons.
 - Requires 3+ consecutive matches. Bridges gaps up to 3 non-matching entries, but only when each bridged entry is trivial (`_bridgeable`: blank, a bare/numeric label, or <= `_MAX_BRIDGE_ENTRY_WORDS` words with no terminal punctuation). A real prose paragraph breaks the run instead of being swallowed.
-- A section that is itself a body heading (`is_heading[i]`) is excluded from matching, *unless* its own text is shaped like a TOC line (`_TOC_LINE_RE`: a dot leader followed by a page number, e.g. `Foo .... 7`). Without this, every body heading matched itself in the reference set and the gap-fill deleted the prose between headings, destroying the body of short papers (#122). The shipped predicate keys on the dot-leader-then-page-number shape, not a bare trailing number, so body headings like `Step 1` / `Phase 2` are never eligible.
+- A section that is itself a body heading (`is_heading[i]`) is excluded from matching, *unless* its own text is shaped like a TOC line (`_TOC_LINE_RE`: a dot leader followed by a page number, e.g. `Foo .... 7`). Without this, every body heading matched itself in the reference set and the gap-fill deleted the prose between headings, destroying the body of short papers. The shipped predicate keys on the dot-leader-then-page-number shape, not a bare trailing number, so body headings like `Step 1` / `Phase 2` are never eligible.
 - Stops on duplicate first-line (second occurrence = real heading, not TOC entry)
 - Includes preceding "Table of Contents" / "Contents" label
+
+**T29b. Leaked heading-kind TOC removal (#122 post-pass)**
+- `structure.py:drop_leaked_toc_headings`, run after the T29 strip and the IMAGE filter, before emit
+- T29 deliberately does not match a heading-kind TOC entry that lacks the dot-leader shape (the `is_heading` guard, to avoid the body-deletion class). Such a TOC therefore leaks: each entry survives as an empty duplicate heading. This pass removes them.
+- Removes a `HEADING` only when it is (1) empty (no section above `_TOC_ENTRY_MAX_BODY_CHARS` between it and the next heading) and (2) its normalized title recurs as a *later* heading, AND it belongs to a contiguous run of at least `MIN_TOC_RUN` (shared with `toc.py`) such headings. A run whose levels strictly increase across the whole run is rejected (a `15`/`15.1`/`15.1.1` clause-container stack, not a TOC). Also drops in-span trivial fragments (split page numbers) and a preceding "Table of Contents" label.
+- Body-safe by construction: an empty heading has no body, so no prose/code/table/list can be removed. The run gate confines removal to dense front-of-section TOC blocks; a lone recurring container is spared. `_TOC_ENTRY_MAX_BODY_CHARS` and `MIN_TOC_RUN` are corpus-tuned; under-removal leaves a cosmetic duplicate heading, never body loss.
 
 ### Layer 9: Emission (8 techniques)
 

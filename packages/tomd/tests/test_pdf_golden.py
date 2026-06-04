@@ -27,6 +27,11 @@ _GOLDEN_STEMS = (
     # a pre-existing leak.
     "p4174r0",
     "p4004r1",
+    # Leaked heading-kind TOC guard (#122 pt2): p4100r1 shipped a front block of
+    # empty duplicate headings (its Table of Contents leaked as headings without
+    # a dot-leader page number). The dedup post-pass removes them (35 -> 0). Pure
+    # Population A: no doubled body, so "body intact and not doubled" is real.
+    "p4100r1",
     # Population-B promotion-dedup guard (pt3): a confident page paired into a
     # promotion was emitted twice. p3968r0's sole defect was this double-emit
     # (sections 6 and 7 doubled at the tail); the golden pins that each section

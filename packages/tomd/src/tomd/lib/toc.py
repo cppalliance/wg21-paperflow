@@ -34,7 +34,12 @@ _TOC_LABELS = frozenset({
 
 _WHITESPACE_RE = re.compile(r"\s+")
 
-_MIN_TOC_RUN = 3
+# Minimum length of a contiguous run that counts as a Table of Contents.
+# Public because `pdf/structure.py:drop_leaked_toc_headings` (the
+# companion pass that removes leaked *heading-kind* TOC entries that
+# `find_toc_indices` deliberately stops matching, #122) gates on the same
+# run length. Shared so the two "what is a TOC" definitions cannot drift.
+MIN_TOC_RUN = 3
 _MAX_GAP = 3
 _MAX_FUZZY_HEADINGS = 200
 
@@ -142,9 +147,16 @@ def find_toc_indices(
     A debug line is logged when the likely-misuse shape is seen.
 
     Both texts and headings are normalized before comparison. Detects runs
-    of 3+ consecutive matches, bridging only trivial gap sections (see
-    _bridgeable). Also includes any "Table of Contents" label immediately
+    of MIN_TOC_RUN+ consecutive matches, bridging only trivial gap sections
+    (see _bridgeable). Also includes any "Table of Contents" label immediately
     preceding a run.
+
+    Companion pass: a heading-kind TOC whose entries lack the dot-leader shape
+    is deliberately *not* matched here (the is_heading guard), so it leaks as
+    empty duplicate headings; `pdf/structure.py:drop_leaked_toc_headings`
+    removes those, gating on the same shared `MIN_TOC_RUN`. The two functions
+    are the structural and the post-structure halves of one "what is a TOC"
+    definition; keep them in sync.
     """
     if not texts:
         return set()
@@ -256,7 +268,7 @@ def find_toc_indices(
 
     match_count = sum(1 for i in run_indices if matches[i])
     toc_indices: set[int] = set()
-    if match_count >= _MIN_TOC_RUN:
+    if match_count >= MIN_TOC_RUN:
         toc_indices = set(run_indices)
         _log.debug("TOC block: %d entries (%d matched)",
                     len(run_indices), match_count)

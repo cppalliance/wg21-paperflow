@@ -11,6 +11,9 @@ from .. import (
     DATE_RE, DEFAULT_FENCE_LANG, SECTION_NUM_PATTERN, SECTION_NUM_PREFIX_RE,
     strip_format_chars,
 )
+# `drop_leaked_toc_headings` reuses toc.py's TOC-recognition helpers so the
+# two "what is a TOC" definitions stay a single source of truth (see #122).
+from ..toc import MIN_TOC_RUN, _is_toc_label, _normalize_toc_entry
 from .glyphs import GLYPH_FONT_SENTINEL, UNKNOWN_GLYPH
 from .types import (
     Block, Line, Span, Section, SectionKind, Confidence,
@@ -416,6 +419,115 @@ def compare_extractions(mupdf_blocks: list[Block],
             sec.spatial_text = ""
 
     return sections
+
+
+# A heading counts as "empty" when every section between it and the next
+# heading is shorter than this: a leaked TOC entry's only "body" is a stray
+# split page number or short fragment, never real prose. Validated against the
+# 2026 corpus. Coupling caveat: this threshold and `MIN_TOC_RUN` (toc.py) are
+# corpus-tuned. A future paper with a 2-entry leaked TOC, or a leaked entry
+# whose stray fragment exceeds 40 chars, under-removes silently (a cosmetic
+# duplicate heading remains). Body text is never at risk either way: only empty
+# headings are ever removed.
+_TOC_ENTRY_MAX_BODY_CHARS = 40
+
+
+def _section_is_trivial(sec: Section) -> bool:
+    """True if a non-heading section is too small to count as body.
+
+    A leaked TOC entry's "body" is at most a split page number or short
+    fragment; real prose, code, tables, and lists exceed the threshold and
+    make the heading above them non-empty (hence not removable).
+    """
+    return len(sec.text.strip()) < _TOC_ENTRY_MAX_BODY_CHARS
+
+
+def drop_leaked_toc_headings(sections: list[Section]) -> list[Section]:
+    """Remove a leaked heading-kind Table of Contents.
+
+    Companion to `toc.find_toc_indices` (the dot-leader structural detector,
+    shared `MIN_TOC_RUN`). #122 stopped `find_toc_indices` from matching a
+    heading-kind section unless it carries a dot-leader page-number shape, so a
+    Table of Contents whose entries are headings without that shape now leaks:
+    each entry survives as an empty duplicate heading. This pass removes such
+    entries, but only when they form a contiguous run of at least `MIN_TOC_RUN`
+    *empty* headings whose titles *recur* as later headings (a TOC block), and
+    never when the run is a strictly-deepening container stack (`15`/`15.1`/
+    `15.1.1`). It is body-safe by construction: an empty heading has no body, so
+    no prose, code, table, or list can be removed or re-parented.
+
+    Pure and deterministic (D7): built by ordered iteration; the removal set
+    gates membership only and never feeds prompt-bound output.
+    """
+    n = len(sections)
+
+    # 1. normalized heading title -> ordered list of section indices.
+    title_indices: dict[str, list[int]] = {}
+    for i, sec in enumerate(sections):
+        if sec.kind == SectionKind.HEADING:
+            title_indices.setdefault(_normalize_toc_entry(sec.text), []).append(i)
+
+    # 2. mark removable-eligible headings: empty (no substantial body before the
+    #    next heading) AND title recurs as a *later* heading.
+    eligible = [False] * n
+    for i, sec in enumerate(sections):
+        if sec.kind != SectionKind.HEADING:
+            continue
+        empty = True
+        for j in range(i + 1, n):
+            if sections[j].kind == SectionKind.HEADING:
+                break
+            if not _section_is_trivial(sections[j]):
+                empty = False
+                break
+        if not empty:
+            continue
+        norm = _normalize_toc_entry(sec.text)
+        if any(k > i for k in title_indices.get(norm, [])):
+            eligible[i] = True
+
+    # 3. group eligible headings into contiguous runs (only trivial sections sit
+    #    between consecutive members, which condition 2's emptiness guarantees),
+    #    keep runs >= MIN_TOC_RUN, reject a strictly-deepening container stack,
+    #    and sweep the run's in-span trivial fragments plus a preceding label.
+    heading_idx = [i for i in range(n) if sections[i].kind == SectionKind.HEADING]
+    to_remove: set[int] = set()
+
+    def _flush(run: list[int]) -> None:
+        if len(run) < MIN_TOC_RUN:
+            return
+        levels = [sections[i].heading_level for i in run]
+        if all(b > a for a, b in zip(levels, levels[1:])):
+            return  # strictly-deepening clause hierarchy, not a TOC
+        for i in run:
+            to_remove.add(i)
+        # Trivial fragments (split page numbers) within the run's empty span,
+        # up to the next real heading after the last entry.
+        end = next((k for k in heading_idx if k > run[-1]), n)
+        for j in range(run[0] + 1, end):
+            if (sections[j].kind != SectionKind.HEADING
+                    and _section_is_trivial(sections[j])):
+                to_remove.add(j)
+        # A "Table of Contents" / "Contents" label immediately preceding the run.
+        p = run[0] - 1
+        while (p >= 0 and sections[p].kind != SectionKind.HEADING
+               and _section_is_trivial(sections[p])):
+            if _is_toc_label(sections[p].text):
+                to_remove.add(p)
+            p -= 1
+
+    run: list[int] = []
+    for h in heading_idx:
+        if eligible[h]:
+            run.append(h)
+        else:
+            _flush(run)
+            run = []
+    _flush(run)
+
+    if not to_remove:
+        return sections
+    return [s for i, s in enumerate(sections) if i not in to_remove]
 
 
 _BODY_PROSE_MIN_CHARS = 500

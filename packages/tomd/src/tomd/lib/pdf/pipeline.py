@@ -32,8 +32,8 @@ from .mono import propagate_monospace
 from .figures import detect_figure_regions
 from .wording import classify_wording, collect_line_drawings
 from .spans import normalize_spans
-from .structure import (compare_extractions, structure_body,
-                        _is_known_section, _TITLE_PID_PREFIX_RE)
+from .structure import (compare_extractions, drop_leaked_toc_headings,
+                        structure_body, _is_known_section, _TITLE_PID_PREFIX_RE)
 from ..metadata_yaml.extract import (
     apply_pdf_metadata_fallbacks as _apply_pdf_metadata_fallbacks,
     enrich_pdf_reply_to as _enrich_pdf_reply_to,
@@ -2062,6 +2062,11 @@ def run_pipeline(
 
     _strip_metadata_from_uncertain(sections, metadata)
     _reorder_abstract_in_uncertain(sections)
+
+    # Remove a leaked heading-kind TOC: entries that survived
+    # find_toc_indices as empty duplicate headings. Body-safe by construction
+    # (only empty headings in a recurring run are removed).
+    sections = drop_leaked_toc_headings(sections)
 
     md = emit_markdown(
         metadata,
