@@ -226,6 +226,19 @@ def _is_column_aligned_orphan(block: Block, column_xs: frozenset[float]) -> bool
     return any(abs(x0 - cx) <= _COLUMN_X_BUCKET for cx in column_xs)
 
 
+def _block_is_monospace(block: Block) -> bool:
+    """True if most of the block's text spans are monospace.
+
+    Used to prevent the single-header multi-orphan scan from absorbing
+    code comparison blocks that belong to side-by-side tables.
+    """
+    text_spans = [s for ln in block.lines for s in ln.spans
+                  if s.text.strip()]
+    if not text_spans:
+        return False
+    return sum(1 for s in text_spans if s.monospace) >= len(text_spans) / 2
+
+
 def _is_partial_row(block: Block, ref_cols: list[float],
                     prev_bottom: float, same_page: bool) -> bool:
     """True if block is a columnar row with fewer columns than ref_cols.
@@ -3380,6 +3393,15 @@ def detect_tables(
                 table_blocks.append(blocks[j])
                 ref_cols = next_cols
                 j += 1
+            elif (next_cols is not None
+                  and _is_subset_columns(next_cols, ref_cols)
+                  and not _block_is_monospace(blocks[j])
+                  and not _block_is_monospace(table_blocks[0])
+                  and blocks[j].page_num == table_blocks[-1].page_num):
+                table_blocks.append(blocks[j])
+                partial_absorbed.add(id(blocks[j]))
+                multi_orphan_used = True
+                j += 1
             elif (_is_column_aligned_orphan(blocks[j], column_xs)
                   and j + 1 < len(blocks)
                   and blocks[j].page_num == table_blocks[-1].page_num):
@@ -3411,14 +3433,16 @@ def detect_tables(
                                                         len(ref_cols)))):
                             partial_absorbed.add(id(blocks[j]))
                     j += 1
-                elif (len(table_blocks) >= 2
+                elif (len(table_blocks) >= 1
                       and ((peek_cols is not None
                             and blocks[j + 1].page_num == blocks[j].page_num
                             and _is_subset_columns(peek_cols, ref_cols))
                            or (_is_column_aligned_orphan(blocks[j + 1],
                                                          column_xs)
                                and blocks[j + 1].page_num
-                                   == blocks[j].page_num))):
+                                   == blocks[j].page_num))
+                      and (len(table_blocks) >= 2
+                           or not _block_is_monospace(blocks[j]))):
                     # Multi-step lookahead: scan ahead past orphans
                     # and subset-column blocks to find a full-column
                     # block confirming the table continues.  Cap
@@ -3454,6 +3478,101 @@ def detect_tables(
                             partial_absorbed.add(id(blocks[k]))
                             table_blocks.append(blocks[k])
                         j = absorbed_end
+                    elif (not found_full
+                          and len(ref_cols) >= 3
+                          and scan > j):
+                        # Fix B: Collective orphan coverage.
+                        # No confirming full-column block, but if
+                        # orphan blocks collectively cover ALL header
+                        # columns with 2+ multi-column y-bands, accept
+                        # the run as a fragmented borderless table.
+                        # Extend scan past the max_scan limit: each
+                        # cell is a separate block, so borderless
+                        # tables need more scan distance than tables
+                        # with confirming full-column blocks.
+                        while (scan < len(blocks)
+                               and blocks[scan].page_num
+                                   == table_page
+                               and _is_column_aligned_orphan(
+                                   blocks[scan], column_xs)):
+                            bx0 = (blocks[scan].lines[0].bbox[0]
+                                   if blocks[scan].lines
+                                   else blocks[scan].bbox[0])
+                            if not any(
+                                    abs(bx0 - rc) <= _COLUMN_X_BUCKET
+                                    for rc in ref_cols):
+                                break
+                            scan += 1
+                        orphan_run = [
+                            blocks[k] for k in range(j, scan)
+                            if _is_column_aligned_orphan(
+                                blocks[k], column_xs)]
+                        col_ybands: dict[int, set[int]] = {}
+                        for ob in orphan_run:
+                            for oln in ob.lines:
+                                if (not oln.spans
+                                        or not oln.text.strip()):
+                                    continue
+                                x0 = oln.bbox[0]
+                                best_ci = min(
+                                    range(len(ref_cols)),
+                                    key=lambda ci: abs(
+                                        x0 - ref_cols[ci]))
+                                if (abs(x0 - ref_cols[best_ci])
+                                        <= _COLUMN_X_TOLERANCE):
+                                    ym = (oln.bbox[1]
+                                          + oln.bbox[3]) / 2.0
+                                    col_ybands.setdefault(
+                                        best_ci, set()).add(
+                                            round(ym
+                                                  / _Y_BAND_HEIGHT))
+                        # Include columns from subset blocks
+                        # already absorbed before this orphan
+                        # run (they cover columns the orphans
+                        # cannot).
+                        for tb in table_blocks:
+                            if id(tb) not in partial_absorbed:
+                                continue
+                            tb_cp = _block_column_positions(tb)
+                            if (tb_cp is None
+                                    or not _is_subset_columns(
+                                        tb_cp, ref_cols)):
+                                continue
+                            for tln in tb.lines:
+                                if (not tln.spans
+                                        or not tln.text.strip()):
+                                    continue
+                                tx0 = tln.bbox[0]
+                                tci = min(
+                                    range(len(ref_cols)),
+                                    key=lambda ci: abs(
+                                        tx0 - ref_cols[ci]))
+                                if (abs(tx0 - ref_cols[tci])
+                                        <= _COLUMN_X_TOLERANCE):
+                                    tym = (tln.bbox[1]
+                                           + tln.bbox[3]) / 2.0
+                                    col_ybands.setdefault(
+                                        tci, set()).add(
+                                            round(tym
+                                                  / _Y_BAND_HEIGHT))
+                        all_ybs = set()
+                        for ybs in col_ybands.values():
+                            all_ybs.update(ybs)
+                        mc_bands = sum(
+                            1 for yk in all_ybs
+                            if sum(1 for ci, ybs
+                                   in col_ybands.items()
+                                   if yk in ybs) >= 2)
+                        if (len(col_ybands) >= len(ref_cols)
+                                and mc_bands >= 2):
+                            multi_orphan_used = True
+                            for k in range(j, scan):
+                                partial_absorbed.add(
+                                    id(blocks[k]))
+                                table_blocks.append(blocks[k])
+                            j = scan
+                        else:
+                            break
                     else:
                         break
                 else:
@@ -3536,7 +3655,17 @@ def detect_tables(
                 gaps = [y_mids[i + 1] - y_mids[i]
                         for i in range(len(y_mids) - 1)]
                 real_gaps = sorted({g for g in gaps if g > 1.0})
-                if len(real_gaps) >= 2:
+                if len(real_gaps) >= 3:
+                    max_jump = 0.0
+                    split_idx = 0
+                    for gi in range(len(real_gaps) - 1):
+                        jump = real_gaps[gi + 1] - real_gaps[gi]
+                        if jump > max_jump:
+                            max_jump = jump
+                            split_idx = gi
+                    band_gap = (real_gaps[split_idx]
+                                + real_gaps[split_idx + 1]) / 2
+                elif len(real_gaps) >= 2:
                     band_gap = (real_gaps[0] + real_gaps[1]) / 2
                 else:
                     band_gap = _SPEC_TABLE_Y_BAND
@@ -3557,27 +3686,74 @@ def detect_tables(
                         row[col_idx].extend(line.spans)
                     rows.append(row)
 
-                # In 2-column tables, y-band grouping can split
+                # Multi-line cell merge: y-band grouping can split
                 # multi-line values into separate bands when
-                # intra-cell line spacing varies.  Merge rows where
-                # col-0 is empty back into the previous row: an
-                # empty key always means value continuation.
-                if num_cols == 2 and len(rows) > 1:
-                    merged_bands: list[list[list]] = []
-                    for row in rows:
+                # intra-cell line spacing varies.  Bands with
+                # col-0 filled are "row anchors"; bands with col-0
+                # empty are continuations merged into the nearest
+                # anchor by y-distance.
+                if len(rows) > 1 and len(bands) > 1:
+                    band_ymids = [
+                        sum(ln.bbox[1] for _, ln in band)
+                        / len(band) if band else 0.0
+                        for band in bands]
+                    anchor_idxs = []
+                    non_anchor_idxs = []
+                    for ri, row in enumerate(rows):
                         col0_text = "".join(
                             s.text for s in row[0]).strip()
-                        col1_text = "".join(
-                            s.text for s in row[1]).strip() if len(row) > 1 else ""
-                        if (merged_bands
-                                and not col0_text and col1_text):
-                            target = merged_bands[-1]
-                            if target[1]:
-                                target[1].append(Span(text=" "))
-                            target[1].extend(row[1])
+                        if col0_text:
+                            anchor_idxs.append(ri)
                         else:
-                            merged_bands.append(row)
-                    rows = merged_bands
+                            any_other = any(
+                                "".join(s.text
+                                        for s in row[ci]).strip()
+                                for ci in range(1, num_cols))
+                            if any_other:
+                                non_anchor_idxs.append(ri)
+                            else:
+                                anchor_idxs.append(ri)
+                    if non_anchor_idxs and anchor_idxs:
+                        merge_map: dict[int, int] = {}
+                        for ni in non_anchor_idxs:
+                            ny = band_ymids[ni]
+                            best_ai = min(
+                                anchor_idxs,
+                                key=lambda ai: abs(
+                                    band_ymids[ai] - ny))
+                            merge_map[ni] = best_ai
+                        merged_rows: dict[int, list[list]] = {}
+                        for ri, row in enumerate(rows):
+                            target_ri = merge_map.get(ri, ri)
+                            if target_ri not in merged_rows:
+                                merged_rows[target_ri] = [
+                                    list(cell)
+                                    for cell in rows[target_ri]]
+                            if ri != target_ri:
+                                target = merged_rows[target_ri]
+                                prepend = (band_ymids[ri]
+                                           < band_ymids[target_ri])
+                                for ci in range(num_cols):
+                                    ct = "".join(
+                                        s.text
+                                        for s in row[ci]).strip()
+                                    if ct:
+                                        if prepend:
+                                            ins = list(row[ci])
+                                            if target[ci]:
+                                                ins.append(
+                                                    Span(text=" "))
+                                            ins.extend(target[ci])
+                                            target[ci] = ins
+                                        else:
+                                            if target[ci]:
+                                                target[ci].append(
+                                                    Span(text=" "))
+                                            target[ci].extend(
+                                                row[ci])
+                        rows = [merged_rows[ai]
+                                for ai in sorted(
+                                    merged_rows.keys())]
             else:
                 continuation_row_indices: set[int] = set()
                 for blk in table_blocks:
@@ -3657,6 +3833,22 @@ def detect_tables(
                     k += 1
             rows = merged
 
+            # Dedup repeated headers from cross-page tables.
+            # PDFs that span multiple pages often repeat the
+            # header row at the top of each continuation page.
+            if len(rows) >= 3:
+                hdr_text = tuple(
+                    "".join(s.text for s in cell).strip()
+                    for cell in rows[0])
+                deduped: list[list[list]] = [rows[0]]
+                for row in rows[1:]:
+                    row_text = tuple(
+                        "".join(s.text for s in cell).strip()
+                        for cell in row)
+                    if row_text != hdr_text:
+                        deduped.append(row)
+                rows = deduped
+
             # MuPDF-overlap guard (Pass 1): if the table blocks overlap a
             # substantial MuPDF find_tables() region, defer to Pass 5.
             # Skip deferral for predominantly monospace tables (code
@@ -3675,10 +3867,16 @@ def detect_tables(
                                     mono_spans += 1
                 p1_mono_ratio = mono_spans / total_spans if total_spans else 0
                 if p1_mono_ratio < _MONO_RATIO_THRESHOLD:
-                    p1_y0 = min(b.bbox[1] for b in table_blocks)
-                    p1_y1 = max(b.bbox[3] for b in table_blocks)
-                    p1_x0 = min(b.bbox[0] for b in table_blocks)
-                    p1_x1 = max(b.bbox[2] for b in table_blocks)
+                    # Use only blocks on p1_page for bounding box.
+                    # Cross-page tables mix y-coordinates from
+                    # different pages, inflating p1_h and defeating
+                    # the phantom guard.
+                    same_pg = [b for b in table_blocks
+                               if b.page_num == p1_page]
+                    p1_y0 = min(b.bbox[1] for b in same_pg)
+                    p1_y1 = max(b.bbox[3] for b in same_pg)
+                    p1_x0 = min(b.bbox[0] for b in same_pg)
+                    p1_x1 = max(b.bbox[2] for b in same_pg)
                     for tbl in page_mupdf_tables.get(p1_page, []):
                         tb = tbl["bbox"]
                         if tbl.get("row_count", 0) < _SBS_MUPDF_DEFER_MIN_ROWS:
