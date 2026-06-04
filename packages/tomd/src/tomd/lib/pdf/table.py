@@ -157,6 +157,30 @@ def _render_table_text(rows: list[list[list]]) -> str:
     )
 
 
+def _header_dedup_start(
+    prev_columns: list[list[list]],
+    cur_rows: list[list[list]],
+) -> int:
+    """Return row index to start appending from cur_rows.
+
+    If the first row of cur_rows textually matches the header (first
+    row) of prev_columns, return 1 to skip the duplicate header.
+    Otherwise return 0 (append all rows).
+    """
+    if cur_rows and prev_columns:
+        hdr_prev = [
+            "".join(s.text for s in cell).strip()
+            for cell in prev_columns[0]
+        ]
+        hdr_cur = [
+            "".join(s.text for s in cell).strip()
+            for cell in cur_rows[0]
+        ]
+        if hdr_prev == hdr_cur:
+            return 1
+    return 0
+
+
 def _find_column_xs(blocks: list[Block]) -> frozenset[float]:
     """Return x-start positions that are genuine table columns.
 
@@ -908,6 +932,12 @@ _MUPDF_TABLE_MIN_BBOX_SIZE = 50.0  # minimum width AND height for a real table
 _MUPDF_TABLE_MAX_PAGE_COVERAGE = 0.80
 _MUPDF_TABLE_MAX_CELL_FRACTION = 0.40
 
+# Cross-page merge thresholds for MuPDF native tables.
+# Used both in the per-page pre-classify absorb and the post-loop merge.
+_CROSS_PAGE_BOTTOM_Y = 600.0
+_CROSS_PAGE_TOP_Y = 200.0
+_CROSS_PAGE_MAX_GAP = 2
+
 
 _LABEL_MAX_WORDS = 3  # column-0 cells with more words are not labels
 
@@ -1198,6 +1228,68 @@ def _detect_mupdf_native_tables(
             kind_val, strategy_val, classify_rows = (
                 _classify_and_annotate(classify_rows))
 
+            # Cross-page absorption: before rejecting a table as
+            # false_positive or bibliography, check if it continues
+            # the immediately preceding table section.  Small tail
+            # fragments (e.g. 2 data rows + footer junk) often get
+            # misclassified because the signal-to-noise ratio is low,
+            # but structurally they belong to the previous table.
+            # Use the MuPDF-native col count (tbl_info) because
+            # spatial clustering may inflate actual_cols.
+            mupdf_col_count = tbl_info["col_count"]
+            if (table_sections
+                    and (kind_val == TableKind.FALSE_POSITIVE.value
+                         or kind_val == TableKind.BIBLIOGRAPHY.value)):
+                prev = table_sections[-1]
+                prev_cols = (len(prev.columns[0])
+                             if prev.columns else 0)
+                prev_last_page = prev.page_num
+                if prev.lines:
+                    ppages = {ln.page_num for ln in prev.lines
+                              if hasattr(ln, 'page_num') and ln.page_num is not None}
+                    if ppages:
+                        prev_last_page = max(ppages)
+                page_gap = page_num - prev_last_page
+                if (prev_cols == mupdf_col_count
+                        and 1 <= page_gap <= 2):
+                    prev_max_y = max(
+                        (ln.bbox[3] for ln in prev.lines), default=0)
+                    cur_min_y = min(
+                        (ln.bbox[1] for ln in all_lines), default=999)
+                    if (prev_max_y > _CROSS_PAGE_BOTTOM_Y
+                            and cur_min_y < _CROSS_PAGE_TOP_Y):
+                        # Build rows from MuPDF-native extract data
+                        # (correct column count) instead of the
+                        # spatially-clustered non_empty_rows which may
+                        # have inflated column count.
+                        extract = tbl_info["extract"]
+                        native_rows: list[list[list]] = []
+                        for raw_row in extract:
+                            cells = [
+                                [Span(text=(c or ""))]
+                                for c in raw_row
+                            ]
+                            filled = sum(
+                                1 for c in raw_row
+                                if c and c.strip()
+                            )
+                            if filled >= 2:
+                                native_rows.append(cells)
+                        if not native_rows:
+                            continue
+                        start = _header_dedup_start(
+                            prev.columns, native_rows)
+                        prev.columns.extend(native_rows[start:])
+                        prev.lines.extend(all_lines)
+                        prev.text = _render_table_text(prev.columns)
+                        used.update(table_block_indices)
+                        _log.debug(
+                            "Cross-page absorb (pre-classify): "
+                            "page %d into page %d table, now %d rows",
+                            page_num, prev.page_num,
+                            len(prev.columns))
+                        continue
+
             # Bibliography: not a real table, skip so prose pipeline handles it.
             # Do NOT mark blocks as used so they stay in remaining.
             if kind_val == TableKind.BIBLIOGRAPHY.value:
@@ -1237,59 +1329,73 @@ def _detect_mupdf_native_tables(
                 len(non_empty_rows), col_count, page_num, kind_val,
             )
 
-    # Cross-page merge: when consecutive MuPDF-native table sections
-    # have the same table_kind and col count, and the first ends near
-    # the page bottom while the second starts near the page top, they
-    # are a single table split across a page break.  Merge by appending
-    # the continuation rows (skipping any duplicate header) to the
-    # first table and dropping the continuation section.
-    _CROSS_PAGE_BOTTOM_Y = 600.0
-    _CROSS_PAGE_TOP_Y = 200.0
+    # Cross-page merge: consecutive MuPDF-native table sections with the
+    # same column count that straddle a page break are fragments of one
+    # logical table.  Merge by appending continuation rows (skipping any
+    # duplicate header) to the first fragment and dropping the rest.
+    #
+    # Guards (all must hold):
+    #   - Same column count (structural identity).
+    #   - First fragment ends near page bottom (y > 600).
+    #   - Second fragment starts near page top (y < 200).
+    #   - Pages within 2 of each other (allows blank separator pages).
+    #
+    # table_kind is intentionally NOT checked: the same logical table
+    # gets different kinds per page because _classify_and_annotate runs
+    # independently per fragment.  Column count is the structural signal.
+    #
+    # Iterates until stable so A+B+C+D collapses in one pass sequence.
     if len(table_sections) >= 2:
-        merged_indices: set[int] = set()
-        for si in range(len(table_sections) - 1):
-            if si in merged_indices:
-                continue
-            sec_a = table_sections[si]
-            sec_b = table_sections[si + 1]
-            if (sec_a.table_kind and sec_b.table_kind
-                    and sec_a.table_kind == sec_b.table_kind
-                    and sec_b.page_num == sec_a.page_num + 1
-                    and sec_a.columns and sec_b.columns
-                    and len(sec_a.columns[0]) == len(sec_b.columns[0])):
+        changed = True
+        while changed:
+            changed = False
+            merged_indices: set[int] = set()
+            for si in range(len(table_sections) - 1):
+                if si in merged_indices:
+                    continue
+                sec_a = table_sections[si]
+                sec_b = table_sections[si + 1]
+                if not (sec_a.columns and sec_b.columns):
+                    continue
+                if len(sec_a.columns[0]) != len(sec_b.columns[0]):
+                    continue
+                # Use max page from lines for adjacency (page_num stays
+                # at the first fragment's page after a merge).
+                a_last_page = sec_a.page_num
+                if sec_a.lines:
+                    pages_in_a = {
+                        ln.page_num for ln in sec_a.lines
+                        if hasattr(ln, 'page_num') and ln.page_num is not None
+                    }
+                    if pages_in_a:
+                        a_last_page = max(pages_in_a)
+                page_gap = sec_b.page_num - a_last_page
+                if page_gap < 1 or page_gap > _CROSS_PAGE_MAX_GAP:
+                    continue
                 a_max_y = max(
                     (ln.bbox[3] for ln in sec_a.lines), default=0)
                 b_min_y = min(
                     (ln.bbox[1] for ln in sec_b.lines), default=999)
-                if a_max_y > _CROSS_PAGE_BOTTOM_Y and b_min_y < _CROSS_PAGE_TOP_Y:
-                    # Skip duplicate header row in continuation:
-                    # if first row of B textually matches header of A, drop it.
-                    start = 0
-                    if len(sec_b.columns) > 1:
-                        hdr_a = [
-                            "".join(s.text for s in cell).strip()
-                            for cell in sec_a.columns[0]
-                        ]
-                        hdr_b = [
-                            "".join(s.text for s in cell).strip()
-                            for cell in sec_b.columns[0]
-                        ]
-                        if hdr_a == hdr_b:
-                            start = 1
-                    sec_a.columns.extend(sec_b.columns[start:])
-                    sec_a.lines.extend(sec_b.lines)
-                    sec_a.text = _render_table_text(sec_a.columns)
-                    merged_indices.add(si + 1)
-                    _log.debug(
-                        "Cross-page merge: page %d + %d (%s), "
-                        "now %d rows",
-                        sec_a.page_num, sec_b.page_num,
-                        sec_a.table_kind, len(sec_a.columns))
-        if merged_indices:
-            table_sections = [
-                s for i, s in enumerate(table_sections)
-                if i not in merged_indices
-            ]
+                if not (a_max_y > _CROSS_PAGE_BOTTOM_Y
+                        and b_min_y < _CROSS_PAGE_TOP_Y):
+                    continue
+                start = _header_dedup_start(
+                    sec_a.columns, sec_b.columns)
+                sec_a.columns.extend(sec_b.columns[start:])
+                sec_a.lines.extend(sec_b.lines)
+                sec_a.text = _render_table_text(sec_a.columns)
+                merged_indices.add(si + 1)
+                changed = True
+                _log.debug(
+                    "Cross-page merge: page %d + %d (cols=%d), "
+                    "now %d rows",
+                    sec_a.page_num, sec_b.page_num,
+                    len(sec_a.columns[0]), len(sec_a.columns))
+            if merged_indices:
+                table_sections = [
+                    s for i, s in enumerate(table_sections)
+                    if i not in merged_indices
+                ]
 
     return table_sections, used
 
@@ -1298,6 +1404,12 @@ _HORIZONTAL_ROW_Y_TOLERANCE = 3.0
 _HORIZONTAL_ROW_Y_TOLERANCE_WIDE = 12.0
 _HORIZONTAL_ROW_WIDE_X_SPREAD = 150.0
 _HORIZONTAL_ROW_MIN_CELLS = 3
+# Gap-asymmetry guard: reject blocks where the ratio of largest to
+# smallest inter-cell gap exceeds this threshold.  Real table rows
+# have roughly uniform spacing (ratio 1-3); WG21 section headings
+# like "4  General  [general]" have extreme asymmetry (ratio 5-13)
+# because the stable name sits far to the right.
+_HORIZONTAL_ROW_MAX_GAP_RATIO = 4.0
 
 # Spanning-header absorption: when a valid run is found, the
 # immediately preceding block may be a multi-column header with
@@ -1332,7 +1444,10 @@ def _block_horizontal_row(block: Block) -> list[float] | None:
         return None
     y_centers = [(ln.bbox[1] + ln.bbox[3]) / 2 for ln in block.lines]
     if max(y_centers) - min(y_centers) <= _HORIZONTAL_ROW_Y_TOLERANCE:
-        return [ln.bbox[0] for ln in block.lines]
+        cols = [ln.bbox[0] for ln in block.lines]
+        if _gap_asymmetry_reject(block.lines):
+            return None
+        return cols
 
     # Relaxed: non-overlapping x-ranges (true side-by-side cells)
     # with moderate y jitter.  MuPDF sometimes reports slightly
@@ -1349,9 +1464,61 @@ def _block_horizontal_row(block: Block) -> list[float] | None:
                 non_overlapping = False
                 break
         if non_overlapping:
+            if _gap_asymmetry_reject(by_x):
+                return None
             return [ln.bbox[0] for ln in by_x]
 
     return None
+
+
+def _gap_asymmetry_reject(lines: list) -> bool:
+    """Reject blocks with extreme gap asymmetry between cells.
+
+    Two independent guards, either triggers rejection:
+
+    1. Pure gap asymmetry: gap_ratio > _HORIZONTAL_ROW_MAX_GAP_RATIO.
+       Real table rows have roughly uniform spacing (ratio 1-3); WG21
+       section headings like "4  General  [general]" reach 5-13.
+
+    2. Combined gap + width asymmetry: gap_ratio > 3 AND the widest
+       cell is >10x the narrowest.  Catches reference-list patterns
+       like "(1.1) — IEC Electropedia: ..." where a tiny marker sits
+       next to a long description (width ratio 27, gap ratio 3.6).
+       Real tables with extreme width ratios have uniform gaps (≤1.4)
+       and vice versa; the combination is unique to list-marker blocks.
+    """
+    if len(lines) < 3:
+        return False
+    by_x = sorted(lines, key=lambda ln: ln.bbox[0])
+    gaps: list[float] = []
+    for k in range(len(by_x) - 1):
+        gap = by_x[k + 1].bbox[0] - by_x[k].bbox[2]
+        gaps.append(gap)
+    positive = [g for g in gaps if g > 0]
+    if len(positive) < 2:
+        return False
+    gap_ratio = max(positive) / min(positive)
+
+    # Guard 1: pure gap asymmetry
+    if gap_ratio > _HORIZONTAL_ROW_MAX_GAP_RATIO:
+        return True
+
+    # Guard 2: moderate gap asymmetry + extreme cell-width asymmetry,
+    # restricted to exactly 3 cells.  The pattern is reference-list
+    # markers "(1.1) — Long description..." which always decompose
+    # into exactly 3 lines.  4+ cell rows are real tables even when
+    # one cell is tiny (e.g. a "-" score column).
+    _GAP_MODERATE = 3.0
+    _WIDTH_EXTREME = 10.0
+    if len(by_x) == 3 and gap_ratio > _GAP_MODERATE:
+        widths = [ln.bbox[2] - ln.bbox[0] for ln in by_x]
+        pos_w = [w for w in widths if w > 0]
+        if len(pos_w) >= 2:
+            width_ratio = max(pos_w) / min(pos_w)
+            if width_ratio > _WIDTH_EXTREME:
+                return True
+
+    return False
 
 
 def _block_horizontal_row_relaxed(
@@ -2093,12 +2260,17 @@ def _detect_column_aligned_tables(
 
             # Build visual rows: group lines by y-band, assign to
             # columns based on their line.bbox[0].  All spans within
-            # a line go into the same column cell.
+            # a line go into the same column cell.  Track which MuPDF
+            # block indices contribute to each visual row so that
+            # multi-line cells (lines from the same block spanning
+            # multiple y-bands) can be detected during row-merge.
             num_cols = len(col_positions)
             visual_rows: list[tuple[int, list[list[Span]]]] = []
+            _vrow_blk_ids: list[set[int]] = []
 
             for yk in all_ybands:
                 cells: list[list[Span]] = [[] for _ in range(num_cols)]
+                blk_ids: set[int] = set()
                 # Re-collect lines for this y-band (not just spans).
                 for idx, blk in idx_blocks:
                     for line in blk.lines:
@@ -2112,7 +2284,9 @@ def _detect_column_aligned_tables(
                             continue
                         ci = _assign_col(line.bbox[0])
                         cells[ci].extend(line.spans)
+                        blk_ids.add(idx)
                 visual_rows.append((yk, cells))
+                _vrow_blk_ids.append(blk_ids)
 
             # Merge visual rows into logical rows.  A new logical row
             # starts when the leftmost column (col 0) has non-empty
@@ -2121,15 +2295,26 @@ def _detect_column_aligned_tables(
             # cell (starts with '(' or ',') is merged instead of
             # starting a new row — fixes P4003R1 §9.4 where "(kqueue)"
             # wraps from the previous cell's "macOS" line.
+            #
+            # Block-sharing continuation: when two consecutive visual
+            # rows share a contributing MuPDF block, the lines come
+            # from the same multi-line cell and must be merged even
+            # if col 0 has content (P1000R7 wrapped prose table).
             logical_rows: list[list[list[Span]]] = []
             current_logical: list[list[Span]] | None = None
 
-            for _, cells in visual_rows:
+            for vi, (_, cells) in enumerate(visual_rows):
                 col0_text = "".join(s.text for s in cells[0]).strip()
-                is_continuation = (
-                    col0_text
+                shares_block = (
+                    vi > 0
                     and current_logical is not None
-                    and col0_text[0] in "(,;"
+                    and bool(_vrow_blk_ids[vi] & _vrow_blk_ids[vi - 1])
+                )
+                is_continuation = (
+                    shares_block
+                    or (col0_text
+                        and current_logical is not None
+                        and col0_text[0] in "(,;")
                 )
                 if col0_text and not is_continuation:
                     if current_logical is not None:
@@ -3669,7 +3854,7 @@ def detect_tables(
                 continue
             blk_cols = _block_horizontal_row_relaxed(
                 blk, _SPANNING_HEADER_MIN_COLS)
-            if blk_cols is None or len(blk_cols) >= ncols:
+            if blk_cols is None or len(blk_cols) > ncols:
                 continue
             # Map each header col to its nearest table col.
             mapping = [
@@ -3723,25 +3908,29 @@ def exclude_table_regions(blocks: list[Block],
     if not table_sections:
         return blocks
 
-    # Build per-page (page_num, y_min, y_max) ranges.
-    page_ranges: dict[int, tuple[float, float]] = {}
+    # Build per-table (page_num, y_min, y_max) ranges.  Each table
+    # section gets its own range(s) so disjoint tables on the same
+    # page do not merge into one mega-range that swallows prose between
+    # them (which would skew compare_extractions similarity scores).
+    table_ranges: list[tuple[int, float, float]] = []
     for sec in table_sections:
         if not sec.lines:
             continue
+        sec_ranges: dict[int, tuple[float, float]] = {}
         for ln in sec.lines:
             pg = ln.page_num
-            if pg in page_ranges:
-                old_min, old_max = page_ranges[pg]
-                page_ranges[pg] = (
+            if pg in sec_ranges:
+                old_min, old_max = sec_ranges[pg]
+                sec_ranges[pg] = (
                     min(old_min, ln.bbox[1]),
                     max(old_max, ln.bbox[3]),
                 )
             else:
-                page_ranges[pg] = (ln.bbox[1], ln.bbox[3])
-
-    table_ranges = [
-        (pg, y_min, y_max) for pg, (y_min, y_max) in page_ranges.items()
-    ]
+                sec_ranges[pg] = (ln.bbox[1], ln.bbox[3])
+        table_ranges.extend(
+            (pg, y_min, y_max)
+            for pg, (y_min, y_max) in sec_ranges.items()
+        )
 
     result = []
     for block in blocks:
@@ -3753,6 +3942,18 @@ def exclude_table_regions(blocks: list[Block],
                     <= y_max + _TABLE_Y_OVERLAP_MARGIN):
                 in_table = True
                 break
+        # Bridge check: a spatial block that fully encloses 2+
+        # disjoint tables is table-spanning content (code/prose
+        # between tables that MuPDF merged into one block).
+        if not in_table:
+            contained = sum(
+                1 for pg, y_min, y_max in table_ranges
+                if block.page_num == pg
+                and block.bbox[1] <= y_min
+                and block.bbox[3] >= y_max
+            )
+            if contained >= 2:
+                in_table = True
         if not in_table:
             result.append(block)
     return result
