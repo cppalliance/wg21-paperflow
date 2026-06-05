@@ -37,8 +37,16 @@ from paperstore.errors import (
     MissingSourceError,
 )
 from paperstore.progress import ProgressCallback, ProgressEvent
+from tomd.lib.pdf import SkipReason
 
 logger = logging.getLogger(__name__)
+
+_SKIP_REASON_MAP: dict[SkipReason, str] = {
+    SkipReason.EMPTY_PDF: "empty_pdf",
+    SkipReason.SLIDE_DECK: "slide_deck",
+    SkipReason.STANDARDS_DRAFT: "standards_draft",
+    SkipReason.UNREADABLE: "unreadable",
+}
 
 MAILING_EARLIEST_YEAR = 2011
 DEFAULT_DOWNLOAD_CONCURRENCY = 8
@@ -366,6 +374,14 @@ async def run_convert(
                     ),
                     timeout=120,
                 )
+                if result.status == "skipped":
+                    bucket = _SKIP_REASON_MAP[SkipReason(result.skip_reason)]
+                    logger.warning("Skipping %s: %s", pid, result.skip_reason)
+                    return {
+                        "paper_id": pid,
+                        "status": "skipped",
+                        "reason": bucket,
+                    }
                 return {
                     "paper_id": pid,
                     "markdown": result.markdown,
@@ -377,9 +393,6 @@ async def run_convert(
                 }
             except RuntimeError as exc:
                 msg = str(exc)
-                if "empty markdown" in msg:
-                    logger.warning("Skipping %s: %s", pid, msg)
-                    return {"paper_id": pid, "status": "skipped", "reason": "unreadable_source"}
                 logger.exception("Convert failed for %s", pid)
                 return {"paper_id": pid, "status": "error", "error": msg}
             except TimeoutError:

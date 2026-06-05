@@ -44,7 +44,7 @@ from tomd.lib import (
     EMAIL_RE,
 )
 from tomd.lib.html import convert_html
-from tomd.lib.pdf import ExtractedImage, convert_pdf, run_pipeline
+from tomd.lib.pdf import ExtractedImage, PipelineResult, run_pipeline
 
 __all__ = ["ConvertedPaper", "convert_paper", "convert_paper_full"]
 
@@ -59,8 +59,8 @@ class ConvertedPaper:
     convert orchestration uses this structured form to persist image
     bytes and decide whether to invalidate downstream pipelines.
 
-    ``skipped`` is True for slide-decks, standards-draft early exits,
-    or unreadable sources. In that case ``markdown`` is the empty
+    ``skipped`` is True for empty PDFs, slide decks, standards-draft
+    early exits, or unreadable sources. In that case ``markdown`` is the empty
     string and ``images`` is empty - the caller writes nothing to
     disk and accumulates the paper in a "skipped" report bucket.
     """
@@ -75,6 +75,22 @@ class ConvertedPaper:
     skip_reason: str = ""
     source_raster_count: int = 0
     source_vector_count: int = 0
+
+    @classmethod
+    def skipped_from(cls, raw: PipelineResult) -> "ConvertedPaper":
+        """Translate a skipped :class:`PipelineResult` into a skipped
+        :class:`ConvertedPaper`.
+        """
+        return cls(
+            markdown="",
+            prompts=raw.prompts,
+            intent="",
+            images=[],
+            source_image_count=0,
+            images_truncated=False,
+            skipped=True,
+            skip_reason=raw.skip_reason,
+        )
 
 logger = logging.getLogger(__name__)
 
@@ -326,19 +342,6 @@ def _strip_body_metadata_text(md: str) -> str:
     return front + "\n".join(new_lines)
 
 
-def _convert_with_tomd(path: Path) -> tuple[str, list[str] | None]:
-    """Dispatch to the appropriate tomd converter by file suffix."""
-    suffix = path.suffix.lower()
-    if suffix == ".pdf":
-        return convert_pdf(path)
-    if suffix in (".html", ".htm"):
-        return convert_html(path)
-    raise UnsupportedSourceFormatError(
-        f"Unsupported source format {suffix!r} for {path.name}; "
-        f"expected .pdf, .html, or .htm"
-    )
-
-
 @dataclass(frozen=True)
 class _RawConversion:
     """Internal shape returned by :func:`_convert_with_tomd_full`."""
@@ -482,15 +485,13 @@ def convert_paper_full(
         )
 
     if raw.skipped:
-        return ConvertedPaper(
-            markdown="",
-            prompts=raw.prompts,
-            intent="",
-            images=[],
-            source_image_count=0,
-            images_truncated=False,
-            skipped=True,
-            skip_reason=raw.skip_reason,
+        return ConvertedPaper.skipped_from(
+            PipelineResult(
+                md="",
+                prompts=raw.prompts,
+                skipped=True,
+                skip_reason=raw.skip_reason,
+            )
         )
 
     if not raw.md or not raw.md.strip():

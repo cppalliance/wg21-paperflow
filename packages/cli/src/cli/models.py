@@ -73,6 +73,7 @@ class ConvertResult:
     prompts: list[str] | None
     intent: str
     title: str
-    status: str         # "ok" | "error"
+    status: str         # "ok" | "skipped" | "error"
+    skip_reason: str = ""
     error: str = ""
     images: list["ExtractedImage"] = field(default_factory=list)

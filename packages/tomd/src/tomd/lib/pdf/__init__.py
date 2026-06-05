@@ -2,9 +2,9 @@
 
 from tomd.lib.pdf.images import ExtractedImage
 from tomd.lib.pdf.pipeline import (
-    convert_pdf,
     run_pipeline,
     PipelineResult,
+    SkipReason,
     _enrich_pdf_reply_to,
     _is_slide_deck,
     _is_standards_draft,
@@ -13,10 +13,10 @@ from tomd.lib.pdf.pipeline import (
 )
 
 __all__ = [
-    "convert_pdf",
     "run_pipeline",
     "ExtractedImage",
     "PipelineResult",
+    "SkipReason",
     "_enrich_pdf_reply_to",
     "_is_slide_deck",
     "_is_standards_draft",

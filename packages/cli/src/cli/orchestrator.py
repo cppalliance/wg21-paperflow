@@ -73,9 +73,15 @@ def convert_one_paper(
         whiteout_text=whiteout_text,
     )
     if converted.skipped:
-        raise RuntimeError(
-            f"tomd produced empty markdown for {paper_id} "
-            f"({converted.skip_reason or 'slide deck, standards draft, or unreadable source'})."
+        return ConvertResult(
+            paper_id=paper_id,
+            markdown="",
+            prompts=converted.prompts,
+            intent="",
+            title=paper.title,
+            images=[],
+            status="skipped",
+            skip_reason=converted.skip_reason,
         )
 
     # tomd front-matter intent wins over scraper-derived intent
