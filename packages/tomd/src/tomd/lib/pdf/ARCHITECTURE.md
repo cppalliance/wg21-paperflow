@@ -350,9 +350,9 @@ Enums:
 
 | Module | Responsibility | Public API | Lines |
 |--------|---------------|------------|------:|
-| `pipeline.py` | Pipeline orchestration, skip contract, slide-deck detection | `run_pipeline`, `PipelineResult`, `SkipReason`, `ExtractedImage` | ~1100 |
+| `pipeline.py` | Pipeline orchestration, skip contract, slide-deck detection | `run_pipeline`, `PipelineResult`, `ExtractedImage` | ~1100 |
 | `__init__.py` | Re-exports | `run_pipeline`, `PipelineResult`, `SkipReason`, `ExtractedImage` | ~25 |
-| `types.py` | Data model, enums, constants | Span, Line, Block, Section, SectionKind, Confidence, is_readable + shared constants | ~252 |
+| `types.py` | Data model, enums, constants | Span, Line, Block, Section, SectionKind, Confidence, SkipReason, is_readable + shared constants | ~280 |
 | `extract.py` | Dual-path text extraction | `extract_mupdf`, `extract_spatial`, `collect_links`, `attach_links` | ~249 |
 | `images.py` | Resource-Dictionary path: embedded raster extraction | `ExtractedImage`, `ExtractionResult`, `extract_page_images`, `finalize_extraction` | ~250 |
 | `mono.py` | Monospace font detection | `classify_monospace`, `propagate_monospace` | ~222 |

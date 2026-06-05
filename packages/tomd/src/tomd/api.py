@@ -44,7 +44,7 @@ from tomd.lib import (
     EMAIL_RE,
 )
 from tomd.lib.html import convert_html
-from tomd.lib.pdf import ExtractedImage, PipelineResult, run_pipeline
+from tomd.lib.pdf import ExtractedImage, PipelineResult, SkipReason, run_pipeline
 
 __all__ = ["ConvertedPaper", "convert_paper", "convert_paper_full"]
 
@@ -72,7 +72,7 @@ class ConvertedPaper:
     source_image_count: int = 0
     images_truncated: bool = False
     skipped: bool = False
-    skip_reason: str = ""
+    skip_reason: SkipReason | None = None
     source_raster_count: int = 0
     source_vector_count: int = 0
 
@@ -351,7 +351,7 @@ class _RawConversion:
     source_image_count: int
     images_truncated: bool
     skipped: bool
-    skip_reason: str
+    skip_reason: SkipReason | None
     source_raster_count: int = 0
     source_vector_count: int = 0
 
@@ -408,14 +408,14 @@ def _convert_with_tomd_full(
             return _RawConversion(
                 md=md, prompts=prompts,
                 images=[], source_image_count=0, images_truncated=False,
-                skipped=False, skip_reason="",
+                skipped=False, skip_reason=None,
             )
         return _RawConversion(
             md=md, prompts=prompts,
             images=list(html_result.images),
             source_image_count=html_result.source_image_count,
             images_truncated=html_result.images_truncated,
-            skipped=False, skip_reason="",
+            skipped=False, skip_reason=None,
         )
     raise UnsupportedSourceFormatError(
         f"Unsupported source format {suffix!r} for {path.name}; "
@@ -528,7 +528,7 @@ def convert_paper_full(
         source_image_count=raw.source_image_count,
         images_truncated=raw.images_truncated,
         skipped=False,
-        skip_reason="",
+        skip_reason=None,
         source_raster_count=raw.source_raster_count,
         source_vector_count=raw.source_vector_count,
     )
@@ -554,6 +554,6 @@ def convert_paper(
     if r.skipped:
         raise RuntimeError(
             f"tomd produced empty markdown for {paper_id} "
-            f"({r.skip_reason or 'slide deck, standards draft, or unreadable source'})."
+            f"({r.skip_reason.value if r.skip_reason else 'slide deck, standards draft, or unreadable source'})."
         )
     return r.markdown, r.prompts, r.intent

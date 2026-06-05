@@ -5,7 +5,6 @@ import logging
 import re
 from collections import Counter
 from dataclasses import dataclass, field
-from enum import StrEnum
 from pathlib import Path
 
 from .cleanup import (get_edge_items, detect_repeating, strip_repeating,
@@ -34,10 +33,17 @@ from .structure import compare_extractions, structure_sections
 from .table import detect_tables, exclude_table_regions
 from .wg21 import extract_metadata_from_blocks
 from .emit import emit_markdown, emit_prompts
-from .types import KNOWN_SECTIONS, Confidence, Section, SectionKind, is_readable
+from .types import (
+    KNOWN_SECTIONS,
+    Confidence,
+    Section,
+    SectionKind,
+    SkipReason,
+    is_readable,
+)
 from ..toc import find_toc_indices
 
-__all__ = ["run_pipeline", "PipelineResult", "SkipReason", "ExtractedImage"]
+__all__ = ["run_pipeline", "PipelineResult", "ExtractedImage"]
 
 _log = logging.getLogger(__name__)
 
@@ -577,15 +583,6 @@ def _insert_image_sections(
     return out
 
 
-class SkipReason(StrEnum):
-    """Closed set of early-exit reasons for :class:`PipelineResult`."""
-
-    EMPTY_PDF = "empty pdf"
-    SLIDE_DECK = "slide deck"
-    STANDARDS_DRAFT = "standards draft"
-    UNREADABLE = "unreadable"
-
-
 @dataclass
 class PipelineResult:
     """Full output of the PDF conversion pipeline, used for QA scoring.
@@ -611,7 +608,7 @@ class PipelineResult:
     nesting_corrections: int = 0
     readable: bool = True
     skipped: bool = False
-    skip_reason: str = ""
+    skip_reason: SkipReason | None = None
     images: list[ExtractedImage] = field(default_factory=list)
     source_image_count: int = 0
     images_truncated: bool = False
@@ -639,7 +636,7 @@ class PipelineResult:
             page_count=page_count,
             readable=readable,
             skipped=True,
-            skip_reason=reason.value,
+            skip_reason=reason,
             images=[],
         )
 
@@ -659,18 +656,18 @@ def _enforce_skip_contract(result: PipelineResult) -> PipelineResult:
                 "PipelineResult must set skipped=True when markdown is empty "
                 "or readable is False"
             )
-        if result.skip_reason not in {r.value for r in SkipReason}:
+        if not isinstance(result.skip_reason, SkipReason):
             _log.error(
                 "PipelineResult skip contract violated: invalid skip_reason=%r",
                 result.skip_reason,
             )
             raise AssertionError(
-                f"PipelineResult skip_reason must be a SkipReason value, "
+                f"PipelineResult skip_reason must be a SkipReason member, "
                 f"got {result.skip_reason!r}"
             )
     if result.skipped:
-        if not result.skip_reason:
-            _log.error("PipelineResult skip contract violated: empty skip_reason")
+        if result.skip_reason is None:
+            _log.error("PipelineResult skip contract violated: missing skip_reason")
             raise AssertionError(
                 "PipelineResult skip_reason must be set when skipped=True"
             )

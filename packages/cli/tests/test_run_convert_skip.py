@@ -56,7 +56,7 @@ def test_run_convert_routes_skip_reason(
             title=paper.title,
             images=[],
             status="skipped",
-            skip_reason=reason.value,
+            skip_reason=reason,
         )
 
     monkeypatch.setattr("cli.orchestrator.convert_one_paper", _stub_convert)

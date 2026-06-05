@@ -375,7 +375,17 @@ async def run_convert(
                     timeout=120,
                 )
                 if result.status == "skipped":
-                    bucket = _SKIP_REASON_MAP[SkipReason(result.skip_reason)]
+                    if result.skip_reason is None:
+                        logger.error(
+                            "Skipping %s: status=skipped but skip_reason is missing",
+                            pid,
+                        )
+                        return {
+                            "paper_id": pid,
+                            "status": "error",
+                            "error": "missing skip_reason",
+                        }
+                    bucket = _SKIP_REASON_MAP[result.skip_reason]
                     logger.warning("Skipping %s: %s", pid, result.skip_reason)
                     return {
                         "paper_id": pid,

@@ -19,10 +19,10 @@ import pytest
 from tomd.api import convert_paper_full
 from tomd.lib.pdf.pipeline import (
     PipelineResult,
-    SkipReason,
     _enforce_skip_contract,
     run_pipeline,
 )
+from tomd.lib.pdf.types import SkipReason
 
 _PROSE = (
     "This paragraph exists so the page passes the readability gate, "
@@ -110,7 +110,7 @@ def test_run_pipeline_skip_contract(
         )
     result = run_pipeline(path)
     assert result.skipped is True
-    assert result.skip_reason == reason.value
+    assert result.skip_reason == reason
     assert result.md == ""
     assert result.images == []
     if reason is SkipReason.UNREADABLE:
@@ -131,13 +131,13 @@ def test_convert_paper_full_skip_contract(
         )
     converted = convert_paper_full("P0000R0", path, meta={})
     assert converted.skipped is True
-    assert converted.skip_reason == reason.value
+    assert converted.skip_reason == reason
     assert converted.markdown == ""
     assert converted.images == []
 
 
 def test_enforce_skip_contract_rejects_malformed_skip():
-    bad = PipelineResult(skipped=True, skip_reason="")
+    bad = PipelineResult(skipped=True, skip_reason=None)
     with pytest.raises(AssertionError, match="skip_reason"):
         _enforce_skip_contract(bad)
 
