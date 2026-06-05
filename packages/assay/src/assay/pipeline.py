@@ -854,12 +854,15 @@ async def _custom_classify(state: PipelineState, ctx: StepContext, spec) -> None
     )
 
     # results are sorted by ci, so gap order (and the IDs Collect assigns)
-    # is deterministic regardless of completion order.
+    # is deterministic regardless of completion order. Pin each gap's
+    # chunk_index to the call's authoritative ci rather than trusting the
+    # model: Analyze partitions own- vs other-chunk gaps on this field.
     scans: list[ScanOutput] = []
     all_gaps: list[GapOutput] = []
     for ci, result, _ in results:
-        scans.append(ScanOutput(chunk_index=ci, gaps=result.gaps))
-        all_gaps.extend(result.gaps)
+        chunk_gaps = [g.model_copy(update={"chunk_index": ci}) for g in result.gaps]
+        scans.append(ScanOutput(chunk_index=ci, gaps=chunk_gaps))
+        all_gaps.extend(chunk_gaps)
     state.raw_scans = scans
     state.raw_classifications = BatchClassifyOutput(gaps=all_gaps)
     if ctx.debug and ctx.debug_log is not None:
