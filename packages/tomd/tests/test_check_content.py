@@ -19,6 +19,7 @@ from paperstore import SqliteBackend
 
 from tomd.errors import CheckContentArgError
 from tomd.lib.check_content import (
+    ContentCheckResult,
     MisalignedRegion,
     _dedup_regions,
     _dehyphenate,
@@ -26,6 +27,8 @@ from tomd.lib.check_content import (
     _local_coverage_windows,
     _multiset_coverage,
     _normalize,
+    _result_from_dict,
+    _result_to_dict,
     _shingle_hashes,
     _strip_repeating_lines,
     _tokenize,
@@ -453,6 +456,89 @@ class TestIntegrationCoverage:
         store.write_paper_md("P0004", "body\n")
         with pytest.raises(CheckContentArgError):
             check_paper_content("P0004", store)
+
+
+class TestUnigramCoverage:
+    """Complementary word-level signal: separates reformatting from loss."""
+
+    def test_unigram_coverage_full_when_reordered(self, tmp_path):
+        # Same words, fully reversed order: every 5-shingle is broken, but the
+        # word multiset is identical. unigram_coverage must stay 1.0.
+        store = SqliteBackend(tmp_path)
+        words = [f"word{i}" for i in range(40)]
+        source = " ".join(words)
+        reordered = " ".join(reversed(words))
+        _stage_html_paper(store, "P0010", source, reordered)
+        result = check_paper_content("P0010", store)
+        assert result.coverage < 0.5
+        assert result.unigram_coverage == 1.0
+
+    def test_unigram_coverage_low_when_content_dropped(self, tmp_path):
+        # A genuine loss (last third dropped) shows on BOTH metrics.
+        store = SqliteBackend(tmp_path)
+        words = [f"alpha{i}" for i in range(60)]
+        source = " ".join(words)
+        truncated = " ".join(words[:40])
+        _stage_html_paper(store, "P0011", source, truncated)
+        result = check_paper_content("P0011", store)
+        assert result.coverage < 0.9
+        assert result.unigram_coverage < 0.9
+
+    def test_unigram_drift_low_when_markdown_is_subset(self, tmp_path):
+        # Markdown reuses only source words (reordered), adding nothing new:
+        # shingle drift is high (broken 5-grams) but unigram_drift is ~0.
+        store = SqliteBackend(tmp_path)
+        words = [f"beta{i}" for i in range(40)]
+        source = " ".join(words)
+        reordered = " ".join(reversed(words))
+        _stage_html_paper(store, "P0012", source, reordered)
+        result = check_paper_content("P0012", store)
+        assert result.drift > 0.1
+        assert result.unigram_drift == 0.0
+
+
+class TestResultSerialization:
+    """JSON round-trip and schema-1 backward compatibility for unigram fields."""
+
+    def _make_result(self) -> ContentCheckResult:
+        return ContentCheckResult(
+            paper_id="P0099",
+            source_format="pdf",
+            coverage=0.90,
+            drift=0.10,
+            unigram_coverage=0.95,
+            unigram_drift=0.05,
+            source_token_count=100,
+            markdown_token_count=90,
+            missing_regions=(),
+            extra_regions=(),
+        )
+
+    def test_roundtrip_preserves_unigram_fields(self):
+        r = self._make_result()
+        d = _result_to_dict(r)
+        assert d["unigram_coverage"] == 0.95
+        assert d["unigram_drift"] == 0.05
+        back = _result_from_dict(d)
+        assert back.unigram_coverage == 0.95
+        assert back.unigram_drift == 0.05
+
+    def test_schema1_dict_without_unigram_fields_defaults_zero(self):
+        # A pre-schema-2 paper dict has no unigram_* keys; it must still
+        # deserialize, with the absent fields defaulting to 0.0.
+        legacy = {
+            "paper_id": "P0098",
+            "source_format": "pdf",
+            "coverage": 0.9,
+            "drift": 0.1,
+            "source_token_count": 100,
+            "markdown_token_count": 90,
+            "missing_regions": [],
+            "extra_regions": [],
+        }
+        r = _result_from_dict(legacy)
+        assert r.unigram_coverage == 0.0
+        assert r.unigram_drift == 0.0
 
 
 class TestPerformanceBudget:

@@ -43,8 +43,8 @@ from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from hashlib import blake2b
 from pathlib import Path
-from collections.abc import Sequence
-from typing import Iterable, Literal
+from collections.abc import Hashable, Sequence
+from typing import Iterable, Literal, TypeVar
 
 import mistune
 from paperstore import SqliteBackend
@@ -106,7 +106,9 @@ _WORKER_POLL_INTERVAL = 0.5
 
 # JSON schema version bump rules: increment when the per-paper fields,
 # constants block, or top-level keys change.
-_JSON_SCHEMA_VERSION = 1
+# v2: added per-paper unigram_coverage / unigram_drift. Schema-1 files stay
+# readable (_result_from_dict defaults the absent fields to 0.0).
+_JSON_SCHEMA_VERSION = 2
 
 
 # -- Data ---------------------------------------------------------------------
@@ -136,6 +138,14 @@ class ContentCheckResult:
     in the Markdown; ``drift`` is the share of *markdown* tokens whose
     shingles do not appear in the source. Both are in ``[0.0, 1.0]``.
 
+    ``unigram_coverage`` / ``unigram_drift`` are the same measures at the
+    single-token (word) level, ignoring order. They are a complementary
+    signal: a large ``unigram_coverage - coverage`` gap means the text is
+    present but locally reformatted (faithful, e.g. PDF reflow or stripped
+    furniture), whereas a low ``unigram_coverage`` means content is genuinely
+    missing. Trustworthy as "faithful" only alongside low drift; never a
+    pass/fail gate on its own.
+
     Coverage will never reach 1.0 in practice: tomd intentionally
     strips headers, footers, page numbers, and tables of contents, so
     the source extraction always carries content the Markdown cannot.
@@ -145,6 +155,13 @@ class ContentCheckResult:
     source_format: Literal["pdf", "html"]
     coverage: float
     drift: float
+    # Same metrics at the single-token level (order-insensitive). Placed
+    # among the non-default fields (before missing_regions/extra_regions,
+    # which carry defaults): a non-default field cannot follow a defaulted
+    # one. check_paper_content always supplies them; old JSON is handled in
+    # _result_from_dict.
+    unigram_coverage: float
+    unigram_drift: float
     source_token_count: int
     markdown_token_count: int
     missing_regions: tuple[MisalignedRegion, ...] = field(default_factory=tuple)
@@ -430,11 +447,18 @@ def _shingle_hashes(tokens: Iterable[str], width: int = _SHINGLE_WIDTH) -> list[
     return hashes
 
 
-def _multiset_coverage(source: list[int], target: list[int]) -> float:
-    """Fraction of ``source`` shingles also present in ``target`` (multiset)."""
+_H = TypeVar("_H", bound=Hashable)
+
+
+def _multiset_coverage(source: list[_H], target: list[_H]) -> float:
+    """Fraction of ``source`` items also present in ``target`` (multiset).
+
+    Generic over hashable items: shingle hashes (``int``) for the headline
+    coverage, or raw tokens (``str``) for the complementary unigram coverage.
+    """
     if not source:
         return 1.0
-    target_counts: dict[int, int] = {}
+    target_counts: dict[_H, int] = {}
     for h in target:
         target_counts[h] = target_counts.get(h, 0) + 1
     matched = 0
@@ -591,6 +615,14 @@ def check_paper_content(
     coverage = _multiset_coverage(src_hashes, md_hashes)
     drift = 1.0 - _multiset_coverage(md_hashes, src_hashes) if md_hashes else 0.0
 
+    # Complementary word-level (order-insensitive) signal. Computed on the raw
+    # token multisets to distinguish faithful-but-reformatted text (high
+    # unigram, low shingle) from genuinely missing content (low on both).
+    unigram_coverage = _multiset_coverage(src_tokens, md_tokens)
+    unigram_drift = (
+        1.0 - _multiset_coverage(md_tokens, src_tokens) if md_tokens else 0.0
+    )
+
     missing_regions: list[MisalignedRegion] = []
     extra_regions: list[MisalignedRegion] = []
 
@@ -655,6 +687,8 @@ def check_paper_content(
         source_format=src_stream.source_format,
         coverage=coverage,
         drift=drift,
+        unigram_coverage=unigram_coverage,
+        unigram_drift=unigram_drift,
         source_token_count=len(src_tokens),
         markdown_token_count=len(md_tokens),
         missing_regions=tuple(missing_regions),
@@ -717,6 +751,8 @@ def _result_to_dict(r: ContentCheckResult) -> dict:
         "source_format": r.source_format,
         "coverage": r.coverage,
         "drift": r.drift,
+        "unigram_coverage": r.unigram_coverage,
+        "unigram_drift": r.unigram_drift,
         "source_token_count": r.source_token_count,
         "markdown_token_count": r.markdown_token_count,
         "missing_regions": [asdict(reg) for reg in r.missing_regions],
@@ -807,6 +843,9 @@ def _result_from_dict(d: dict) -> ContentCheckResult:
         source_format=d["source_format"],
         coverage=d["coverage"],
         drift=d["drift"],
+        # Backward compat: schema-1 JSON predates these fields; default to 0.0.
+        unigram_coverage=d.get("unigram_coverage", 0.0),
+        unigram_drift=d.get("unigram_drift", 0.0),
         source_token_count=d["source_token_count"],
         markdown_token_count=d["markdown_token_count"],
         missing_regions=tuple(
@@ -826,7 +865,11 @@ _REPORT_PREAMBLE = (
     "achievable: tomd intentionally strips headers, footers, page\n"
     "numbers, and tables of contents, all of which appear in the source\n"
     "extraction but cannot appear in the markdown. Expect clean papers\n"
-    "to land between 0.90 and 0.97."
+    "to land between 0.90 and 0.97.\n"
+    "\n"
+    "UniCov is coverage at the single-token (word) level, ignoring order.\n"
+    "A large UniCov-Cov gap means the text is present but reformatted\n"
+    "(faithful); a low UniCov means content is genuinely missing."
 )
 
 
@@ -881,8 +924,13 @@ def format_content_check_report(
     worst = sorted(results, key=lambda r: r.coverage)[:_WORST_FILES_DISPLAY_LIMIT]
     lines.append("")
     lines.append(f"Worst {len(worst)} files (lowest coverage):")
-    lines.append(f"  {'Cov':>5}  {'Drift':>5}  {'File':<12}  Top missing region")
-    lines.append(f"  {'-' * 5}  {'-' * 5}  {'-' * 12}  {'-' * 41}")
+    lines.append(
+        f"  {'Cov':>5}  {'UniCov':>6}  {'Drift':>5}  {'File':<12}  "
+        f"Top missing region"
+    )
+    lines.append(
+        f"  {'-' * 5}  {'-' * 6}  {'-' * 5}  {'-' * 12}  {'-' * 41}"
+    )
     for r in worst:
         sample = ""
         if r.missing_regions:
@@ -890,7 +938,7 @@ def format_content_check_report(
             page = f"p.{top.page}: " if top.page else ""
             sample = f'"{page}{top.sample}"'
         lines.append(
-            f"  {r.coverage:>5.2f}  {r.drift:>5.2f}  "
+            f"  {r.coverage:>5.2f}  {r.unigram_coverage:>6.2f}  {r.drift:>5.2f}  "
             f"{r.paper_id:<12}  {sample}"
         )
 

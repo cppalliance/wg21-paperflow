@@ -53,13 +53,22 @@ MisalignedRegion
 ContentCheckResult
     paper_id
     source_format      pdf | html
-    coverage           0.0-1.0
-    drift              0.0-1.0
+    coverage           0.0-1.0  (5-shingle)
+    drift              0.0-1.0  (5-shingle)
+    unigram_coverage   0.0-1.0  (single-token, order-insensitive)
+    unigram_drift      0.0-1.0  (single-token, order-insensitive)
     source_token_count
     markdown_token_count
     missing_regions    in source, not in markdown
     extra_regions      in markdown, not in source
 ```
+
+`unigram_coverage` / `unigram_drift` are a complementary triage signal: a large
+`unigram_coverage - coverage` gap means the text is present but locally
+reformatted (faithful: PDF reflow, stripped furniture), whereas a low
+`unigram_coverage` means content is genuinely missing. They are trustworthy as
+"faithful" only alongside low drift and are never a pass/fail gate on their own.
+The JSON carries both (schema 2; schema-1 files read back with 0.0 defaults).
 
 Both dataclasses are `frozen=True`. The tuples in `missing_regions` /
 `extra_regions` are sorted by `token_start` after the dedup pass.
