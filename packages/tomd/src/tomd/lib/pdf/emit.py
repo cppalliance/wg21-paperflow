@@ -16,6 +16,7 @@ from .glyphs import (
 from .images import TRUNCATION_MARKER_TEMPLATE, VectorUncertaintyStats
 from .types import Line, Span, Section, SectionKind, BULLET_CHARS, FigureGraph
 from .vector_images import format_uncertainty_marker, should_emit_marker
+from ..wording_markup import WORDING_FENCE_CLOSE, wording_fence_open
 
 _log = logging.getLogger(__name__)
 
@@ -386,7 +387,7 @@ def _render_wording_section(sec: Section) -> str:
         inner = "\n".join(lines)
     else:
         inner = " ".join(ln.strip() for ln in lines)
-    return f":::{div_class}\n\n{inner}\n\n:::"
+    return f"{wording_fence_open(div_class)}\n\n{inner}\n\n{WORDING_FENCE_CLOSE}"
 
 
 _DINGBATS_MAP: dict[int, str] = {

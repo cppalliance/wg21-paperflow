@@ -31,6 +31,7 @@ from tomd.lib.check_content import (
     _tokenize,
     check_paper_content,
 )
+from tomd.lib.html.convert import convert_html
 
 
 class TestNormalize:
@@ -233,6 +234,113 @@ class TestMarkdownStream:
         assert "before" in tokens
         assert "after" in tokens
 
+    def test_strips_ins_del_tags_keeps_inner_text(self):
+        md = "Add <ins>new wording</ins> and drop <del>old wording</del> here."
+        tokens = _extract_markdown_stream(md)
+        assert "ins" not in tokens
+        assert "del" not in tokens
+        # inner prose retained (it is present in the source)
+        assert "new" in tokens
+        assert "wording" in tokens
+        assert "old" in tokens
+        # surrounding prose intact
+        assert "add" in tokens
+        assert "drop" in tokens
+        assert "here" in tokens
+
+    def test_strips_ins_del_with_attributes(self):
+        md = 'Keep <ins class="foo">alpha</ins> and <del data-y="1">beta</del>.'
+        tokens = _extract_markdown_stream(md)
+        assert "ins" not in tokens
+        assert "del" not in tokens
+        # attribute names/values are part of the tag and must not leak
+        assert "class" not in tokens
+        assert "foo" not in tokens
+        assert "data" not in tokens
+        assert "alpha" in tokens
+        assert "beta" in tokens
+
+    def test_strips_wording_fence_lines_keeps_body(self):
+        md = (
+            ":::wording-add\n"
+            "\n"
+            "The function shall return zero on success.\n"
+            "\n"
+            ":::\n"
+        )
+        tokens = _extract_markdown_stream(md)
+        assert "wording" not in tokens
+        assert "add" not in tokens
+        for word in ("function", "shall", "return", "zero", "success"):
+            assert word in tokens
+
+    def test_strips_all_emitted_fence_variants(self):
+        md = (
+            ":::wording\n\nalpha sentinel paragraph here.\n\n:::\n\n"
+            ":::wording-add\n\nbeta sentinel paragraph here.\n\n:::\n\n"
+            ":::wording-remove\n\ngamma sentinel paragraph here.\n\n:::\n"
+        )
+        tokens = _extract_markdown_stream(md)
+        # none of the fence-derived keywords leak
+        assert "wording" not in tokens
+        assert "add" not in tokens
+        assert "remove" not in tokens
+        # the prose inside each variant survives
+        assert "alpha" in tokens
+        assert "beta" in tokens
+        assert "gamma" in tokens
+
+    def test_keeps_remove_as_prose_word(self):
+        # No fence: "Remove" is ordinary standardese prose and must count.
+        tokens = _extract_markdown_stream(
+            "Remove the following paragraph from the standard."
+        )
+        assert "remove" in tokens
+
+    def test_keeps_note_and_example_prose(self):
+        tokens = _extract_markdown_stream("Note: see the example below.")
+        assert "note" in tokens
+        assert "example" in tokens
+
+    def test_fence_regex_does_not_touch_inline_or_scope_colons(self):
+        md = (
+            "Prose with x ::: y inline, not line-anchored.\n\n"
+            "```cpp\n"
+            "auto a = b;  // a :: b\n"
+            "std::vector<int> v;\n"
+            "```\n"
+        )
+        tokens = _extract_markdown_stream(md)
+        # scope-resolution and inline triple-colons are not fence lines
+        assert "std" in tokens
+        assert "vector" in tokens
+        assert "inline" in tokens
+
+    def test_documents_code_block_literal_markup_strip(self):
+        # Known, documented limitation: the pre-AST strip is not code-aware,
+        # so a literal <ins> tag or a bare ::: line inside a code block is
+        # removed too. This test pins that behavior so it stays visible; if a
+        # future change moves tag handling to the node level, flip this test.
+        md = (
+            "```cpp\n"
+            "int x = 0;\n"
+            "<ins>int added = 1;</ins>\n"
+            ":::\n"
+            "int y = 2;\n"
+            "```\n"
+        )
+        tokens = _extract_markdown_stream(md)
+        assert "ins" not in tokens
+        # surrounding real code tokens survive
+        for word in ("int", "x", "added", "y"):
+            assert word in tokens
+
+    def test_ins_del_replaced_with_space_not_merged(self):
+        tokens = _extract_markdown_stream("<ins>foo</ins>bar")
+        assert "foo" in tokens
+        assert "bar" in tokens
+        assert "foobar" not in tokens
+
 
 # -- Integration tests against a real SqliteBackend ---------------------------
 
@@ -293,6 +401,44 @@ class TestIntegrationCoverage:
         result = check_paper_content("P0003", store)
         assert result.drift > 0.1
         assert result.extra_regions, "expected at least one extra region"
+
+    def test_wording_markup_does_not_depress_coverage(self, tmp_path):
+        # End-to-end: stage a wording SOURCE, run the real HTML converter so
+        # render.py emits its actual :::wording / <ins> / <del> syntax, then
+        # check. If the emitter's syntax and the checker's strip rules ever
+        # diverge, the markup would register as missing/extra and this fails.
+        store = SqliteBackend(tmp_path)
+        prose_a = (
+            "The motivation section explains why the current language "
+            "facilities are insufficient for the use case considered here. "
+        ) * 2
+        prose_b = (
+            "The proposed function shall return a value of type span and "
+            "shall not throw an exception under any documented condition. "
+        ) * 2
+        prose_c = (
+            "Implementation experience demonstrates the design is feasible "
+            "on every major standard library implementation in use today. "
+        ) * 2
+        html_body = (
+            f"<p>{prose_a}</p>"
+            f'<div class="wording-add"><p>{prose_b}</p></div>'
+            f"<p>Also <ins>{prose_c}</ins> remains correct.</p>"
+        )
+        store.upsert_year("2026", [{"paper_id": "P0009", "title": "Sample"}])
+        html_doc = f"<html><body>{html_body}</body></html>"
+        store.put_source("P0009", html_doc.encode("utf-8"), suffix=".html")
+
+        # Real conversion (the same entrypoint `convert` uses for HTML).
+        md, _ = convert_html(store.get_source_path("P0009"))
+        # Sanity: the emitter actually produced the markup we mean to strip.
+        assert ":::wording-add" in md
+        assert "<ins>" in md
+        store.write_paper_md("P0009", md)
+
+        result = check_paper_content("P0009", store)
+        assert result.coverage >= 0.95, result.coverage
+        assert result.drift <= 0.10, result.drift
 
     def test_unsupported_suffix_raises(self, tmp_path):
         store = SqliteBackend(tmp_path)
