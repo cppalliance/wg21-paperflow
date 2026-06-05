@@ -92,6 +92,7 @@ class ConvertedPaper:
             skip_reason=raw.skip_reason,
         )
 
+
 logger = logging.getLogger(__name__)
 
 _TOC_MAX_LINES = 300
@@ -106,8 +107,8 @@ _FALLBACK_KEY_MAP = {
     "title": "title",
     "paper_id": "document",
     "document_date": "date",
-    "subgroup": "audience",       # mailing row key
-    "target_group": "audience",   # DB row key (SqliteBackend)
+    "subgroup": "audience",  # mailing row key
+    "target_group": "audience",  # DB row key (SqliteBackend)
     "authors": "reply-to",
 }
 
@@ -117,9 +118,7 @@ _FALLBACK_KEY_MAP = {
 # paper_id (P/N-number) is the canonical identifier.
 _OVERRIDE_KEYS = {"document"}
 
-_FRONT_MATTER_RE = re.compile(
-    r"\A---\s*\n(?P<body>.*?)\n---\s*\n?", re.DOTALL
-)
+_FRONT_MATTER_RE = re.compile(r"\A---\s*\n(?P<body>.*?)\n---\s*\n?", re.DOTALL)
 
 
 def _strip_toc_replace(m: re.Match[str]) -> str:
@@ -220,7 +219,7 @@ def _normalize_front_matter(md: str, mailing_meta: dict | None) -> str:
     match = _FRONT_MATTER_RE.match(md)
     if match:
         parsed = _parse_front_matter_body(match.group("body"))
-        rest = md[match.end():]
+        rest = md[match.end() :]
     else:
         parsed = {}
         rest = md
@@ -237,10 +236,7 @@ def _normalize_front_matter(md: str, mailing_meta: dict | None) -> str:
         # Bare-name-only reply-to (no emails) should not block the
         # mailing fallback: the mailing may have richer author+email data.
         rt = parsed.get("reply-to")
-        if (
-            isinstance(rt, list) and rt
-            and not any(EMAIL_RE.search(e) for e in rt)
-        ):
+        if isinstance(rt, list) and rt and not any(EMAIL_RE.search(e) for e in rt):
             present.discard("reply-to")
         added_yaml_keys: set[str] = set()
         for src_key, yaml_key in _FALLBACK_KEY_MAP.items():
@@ -259,7 +255,8 @@ def _normalize_front_matter(md: str, mailing_meta: dict | None) -> str:
             if yaml_key == "date":
                 logger.debug(
                     "Date fallback from mailing (%s=%r): source had no date",
-                    src_key, val,
+                    src_key,
+                    val,
                 )
             parsed[yaml_key] = val
             added_yaml_keys.add(yaml_key)
@@ -298,8 +295,8 @@ def _strip_body_metadata_text(md: str) -> str:
     if not match:
         return md
 
-    front = md[:match.end()]
-    body = md[match.end():]
+    front = md[: match.end()]
+    body = md[match.end() :]
 
     lines = body.split("\n")
     to_remove: set[int] = set()
@@ -345,6 +342,7 @@ def _strip_body_metadata_text(md: str) -> str:
 @dataclass(frozen=True)
 class _RawConversion:
     """Internal shape returned by :func:`_convert_with_tomd_full`."""
+
     md: str
     prompts: list[str] | None
     images: list[ExtractedImage]
@@ -406,16 +404,22 @@ def _convert_with_tomd_full(
         md, prompts = convert_html(path, html_images_result=html_result)
         if html_result is None:
             return _RawConversion(
-                md=md, prompts=prompts,
-                images=[], source_image_count=0, images_truncated=False,
-                skipped=False, skip_reason=None,
+                md=md,
+                prompts=prompts,
+                images=[],
+                source_image_count=0,
+                images_truncated=False,
+                skipped=False,
+                skip_reason=None,
             )
         return _RawConversion(
-            md=md, prompts=prompts,
+            md=md,
+            prompts=prompts,
             images=list(html_result.images),
             source_image_count=html_result.source_image_count,
             images_truncated=html_result.images_truncated,
-            skipped=False, skip_reason=None,
+            skipped=False,
+            skip_reason=None,
         )
     raise UnsupportedSourceFormatError(
         f"Unsupported source format {suffix!r} for {path.name}; "
@@ -435,7 +439,7 @@ def _extract_intent_from_front_matter(md: str) -> str:
     intent_match = _INTENT_LINE_RE.search(body)
     if not intent_match:
         return ""
-    return intent_match.group(1).strip().strip('"\'')
+    return intent_match.group(1).strip().strip("\"'")
 
 
 def convert_paper_full(
@@ -481,7 +485,8 @@ def convert_paper_full(
     if raw.prompts:
         logger.warning(
             "tomd [%s] flagged %d uncertain region(s)",
-            paper_id, len(raw.prompts),
+            paper_id,
+            len(raw.prompts),
         )
 
     if raw.skipped:
@@ -496,8 +501,8 @@ def convert_paper_full(
 
     if not raw.md or not raw.md.strip():
         raise RuntimeError(
-            f"tomd produced empty markdown for {paper_id} (slide deck, "
-            f"standards draft, or unreadable source)."
+            f"tomd produced empty markdown for {paper_id} "
+            f"({source_path.suffix.lower()} source; not a typed skip)."
         )
 
     md = _normalize_front_matter(raw.md, meta)

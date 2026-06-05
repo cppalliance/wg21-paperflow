@@ -56,6 +56,7 @@ DEFAULT_DOWNLOAD_CONCURRENCY = 8
 # Target resolution helpers
 # ---------------------------------------------------------------------------
 
+
 def _validate_targets(targets: list[str]) -> str:
     """Return the target type: 'all', 'years', or 'papers'.
 
@@ -73,8 +74,7 @@ def _validate_targets(targets: list[str]) -> str:
     if not any(are_years):
         return "papers"
     raise MixedTargetsError(
-        "Cannot mix years and paper IDs in one command. "
-        f"Got: {targets!r}"
+        "Cannot mix years and paper IDs in one command. " f"Got: {targets!r}"
     )
 
 
@@ -97,7 +97,11 @@ def _papers_from_scope(
             try:
                 rows.extend(backend.list_papers_for_year(year))
             except MissingMailingIndexError:
-                logger.warning("No papers found for year %s; run 'paperflow mailing %s' first.", year, year)
+                logger.warning(
+                    "No papers found for year %s; run 'paperflow mailing %s' first.",
+                    year,
+                    year,
+                )
         return rows
     # paper IDs
     rows = []
@@ -114,6 +118,7 @@ def _papers_from_scope(
 # ---------------------------------------------------------------------------
 # run_mailing
 # ---------------------------------------------------------------------------
+
 
 async def run_mailing(
     targets: list[str],
@@ -154,10 +159,14 @@ async def run_mailing(
     for i, year in enumerate(years):
         if on_progress is not None:
             try:
-                on_progress(ProgressEvent(
-                    step=i, total=total_years,
-                    name=f"Mailing {year}", pct=i / total_years if total_years else 1.0,
-                ))
+                on_progress(
+                    ProgressEvent(
+                        step=i,
+                        total=total_years,
+                        name=f"Mailing {year}",
+                        pct=i / total_years if total_years else 1.0,
+                    )
+                )
             except Exception:
                 logger.warning("on_progress hook raised; disabling", exc_info=True)
                 on_progress = None
@@ -177,10 +186,14 @@ async def run_mailing(
 
     if on_progress is not None:
         try:
-            on_progress(ProgressEvent(
-                step=total_years, total=total_years,
-                name="done", pct=1.0,
-            ))
+            on_progress(
+                ProgressEvent(
+                    step=total_years,
+                    total=total_years,
+                    name="done",
+                    pct=1.0,
+                )
+            )
         except Exception:
             pass
 
@@ -190,6 +203,7 @@ async def run_mailing(
 # ---------------------------------------------------------------------------
 # run_download
 # ---------------------------------------------------------------------------
+
 
 async def run_download(
     targets: list[str],
@@ -237,11 +251,19 @@ async def run_download(
                         except (MissingSourceError, FileNotFoundError):
                             existing_size = None
                         if existing_size == cl:
-                            return {"paper_id": pid, "status": "skipped", "reason": "verified_match"}
+                            return {
+                                "paper_id": pid,
+                                "status": "skipped",
+                                "reason": "verified_match",
+                            }
                 try:
                     fetched = await download_paper(pid, source_url=url, client=http)
                     if fetched is None:
-                        return {"paper_id": pid, "status": "skipped", "reason": "no_url"}
+                        return {
+                            "paper_id": pid,
+                            "status": "skipped",
+                            "reason": "no_url",
+                        }
                     content, suffix = fetched
                     return {
                         "paper_id": pid,
@@ -251,8 +273,10 @@ async def run_download(
                     }
                 except httpx.HTTPStatusError as exc:
                     logger.error(
-                        "%s: HTTP %d %s", pid,
-                        exc.response.status_code, exc.response.reason_phrase,
+                        "%s: HTTP %d %s",
+                        pid,
+                        exc.response.status_code,
+                        exc.response.reason_phrase,
                     )
                     return {"paper_id": pid, "status": "error", "error": str(exc)}
                 except Exception as exc:
@@ -264,9 +288,12 @@ async def run_download(
         failed = []
         to_process_ids = {p.paper_id for p in to_process}
         skipped_papers = [
-            {"paper_id": p.paper_id,
-             "reason": "no_url" if not p.url else "already_staged"}
-            for p in all_papers if p.paper_id not in to_process_ids
+            {
+                "paper_id": p.paper_id,
+                "reason": "no_url" if not p.url else "already_staged",
+            }
+            for p in all_papers
+            if p.paper_id not in to_process_ids
         ]
 
         completed = 0
@@ -284,10 +311,14 @@ async def run_download(
             completed += 1
             if on_progress is not None:
                 try:
-                    on_progress(ProgressEvent(
-                        step=completed, total=total,
-                        name=result["paper_id"], pct=completed / total if total else 1.0,
-                    ))
+                    on_progress(
+                        ProgressEvent(
+                            step=completed,
+                            total=total,
+                            name=result["paper_id"],
+                            pct=completed / total if total else 1.0,
+                        )
+                    )
                 except Exception:
                     logger.warning("on_progress hook raised; disabling", exc_info=True)
                     on_progress = None
@@ -298,6 +329,7 @@ async def run_download(
 # ---------------------------------------------------------------------------
 # run_convert
 # ---------------------------------------------------------------------------
+
 
 async def run_convert(
     targets: list[str],
@@ -332,8 +364,7 @@ async def run_convert(
     all_papers = _papers_from_scope(targets, target_type, backend)
 
     if not force:
-        to_process = [p for p in all_papers
-                      if p.source_file and not p.markdown_path]
+        to_process = [p for p in all_papers if p.source_file and not p.markdown_path]
     else:
         to_process = [p for p in all_papers if p.source_file]
 
@@ -368,7 +399,8 @@ async def run_convert(
                 # the main coroutine persists through the backend below.
                 result = await asyncio.wait_for(
                     asyncio.to_thread(
-                        convert_one_paper, paper,
+                        convert_one_paper,
+                        paper,
                         extract_vector=extract_vector,
                         whiteout_text=whiteout_text,
                     ),
@@ -418,8 +450,11 @@ async def run_convert(
     succeeded = []
     failed = []
     to_process_ids = {p.paper_id for p in to_process}
-    skipped = [{"paper_id": p.paper_id, "reason": "already_converted"}
-               for p in all_papers if p.paper_id not in to_process_ids]
+    skipped = [
+        {"paper_id": p.paper_id, "reason": "already_converted"}
+        for p in all_papers
+        if p.paper_id not in to_process_ids
+    ]
 
     completed = 0
     for coro in asyncio.as_completed(tasks):
@@ -434,7 +469,11 @@ async def run_convert(
                 backend.delete_paper_images(pid)
                 for img in pdf_images:
                     backend.write_paper_image(
-                        pid, img.page, img.index_on_page, img.ext, img.bytes,
+                        pid,
+                        img.page,
+                        img.index_on_page,
+                        img.ext,
+                        img.bytes,
                     )
             md_path = backend.write_paper_md(pid, result["markdown"])
             if write_prompts and result["prompts"]:
@@ -448,11 +487,14 @@ async def run_convert(
         completed += 1
         if on_progress is not None:
             try:
-                on_progress(ProgressEvent(
-                    step=completed, total=total,
-                    name=next(iter(in_flight)) if in_flight else result["paper_id"],
-                    pct=completed / total if total else 1.0,
-                ))
+                on_progress(
+                    ProgressEvent(
+                        step=completed,
+                        total=total,
+                        name=next(iter(in_flight)) if in_flight else result["paper_id"],
+                        pct=completed / total if total else 1.0,
+                    )
+                )
             except Exception:
                 logger.warning("on_progress hook raised; disabling", exc_info=True)
                 on_progress = None
@@ -464,8 +506,10 @@ async def run_convert(
 # run_content_check
 # ---------------------------------------------------------------------------
 
+
 def _rows_for_content_check_targets(
-    targets: list[str], backend: StorageBackend,
+    targets: list[str],
+    backend: StorageBackend,
 ) -> list[PaperRow]:
     """Resolve CLI targets (paper id, year, year-month) to paper rows.
 
@@ -546,7 +590,10 @@ def run_content_check(
         return {"succeeded": [], "skipped": skipped, "failed": []}
 
     run_content_check_report(
-        items, json_path=json_path, workers=workers, timeout=timeout,
+        items,
+        json_path=json_path,
+        workers=workers,
+        timeout=timeout,
     )
     return {
         "succeeded": [pid for pid, _ in items],
@@ -558,6 +605,7 @@ def run_content_check(
 # ---------------------------------------------------------------------------
 # run_full
 # ---------------------------------------------------------------------------
+
 
 async def run_full(
     targets: list[str],
