@@ -231,7 +231,7 @@ def test_heading_kind_toc_pagenum_only_not_stripped():
     This is the deliberate scope at the `find_toc_indices` layer: a
     no-dot-leader heading-kind TOC is left in the body rather than risking the
     Step-1 deletion class. The leak is cleaned up downstream by
-    `structure.drop_leaked_toc_headings`, but *only* when each entry recurs as
+    `structure.drop_leaked_toc_entries`, but *only* when each entry recurs as
     a later heading. These synthetic entries have no later duplicate, so the
     post-pass also leaves them: this test pins the find_toc_indices behaviour
     in isolation, and the no-recurrence case the post-pass deliberately keeps.

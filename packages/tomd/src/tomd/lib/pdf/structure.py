@@ -11,7 +11,7 @@ from .. import (
     DATE_RE, DEFAULT_FENCE_LANG, SECTION_NUM_PATTERN, SECTION_NUM_PREFIX_RE,
     strip_format_chars,
 )
-# `drop_leaked_toc_headings` reuses toc.py's TOC-recognition helpers so the
+# `drop_leaked_toc_entries` reuses toc.py's TOC-recognition helpers so the
 # two "what is a TOC" definitions stay a single source of truth (see #122).
 from ..toc import MIN_TOC_RUN, is_toc_label, normalize_toc_entry
 from .glyphs import GLYPH_FONT_SENTINEL, UNKNOWN_GLYPH
@@ -513,7 +513,142 @@ def _is_paragraphish(sec: Section) -> bool:
     return sec.kind in (SectionKind.PARAGRAPH, SectionKind.LIST)
 
 
-def drop_leaked_toc_headings(sections: list[Section]) -> list[Section]:
+# Recurrence-density floor for a removable run: at least this fraction of a
+# run's counted members (entries + in-span stragglers) must recur as later
+# headings (i.e. be entries). A genuine leaked TOC is overwhelmingly recurring
+# entries with a few non-recurring stragglers wedged in; a body region that
+# coincidentally forms a heading-anchored run is mostly non-recurring and is
+# rejected here. Corpus-tuned alongside `MIN_TOC_RUN`/`_TOC_ENTRY_MAX_LINES`;
+# it gates a per-run property, so it generalizes, but density alone is not
+# sufficient (repeated spec boilerplate is dense too) - the front-region bound
+# is what makes it safe. See the pt5 plan.
+_TOC_RUN_MIN_RECUR_FRACTION = 0.75
+
+# Minimum normalized-title length (chars) for the paragraph-straggler
+# forward-reference gate to consider a containment match. Below this a title is
+# too short for "appears as a later heading" to mean anything (a two-letter
+# fragment is a substring of half the document). Corpus-tuned.
+_TOC_STRAGGLER_MIN_TITLE_LEN = 6
+
+
+def _has_alpha_title(sec: Section) -> bool:
+    """True if the section's normalized recurrence title has alphabetic content.
+
+    A TOC entry's title is real words. A section that reduces to a bare number
+    or a stray extraction glyph ("8", "?", "page") has no place in a leaked-TOC
+    run and must never be a straggler or an entry.
+    """
+    norm = normalize_toc_entry(_entry_title(sec))
+    return bool(norm) and any(c.isalpha() for c in norm)
+
+
+def _is_title_like_straggler(sec: Section) -> bool:
+    """True if a non-heading section is shaped like a leaked-TOC title line.
+
+    PARAGRAPH/LIST, at most `_TOC_ENTRY_MAX_LINES` text lines (derived from
+    `sec.text`; a title that wrapped at most once; three or more lines is real
+    prose), with alphabetic title content. This is the *shape* test only - it
+    says nothing about recurrence. A recurring title-like line is a non-heading
+    entry; a non-recurring one is a bridge straggler. Both share this shape.
+    """
+    return (_is_paragraphish(sec)
+            and len(sec.text.split("\n")) <= _TOC_ENTRY_MAX_LINES
+            and _has_alpha_title(sec))
+
+
+def _is_empty_heading(sections: list[Section], i: int) -> bool:
+    """True if the heading at `i` has no real body before the next heading.
+
+    Empty means every section between this heading and the next heading is
+    either trivial (a split page number) or a title-like non-heading (a leaked
+    TOC line the classifier left as PARAGRAPH/LIST). This broadens the earlier
+    definition, which bridged only trivial or *recurring* non-heading entries:
+    a heading over a single non-recurring title-like line (P4016R0's
+    `## 1.2 Motivating example` above a leaked appendix title) still counts
+    empty, so it can be a straggler.
+    Recurrence is decided by the caller; emptiness is shape-only.
+    """
+    sec = sections[i]
+    if sec.kind != SectionKind.HEADING:
+        return False
+    for j in range(i + 1, len(sections)):
+        if sections[j].kind == SectionKind.HEADING:
+            break
+        if not (_section_is_trivial(sections[j])
+                or _is_title_like_straggler(sections[j])):
+            return False
+    return True
+
+
+def _straggler_forward_references(
+        title_norm: str, i: int,
+        heading_titles: list[tuple[int, str]]) -> bool:
+    """True if a paragraph straggler's title appears as a *later* heading.
+
+    The defining property of a real TOC entry is that it is a forward reference:
+    its title text appears downstream as a section heading. A unique body
+    sentence is not. Match is bidirectional containment (one normalized title is
+    a substring of the other) because the leaked TOC line often carries a
+    trailing qualifier the real heading lacks (`Appendix D: ... Structure
+    (Informative)` -> heading `Appendix D: ... Structure`). The target must be a
+    later HEADING, not arbitrary later text: matching against paragraphs would
+    re-admit repeated body wording (p2846r6's `Effects:` boilerplate).
+
+    This gate is necessarily *loose* on its own (containment with a length
+    floor); its safety is the conjunction with the other gates (in-span,
+    front-region, anchor, density), never this check alone. Applied only to
+    paragraph/list stragglers; empty-heading stragglers are exempt because
+    heading text drifts between TOC and body (renumbering, smart quotes, a body
+    heading absorbed into prose), and a hard gate there would wrongly keep
+    legitimate leaked headings (P4007R0's `8.1`-`8.4`). Fails safe: a paragraph
+    straggler whose target heading was never captured is simply kept.
+    """
+    if (len(title_norm) < _TOC_STRAGGLER_MIN_TITLE_LEN
+            or not any(c.isalpha() for c in title_norm)):
+        return False
+    for j, htitle in heading_titles:
+        if j <= i or len(htitle) < _TOC_STRAGGLER_MIN_TITLE_LEN:
+            continue
+        if title_norm in htitle or htitle in title_norm:
+            return True
+    return False
+
+
+def _run_recurrence_density(num_entries: int, num_in_span_stragglers: int) -> float:
+    """Fraction of a run's counted members that are recurring entries."""
+    total = num_entries + num_in_span_stragglers
+    if total == 0:
+        return 0.0
+    return num_entries / total
+
+
+def _compute_body_start(sections: list[Section], recurs: list[bool]) -> int:
+    """Index of the first real body section; straggler bridging stops here.
+
+    The first non-recurring, non-trivial, `>= 2`-line PARAGRAPH marks where the
+    front matter ends and the body begins. Relaxed straggler bridging fires only
+    before this index, because the recurrence signal is unreliable in the body
+    (spec boilerplate recurs verbatim across methods and can form a dense
+    empty-heading-anchored run), while leaked TOCs are always front matter.
+    Returns `len(sections)` if no such paragraph exists (whole document is front
+    region; the other gates still constrain removal).
+
+    Fails safe both ways: a *late* mis-detection cannot delete prose (the
+    forward-reference gate keeps a unique paragraph regardless of `body_start`),
+    only an empty heading; an *early* mis-detection (e.g. a 2-line non-recurring
+    appendix entry mid-block) merely truncates the front region and under-removes
+    (cosmetic).
+    """
+    for i, sec in enumerate(sections):
+        if (sec.kind == SectionKind.PARAGRAPH
+                and not _section_is_trivial(sec)
+                and not recurs[i]
+                and len(sec.lines) >= 2):
+            return i
+    return len(sections)
+
+
+def drop_leaked_toc_entries(sections: list[Section]) -> list[Section]:
     """Remove a leaked Table of Contents left behind as mixed heading/body kinds.
 
     Companion to `toc.find_toc_indices` (the dot-leader structural detector,
@@ -524,22 +659,38 @@ def drop_leaked_toc_headings(sections: list[Section]) -> list[Section]:
     HEADINGs, others stay short title-like PARAGRAPH or LIST sections ("3. The
     Rationale for Unification"). This pass removes the whole block.
 
-    The single discriminator is **recurrence as a later heading**, shared by
-    both entry kinds (the `entry` array). A run is a contiguous sequence of such
-    entries (only trivial fragments or other entries may sit between members),
-    of length at least `MIN_TOC_RUN`, that is **not** a run whose heading
-    subsequence strictly deepens (`15`/`15.1`/`15.1.1` clause-container
-    stack).
+    Entries are unified by **recurrence as a later heading** (empty recurring
+    headings + title-like recurring paragraph/list). A real leaked TOC is often
+    *fragmented* by non-recurring **stragglers** the body classifier handled
+    differently from the recurring entries: title-like paragraph/list lines whose
+    body heading text drifted, and once-only empty headings. This pass bridges
+    stragglers as in-span run members so the block coalesces and removes whole
+    (P4016R0's ~146-entry appendix dump, P4007R0's `8.1`-`8.4` objections).
 
-    Safety: the earlier heading-only variant was body-safe by construction
-    because it removed only empty headings. This pass also removes
-    PARAGRAPH/LIST sections, so that guarantee no longer holds outright. It is
-    restored mostly by the **heading anchor**: a run is removable only if it
-    contains at least one empty-heading entry, so paragraph/list entries are
-    deleted only within the span of a confirmed heading-kind TOC block, never
-    as a free-floating cluster. Combined with exact normalized match, the
-    title-like line cap (`_TOC_ENTRY_MAX_LINES`), and the run-length floor,
-    removal is confined to a structurally-bounded region.
+    Body-safety is a **conjunction of gates, not any single one** (a future
+    maintainer must not loosen one assuming another carries the weight):
+
+    - **Heading anchor:** a removable run needs >= 1 empty-heading entry, so
+      paragraph/list members are deleted only inside a confirmed heading-kind TOC
+      block.
+    - **Front-region bound:** straggler bridging fires only before `body_start`
+      (the first real body paragraph). Spec boilerplate recurs verbatim across
+      methods and can form a dense empty-heading-anchored run in the body; the
+      bound keeps the relaxation out of the body (where strict, trivial-only
+      bridging still applies). This is what stops p2846r6's `Effects:` wording
+      loss.
+    - **Recurrence-density floor:** a run is removed only if a strong majority of
+      its counted members recur as later headings.
+    - **In-span / trailing rule:** only stragglers strictly between the run's
+      first and last *entry* are removed; trailing stragglers (past the last
+      entry) are kept, even though the scan bridged them. This is what keeps a
+      real section, and real single-line abstract prose, that immediately follows
+      a front-matter TOC (P4016R0's idx150/151).
+    - **Forward-reference gate** (paragraph/list stragglers only): such a
+      straggler is removed only if its title appears as a later heading, so a
+      unique body sentence is never deleted. Empty-heading stragglers are exempt
+      (heading text drifts; gating them regresses P4007R0); their residual risk is
+      heading-level loss, covered by the anchor/density/front/in-span guards.
 
     "Empty" is interpreted loosely: non-trivial sections that are themselves
     heading titles recurring later (adjacent TOC entries that `find_toc_indices`
@@ -552,12 +703,15 @@ def drop_leaked_toc_headings(sections: list[Section]) -> list[Section]:
     n = len(sections)
 
     # 1. normalized heading title (fold-aware, see `_entry_title`) -> ordered
-    #    list of HEADING indices.
+    #    list of HEADING indices; plus the ordered (index, title) list the
+    #    forward-reference gate scans.
     title_indices: dict[str, list[int]] = {}
+    heading_titles: list[tuple[int, str]] = []
     for i, sec in enumerate(sections):
         if sec.kind == SectionKind.HEADING:
-            title_indices.setdefault(
-                normalize_toc_entry(_entry_title(sec)), []).append(i)
+            norm = normalize_toc_entry(_entry_title(sec))
+            title_indices.setdefault(norm, []).append(i)
+            heading_titles.append((i, norm))
 
     def _recurs_later(sec: Section, i: int) -> bool:
         norm = normalize_toc_entry(_entry_title(sec))
@@ -571,89 +725,103 @@ def drop_leaked_toc_headings(sections: list[Section]) -> list[Section]:
             return False
         return any(k > i for k in title_indices.get(norm, []))
 
-    # 2. non-heading entry-ness (PARAGRAPH/LIST): title-like AND recurs as a
-    #    later heading. Computed FIRST because heading-emptiness (step 3)
-    #    consumes it, while it does not itself depend on heading-emptiness.
-    #    Title-like = at most `_TOC_ENTRY_MAX_LINES` text lines (from sec.text);
-    #    this is the load-bearing guard that keeps a multi-line body block from
-    #    being an entry just because its first line echoes a heading.
-    nonheading_entry = [False] * n
-    for i, sec in enumerate(sections):
-        if (_is_paragraphish(sec)
-                and len(sec.text.split("\n")) <= _TOC_ENTRY_MAX_LINES
-                and _recurs_later(sec, i)):
-            nonheading_entry[i] = True
+    recurs = [_recurs_later(sections[i], i) for i in range(n)]
 
-    # 3. heading emptiness, then heading entry-ness. A heading is empty when
-    #    every section before the next heading is trivial OR itself a
-    #    non-heading TOC entry, so a heading followed only by leaked
-    #    paragraph/list entries (P4094R0's `3.7 Summary` over a `LIST`-kind
-    #    entry) still counts as empty. A heading entry is an empty heading whose
-    #    title recurs as a later heading.
-    heading_entry = [False] * n
-    for i, sec in enumerate(sections):
-        if sec.kind != SectionKind.HEADING:
-            continue
-        empty = True
-        for j in range(i + 1, n):
-            if sections[j].kind == SectionKind.HEADING:
-                break
-            if (sections[j].kind in _TOC_SWEEP_SKIP_KINDS
-                    or not (_section_is_trivial(sections[j]) or nonheading_entry[j])):
-                empty = False
-                break
-        if empty and _recurs_later(sec, i):
-            heading_entry[i] = True
-
-    # The single source of truth: a section is a TOC entry iff it is an empty
-    # recurring heading or a title-like recurring paragraph/list.
+    # 2. entry-ness. A non-heading entry is a title-like paragraph/list that
+    #    recurs as a later heading. A heading entry is an empty heading (shape
+    #    only, broadened to bridge title-like non-headings) that recurs.
+    nonheading_entry = [
+        _is_title_like_straggler(sections[i]) and recurs[i] for i in range(n)]
+    heading_entry = [
+        _is_empty_heading(sections, i) and recurs[i] for i in range(n)]
     entry = [heading_entry[i] or nonheading_entry[i] for i in range(n)]
 
-    # 4. group entries into contiguous runs (only non-heading trivial fragments
-    #    bridge consecutive members), keep runs >= MIN_TOC_RUN that clear the
-    #    heading anchor, reject runs whose headings strictly deepen (real
-    #    clause-container stacks), and sweep in-span trivial fragments plus a
-    #    preceding label.
+    # 3. front-region bound: relaxed straggler bridging fires only before the
+    #    first real body paragraph.
+    body_start = _compute_body_start(sections, recurs)
+
+    def _is_straggler(i: int) -> bool:
+        # A non-entry section bridged in-span: a title-like (non-recurring)
+        # paragraph/list, or a once-only empty heading. Entries are excluded
+        # (a recurring title-like line is a non-heading entry; a recurring empty
+        # heading is a heading entry).
+        if entry[i]:
+            return False
+        if _is_title_like_straggler(sections[i]):
+            return True
+        return _is_empty_heading(sections, i) and _has_alpha_title(sections[i])
+
+    # 4. group entries into runs, bridging trivial fragments (anywhere) and
+    #    stragglers (front-region only), then flush.
     to_remove: set[int] = set()
 
-    def _flush(run: list[int]) -> None:
+    def _flush(entries: list[int], strags: list[int]) -> None:
         # Known limitation (recall): a leaked TOC entry whose body counterpart
         # is not a recurrence-matching heading carries no signal _recurs_later
         # can use. Such entries return False from _recurs_later, are never
         # placed in `entry`, and therefore never reach this function. They
         # survive in the output. P4007R0's once-only objection-title headings
-        # (e.g. "8.1 C++ needs a standard task...") are the confirmed case: each
-        # appears only once in the document, so _recurs_later returns False for
-        # all of them. Catching once-only leaked entries requires a non-recurrence
-        # signal (front-region position, distance from the TOC label, etc.),
+        # (e.g. "8.1 C++ needs a standard task...") are the confirmed case
+        # for the recurring-entry class; the straggler bridging in this pass
+        # now catches them via the front-region + forward-reference gates.
+        # Catching entries with no recurrence signal at all would require a
+        # non-recurrence discriminator (position, distance from TOC label),
         # which was deliberately deferred as too risky for body-safety.
-        if len(run) < MIN_TOC_RUN:
+        # MIN_TOC_RUN is counted on ENTRIES, not stragglers.
+        if len(entries) < MIN_TOC_RUN:
             return
-        # Heading anchor: a removable run must contain at least one empty-heading
-        # entry. Paragraph/list entries are deleted only inside the span of a
-        # confirmed heading-kind TOC block, never as a free-floating cluster.
-        if not any(heading_entry[i] for i in run):
+        # Heading anchor.
+        if not any(heading_entry[i] for i in entries):
             return
-        # Strictly-deepening rejection: a run whose headings form a
+        lo, hi = entries[0], entries[-1]
+        # In-span / trailing rule: only stragglers strictly between the first and
+        # last entry are candidates; trailing stragglers (the scan bridged them
+        # past `hi`) are kept. This protects a real section, and real single-line
+        # abstract prose, that follows a front-matter TOC (P4016R0 idx150/151).
+        in_span = [i for i in strags if lo < i < hi]
+        # Recurrence-density floor: density alone is insufficient (boilerplate is
+        # dense), but combined with the front bound it rejects a coincidental
+        # in-front anchor over mostly-non-recurring lines.
+        if _run_recurrence_density(len(entries), len(in_span)) < _TOC_RUN_MIN_RECUR_FRACTION:
+            return
+        # Strictly-deepening rejection: a run whose heading subsequence forms a
         # 15/15.1/15.1.1 ascending sequence is a real clause-container stack,
-        # not a leaked TOC. Apply to both all-heading runs and the heading
-        # subsequence of mixed runs: if the headings strictly deepen, the run
-        # is structural even if PARAGRAPH/LIST entries appear between them.
-        # Require at least two headings so the check is non-vacuous.
-        heading_run = [i for i in run if sections[i].kind == SectionKind.HEADING]
-        if len(heading_run) >= 2:
-            levels = [sections[i].heading_level for i in heading_run]
+        # not a leaked TOC. Applies to all-heading and mixed runs alike; require
+        # at least two headings so the check is non-vacuous.
+        heading_entries = [i for i in entries if sections[i].kind == SectionKind.HEADING]
+        if len(heading_entries) >= 2:
+            levels = [sections[i].heading_level for i in heading_entries]
             if all(b > a for a, b in zip(levels, levels[1:])):
                 return
-        for i in run:
+        for i in entries:
             to_remove.add(i)
-        # Trivial fragments (split page numbers) within the run's span, up to
-        # the next *real* (non-entry) heading after the last member.
-        end = next((k for k in range(run[-1] + 1, n)
+        in_span_set = set(in_span)
+        for i in in_span:
+            if _is_title_like_straggler(sections[i]):
+                # Paragraph/list straggler: forward-reference gate. The check is
+                # applied here as a removal *filter*, not in the run scan, so a
+                # failing straggler is bridged-but-kept (the run continued, the
+                # tail is still removed, at most one stray line survives).
+                title_norm = normalize_toc_entry(_entry_title(sections[i]))
+                if _straggler_forward_references(title_norm, i, heading_titles):
+                    to_remove.add(i)
+            else:
+                # Empty-heading straggler: exempt from the forward-reference gate
+                # (heading text drifts; gating it regresses P4007R0).
+                to_remove.add(i)
+        # Trivial fragments (split page numbers) up to the next real (non-entry)
+        # heading after the last entry. The trailing-exclusion rule applies to
+        # *stragglers* (the prose-risk class), not to trivial page-number debris,
+        # which pt4 swept up to the next real section and which is never real
+        # content (< `_TOC_ENTRY_MAX_BODY_CHARS`). Stragglers are skipped here so
+        # a bridged-but-kept paragraph straggler survives; real prose is
+        # non-trivial and never matches.
+        end = next((k for k in range(hi + 1, n)
                     if sections[k].kind == SectionKind.HEADING and not entry[k]),
                    n)
-        for j in range(run[0] + 1, end):
+        for j in range(lo + 1, end):
             if (j not in to_remove
+                    and j not in in_span_set
                     and sections[j].kind != SectionKind.HEADING
                     and sections[j].kind not in _TOC_SWEEP_SKIP_KINDS
                     and _section_is_trivial(sections[j])):
@@ -661,7 +829,7 @@ def drop_leaked_toc_headings(sections: list[Section]) -> list[Section]:
         # A "Table of Contents" / "Contents" label immediately preceding the run,
         # whether it is paragraph-kind or heading-kind (P4003R1's leaked
         # `### Table of Contents`). Walk back over trivial filler to reach it.
-        p = run[0] - 1
+        p = lo - 1
         while p >= 0:
             if is_toc_label(sections[p].text):
                 to_remove.add(p)
@@ -673,18 +841,23 @@ def drop_leaked_toc_headings(sections: list[Section]) -> list[Section]:
                 continue
             break
 
-    run: list[int] = []
+    entries: list[int] = []
+    strags: list[int] = []
     for i in range(n):
         if entry[i]:
-            run.append(i)
-        elif sections[i].kind != SectionKind.HEADING and _section_is_trivial(sections[i]):
+            entries.append(i)
+        elif (entries and sections[i].kind != SectionKind.HEADING
+                and _section_is_trivial(sections[i])):
             # Non-heading trivial filler (a split page number) bridges
             # consecutive entries; it neither opens nor closes a run.
             continue
+        elif entries and i < body_start and _is_straggler(i):
+            # Front-region straggler bridges the run (removal decided in _flush).
+            strags.append(i)
         else:
-            _flush(run)
-            run = []
-    _flush(run)
+            _flush(entries, strags)
+            entries, strags = [], []
+    _flush(entries, strags)
 
     if not to_remove:
         return sections
