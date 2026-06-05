@@ -807,14 +807,18 @@ class TestLossyTableMarker:
         assert md.count("<!-- tomd:lossy-table -->") == 2
 
 
-class TestLabeledCodeTable:
-    """Code-comparison tables with a <th> header row emit each block under its
-    column label, on the clean-grid path only; everything else falls back to
-    the flat lossy emit unchanged."""
+class TestCodeComparisonTable:
+    """Clean code-comparison tables (a <th> header row over body rows of code
+    cells) render as a side-by-side HTML table via the shared
+    ``tables.render_code_comparison_table``; everything else falls back to the
+    flat lossy emit unchanged.
 
-    def test_code_table_before_after_labels_emitted(self):
-        """thead/tbody comparison (the mpark/wg21 and P2906R1 shape): each
-        block sits under its column label, no lossy marker."""
+    The HTML-table output matches the PDF emitter's CODE_COMPARISON markup on
+    the sg/tomd-table-figures-abstract-metadata branch (see lib/tables.py)."""
+
+    def test_code_table_before_after_renders_html_table(self):
+        """thead/tbody comparison (the mpark/wg21 and P2906R1 shape): an HTML
+        table with <th> headers and <pre> code cells, no lossy marker."""
         html = """
         <table>
         <thead><tr><th>Before</th><th>After</th></tr></thead>
@@ -826,21 +830,36 @@ class TestLabeledCodeTable:
         """
         md = render_body(parse_html(html), "mpark")
         assert "<!-- tomd:lossy-table -->" not in md
-        assert "**Before**" in md
-        assert "**After**" in md
-        assert "int verbose_form();" in md
-        assert "int proposed_form();" in md
-        # row-major order: label, its block, next label, its block
+        assert "<table" in md
+        assert ">Before</th>" in md
+        assert ">After</th>" in md
+        assert "<pre style=\"margin: 0;\">int verbose_form();</pre>" in md
+        assert "<pre style=\"margin: 0;\">int proposed_form();</pre>" in md
+        # headers precede the data row; left cell precedes right cell
         assert (
-            md.index("**Before**")
+            md.index(">Before</th>")
             < md.index("int verbose_form();")
-            < md.index("**After**")
             < md.index("int proposed_form();")
         )
 
-    def test_code_table_labels_multi_row_grid(self):
-        """2 columns x 2 body rows, header in the first <tr> (no thead). Labels
-        repeat row-major, each block under the correct column label."""
+    def test_code_table_code_is_html_escaped(self):
+        """Code containing <, >, & is escaped so it survives inside <pre>."""
+        html = """
+        <table>
+        <thead><tr><th>Before</th><th>After</th></tr></thead>
+        <tbody><tr>
+        <td><pre>vector&lt;int&gt; v;</pre></td>
+        <td><pre>a &amp;&amp; b;</pre></td>
+        </tr></tbody>
+        </table>
+        """
+        md = render_body(parse_html(html), "mpark")
+        assert "vector&lt;int&gt; v;" in md
+        assert "a &amp;&amp; b;" in md
+
+    def test_code_table_multi_row_grid_one_tr_per_row(self):
+        """2 columns x 2 body rows, header in the first <tr> (no thead). Header
+        cells appear once; each body row is its own <tr> with both cells."""
         html = """
         <table>
         <tr><th>Before</th><th>After</th></tr>
@@ -850,8 +869,10 @@ class TestLabeledCodeTable:
         """
         md = render_body(parse_html(html), "mpark")
         assert "<!-- tomd:lossy-table -->" not in md
-        assert md.count("**Before**") == 2
-        assert md.count("**After**") == 2
+        assert md.count(">Before</th>") == 1
+        assert md.count(">After</th>") == 1
+        assert md.count("<tr>") == 3  # header + two body rows
+        # each row keeps its left/right cells adjacent and in document order
         assert (
             md.index("row_one_left;")
             < md.index("row_one_right;")
@@ -859,8 +880,8 @@ class TestLabeledCodeTable:
             < md.index("row_two_right;")
         )
 
-    def test_code_table_three_column_labels(self):
-        """3-column clean grid (P3549R0 shape): all three labels emitted."""
+    def test_code_table_three_column_headers(self):
+        """3-column clean grid (P3549R0 shape): all three headers emitted."""
         html = """
         <table>
         <thead><tr><th>Desired</th><th>Throwing</th><th>Explicit</th></tr></thead>
@@ -873,13 +894,15 @@ class TestLabeledCodeTable:
         """
         md = render_body(parse_html(html), "mpark")
         assert "<!-- tomd:lossy-table -->" not in md
-        assert "**Desired**" in md
-        assert "**Throwing**" in md
-        assert "**Explicit**" in md
+        assert ">Desired</th>" in md
+        assert ">Throwing</th>" in md
+        assert ">Explicit</th>" in md
+        # three columns -> width 33%
+        assert "width: 33%;" in md
 
     def test_code_table_no_header_keeps_marker(self):
         """A code table with <td>-only cells (no <th>) stays on the flat lossy
-        path: marker present, no bold labels."""
+        path: marker present, fenced blocks, no HTML table."""
         html = """
         <table>
         <tr><td><pre>int a;</pre></td><td><pre>int b;</pre></td></tr>
@@ -887,7 +910,8 @@ class TestLabeledCodeTable:
         """
         md = render_body(parse_html(html), "mpark")
         assert "<!-- tomd:lossy-table -->" in md
-        assert "**" not in md
+        assert "<table" not in md
+        assert "```cpp" in md
         assert "int a;" in md
         assert "int b;" in md
 
@@ -901,7 +925,7 @@ class TestLabeledCodeTable:
         """
         md = render_body(parse_html(html), "mpark")
         assert "<!-- tomd:lossy-table -->" in md
-        assert "**Before**" not in md
+        assert "<table" not in md
         assert "only_one_cell;" in md
 
     def test_code_table_header_with_code_falls_back(self):
@@ -915,7 +939,7 @@ class TestLabeledCodeTable:
         """
         md = render_body(parse_html(html), "mpark")
         assert "<!-- tomd:lossy-table -->" in md
-        assert "**After**" not in md
+        assert ">After</th>" not in md
 
     def test_code_table_multi_row_thead_falls_back(self):
         """A <thead> with more than one <tr> (stacked header) is not guessed
@@ -931,12 +955,11 @@ class TestLabeledCodeTable:
         """
         md = render_body(parse_html(html), "mpark")
         assert "<!-- tomd:lossy-table -->" in md
-        assert "**Before**" not in md
-        assert "**Group A**" not in md
+        assert "<table" not in md
 
     def test_code_table_empty_code_cell_falls_back(self):
         """A body row with N code tags but a text-empty one has only N-1
-        non-empty cells: fall back rather than emit N-1 blocks under N labels.
+        non-empty cells: fall back rather than misalign cells to headers.
         Pins gate condition 3 (non-empty)."""
         html = """
         <table>
@@ -946,11 +969,12 @@ class TestLabeledCodeTable:
         """
         md = render_body(parse_html(html), "mpark")
         assert "<!-- tomd:lossy-table -->" in md
-        assert "**Before**" not in md
+        assert "<table" not in md
         assert "has_content;" in md
 
-    def test_code_table_label_bold_full_wrap_unwrapped(self):
-        """A fully-bold <th> renders as a single bold label, not double-wrapped."""
+    def test_code_table_header_inline_formatting_flattened(self):
+        """Inline markup inside a <th> (here <strong>) becomes plain header
+        text, not markdown punctuation, since the cell is HTML-escaped."""
         html = """
         <table>
         <thead><tr><th><strong>Before</strong></th><th><strong>After</strong></th></tr></thead>
@@ -959,12 +983,12 @@ class TestLabeledCodeTable:
         """
         md = render_body(parse_html(html), "mpark")
         assert "<!-- tomd:lossy-table -->" not in md
-        assert "**Before**" in md
-        assert "****Before****" not in md
+        assert ">Before</th>" in md
+        assert ">After</th>" in md
+        assert "**" not in md
 
-    def test_code_table_label_partial_bold_emitted_verbatim(self):
-        """A partially-bold <th> is emitted verbatim (no re-wrap), so it never
-        produces malformed Markdown."""
+    def test_code_table_header_mixed_inline_flattened(self):
+        """A header mixing bold and plain text collapses to plain header text."""
         html = """
         <table>
         <thead><tr><th><strong>Before</strong> (old)</th><th>After</th></tr></thead>
@@ -973,12 +997,12 @@ class TestLabeledCodeTable:
         """
         md = render_body(parse_html(html), "mpark")
         assert "<!-- tomd:lossy-table -->" not in md
-        assert "**Before** (old)" in md
-        assert "***Before** (old)**" not in md
+        assert ">Before (old)</th>" in md
+        assert "**" not in md
 
-    def test_code_table_label_non_ascii_passthrough(self):
-        """Non-ASCII labels (𝔽/𝕃 + en-dash, the P3666/P3721 family) survive
-        normalization and emit byte-intact."""
+    def test_code_table_header_non_ascii_passthrough(self):
+        """Non-ASCII headers (𝔽/𝕃 + en-dash, the P3666/P3721 family) survive
+        into the <th> byte-intact (html.escape leaves them untouched)."""
         html = """
         <table>
         <thead><tr><th>\U0001D53D – Fundamental type</th><th>\U0001D543 – Library type</th></tr></thead>
@@ -987,8 +1011,8 @@ class TestLabeledCodeTable:
         """
         md = render_body(parse_html(html), "mpark")
         assert "<!-- tomd:lossy-table -->" not in md
-        assert "\U0001D53D – Fundamental type" in md
-        assert "\U0001D543 – Library type" in md
+        assert "\U0001D53D – Fundamental type</th>" in md
+        assert "\U0001D543 – Library type</th>" in md
 
 
 class TestDefinitionList:

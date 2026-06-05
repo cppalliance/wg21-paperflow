@@ -9,6 +9,7 @@ from bs4 import BeautifulSoup, CData, Comment, Tag, NavigableString
 
 from .. import strip_format_chars, ALLOWED_LINK_SCHEMES
 from ..wording_markup import WORDING_FENCE_CLOSE, wording_fence_open, wording_tag_open
+from ..tables import render_code_comparison_table
 
 _BOLD_WRAP_RE = re.compile(r"^\*\*(.+)\*\*$")
 _LOSSY_TABLE_MARKER = "<!-- tomd:lossy-table -->"
@@ -1290,14 +1291,14 @@ def _render_table(el: Tag) -> str | None:
     return "\n".join(lines)
 
 
-def _labeled_code_grid(el: Tag) -> list[tuple[str, str]] | None:
-    """Return (label, code) pairs for a clean labeled code-comparison grid.
+def _labeled_code_grid(el: Tag) -> tuple[list[str], list[list[str]]] | None:
+    """Return ``(headers, body_rows)`` for a clean labeled code-comparison grid.
 
     WG21 papers routinely present code comparisons as a table with a <th>
     header row labeling each column (Before/After, C++23/This Paper, ...). The
-    flat code-table emit drops those labels. This recovers them, but only when
-    the table is an unambiguous rectangular grid, so an irregular or
-    parser-mangled table can never be mislabeled:
+    flat code-table emit drops those labels and flattens the columns. This
+    recognises the grid, but only when it is unambiguous, so an irregular or
+    parser-mangled table can never be misrendered:
 
     1. A header row of N >= 1 <th> cells, all non-empty, none containing code.
        The header row is the single <tr> inside <thead> when present (a <thead>
@@ -1306,11 +1307,11 @@ def _labeled_code_grid(el: Tag) -> list[tuple[str, str]] | None:
     2. Every body row (a <tr> holding a code block) has exactly N non-empty
        <pre>/<code-block> cells.
 
-    Pairs are returned in row-major document order (each block under its column
-    label), or None when any condition fails, in which case the caller falls
-    back to the flat lossy emit. The gate is stated entirely in terms of
-    non-empty cells, so the label-to-code mapping is total: a None label is
-    impossible by construction.
+    ``headers`` is the N column labels as plain (collapsed) text; ``body_rows``
+    is one list of N cell-code strings per body row, in column order. Returns
+    None when any condition fails, in which case the caller falls back to the
+    flat lossy emit. The gate is stated entirely in terms of non-empty cells,
+    so every cell maps to a column by construction.
     """
     thead = el.find("thead")
     if thead is not None:
@@ -1326,22 +1327,26 @@ def _labeled_code_grid(el: Tag) -> list[tuple[str, str]] | None:
     th_cells = header_row.find_all("th", recursive=False)
     if not th_cells:
         return None
-    labels: list[str] = []
+    headers: list[str] = []
     for th in th_cells:
         if th.find(_CODE_BLOCK_TAGS):
             return None
-        label = _COLLAPSE_WS_RE.sub(" ", _inline_text(th).strip()).strip()
+        # Plain collapsed text: the shared renderer HTML-escapes it into a
+        # <th> cell, so inline markdown (** , `code`) would only show as
+        # literal punctuation. This matches the PDF emitter, which builds the
+        # same labels from span text.
+        label = _COLLAPSE_WS_RE.sub(" ", th.get_text(" ", strip=True)).strip()
         if not label:
             return None
-        labels.append(label)
-    num_cols = len(labels)
+        headers.append(label)
+    num_cols = len(headers)
 
-    body_rows = [tr for tr in el.find_all("tr") if tr.find(_CODE_BLOCK_TAGS)]
-    if not body_rows:
+    body_blocks = [tr for tr in el.find_all("tr") if tr.find(_CODE_BLOCK_TAGS)]
+    if not body_blocks:
         return None
 
-    pairs: list[tuple[str, str]] = []
-    for tr in body_rows:
+    body_rows: list[list[str]] = []
+    for tr in body_blocks:
         codes = [
             text
             for cb in tr.find_all(_CODE_BLOCK_TAGS)
@@ -1349,43 +1354,35 @@ def _labeled_code_grid(el: Tag) -> list[tuple[str, str]] | None:
         ]
         if len(codes) != num_cols:
             return None
-        pairs.extend(zip(labels, codes))
-    return pairs
-
-
-def _format_label(label: str) -> str:
-    """Render a code-column label as a bold line, guarding against broken bold.
-
-    A single fully-wrapping ``**...**`` is unwrapped first (so a <strong>-only
-    cell does not become ``****label****``). The bold wrap is then applied only
-    when the unwrapped label contains no ``*``; a label that carries its own
-    inline emphasis (partial bold, e.g. ``**Before** (old)``) is emitted
-    verbatim, since re-wrapping it would produce malformed Markdown
-    (``***Before** (old)**``).
-    """
-    label = _BOLD_WRAP_RE.sub(r"\1", label)
-    if "*" in label:
-        return label
-    return f"**{label}**"
+        body_rows.append(codes)
+    return headers, body_rows
 
 
 def _render_code_table(el: Tag) -> str | None:
-    """Extract fenced code blocks from a table containing <pre> or <code-block>.
+    """Render a table containing <pre> or <code-block> cells.
 
-    Some generators (dascandy/fiets, Bikeshed, Schultke) wrap code inside
-    table cells. A clean labeled comparison grid (header row of N labels, each
-    body row holding exactly N code cells) is emitted with each block under its
-    column label and no lossy marker, since the labels and per-column code are
-    preserved. Any other code table keeps the flat lossy emit: every non-empty
-    block as its own fenced block behind a <!-- tomd:lossy-table --> marker.
+    A clean labeled comparison grid (header row of N labels, each body row
+    holding exactly N code cells) is rendered as a side-by-side HTML table via
+    the shared :func:`tables.render_code_comparison_table`, so the labels and
+    per-column code are preserved with left/right cells kept in the same row.
+
+    DRY-UP AFTER REBASE: this HTML path and the PDF emitter on the
+    ``sg/tomd-table-figures-abstract-metadata`` branch
+    (``lib/pdf/emit.py::_render_html_table``, the ``CODE_COMPARISON`` strategy)
+    produce the same markup. Once this branch is rebased onto ``sg``, the PDF
+    side should be reduced to a span-extraction adapter that also calls the
+    shared helper, so the format lives in exactly one place. See
+    ``lib/tables.py`` for the full note.
+
+    Any other code table (no header, parser-mangled DOM, ragged code-cell
+    counts, stacked <thead>, header cells containing code) keeps the flat lossy
+    emit: every non-empty block as its own fenced block behind a
+    <!-- tomd:lossy-table --> marker.
     """
     grid = _labeled_code_grid(el)
     if grid is not None:
-        parts: list[str] = []
-        for label, code in grid:
-            parts.append(_format_label(label))
-            parts.append(f"```cpp\n{code}\n```")
-        return "\n\n".join(parts)
+        headers, body_rows = grid
+        return render_code_comparison_table([headers] + body_rows)
 
     blocks: list[str] = []
     for cb in el.find_all(_CODE_BLOCK_TAGS):
