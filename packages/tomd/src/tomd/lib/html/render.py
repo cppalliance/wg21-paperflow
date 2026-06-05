@@ -1290,13 +1290,103 @@ def _render_table(el: Tag) -> str | None:
     return "\n".join(lines)
 
 
+def _labeled_code_grid(el: Tag) -> list[tuple[str, str]] | None:
+    """Return (label, code) pairs for a clean labeled code-comparison grid.
+
+    WG21 papers routinely present code comparisons as a table with a <th>
+    header row labeling each column (Before/After, C++23/This Paper, ...). The
+    flat code-table emit drops those labels. This recovers them, but only when
+    the table is an unambiguous rectangular grid, so an irregular or
+    parser-mangled table can never be mislabeled:
+
+    1. A header row of N >= 1 <th> cells, all non-empty, none containing code.
+       The header row is the single <tr> inside <thead> when present (a <thead>
+       with zero or several <tr> rows is a stacked header we will not guess at),
+       otherwise the table's first <tr>.
+    2. Every body row (a <tr> holding a code block) has exactly N non-empty
+       <pre>/<code-block> cells.
+
+    Pairs are returned in row-major document order (each block under its column
+    label), or None when any condition fails, in which case the caller falls
+    back to the flat lossy emit. The gate is stated entirely in terms of
+    non-empty cells, so the label-to-code mapping is total: a None label is
+    impossible by construction.
+    """
+    thead = el.find("thead")
+    if thead is not None:
+        head_rows = thead.find_all("tr", recursive=False)
+        if len(head_rows) != 1:
+            return None
+        header_row = head_rows[0]
+    else:
+        header_row = el.find("tr")
+    if header_row is None:
+        return None
+
+    th_cells = header_row.find_all("th", recursive=False)
+    if not th_cells:
+        return None
+    labels: list[str] = []
+    for th in th_cells:
+        if th.find(_CODE_BLOCK_TAGS):
+            return None
+        label = _COLLAPSE_WS_RE.sub(" ", _inline_text(th).strip()).strip()
+        if not label:
+            return None
+        labels.append(label)
+    num_cols = len(labels)
+
+    body_rows = [tr for tr in el.find_all("tr") if tr.find(_CODE_BLOCK_TAGS)]
+    if not body_rows:
+        return None
+
+    pairs: list[tuple[str, str]] = []
+    for tr in body_rows:
+        codes = [
+            text
+            for cb in tr.find_all(_CODE_BLOCK_TAGS)
+            if (text := cb.get_text().strip())
+        ]
+        if len(codes) != num_cols:
+            return None
+        pairs.extend(zip(labels, codes))
+    return pairs
+
+
+def _format_label(label: str) -> str:
+    """Render a code-column label as a bold line, guarding against broken bold.
+
+    A single fully-wrapping ``**...**`` is unwrapped first (so a <strong>-only
+    cell does not become ``****label****``). The bold wrap is then applied only
+    when the unwrapped label contains no ``*``; a label that carries its own
+    inline emphasis (partial bold, e.g. ``**Before** (old)``) is emitted
+    verbatim, since re-wrapping it would produce malformed Markdown
+    (``***Before** (old)**``).
+    """
+    label = _BOLD_WRAP_RE.sub(r"\1", label)
+    if "*" in label:
+        return label
+    return f"**{label}**"
+
+
 def _render_code_table(el: Tag) -> str | None:
     """Extract fenced code blocks from a table containing <pre> or <code-block>.
 
     Some generators (dascandy/fiets, Bikeshed, Schultke) wrap code inside
-    table cells. Emit every non-empty block as its own fenced block so
-    before/after comparisons and multi-snippet tables are preserved.
+    table cells. A clean labeled comparison grid (header row of N labels, each
+    body row holding exactly N code cells) is emitted with each block under its
+    column label and no lossy marker, since the labels and per-column code are
+    preserved. Any other code table keeps the flat lossy emit: every non-empty
+    block as its own fenced block behind a <!-- tomd:lossy-table --> marker.
     """
+    grid = _labeled_code_grid(el)
+    if grid is not None:
+        parts: list[str] = []
+        for label, code in grid:
+            parts.append(_format_label(label))
+            parts.append(f"```cpp\n{code}\n```")
+        return "\n\n".join(parts)
+
     blocks: list[str] = []
     for cb in el.find_all(_CODE_BLOCK_TAGS):
         text = cb.get_text().strip()

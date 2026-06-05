@@ -6,6 +6,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from tomd.lib.pdf.qa import compute_metrics
+from tomd.lib.html.extract import parse_html
+from tomd.lib.html.render import render_body
 
 
 _GOOD_MD = """\
@@ -115,6 +117,24 @@ class TestLossyTableCount:
         md = "## Heading\n\n<!-- tomd:lossy-table -->\n\n| A | B |\n| --- | --- |\n| 1 | 2 |\n"
         m = compute_metrics(md)
         assert m.score == 100
+
+    def test_labeled_code_grid_emits_no_lossy_marker(self):
+        """A clean labeled code-comparison grid is no longer lossy: the HTML
+        renderer emits labels instead of a marker, so it contributes 0 to
+        lossy_table_count. Pins the intentional marker/metric change."""
+        html = """
+        <table>
+        <thead><tr><th>Before</th><th>After</th></tr></thead>
+        <tbody><tr>
+        <td><pre>int verbose_form();</pre></td>
+        <td><pre>int proposed_form();</pre></td>
+        </tr></tbody>
+        </table>
+        """
+        md = render_body(parse_html(html), "mpark")
+        assert "<!-- tomd:lossy-table -->" not in md
+        m = compute_metrics("## Heading\n\n" + md + "\n")
+        assert m.lossy_table_count == 0
 
 
 class TestNoHeadings:
