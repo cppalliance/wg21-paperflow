@@ -31,7 +31,6 @@ flowchart TD
 
 - **gemma:** b200x2-gemma4
 - **deepseek:** h200x8-deepseek-v4-pro
-- **opus:** anthropic-opus
 - **default:** h200x8-deepseek-v4-pro
 
 ## Config
@@ -165,7 +164,7 @@ Lens definitions:
 
 ---
 
-Per-chunk call with concurrency from ## Config. Receives one chunk's unsupported claims from Step 5. Output: BatchClassifyOutput per chunk; gaps are merged and deduped in Step 7 Collect.
+Per-chunk call with concurrency from ## Config. Receives one chunk's unsupported claims from Step 5. Output: ChunkClassifyOutput per chunk (model authors semantic fields only; the orchestrator assigns chunk_index and pipeline-managed id/closed_by). Gaps are merged and deduped in Step 7 Collect.
 
 ## 7. Collect
 
