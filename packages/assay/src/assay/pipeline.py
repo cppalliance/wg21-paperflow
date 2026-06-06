@@ -47,6 +47,7 @@ from assay.models import (
     BatchClassifyOutput,
     GapOutput,
     ChunkAnalyzeOutput,
+    ChunkClassifyOutput,
     ChunkDecideOutput,
     ChunkEntry,
     ChunkExtractOutput,
@@ -838,7 +839,7 @@ async def _custom_classify(state: PipelineState, ctx: StepContext, spec) -> None
         result = await agent.run(
             system_prompt=system_prompt,
             user_message=user_msg,
-            output_type=BatchClassifyOutput,
+            output_type=ChunkClassifyOutput,
             max_tokens=max_output,
             thinking_budget=thinking,
             label=f"classify-chunk-{ci}",
@@ -854,13 +855,28 @@ async def _custom_classify(state: PipelineState, ctx: StepContext, spec) -> None
     )
 
     # results are sorted by ci, so gap order (and the IDs Collect assigns)
-    # is deterministic regardless of completion order. Pin each gap's
-    # chunk_index to the call's authoritative ci rather than trusting the
-    # model: Analyze partitions own- vs other-chunk gaps on this field.
+    # is deterministic regardless of completion order. The model authors only
+    # the semantic fields (ClassifyGap); chunk_index is set to the call's
+    # authoritative ci here (Analyze partitions own- vs other-chunk gaps on it),
+    # and id / closed_by are pipeline-assigned (Collect reassigns id).
     scans: list[ScanOutput] = []
     all_gaps: list[GapOutput] = []
     for ci, result, _ in results:
-        chunk_gaps = [g.model_copy(update={"chunk_index": ci}) for g in result.gaps]
+        chunk_gaps = [
+            GapOutput(
+                id=0,
+                chunk_index=ci,
+                item_quote=g.item_quote,
+                line=g.line,
+                gap=g.gap,
+                why_important=g.why_important,
+                primary_lens=g.primary_lens,
+                secondary_lens=g.secondary_lens,
+                severity=g.severity,
+                closed_by=[],
+            )
+            for g in result.gaps
+        ]
         scans.append(ScanOutput(chunk_index=ci, gaps=chunk_gaps))
         all_gaps.extend(chunk_gaps)
     state.raw_scans = scans
