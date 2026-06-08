@@ -39,6 +39,16 @@ from paperstore.errors import (
     MissingSourceError,
 )
 from paperstore.progress import ProgressCallback, ProgressEvent
+from tomd.lib.batch import (
+    format_batch_finished,
+    format_batch_progress_line,
+    format_batch_timeout,
+)
+from tomd.lib.check_content import (
+    format_content_check_report,
+    run_content_check_batch,
+    write_content_check_json_atomic,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -490,8 +500,6 @@ def _rows_for_content_check_targets(
 
 def _make_stderr_progress() -> ProgressCallback:
     """Build a progress handler that writes batch lines to stderr."""
-    from tomd.lib.batch import format_batch_progress_line
-
     t0 = time.monotonic()
 
     def handler(event: ProgressEvent) -> None:
@@ -519,13 +527,6 @@ def run_content_check(
     from the workspace path. Skips papers missing either source or
     markdown.
     """
-    from tomd.lib.batch import format_batch_finished, format_batch_timeout
-    from tomd.lib.check_content import (
-        format_content_check_report,
-        run_content_check_batch,
-        write_content_check_json_atomic,
-    )
-
     workers = max(1, workers)
     rows = _rows_for_content_check_targets(targets, backend)
 
