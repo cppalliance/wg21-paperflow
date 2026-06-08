@@ -73,7 +73,10 @@ Each command runs `process_paper` for matching papers, which auto-runs all prere
 ### Skip buckets
 
 `run_convert` (and `paperflow convert`) accumulate skipped papers in the result dict's
-`skipped` list. Each entry is `{"paper_id": ..., "reason": ...}`.
+`skipped` list. Every entry has `paper_id` and `reason` (the consumer contract).
+Pre-filtered entries (`already_converted`, download `already_staged` / `no_url` pre-seed)
+use only those two keys. Entries appended from convert or download workers may also
+carry `"status": "skipped"` (an internal routing field retained in the output).
 
 When tomd intentionally skips a PDF, `reason` is one of four snake_case buckets mapped
 from `SkipReason` in `cli/jobs.py`:

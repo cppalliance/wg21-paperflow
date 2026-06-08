@@ -59,6 +59,8 @@ def test_run_convert_routes_skip_reason(
             skip_reason=reason,
         )
 
+    # Patches orchestrator because run_convert lazy-imports convert_one_paper;
+    # repoint to cli.jobs.convert_one_paper if that import is hoisted.
     monkeypatch.setattr("cli.orchestrator.convert_one_paper", _stub_convert)
 
     result = asyncio.run(jobs.run_convert(
@@ -79,6 +81,8 @@ def test_run_convert_runtime_error_goes_to_failed(store, monkeypatch):
     def _stub_convert(_paper, **_kwargs):
         raise RuntimeError("oops")
 
+    # Patches orchestrator because run_convert lazy-imports convert_one_paper;
+    # repoint to cli.jobs.convert_one_paper if that import is hoisted.
     monkeypatch.setattr("cli.orchestrator.convert_one_paper", _stub_convert)
 
     result = asyncio.run(jobs.run_convert(

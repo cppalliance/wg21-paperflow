@@ -40,9 +40,13 @@ def convert_one_paper(
     ``extract_vector`` and ``whiteout_text`` are forwarded to the tomd
     PDF pipeline. They default to False; HTML sources ignore them.
 
+    Typed PDF skips (``SkipReason``) return a :class:`ConvertResult` with
+    ``status="skipped"`` instead of raising.
+
     Raises:
-        RuntimeError: source_file is empty - run ``paperflow download`` first.
-        RuntimeError: tomd produced no usable markdown.
+        RuntimeError: source_file missing or source path not found.
+        RuntimeError: tomd produced no usable markdown (HTML empty or
+            untyped empty; not a typed PDF skip).
     """
     paper_id = paper.document_id.strip().upper()
 
