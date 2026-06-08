@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sys
+from concurrent.futures import Future
 from pathlib import Path
 from unittest.mock import patch
 
@@ -16,6 +17,10 @@ from tomd.lib.batch import (
     format_batch_timeout,
     run_parallel_batch,
 )
+
+
+def _double(x: int) -> int:
+    return x * 2
 
 
 def test_sequential_batch_returns_all_outcomes():
@@ -84,3 +89,77 @@ def test_empty_items():
     assert run.outcomes == []
     assert run.timed_out == []
     assert run.elapsed_sec == 0.0
+
+
+def test_parallel_batch_collects_outcomes():
+    future_a = Future()
+    future_a.set_result(2)
+    future_b = Future()
+    future_b.set_result(4)
+
+    class FakePool:
+        def __init__(self, max_workers: int) -> None:
+            pass
+
+        def submit(self, worker, payload):  # noqa: ANN001
+            if payload == 1:
+                return future_a
+            return future_b
+
+        def __enter__(self) -> FakePool:
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            pass
+
+        def shutdown(self, *, wait: bool = False, cancel_futures: bool = False) -> None:
+            pass
+
+    with patch("tomd.lib.batch.ProcessPoolExecutor", FakePool):
+        run = run_parallel_batch([("a", 1), ("b", 2)], _double, workers=2)
+
+    assert run.timed_out == []
+    assert sorted(run.outcomes) == [("a", 2), ("b", 4)]
+
+
+def test_parallel_batch_timeout_aborts_pending():
+    done_future = Future()
+    done_future.set_result(2)
+    pending_future = Future()
+
+    class FakePool:
+        def __init__(self, max_workers: int) -> None:
+            self._submit_count = 0
+
+        def submit(self, worker, payload):  # noqa: ANN001
+            self._submit_count += 1
+            if payload == 1:
+                return done_future
+            return pending_future
+
+        def __enter__(self) -> FakePool:
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            pass
+
+        def shutdown(self, *, wait: bool = False, cancel_futures: bool = False) -> None:
+            pass
+
+    monotonic_values = iter([0.0, 0.0, 0.0, 200.0, 200.0])
+
+    with patch("tomd.lib.batch.ProcessPoolExecutor", FakePool):
+        with patch(
+            "tomd.lib.batch.time.monotonic",
+            side_effect=lambda: next(monotonic_values),
+        ):
+            with patch("tomd.lib.batch.time.sleep"):
+                run = run_parallel_batch(
+                    [("a", 1), ("b", 2)],
+                    _double,
+                    workers=2,
+                    timeout_sec=120,
+                )
+
+    assert run.timed_out == ["b"]
+    assert run.outcomes == [("a", 2)]

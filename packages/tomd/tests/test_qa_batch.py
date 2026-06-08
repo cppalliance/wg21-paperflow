@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 
@@ -11,6 +12,7 @@ from tomd.lib.pdf.qa import (
     QAMetrics,
     format_qa_report,
     run_qa_batch,
+    write_qa_json_atomic,
 )
 
 
@@ -60,3 +62,12 @@ def test_format_qa_report_contains_expected_sections():
     # Worst list is sorted by score ascending in metrics input; format uses
     # score < 100 filter preserving input order among non-perfect scores.
     assert "a.md" in text
+
+
+def test_write_qa_json_atomic_round_trip(tmp_path: Path):
+    metrics = [QAMetrics(file="a.md", score=90, issues=[])]
+    path = tmp_path / "qa.json"
+    write_qa_json_atomic(path, metrics)
+    data = json.loads(path.read_text())
+    assert data[0]["file"] == "a.md"
+    assert data[0]["score"] == 90

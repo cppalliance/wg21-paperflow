@@ -33,7 +33,7 @@ _DEFAULT_POLL_INTERVAL_SEC = 0.5
 class BatchRunResult[TResult]:
     """Outcome of a parallel or sequential batch run."""
 
-    outcomes: list[tuple[str, TResult]]
+    outcomes: list[tuple[str, TResult | Exception]]
     timed_out: list[str]
     elapsed_sec: float
 
@@ -97,7 +97,7 @@ def run_parallel_batch[TItem, TResult](
     1-based completion count (matching existing QA/content-check output).
     """
     total = len(items)
-    outcomes: list[tuple[str, TResult]] = []
+    outcomes: list[tuple[str, TResult | Exception]] = []
     timed_out: list[str] = []
     t0 = time.monotonic()
 

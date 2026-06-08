@@ -518,6 +518,8 @@ async def run_convert(
 # run_content_check
 # ---------------------------------------------------------------------------
 
+_CONTENT_CHECK_TIMEOUT = 120
+
 
 def _rows_for_content_check_targets(
     targets: list[str],
@@ -585,7 +587,7 @@ def run_content_check(
     *,
     json_path: Path | None = None,
     workers: int = 1,
-    timeout: int = 120,
+    timeout: int = _CONTENT_CHECK_TIMEOUT,
 ) -> dict:
     """Compare source text against converted markdown for the given targets.
 
@@ -639,10 +641,19 @@ def run_content_check(
         write_content_check_json_atomic(json_path, batch.results)
         print(f"\nDetailed metrics written to {json_path}")
 
+    failed = [
+        {"paper_id": pid, "reason": msg}
+        for pid, msg in batch.errors
+    ]
+    for pid in batch.timed_out:
+        failed.append({"paper_id": pid, "reason": "timeout"})
+
+    failed_ids = {entry["paper_id"] for entry in failed}
+
     return {
-        "succeeded": [pid for pid, _ in items],
+        "succeeded": [pid for pid, _ in items if pid not in failed_ids],
         "skipped": skipped,
-        "failed": [],
+        "failed": failed,
     }
 
 
