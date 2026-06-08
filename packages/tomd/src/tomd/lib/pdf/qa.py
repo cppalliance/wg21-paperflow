@@ -15,17 +15,24 @@ import json
 import logging
 import os
 import re
-import sys
 import tempfile
-import time
-from concurrent.futures import ProcessPoolExecutor
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
 from ftfy.badness import badness as _ftfy_badness
 import mistune
+from paperstore.progress import ProgressCallback
 
-__all__ = ["QAMetrics", "compute_metrics", "run_qa_report"]
+from tomd.lib.batch import run_parallel_batch
+
+__all__ = [
+    "QABatchResult",
+    "QAMetrics",
+    "compute_metrics",
+    "format_qa_report",
+    "run_qa_batch",
+    "write_qa_json_atomic",
+]
 
 _log = logging.getLogger(__name__)
 
@@ -446,92 +453,67 @@ def _qa_metrics_from_dict(d: dict) -> QAMetrics:
     return QAMetrics(**d)
 
 
-def run_qa_report(
+@dataclass(frozen=True)
+class QABatchResult:
+    """Outcome of a batch QA scoring run."""
+
+    metrics: list[QAMetrics]
+    timed_out: list[str]
+    elapsed_sec: float
+
+
+def run_qa_batch(
     items: list[tuple[str, str]],
-    json_path: Path | None = None,
+    *,
     workers: int = 1,
     timeout: int = _QA_BATCH_TIMEOUT_SEC,
-) -> None:
-    """Score a batch of converted papers and print a ranked report.
+    on_progress: ProgressCallback | None = None,
+) -> QABatchResult:
+    """Score a batch of converted papers and return ranked metrics.
+
+    CLI-adjacent: callers format output via :func:`format_qa_report`.
 
     *items* is a list of ``(paper_id, markdown_text)`` pairs. Each markdown
     string is scored independently via :func:`compute_metrics`. Uses
     *workers* parallel processes (default 1 = sequential); *timeout* is
     seconds of no progress before aborting remaining items.
     """
-    total = len(items)
+    batch_items = [(pid, (pid, md)) for pid, md in items]
+
+    run = run_parallel_batch(
+        batch_items,
+        _qa_one,
+        workers=workers,
+        timeout_sec=timeout,
+        poll_interval_sec=_WORKER_POLL_INTERVAL,
+        on_progress=on_progress,
+    )
+
     results: list[QAMetrics] = []
-    t0 = time.monotonic()
+    for item_id, outcome in run.outcomes:
+        if isinstance(outcome, Exception):
+            results.append(QAMetrics(
+                file=item_id, score=0, issues=[f"error: {outcome}"]))
+        else:
+            results.append(_qa_metrics_from_dict(outcome))
 
-    if workers > 1:
-        done_count = 0
-        with ProcessPoolExecutor(max_workers=workers) as pool:
-            future_to_id = {pool.submit(_qa_one, it): it[0] for it in items}
-            pending = set(future_to_id.keys())
-            last_completion = time.monotonic()
-
-            while pending:
-                newly_done = {f for f in pending if f.done()}
-
-                if newly_done:
-                    last_completion = time.monotonic()
-                    for f in newly_done:
-                        pending.discard(f)
-                        done_count += 1
-                        pid = future_to_id[f]
-                        elapsed = time.monotonic() - t0
-                        rate = done_count / elapsed if elapsed > 0 else 0
-                        eta = (total - done_count) / rate if rate > 0 else 0
-                        print(f"\r  [{done_count}/{total}] {pid:<40} "
-                              f"{rate:.1f} files/s  ETA {eta/60:.0f}m",
-                              end="", file=sys.stderr)
-                        sys.stderr.flush()
-                        try:
-                            d = f.result()
-                            results.append(_qa_metrics_from_dict(d))
-                        # Batch robustness: one bad paper must not crash the run
-                        except Exception as exc:
-                            results.append(QAMetrics(
-                                file=pid, score=0,
-                                issues=[f"error: {exc}"]))
-
-                elif time.monotonic() - last_completion > timeout:
-                    timed_out: list[str] = []
-                    for f in pending:
-                        pid = future_to_id[f]
-                        timed_out.append(pid)
-                        f.cancel()
-                        results.append(QAMetrics(
-                            file=pid, score=0,
-                            issues=[f"timeout (no progress for {timeout}s)"]))
-                    done_count += len(pending)
-                    print(f"\n  TIMEOUT: {len(timed_out)} files aborted: "
-                          f"{', '.join(timed_out)}", file=sys.stderr)
-                    break
-
-                else:
-                    time.sleep(_WORKER_POLL_INTERVAL)
-
-            pool.shutdown(wait=False, cancel_futures=True)
-    else:
-        for i, item in enumerate(items, 1):
-            pid = item[0]
-            elapsed = time.monotonic() - t0
-            rate = i / elapsed if elapsed > 0 else 0
-            eta = (total - i) / rate if rate > 0 else 0
-            print(f"\r  [{i}/{total}] {pid:<40} "
-                  f"{rate:.1f} files/s  ETA {eta/60:.0f}m",
-                  end="", file=sys.stderr)
-            sys.stderr.flush()
-            d = _qa_one(item)
-            results.append(_qa_metrics_from_dict(d))
-
-    wall = time.monotonic() - t0
-    avg = wall / total if total else 0.0
-    print(f"\n  Finished in {wall/60:.1f} minutes "
-          f"({avg:.1f}s/file avg)\n", file=sys.stderr)
+    for pid in run.timed_out:
+        results.append(QAMetrics(
+            file=pid, score=0,
+            issues=[f"timeout (no progress for {timeout}s)"]))
 
     results.sort(key=lambda r: r.score)
+    return QABatchResult(
+        metrics=results,
+        timed_out=list(run.timed_out),
+        elapsed_sec=run.elapsed_sec,
+    )
+
+
+def format_qa_report(results: list[QAMetrics]) -> str:
+    """Return the ranked QA report text for stdout."""
+    total = len(results)
+    lines: list[str] = []
 
     buckets = {"90-100": 0, "70-89": 0, "50-69": 0, "0-49": 0}
     for r in results:
@@ -544,46 +526,53 @@ def run_qa_report(
         else:
             buckets["0-49"] += 1
 
-    print(f"\ntomd QA Report: {total} files")
-    print("=" * 40)
-    print("\nScore Distribution:")
+    lines.append(f"\ntomd QA Report: {total} files")
+    lines.append("=" * 40)
+    lines.append("\nScore Distribution:")
     for label, count in buckets.items():
         pct = 100 * count / total if total else 0
-        print(f"  {label}: {count:>6}  ({pct:.1f}%)")
+        lines.append(f"  {label}: {count:>6}  ({pct:.1f}%)")
 
     needs_review = sum(1 for r in results if r.score < _NEEDS_REVIEW_THRESHOLD)
-    print(f"\nFiles needing review (score < {_NEEDS_REVIEW_THRESHOLD}): {needs_review}")
-    print(f"Files probably OK (score >= {_NEEDS_REVIEW_THRESHOLD}):   {total - needs_review}")
+    lines.append(
+        f"\nFiles needing review (score < {_NEEDS_REVIEW_THRESHOLD}): "
+        f"{needs_review}"
+    )
+    lines.append(
+        f"Files probably OK (score >= {_NEEDS_REVIEW_THRESHOLD}):   "
+        f"{total - needs_review}"
+    )
 
     worst = [r for r in results if r.score < 100][:_WORST_FILES_DISPLAY_LIMIT]
     if worst:
-        print(f"\nWorst {len(worst)} files:")
-        print(f"  {'Score':>5}  {'File':<40}  Issues")
-        print(f"  {'-----':>5}  {'-' * 40}  {'-' * 40}")
+        lines.append(f"\nWorst {len(worst)} files:")
+        lines.append(f"  {'Score':>5}  {'File':<40}  Issues")
+        lines.append(f"  {'-----':>5}  {'-' * 40}  {'-' * 40}")
         for r in worst:
             name = r.file
             if len(name) > 40:
                 name = name[:37] + "..."
             issue_str = ", ".join(r.issues) if r.issues else "ok"
-            print(f"  {r.score:>5}  {name:<40}  {issue_str}")
+            lines.append(f"  {r.score:>5}  {name:<40}  {issue_str}")
 
-    if json_path is not None:
-        rows = [asdict(r) for r in results]
-        json_path.parent.mkdir(parents=True, exist_ok=True)
-        json_bytes = json.dumps(rows, indent=2).encode("utf-8")
-        tmp_fd, tmp_path = tempfile.mkstemp(
-            dir=json_path.parent, suffix=".tmp"
-        )
+    return "\n".join(lines) + "\n"
+
+
+def write_qa_json_atomic(path: Path, results: list[QAMetrics]) -> None:
+    """Atomically write per-paper QA metrics as JSON."""
+    rows = [asdict(r) for r in results]
+    path.parent.mkdir(parents=True, exist_ok=True)
+    json_bytes = json.dumps(rows, indent=2).encode("utf-8")
+    tmp_fd, tmp_path = tempfile.mkstemp(dir=path.parent, suffix=".tmp")
+    try:
+        os.write(tmp_fd, json_bytes)
+        os.close(tmp_fd)
+        os.replace(tmp_path, path)
+    except BaseException:
         try:
-            os.write(tmp_fd, json_bytes)
             os.close(tmp_fd)
-            os.replace(tmp_path, json_path)
-        except BaseException:
-            try:
-                os.close(tmp_fd)
-            except OSError:
-                pass
-            with contextlib.suppress(OSError):
-                os.unlink(tmp_path)
-            raise
-        print(f"\nDetailed metrics written to {json_path}")
+        except OSError:
+            pass
+        with contextlib.suppress(OSError):
+            os.unlink(tmp_path)
+        raise

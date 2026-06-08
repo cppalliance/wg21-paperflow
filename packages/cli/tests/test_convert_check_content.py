@@ -14,6 +14,7 @@ staged source plus the converted markdown and emit a coverage report.
 from __future__ import annotations
 
 import json
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -59,6 +60,29 @@ def test_check_content_writes_json(store, tmp_path: Path):
     assert len(payload["papers"]) == 1
     assert payload["papers"][0]["paper_id"] == "P1000R0"
     assert payload["papers"][0]["coverage"] > 0.9
+
+
+def test_check_content_report_structure(store, tmp_path: Path):
+    body = _BODY * 4
+    _stage(store, "P1000R0", body, body)
+
+    result = subprocess.run(
+        [
+            sys.executable, "-m", "cli", "--workspace-dir", str(tmp_path),
+            "convert", "2026", "--check-content",
+        ],
+        capture_output=True, text=True, check=False,
+    )
+    assert result.returncode == 0, (result.stdout, result.stderr)
+    assert "tomd Content-Check Report: 1 files" in result.stdout
+    assert "Coverage Distribution:" in result.stdout
+    assert "Worst 1 files (lowest coverage):" in result.stdout
+    assert "P1000R0" in result.stdout
+    assert re.search(
+        r"\[\d+/1\].*P1000R0.*files/s.*ETA",
+        result.stderr,
+    )
+    assert "Finished in" in result.stderr
 
 
 def test_check_content_skips_papers_without_source(store, tmp_path: Path):
