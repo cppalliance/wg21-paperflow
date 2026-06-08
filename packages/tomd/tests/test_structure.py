@@ -204,6 +204,50 @@ class TestBodySizeDetection:
         assert len(headings) == 0
 
 
+class TestHeadingStructureDefectsP4221R0:
+    """End-to-end heading defects from issue #154 (P4221R0, PDF)."""
+
+    def test_empty_elevated_font_section_not_a_heading(self):
+        """A blank line with an elevated font (a TOC-page spacer) must not
+        become an empty `#####` heading."""
+        sections = [
+            make_section("body text here", font_size=10.0),
+            make_section("more body text", font_size=10.0),
+            make_section("", font_size=16.0),
+            make_section("Real Heading", font_size=16.0),
+        ]
+        _, result, _ = structure_sections(sections, has_title=True)
+        headings = [s for s in result if s.kind == SectionKind.HEADING]
+        assert all(s.text.strip() for s in headings), (
+            f"empty heading emitted: {[s.text for s in headings]}"
+        )
+
+    def test_parent_not_rendered_deeper_than_child(self):
+        """The non-known top-level section "Proposed Functions" (20pt) must
+        not render deeper than its known child "Overview" (pinned to h2).
+        The document title (26pt) pollutes the font-size ranking and demotes
+        the genuine top-level size to rank 2."""
+        sections = [
+            make_section("Atomic Compare", font_size=26.0),
+            make_section("intro body prose text that is clearly a paragraph",
+                         font_size=11.0),
+            make_section("Background", font_size=16.0),
+            make_section("background body prose text goes here", font_size=11.0),
+            make_section("Proposed Functions", font_size=20.0),
+            make_section("Overview", font_size=16.0),
+            make_section("overview body prose text goes here", font_size=11.0),
+        ]
+        _, result, _ = structure_sections(sections, has_title=False)
+        headings = {s.text.strip(): s.heading_level
+                    for s in result if s.kind == SectionKind.HEADING}
+        assert "Proposed Functions" in headings and "Overview" in headings, (
+            f"expected both headings; got {headings}"
+        )
+        assert headings["Proposed Functions"] <= headings["Overview"], (
+            f"parent rendered deeper than child: {headings}"
+        )
+
+
 class TestExtractMetadataKey:
     def test_document_number_produces_document_key(self):
         """Regression: _extract_metadata must write 'document', not 'doc-number'."""
@@ -620,6 +664,63 @@ class TestValidateNestingSiblingClamp:
         ]
         _validate_nesting(sections)
         assert sections[-1].heading_level == 3
+
+
+class TestValidateNestingInversion:
+    """A larger-font heading must not render deeper than the smaller-font
+    heading before it (inverted nesting). Regression for issue #154
+    (P4221R0): the non-known top-level section "Proposed Functions" (20pt)
+    was rendered at h3, deeper than the known "Overview" (16pt) pinned to
+    h2, so the parent sat below its child.
+    """
+
+    def _h(self, text, *, level, fs):
+        return _mk_section(text, font_size=fs,
+                            kind=SectionKind.HEADING,
+                            confidence=Confidence.HIGH,
+                            heading_level=level)
+
+    def test_larger_font_heading_promoted_above_smaller_predecessor(self):
+        sections = [
+            self._h("Background", level=2, fs=16.0),
+            self._h("Proposed Functions", level=3, fs=20.0),
+            self._h("Overview", level=2, fs=16.0),
+        ]
+        _validate_nesting(sections)
+        assert [s.heading_level for s in sections] == [2, 2, 2], (
+            "the larger-font parent must not be deeper than its neighbours"
+        )
+
+    def test_inversion_repair_downgrades_high_to_medium(self):
+        sections = [
+            self._h("Background", level=2, fs=16.0),
+            self._h("Proposed Functions", level=3, fs=20.0),
+        ]
+        _validate_nesting(sections)
+        assert sections[1].heading_level == 2
+        assert sections[1].confidence == Confidence.MEDIUM
+
+    def test_smaller_font_deeper_heading_unchanged(self):
+        """Normal nesting (smaller font, deeper level) is not touched."""
+        sections = [
+            self._h("Proposed Functions", level=2, fs=20.0),
+            self._h("Overview", level=3, fs=16.0),
+        ]
+        _validate_nesting(sections)
+        assert [s.heading_level for s in sections] == [2, 3]
+
+    def test_numbered_deeper_heading_not_promoted_by_font(self):
+        """A numbered subsection keeps its number-derived level even when
+        the source styles it with a larger font than its parent. Font must
+        never override section numbering."""
+        sections = [
+            self._h("2 Motivation", level=2, fs=14.0),
+            self._h("2.1 Background", level=3, fs=16.0),
+        ]
+        _validate_nesting(sections)
+        assert sections[1].heading_level == 3, (
+            "numbered headings keep their number-derived level"
+        )
 
 
 def _block_at(y, texts, page_num=0, mono=False, x=0):
