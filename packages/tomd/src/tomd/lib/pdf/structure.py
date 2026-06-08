@@ -54,6 +54,10 @@ _TITLE_PID_PREFIX_RE = re.compile(
 _BODY_MARGIN_FRACTION = 0.1
 _BULLET_JOIN_MAX_CHARS = 3
 
+# Translation table that drops zero-width characters, so a "blank" line
+# decorated with a zero-width space is recognized as having no visible text.
+_ZERO_WIDTH_TRANS = {c: None for c in ZERO_WIDTH_CHARS}
+
 _HTML_TAG_RE = re.compile(r"<[^>]+>")
 # Quick-strip pattern for removing email addresses from reply-to values.
 # Intentionally broader than lib.EMAIL_RE which is for precise matching.
@@ -435,6 +439,15 @@ def _heading_level_from_number(section_num: str) -> int:
     return len(parts) + 1
 
 
+def _heading_is_numbered(sec: Section) -> bool:
+    """True when the section's first line opens with a section number.
+
+    A numbered heading's level comes from its numbering depth, which is
+    authoritative; font-size signals must not override it.
+    """
+    return bool(SECTION_NUM_RE.match(sec.text.split("\n")[0].strip()))
+
+
 def heading_confidence(has_number: bool, number_level: int,
                         font_level: int | None, is_bold: bool,
                         is_known: bool) -> tuple[int, Confidence]:
@@ -693,7 +706,15 @@ def structure_sections(sections: list[Section],
             )
         )
 
-        if (has_number or font_level is not None or is_known) and not first_line_is_bullet_marker:
+        # A section with no visible text (e.g. a blank elevated-font spacer
+        # on a TOC page) must never become a heading; otherwise emit.py
+        # renders it as a textless "##### ".
+        heading_has_text = bool(
+            first_line.translate(_ZERO_WIDTH_TRANS).strip())
+
+        if (heading_has_text
+                and (has_number or font_level is not None or is_known)
+                and not first_line_is_bullet_marker):
             number_level = _heading_level_from_number(section_num) if has_number else 0
             level, conf = heading_confidence(
                 has_number, number_level, font_level, is_bold, is_known)
@@ -1295,6 +1316,7 @@ def _validate_nesting(sections: list[Section]) -> int:
     """
     prev_level = 0
     prev_font_size: float | None = None
+    prev_numbered = False
     corrections = 0
     for sec in sections:
         if sec.kind != SectionKind.HEADING:
@@ -1303,8 +1325,27 @@ def _validate_nesting(sections: list[Section]) -> int:
             prev_font_size is not None
             and abs(sec.font_size - prev_font_size) <= _SIBLING_FONT_TOL
         )
+        is_numbered = _heading_is_numbered(sec)
         if is_sibling and prev_level > 0 and sec.heading_level > prev_level:
             _log.info("Nesting sibling: h%d -> h%d for %r",
+                       sec.heading_level, prev_level, sec.text[:40])
+            sec.heading_level = prev_level
+            if sec.confidence == Confidence.HIGH:
+                sec.confidence = Confidence.MEDIUM
+            corrections += 1
+        elif (prev_level > 0
+              and sec.heading_level > prev_level
+              and prev_font_size is not None
+              and sec.font_size > prev_font_size + _SIBLING_FONT_TOL
+              and not is_numbered and not prev_numbered):
+            # Inverted nesting: a larger-font (more prominent) heading must
+            # not render deeper than the smaller-font heading before it.
+            # Font-rank pollution (e.g. the document title inflating the
+            # size ranking) can demote a genuine top-level heading below a
+            # known section pinned to ##. Clamp it back to its predecessor's
+            # level. Numbered headings are exempt: their level comes from
+            # section numbering, not font.
+            _log.info("Nesting inversion: h%d -> h%d for %r",
                        sec.heading_level, prev_level, sec.text[:40])
             sec.heading_level = prev_level
             if sec.confidence == Confidence.HIGH:
@@ -1321,4 +1362,5 @@ def _validate_nesting(sections: list[Section]) -> int:
             corrections += 1
         prev_level = sec.heading_level
         prev_font_size = sec.font_size
+        prev_numbered = is_numbered
     return corrections
