@@ -61,3 +61,37 @@ def test_run_content_check_surfaces_batch_failures(store, tmp_path: Path):
     assert result["failed"] == [
         {"paper_id": "P1001R0", "reason": "check failed"},
     ]
+
+
+def test_run_content_check_no_duplicate_timeout_failures(store, tmp_path: Path):
+    body = _BODY * 4
+    _stage(store, "P1000R0", body, body)
+    _stage(store, "P1001R0", body, body)
+
+    ok_result = ContentCheckResult(
+        paper_id="P1000R0",
+        source_format="html",
+        coverage=0.95,
+        drift=0.01,
+        source_token_count=100,
+        markdown_token_count=98,
+        missing_regions=(),
+        extra_regions=(),
+    )
+    timeout_msg = "timeout (no progress for 120s)"
+    fake_batch = ContentCheckBatchResult(
+        results=[ok_result],
+        skipped=[],
+        errors=[("P1001R0", timeout_msg)],
+        timed_out=["P1001R0"],
+        elapsed_sec=1.0,
+    )
+
+    with patch("cli.jobs.run_content_check_batch", return_value=fake_batch):
+        result = run_content_check(["2026"], store)
+
+    assert len(result["failed"]) == 1
+    assert result["failed"] == [
+        {"paper_id": "P1001R0", "reason": timeout_msg},
+    ]
+    assert result["succeeded"] == ["P1000R0"]

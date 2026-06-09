@@ -2,10 +2,7 @@
 
 from __future__ import annotations
 
-import sys
 from pathlib import Path
-
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from paperstore import SqliteBackend
 
@@ -42,8 +39,8 @@ def test_run_content_check_batch_on_staged_fixture(tmp_path: Path):
     assert len(batch.results) == 1
     assert batch.results[0].paper_id == "P1000R0"
     assert batch.results[0].coverage > 0.9
-    assert batch.errors == []
-    assert batch.skipped == []
+    assert batch.errors == ()
+    assert batch.skipped == ()
 
 
 def test_format_content_check_report_contains_expected_sections():

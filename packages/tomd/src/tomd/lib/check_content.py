@@ -713,10 +713,10 @@ def _result_to_dict(r: ContentCheckResult) -> dict:
 class ContentCheckBatchResult:
     """Outcome of a batch content-coverage check."""
 
-    results: list[ContentCheckResult]
-    skipped: list[tuple[str, str]]
-    errors: list[tuple[str, str]]
-    timed_out: list[str]
+    results: tuple[ContentCheckResult, ...]
+    skipped: tuple[tuple[str, str], ...]
+    errors: tuple[tuple[str, str], ...]
+    timed_out: tuple[str, ...]
     elapsed_sec: float
 
 
@@ -764,10 +764,10 @@ def run_content_check_batch(
         errors.append((pid, f"timeout (no progress for {timeout}s)"))
 
     return ContentCheckBatchResult(
-        results=results,
-        skipped=skipped,
-        errors=errors,
-        timed_out=list(run.timed_out),
+        results=tuple(results),
+        skipped=tuple(skipped),
+        errors=tuple(errors),
+        timed_out=tuple(run.timed_out),
         elapsed_sec=run.elapsed_sec,
     )
 

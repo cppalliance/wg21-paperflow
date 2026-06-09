@@ -645,8 +645,6 @@ def run_content_check(
         {"paper_id": pid, "reason": msg}
         for pid, msg in batch.errors
     ]
-    for pid in batch.timed_out:
-        failed.append({"paper_id": pid, "reason": "timeout"})
 
     failed_ids = {entry["paper_id"] for entry in failed}
 

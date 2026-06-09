@@ -3,11 +3,10 @@
 from __future__ import annotations
 
 import json
-import sys
 from pathlib import Path
+from unittest.mock import patch
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-
+from tomd.lib.batch import BatchRunResult
 from tomd.lib.pdf.qa import (
     QAMetrics,
     format_qa_report,
@@ -43,9 +42,25 @@ def test_run_qa_batch_returns_sorted_metrics():
     ]
     batch = run_qa_batch(items, workers=1)
     assert len(batch.metrics) == 2
+    assert batch.errors == ()
     assert batch.metrics[0].score <= batch.metrics[1].score
     assert batch.metrics[0].score == 0
     assert batch.metrics[1].score == 100
+
+
+def test_run_qa_batch_collects_timeout_errors():
+    fake_run = BatchRunResult(
+        outcomes=(),
+        timed_out=("bad",),
+        elapsed_sec=1.0,
+    )
+    with patch("tomd.lib.pdf.qa.run_parallel_batch", return_value=fake_run):
+        batch = run_qa_batch([("bad", "")], workers=1, timeout=120)
+
+    assert batch.metrics == ()
+    assert batch.errors == (
+        ("bad", "timeout (no progress for 120s)"),
+    )
 
 
 def test_format_qa_report_contains_expected_sections():

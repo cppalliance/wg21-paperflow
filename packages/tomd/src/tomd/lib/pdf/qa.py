@@ -457,8 +457,9 @@ def _qa_metrics_from_dict(d: dict) -> QAMetrics:
 class QABatchResult:
     """Outcome of a batch QA scoring run."""
 
-    metrics: list[QAMetrics]
-    timed_out: list[str]
+    metrics: tuple[QAMetrics, ...]
+    errors: tuple[tuple[str, str], ...]
+    timed_out: tuple[str, ...]
     elapsed_sec: float
 
 
@@ -490,22 +491,21 @@ def run_qa_batch(
     )
 
     results: list[QAMetrics] = []
+    errors: list[tuple[str, str]] = []
     for item_id, outcome in run.outcomes:
         if isinstance(outcome, Exception):
-            results.append(QAMetrics(
-                file=item_id, score=0, issues=[f"error: {outcome}"]))
+            errors.append((item_id, str(outcome)))
         else:
             results.append(_qa_metrics_from_dict(outcome))
 
     for pid in run.timed_out:
-        results.append(QAMetrics(
-            file=pid, score=0,
-            issues=[f"timeout (no progress for {timeout}s)"]))
+        errors.append((pid, f"timeout (no progress for {timeout}s)"))
 
     results.sort(key=lambda r: r.score)
     return QABatchResult(
-        metrics=results,
-        timed_out=list(run.timed_out),
+        metrics=tuple(results),
+        errors=tuple(errors),
+        timed_out=tuple(run.timed_out),
         elapsed_sec=run.elapsed_sec,
     )
 

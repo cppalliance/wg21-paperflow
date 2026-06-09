@@ -2,12 +2,8 @@
 
 from __future__ import annotations
 
-import sys
 from concurrent.futures import Future
-from pathlib import Path
 from unittest.mock import patch
-
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from paperstore.progress import ProgressEvent
 
@@ -26,8 +22,8 @@ def _double(x: int) -> int:
 def test_sequential_batch_returns_all_outcomes():
     items = [("a", 1), ("b", 2), ("c", 3)]
     run = run_parallel_batch(items, lambda x: x * 2, workers=1)
-    assert run.timed_out == []
-    assert run.outcomes == [("a", 2), ("b", 4), ("c", 6)]
+    assert run.timed_out == ()
+    assert run.outcomes == (("a", 2), ("b", 4), ("c", 6))
     assert run.elapsed_sec >= 0.0
 
 
@@ -68,6 +64,7 @@ def test_format_batch_finished():
 def test_format_batch_timeout():
     text = format_batch_timeout(["P1", "P2"], 120)
     assert "TIMEOUT: 2 files aborted" in text
+    assert "(no progress for 120s)" in text
     assert "P1" in text
     assert "P2" in text
 
@@ -86,8 +83,8 @@ def test_worker_exception_stored_as_outcome():
 
 def test_empty_items():
     run = run_parallel_batch([], lambda x: x, workers=1)
-    assert run.outcomes == []
-    assert run.timed_out == []
+    assert run.outcomes == ()
+    assert run.timed_out == ()
     assert run.elapsed_sec == 0.0
 
 
@@ -118,7 +115,7 @@ def test_parallel_batch_collects_outcomes():
     with patch("tomd.lib.batch.ProcessPoolExecutor", FakePool):
         run = run_parallel_batch([("a", 1), ("b", 2)], _double, workers=2)
 
-    assert run.timed_out == []
+    assert run.timed_out == ()
     assert sorted(run.outcomes) == [("a", 2), ("b", 4)]
 
 
@@ -161,5 +158,5 @@ def test_parallel_batch_timeout_aborts_pending():
                     timeout_sec=120,
                 )
 
-    assert run.timed_out == ["b"]
-    assert run.outcomes == [("a", 2)]
+    assert run.timed_out == ("b",)
+    assert run.outcomes == (("a", 2),)

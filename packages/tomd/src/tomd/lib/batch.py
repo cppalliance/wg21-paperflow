@@ -33,8 +33,8 @@ _DEFAULT_POLL_INTERVAL_SEC = 0.5
 class BatchRunResult[TResult]:
     """Outcome of a parallel or sequential batch run."""
 
-    outcomes: list[tuple[str, TResult | Exception]]
-    timed_out: list[str]
+    outcomes: tuple[tuple[str, TResult | Exception], ...]
+    timed_out: tuple[str, ...]
     elapsed_sec: float
 
 
@@ -54,13 +54,14 @@ def format_batch_progress_line(
 def format_batch_finished(elapsed_sec: float, total: int) -> str:
     """Return the trailing batch-finished line for stderr."""
     avg = elapsed_sec / total if total else 0.0
-    return f"\n  Finished in {elapsed_sec/60:.1f} minutes ({avg:.1f}s/file avg)\n"
+    return f"\n  Finished in {elapsed_sec/60:.1f} minutes ({avg:.1f}s/file avg)"
 
 
 def format_batch_timeout(timed_out: list[str], timeout_sec: int) -> str:
     """Return the timeout abort line for stderr."""
     return (
-        f"\n  TIMEOUT: {len(timed_out)} files aborted: "
+        f"\n  TIMEOUT: {len(timed_out)} files aborted "
+        f"(no progress for {timeout_sec}s): "
         f"{', '.join(timed_out)}"
     )
 
@@ -102,7 +103,11 @@ def run_parallel_batch[TItem, TResult](
     t0 = time.monotonic()
 
     if total == 0:
-        return BatchRunResult(outcomes=outcomes, timed_out=timed_out, elapsed_sec=0.0)
+        return BatchRunResult(
+            outcomes=(),
+            timed_out=(),
+            elapsed_sec=0.0,
+        )
 
     if workers > 1:
         done_count = 0
@@ -140,14 +145,14 @@ def run_parallel_batch[TItem, TResult](
             pool.shutdown(wait=False, cancel_futures=True)
     else:
         for i, (item_id, payload) in enumerate(items, 1):
-            _fire_progress(on_progress, i, total, item_id)
             try:
                 outcomes.append((item_id, worker(payload)))
             except Exception as exc:
                 outcomes.append((item_id, exc))
+            _fire_progress(on_progress, i, total, item_id)
 
     return BatchRunResult(
-        outcomes=outcomes,
-        timed_out=timed_out,
+        outcomes=tuple(outcomes),
+        timed_out=tuple(timed_out),
         elapsed_sec=time.monotonic() - t0,
     )
