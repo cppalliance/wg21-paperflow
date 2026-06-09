@@ -1379,6 +1379,7 @@ def _structure_body_impl(metadata: dict,
     structured = _coalesce_code_paragraphs(structured)
     structured = _absorb_code_orphans(structured)
     structured = _rescue_unfenced_code(structured)
+    structured = _split_embedded_code(structured)
     _demote_repeated_low_confidence_numbers(structured)
     nesting_corrections = _validate_nesting(structured)
     return metadata, structured, nesting_corrections
@@ -2204,6 +2205,81 @@ def _rescue_unfenced_code(sections: list[Section]) -> list[Section]:
             sec.kind = SectionKind.CODE
             sec.confidence = Confidence.MEDIUM
     return sections
+
+
+_SPLIT_MIN_CODE_RUN = 2
+
+
+def _split_embedded_code(sections: list[Section]) -> list[Section]:
+    """Extract an embedded run of monospace code lines from a PARAGRAPH.
+
+    _merge_paragraphs glues a code block into the surrounding prose when
+    the code lines lack terminal punctuation (they end in ``{``, ``;``,
+    ``}``) and the following prose starts lowercase. The merged section is
+    mostly prose, so _rescue_unfenced_code (which promotes a section
+    wholesale) leaves it as prose and the code collapses onto one line.
+
+    This pass runs AFTER _classify_wording_sections and
+    _rescue_unfenced_code, so it only sees plain PARAGRAPH sections:
+    wording sections keep their own grouping, and a comment-above-code
+    listing that rescue already promoted to CODE is left intact. Within a
+    PARAGRAPH it splits a maximal run of _SPLIT_MIN_CODE_RUN or more
+    consecutive all-monospace, code-shaped lines into its own CODE
+    section, leaving the surrounding prose as PARAGRAPH sections.
+
+    A PARAGRAPH that survives _detect_code_blocks is never all-monospace,
+    so any monospace run it contains is genuinely embedded code.
+    """
+    result: list[Section] = []
+    for sec in sections:
+        if sec.kind != SectionKind.PARAGRAPH or len(sec.lines) < _SPLIT_MIN_CODE_RUN:
+            result.append(sec)
+            continue
+
+        is_code = [
+            _line_is_monospace(ln) and bool(ln.text.strip())
+            for ln in sec.lines
+        ]
+        if not any(is_code):
+            result.append(sec)
+            continue
+
+        # Partition into alternating prose / code-run segments.
+        segments: list[tuple[bool, list]] = []
+        for code_flag, line in zip(is_code, sec.lines):
+            if segments and segments[-1][0] == code_flag:
+                segments[-1][1].append(line)
+            else:
+                segments.append((code_flag, [line]))
+
+        code_idx = {
+            i for i, (flag, seg) in enumerate(segments)
+            if flag and len(seg) >= _SPLIT_MIN_CODE_RUN
+            and _STRUCTURAL_CODE_RE.search("\n".join(ln.text for ln in seg))
+        }
+        if not code_idx:
+            result.append(sec)
+            continue
+
+        for i, (flag, seg_lines) in enumerate(segments):
+            is_split_code = i in code_idx
+            seg_text = "\n".join(ln.text for ln in seg_lines)
+            if not seg_text.strip():
+                continue
+            if is_split_code:
+                result.append(Section(
+                    kind=SectionKind.CODE,
+                    text=seg_text,
+                    confidence=Confidence.MEDIUM,
+                    lines=list(seg_lines),
+                    page_num=sec.page_num,
+                    fence_lang=DEFAULT_FENCE_LANG,
+                ))
+            else:
+                result.append(replace(
+                    sec, text=seg_text, lines=list(seg_lines),
+                ))
+    return result
 
 
 _PARAGRAPH_NUM_MIN_REPEATS = 3

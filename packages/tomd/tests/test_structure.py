@@ -14,6 +14,7 @@ from tomd.lib.pdf.structure import (
     _section_top_y, _reorders_only_monospace, _page_is_multicolumn,
     _is_title_like_straggler, _is_empty_heading, _straggler_forward_references,
     _run_recurrence_density, _compute_body_start,
+    _classify_wording_sections, _split_embedded_code,
 )
 
 
@@ -2011,3 +2012,62 @@ class TestSectionTopY:
                  page_num=7),
         ])
         assert _section_top_y(sec) == 700
+
+
+class TestSplitEmbeddedCode:
+    """`_split_embedded_code` extracts code runs glued into prose."""
+
+    @staticmethod
+    def _line(text, *, mono):
+        return Line(spans=[Span(text=text, monospace=mono)])
+
+    def _paragraph(self, specs):
+        lines = [self._line(t, mono=m) for t, m in specs]
+        text = "\n".join(t for t, _ in specs)
+        return Section(kind=SectionKind.PARAGRAPH, text=text, lines=lines)
+
+    def test_code_run_between_prose_is_extracted(self):
+        sec = self._paragraph([
+            ("Some heading text", False),
+            ("V f(V x) {", True),
+            ("  return x + 1;", True),
+            ("}", True),
+            ("needs to use something else.", False),
+        ])
+        out = _split_embedded_code([sec])
+        kinds = [s.kind for s in out]
+        assert kinds == [
+            SectionKind.PARAGRAPH, SectionKind.CODE, SectionKind.PARAGRAPH,
+        ]
+        assert out[1].text == "V f(V x) {\n  return x + 1;\n}"
+        assert out[0].text == "Some heading text"
+        assert out[2].text == "needs to use something else."
+
+    def test_single_mono_line_not_split(self):
+        # A lone inline monospace line is below _SPLIT_MIN_CODE_RUN.
+        sec = self._paragraph([
+            ("prose before", False),
+            ("inline_ref", True),
+            ("prose after", False),
+        ])
+        out = _split_embedded_code([sec])
+        assert [s.kind for s in out] == [SectionKind.PARAGRAPH]
+
+    def test_wording_section_untouched(self):
+        sec = self._paragraph([
+            ("template<class T> {", True),
+            ("  body;", True),
+        ])
+        sec.kind = SectionKind.WORDING_ADD
+        out = _split_embedded_code([sec])
+        assert out == [sec]
+
+    def test_already_code_section_untouched(self):
+        sec = self._paragraph([
+            ("// comment", False),
+            ("V f(V x) {", True),
+            ("}", True),
+        ])
+        sec.kind = SectionKind.CODE
+        out = _split_embedded_code([sec])
+        assert out == [sec]
