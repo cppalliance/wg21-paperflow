@@ -12,7 +12,7 @@
 from __future__ import annotations
 
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from concurrent.futures import ProcessPoolExecutor
 from dataclasses import dataclass
 
@@ -57,7 +57,7 @@ def format_batch_finished(elapsed_sec: float, total: int) -> str:
     return f"\n  Finished in {elapsed_sec/60:.1f} minutes ({avg:.1f}s/file avg)"
 
 
-def format_batch_timeout(timed_out: list[str], timeout_sec: int) -> str:
+def format_batch_timeout(timed_out: Sequence[str], timeout_sec: int) -> str:
     """Return the timeout abort line for stderr."""
     return (
         f"\n  TIMEOUT: {len(timed_out)} files aborted "

@@ -11,6 +11,7 @@ and prevents coupling between the scorer and the converter.
 """
 
 import contextlib
+from collections.abc import Sequence
 import json
 import logging
 import os
@@ -510,7 +511,7 @@ def run_qa_batch(
     )
 
 
-def format_qa_report(results: list[QAMetrics]) -> str:
+def format_qa_report(results: Sequence[QAMetrics]) -> str:
     """Return the ranked QA report text for stdout."""
     total = len(results)
     lines: list[str] = []

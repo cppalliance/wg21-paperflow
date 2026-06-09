@@ -47,10 +47,10 @@ def test_run_content_check_surfaces_batch_failures(store, tmp_path: Path):
         extra_regions=(),
     )
     fake_batch = ContentCheckBatchResult(
-        results=[ok_result],
-        skipped=[],
-        errors=[("P1001R0", "check failed")],
-        timed_out=[],
+        results=(ok_result,),
+        skipped=(),
+        errors=(("P1001R0", "check failed"),),
+        timed_out=(),
         elapsed_sec=1.0,
     )
 
@@ -80,10 +80,10 @@ def test_run_content_check_no_duplicate_timeout_failures(store, tmp_path: Path):
     )
     timeout_msg = "timeout (no progress for 120s)"
     fake_batch = ContentCheckBatchResult(
-        results=[ok_result],
-        skipped=[],
-        errors=[("P1001R0", timeout_msg)],
-        timed_out=["P1001R0"],
+        results=(ok_result,),
+        skipped=(),
+        errors=(("P1001R0", timeout_msg),),
+        timed_out=("P1001R0",),
         elapsed_sec=1.0,
     )
 

@@ -43,6 +43,7 @@ from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from hashlib import blake2b
 from pathlib import Path
+from collections.abc import Sequence
 from typing import Iterable, Literal
 
 import mistune
@@ -816,9 +817,9 @@ _REPORT_PREAMBLE = (
 
 
 def format_content_check_report(
-    results: list[ContentCheckResult],
-    skipped: list[tuple[str, str]],
-    errors: list[tuple[str, str]],
+    results: Sequence[ContentCheckResult],
+    skipped: Sequence[tuple[str, str]],
+    errors: Sequence[tuple[str, str]],
 ) -> str:
     """Return the ranked content-check report text for stdout."""
     total = len(results)
@@ -890,7 +891,7 @@ def format_content_check_report(
 
 
 def write_content_check_json_atomic(
-    json_path: Path, results: list[ContentCheckResult],
+    json_path: Path, results: Sequence[ContentCheckResult],
 ) -> None:
     """Atomically write per-paper content-check metrics as JSON."""
     payload = {
