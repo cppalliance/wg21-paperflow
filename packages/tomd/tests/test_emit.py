@@ -1,8 +1,17 @@
 """Tests for lib.pdf.emit."""
 
 from conftest import make_section, make_line, make_span
-from tomd.lib.pdf.types import SectionKind, Confidence, Span, Line
-from tomd.lib.pdf.emit import emit_markdown, emit_prompts, _render_wording_line
+from tomd.lib.pdf.types import SectionKind, Confidence, Section, Span, Line
+from tomd.lib.pdf.emit import (
+    emit_markdown,
+    emit_prompts,
+    _render_code_block,
+    _detect_code_gutter,
+)
+from tomd.lib.pdf.wording_emit import (
+    _render_wording_line,
+    _render_wording_section,
+)
 
 
 def test_emit_heading():
@@ -431,6 +440,142 @@ class TestRenderWordingLine:
     def test_empty_line(self):
         assert _render_wording_line(Line(spans=[])) == ""
 
+    def test_non_role_angle_brackets_escaped(self):
+        # Regression: a non-role code fragment like the `<float>` in
+        # `vec<float>` must not be eaten by the wording div's HTML parser.
+        v = Span(text="<float>", monospace=True)
+        result = _render_wording_line(self._line(_del("native_simd"), v))
+        assert result == "<del>native_simd</del>&lt;float&gt;"
+
+    def test_angle_brackets_inside_role_escaped(self):
+        # Brackets inside an ins/del tag are escaped too; the tag stays.
+        result = _render_wording_line(
+            self._line(_ins("template<class U>")))
+        assert result == "<ins>template&lt;class U&gt;</ins>"
+
+    def test_ampersand_escaped(self):
+        amp = Span(text="U&& value", monospace=True)
+        result = _render_wording_line(self._line(_del("x"), amp))
+        assert result == "<del>x</del>U&amp;&amp; value"
+
+
+def _mono_span(text: str, role: str | None = None) -> Span:
+    s = Span(text=text, monospace=True)
+    if role is not None:
+        s.wording_role = role
+    return s
+
+
+def _make_wording_section(kind: SectionKind, lines: list[Line]) -> Section:
+    text = "\n".join("".join(s.text for s in ln.spans) for ln in lines)
+    return Section(kind=kind, text=text, lines=lines)
+
+
+class TestRenderWordingSection:
+    """Emit-level tests: the PDF wording renderer should preserve all
+    inline ``<ins>`` / ``<del>`` tags verbatim. The redundancy-stripping
+    rule lives in ``lib.wording_cleanup`` and is exercised by
+    ``test_wording_cleanup.py``; this layer only owns code promotion.
+    """
+
+    def test_uniform_add_passthrough_ins_tags(self):
+        line = Line(spans=[_ins("• added bullet")])
+        sec = _make_wording_section(SectionKind.WORDING_ADD, [line])
+        out = _render_wording_section(sec)
+        assert "<ins>• added bullet</ins>" in out
+        assert out.startswith(":::wording-add")
+
+    def test_uniform_remove_passthrough_del_tags(self):
+        line = Line(spans=[_del("doomed paragraph")])
+        sec = _make_wording_section(SectionKind.WORDING_REMOVE, [line])
+        out = _render_wording_section(sec)
+        assert "<del>doomed paragraph</del>" in out
+        assert out.startswith(":::wording-remove")
+
+    def test_mixed_add_emits_inline_tags(self):
+        line = Line(spans=[
+            _plain("context "),
+            _ins("inserted"),
+            _plain(" tail"),
+        ])
+        sec = _make_wording_section(SectionKind.WORDING_ADD, [line])
+        out = _render_wording_section(sec)
+        assert "<ins>inserted</ins>" in out
+        assert "context" in out
+        assert "tail" in out
+
+    def test_wording_neutral_keeps_all_tags(self):
+        line = Line(spans=[_ins("new"), _plain(" / "), _del("old")])
+        sec = _make_wording_section(SectionKind.WORDING, [line])
+        out = _render_wording_section(sec)
+        assert "<ins>new</ins>" in out
+        assert "<del>old</del>" in out
+
+    def test_multiline_mono_uniform_add_promoted_to_fenced_code(self):
+        l1 = Line(spans=[_mono_span("template<class From, class To>", "ins")])
+        l2 = Line(spans=[
+            _mono_span("concept simd-consteval-broadcast-arg = see below;",
+                       "ins"),
+        ])
+        sec = _make_wording_section(SectionKind.WORDING_ADD, [l1, l2])
+        out = _render_wording_section(sec)
+        assert "```cpp" in out
+        assert "template<class From, class To>" in out
+        assert "concept simd-consteval-broadcast-arg" in out
+        # Code-promoted divs carry no inline role tags by construction.
+        assert "<ins>" not in out
+
+    def test_multiline_mono_mixed_emits_br_code_diff(self):
+        # Monospace, multi-line, but NOT uniform role: a partial edit
+        # inside a code listing. Keep line structure (<br>) and the inline
+        # tags, in a neutral :::wording div (never directional, which would
+        # paint the unchanged context as removed).
+        l1 = Line(spans=[_mono_span("template<class U>")])
+        l2 = Line(spans=[
+            _mono_span("  constexpr "),
+            _mono_span("explicit(see below)", "del"),
+            _mono_span(" basic_vec(U&& value) noexcept;"),
+        ])
+        sec = _make_wording_section(SectionKind.WORDING_REMOVE, [l1, l2])
+        out = _render_wording_section(sec)
+        assert out.splitlines()[0] == ":::wording"
+        assert "wording-remove" not in out
+        assert "<br>" in out
+        assert "<del>explicit(see below)</del>" in out
+        # Code angle brackets / ampersands are HTML-escaped so they
+        # survive the wording div's HTML context (the <del> tag stays).
+        assert "template&lt;class U&gt;" in out
+        assert "basic_vec(U&amp;&amp; value)" in out
+        assert "  constexpr" in out
+        assert "```" not in out
+
+    def test_singleline_mono_bullet_not_promoted(self):
+        # Bullet item like "• common_type_t<From, To> is To," can be 86%
+        # monospace by character count but must stay a list item: the
+        # multi-line guard in the emitter prevents promotion.
+        line = Line(spans=[
+            Span(text="• "),
+            _mono_span("common_type_t<From, To>", "ins"),
+            Span(text=" is To,"),
+        ])
+        line.spans[0].wording_role = "ins"
+        line.spans[2].wording_role = "ins"
+        sec = _make_wording_section(SectionKind.WORDING_ADD, [line])
+        out = _render_wording_section(sec)
+        assert "```" not in out
+        assert "common_type_t&lt;From, To&gt;" in out
+
+    def test_prose_uniform_add_not_promoted_to_code(self):
+        # Pure prose, all-ins: no code fence (the post-cleanup pass
+        # will drop the redundant ins tags later).
+        l1 = Line(spans=[_ins("First inserted sentence.")])
+        l2 = Line(spans=[_ins("Second inserted sentence.")])
+        sec = _make_wording_section(SectionKind.WORDING_ADD, [l1, l2])
+        out = _render_wording_section(sec)
+        assert "```" not in out
+        assert "First inserted sentence." in out
+        assert "Second inserted sentence." in out
+
 
 from tomd.lib import sanitize_metadata as _sanitize_metadata
 
@@ -597,3 +742,108 @@ def test_escape_italic_text_passes_plain_text():
 
 def test_escape_italic_text_handles_empty():
     assert _escape_italic_text("") == ""
+
+
+_CHAR_W = 6.0
+
+
+def _gspan(text, x0, y0, mono=False):
+    """A span on a 6pt/char monospace grid, baseline height 10pt."""
+    n = max(len(text.replace(" ", "")), 1)
+    return Span(
+        text=text, font_name="F", font_size=10.0, monospace=mono,
+        bbox=(x0, y0, x0 + _CHAR_W * n, y0 + 10.0),
+    )
+
+
+def _gline(spans):
+    return Line(spans=spans)
+
+
+def _gutter_section(rows):
+    """Build a CODE section from (number_x0, num_text, code_x0, code_text) rows.
+
+    Each row contributes two interleaved lines (the non-monospace gutter
+    number, then the monospace code), sharing one y-band, mirroring how
+    extraction emits P0876's fiber listings.
+    """
+    lines = []
+    for i, (num_x0, num_text, code_x0, code_text) in enumerate(rows):
+        y = i * 12.0
+        if num_text is not None:
+            lines.append(_gline([_gspan(num_text, num_x0, y, mono=False)]))
+        lines.append(_gline([_gspan(code_text, code_x0, y, mono=True)]))
+    return Section(kind=SectionKind.CODE, text="", lines=lines, fence_lang="cpp")
+
+
+class TestCodeGutter:
+    def test_gutter_kept_and_indentation_restored(self):
+        # Top-level code at col 3 (x=24), nested code at col 5 (x=36);
+        # single-digit gutter numbers at x=6 (grid origin).
+        sec = _gutter_section([
+            (6, "1", 24, "a();"),
+            (6, "2", 36, "b();"),
+            (6, "3", 24, "c();"),
+        ])
+        out = _render_code_block(sec)
+        lines = out.splitlines()
+        assert lines[0] == "```cpp"
+        assert lines[-1] == "```"
+        body = lines[1:-1]
+        assert body == ["1  a();", "2    b();", "3  c();"]
+        # Nested line keeps 2 extra spaces of code indent over top-level.
+        assert body[1].index("b();") - body[0].index("a();") == 2
+
+    def test_gutter_numbers_right_aligned(self):
+        # 9 is shifted right so its right edge aligns with the two-digit
+        # numbers' right edge (PDF right-aligned gutter). Origin is the
+        # leftmost gutter glyph (x=6, the two-digit numbers).
+        sec = _gutter_section([
+            (12, "9", 24, "a();"),
+            (6, "10", 24, "b();"),
+            (6, "11", 24, "c();"),
+        ])
+        body = _render_code_block(sec).splitlines()[1:-1]
+        assert body[0].startswith(" 9 ")
+        assert body[1].startswith("10 ")
+        assert body[2].startswith("11 ")
+
+    def test_below_threshold_is_not_a_gutter(self):
+        # Only two numeric lines: not enough to be a gutter column.
+        sec = _gutter_section([
+            (6, "1", 24, "a();"),
+            (6, "2", 24, "b();"),
+        ])
+        assert _detect_code_gutter(sec) is None
+
+    def test_non_increasing_is_not_a_gutter(self):
+        sec = _gutter_section([
+            (6, "1", 24, "a();"),
+            (6, "1", 24, "b();"),
+            (6, "1", 24, "c();"),
+        ])
+        assert _detect_code_gutter(sec) is None
+
+    def test_monospace_number_is_not_a_gutter_cell(self):
+        # Bare numbers that are themselves monospace (at the code margin)
+        # are code, not a gutter, and must not trigger the gutter path.
+        lines = [
+            _gline([_gspan("10", 24, 0.0, mono=True)]),
+            _gline([_gspan("20", 24, 12.0, mono=True)]),
+            _gline([_gspan("30", 24, 24.0, mono=True)]),
+        ]
+        sec = Section(kind=SectionKind.CODE, text="", lines=lines,
+                      fence_lang="cpp")
+        assert _detect_code_gutter(sec) is None
+
+    def test_plain_code_block_without_gutter_unchanged(self):
+        sec = _gutter_section([
+            (None, None, 0, "int main() {"),
+            (None, None, 12, "return 0;"),
+            (None, None, 0, "}"),
+        ])
+        assert _detect_code_gutter(sec) is None
+        body = _render_code_block(sec).splitlines()[1:-1]
+        assert body[0] == "int main() {"
+        assert body[1] == "  return 0;"
+        assert body[2] == "}"
