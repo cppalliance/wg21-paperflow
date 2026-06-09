@@ -2,8 +2,6 @@
 
 from tomd.lib.pdf.images import ExtractedImage
 from tomd.lib.pdf.pipeline import (
-    convert_pdf,
-    convert_pdf_full,
     run_pipeline,
     PipelineResult,
     _is_slide_deck,
@@ -11,14 +9,14 @@ from tomd.lib.pdf.pipeline import (
     _toc_structural_hints,
     _TOC_X_TOLERANCE,
 )
+from tomd.lib.pdf.types import SkipReason
 from tomd.lib.metadata_yaml.extract import enrich_pdf_reply_to as _enrich_pdf_reply_to
 
 __all__ = [
-    "convert_pdf",
-    "convert_pdf_full",
     "run_pipeline",
     "ExtractedImage",
     "PipelineResult",
+    "SkipReason",
     "_enrich_pdf_reply_to",
     "_is_slide_deck",
     "_is_standards_draft",
