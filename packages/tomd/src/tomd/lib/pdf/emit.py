@@ -12,7 +12,7 @@ from .glyphs import (
     GlyphPassStats,
 )
 from .images import TRUNCATION_MARKER_TEMPLATE, VectorUncertaintyStats
-from .types import Line, Span, Section, SectionKind, BULLET_CHARS
+from .types import Line, Span, Section, SectionKind, BULLET_CHARS, BULLET_RE, NUMBERED_LIST_RE
 from .vector_images import format_uncertainty_marker, should_emit_marker
 
 _log = logging.getLogger(__name__)
@@ -127,17 +127,61 @@ def _normalize_bullets(text: str) -> str:
     return "".join(_normalize_bullet(ch) for ch in text)
 
 
-def _render_list_spans(sec: Section) -> str:
-    """Render a list section with span formatting and normalized bullets."""
-    if sec.lines:
-        result_lines = []
-        for line in sec.lines:
-            rendered = _render_line_spans(line).rstrip()
-            if rendered:
-                result_lines.append(_normalize_bullets(rendered))
-        return "\n".join(result_lines)
+# Two spaces of leading indentation per nesting level. Markdown nests a
+# sublist when its marker is indented past the parent item's content.
+_LIST_INDENT_UNIT = "  "
 
-    return _normalize_bullets(sec.text.rstrip())
+
+def _is_list_item_start(text: str) -> bool:
+    """Whether a rendered line begins a new list item (vs. a wrapped continuation)."""
+    stripped = text.lstrip()
+    if not stripped:
+        return False
+    if stripped[0] in BULLET_CHARS:
+        return True
+    return bool(BULLET_RE.match(stripped) or NUMBERED_LIST_RE.match(stripped))
+
+
+def _format_list_item(text: str, depth: int) -> str:
+    """Format one list item at the given nesting depth.
+
+    A Unicode bullet glyph becomes ``*`` at depth 0 and ``-`` when nested
+    (indented two spaces per level). Anything already carrying its own
+    marker (numbered ``1.``, literal ``-``/``*``) keeps it and is only
+    indented.
+    """
+    text = text.strip()
+    indent = _LIST_INDENT_UNIT * max(depth, 0)
+    if text[:1] in BULLET_CHARS:
+        marker = "-" if depth > 0 else "*"
+        return f"{indent}{marker} {_normalize_bullets(text[1:].lstrip())}"
+    return f"{indent}{_normalize_bullets(text)}"
+
+
+def _render_list_spans(sec: Section) -> str:
+    """Render a list section, unwrapping each item and indenting nested ones.
+
+    A LIST section is either a single (possibly line-wrapped) item from the
+    position splitter or several clean bullet lines from the classification
+    loop. Lines that start a new item open an item; the rest are wrapped
+    continuations joined onto it. ``indent_level`` (assigned by
+    :func:`structure._assign_list_nesting`) sets the nesting depth.
+    """
+    depth = max(sec.indent_level, 0)
+    if not sec.lines:
+        return _format_list_item(sec.text, depth)
+
+    items: list[list[str]] = []
+    for line in sec.lines:
+        rendered = _render_line_spans(line).strip()
+        if not rendered:
+            continue
+        if _is_list_item_start(rendered) or not items:
+            items.append([rendered])
+        else:
+            items[-1].append(rendered)
+
+    return "\n".join(_format_list_item(" ".join(parts), depth) for parts in items)
 
 
 _DEFAULT_CHAR_WIDTH = 6.0

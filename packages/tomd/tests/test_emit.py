@@ -161,6 +161,54 @@ def test_emit_list():
     assert "- item one" in md
 
 
+def test_emit_list_top_level_bullet_uses_star():
+    sec = make_section("● item", kind=SectionKind.LIST)
+    md = emit_markdown({}, [sec])
+    assert "* item" in md
+    assert "●" not in md
+
+
+def test_emit_list_nested_bullet_indented_dash():
+    sec = make_section("○ nested", kind=SectionKind.LIST, indent_level=1)
+    md = emit_markdown({}, [sec])
+    assert "  - nested" in md
+
+
+def test_emit_list_circle_glyph_not_emitted_literally():
+    """U+25CB is a recognized bullet, never left as a literal glyph (issue #150)."""
+    sec = make_section("○ child", kind=SectionKind.LIST, indent_level=1)
+    md = emit_markdown({}, [sec])
+    assert "○" not in md
+
+
+def test_emit_list_deeper_nesting_indents_more():
+    sec = make_section("○ deep", kind=SectionKind.LIST, indent_level=2)
+    md = emit_markdown({}, [sec])
+    assert "    - deep" in md
+
+
+def test_emit_list_unwraps_wrapped_item():
+    """A single bullet item split across PDF lines renders as one line."""
+    line1 = make_line(["○ Perform a check of the value"])
+    line2 = make_line(["expected."])
+    sec = make_section(
+        "○ Perform a check of the value\nexpected.",
+        kind=SectionKind.LIST, lines=[line1, line2], indent_level=1,
+    )
+    md = emit_markdown({}, [sec])
+    assert "  - Perform a check of the value expected." in md
+
+
+def test_emit_list_multiple_clean_items_one_per_line():
+    line1 = make_line(["● first"])
+    line2 = make_line(["● second"])
+    sec = make_section("● first\n● second",
+                       kind=SectionKind.LIST, lines=[line1, line2])
+    md = emit_markdown({}, [sec])
+    assert "* first" in md
+    assert "* second" in md
+
+
 def test_emit_table():
     from tomd.lib.pdf.types import Section
     sec = Section(
