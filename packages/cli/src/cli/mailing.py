@@ -10,13 +10,14 @@
 from __future__ import annotations
 
 import sys
+from datetime import datetime, timezone
+
+from cli.progress import make_progress_handler
+from mailing.scrape import discover_years, fetch_all_mailings_for_year
+from paperstore.progress import ProgressEvent
 
 
 def command(args, backend):
-    from mailing.scrape import discover_years, fetch_all_mailings_for_year
-    from cli.progress import make_progress_handler
-    from datetime import datetime, timezone
-
     current_year = str(datetime.now(timezone.utc).year)
     EARLIEST = 2011
     all_years = discover_years()
@@ -26,8 +27,6 @@ def command(args, backend):
     succeeded = 0
     skipped = 0
     failed = 0
-
-    from paperstore.progress import ProgressEvent
 
     total = len(years)
     with progress_ctx:

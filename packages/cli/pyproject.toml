@@ -9,7 +9,10 @@ dependencies = [
     "paperstore",
     "mailing",
     "tomd",
+    "pipeline",
     "agora",
+    "assay",
+    "pydantic-ai",
     "rich",
 ]
 

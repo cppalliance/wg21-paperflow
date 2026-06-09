@@ -4,7 +4,7 @@ import fitz
 import logging
 import re
 from collections import Counter
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 from .cleanup import (get_edge_items, detect_repeating, strip_repeating,
@@ -29,7 +29,11 @@ from .glyphs import (
 from .mono import propagate_monospace
 from .wording import classify_wording, collect_line_drawings
 from .spans import normalize_spans
-from .structure import compare_extractions, structure_sections
+from .structure import (
+    _TITLE_PID_PREFIX_RE,
+    compare_extractions,
+    structure_sections,
+)
 from .table import detect_tables, exclude_table_regions
 from .wg21 import extract_metadata_from_blocks
 from .emit import emit_markdown, emit_prompts
@@ -41,6 +45,7 @@ from .types import (
     SkipReason,
     is_readable,
 )
+from .. import DOC_NUM_RE, EMAIL_RE
 from ..toc import find_toc_indices
 
 __all__ = ["run_pipeline", "PipelineResult", "ExtractedImage"]
@@ -512,7 +517,6 @@ def _filter_sections_inside_vector_images(
     if not image_bboxes_by_page:
         return sections
 
-    from dataclasses import replace
     structural_kinds = {SectionKind.TABLE, SectionKind.CODE, SectionKind.IMAGE}
     kept: list[Section] = []
     for sec in sections:
@@ -708,8 +712,6 @@ def _enrich_pdf_reply_to(
     """
     if not isinstance(metadata.get("reply-to"), list):
         metadata["reply-to"] = []
-    from .. import EMAIL_RE
-
     page0_lines: list[str] = []
     for b in blocks:
         if b.page_num != 0:
@@ -1058,14 +1060,12 @@ def run_pipeline(
             result.images, sections,
         )
         if total_dropped and result.vector_uncertainty is not None:
-            from dataclasses import replace
             new_kept = sum(1 for im in result.images if im.source == "vector")
             result.vector_uncertainty = replace(
                 result.vector_uncertainty, kept=new_kept,
             )
 
     if "document" not in metadata:
-        from .. import DOC_NUM_RE
         stem_match = DOC_NUM_RE.search(path.stem)
         if stem_match:
             metadata["document"] = stem_match.group(1).upper()
@@ -1097,7 +1097,6 @@ def run_pipeline(
     # pathway (wg21, structure, heading fallback, PDF info). Import from
     # structure where the regex is defined to keep a single source of truth.
     if metadata.get("title"):
-        from .structure import _TITLE_PID_PREFIX_RE
         stripped = _TITLE_PID_PREFIX_RE.sub("", metadata["title"]).strip()
         if stripped:
             metadata["title"] = stripped

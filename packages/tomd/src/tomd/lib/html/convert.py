@@ -5,7 +5,13 @@ import os
 import re
 from pathlib import Path
 
-from .. import format_front_matter, dedup_paragraphs, strip_redundant_body_meta, strip_leading_h1
+from .. import (
+    DOC_NUM_RE,
+    dedup_paragraphs,
+    format_front_matter,
+    strip_leading_h1,
+    strip_redundant_body_meta,
+)
 from . import extract as _extract
 from . import render as _render
 from .images import HtmlImagesResult
@@ -67,7 +73,6 @@ def convert_html(
 
     metadata = _extract.extract_metadata(soup, generator)
     if metadata and "document" not in metadata:
-        from .. import DOC_NUM_RE
         stem_match = DOC_NUM_RE.search(path.stem)
         if stem_match:
             metadata["document"] = stem_match.group(1).upper()

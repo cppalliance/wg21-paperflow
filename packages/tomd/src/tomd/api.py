@@ -44,6 +44,7 @@ from tomd.lib import (
     EMAIL_RE,
 )
 from tomd.lib.html import convert_html
+from tomd.lib.html.images import load_html_images
 from tomd.lib.pdf import ExtractedImage, PipelineResult, SkipReason, run_pipeline
 
 __all__ = ["ConvertedPaper", "convert_paper", "convert_paper_full"]
@@ -398,8 +399,6 @@ def _convert_with_tomd_full(
     if suffix in (".html", ".htm"):
         html_result = None
         if html_images_manifest is not None:
-            from tomd.lib.html.images import load_html_images
-
             html_result = load_html_images(html_images_manifest)
         md, prompts = convert_html(path, html_images_result=html_result)
         if html_result is None:

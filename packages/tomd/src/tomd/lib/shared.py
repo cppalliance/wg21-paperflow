@@ -3,6 +3,7 @@
 import logging as _logging
 import re
 import unicodedata
+from collections import Counter
 
 _NAMED_ENTITIES = {
     0xC0: "&Agrave;", 0xC1: "&Aacute;", 0xC2: "&Acirc;", 0xC3: "&Atilde;",
@@ -89,7 +90,6 @@ def dedup_paragraphs(md: str) -> str:
         if block.strip() != deduped[-1].strip():
             deduped.append(block)
 
-    from collections import Counter
     counts: Counter[str] = Counter()
     result: list[str] = []
     for block in deduped:

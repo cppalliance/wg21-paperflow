@@ -1,5 +1,6 @@
 """Header/footer detection and text cleanup for PDF extraction."""
 
+import fitz
 import logging
 import re
 from collections import defaultdict, Counter
@@ -289,7 +290,6 @@ def strip_hidden_blocks(blocks: list[Block],
     if not hidden_bboxes:
         return blocks
 
-    import fitz
     result = []
     for block in blocks:
         has_visible = False

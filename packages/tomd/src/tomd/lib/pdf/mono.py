@@ -18,6 +18,7 @@ spatial glyph-width decisions to MuPDF spans of the same font after extraction.
 
 import math
 import re
+from collections import Counter
 
 from .glyphs import GLYPH_FONT_SENTINEL
 from .types import Block
@@ -220,7 +221,6 @@ def propagate_monospace(mupdf_blocks: list[Block], spatial_blocks: list[Block],
     name-based mono check, to avoid body text leaking into code blocks
     when metrics happen to agree across a majority.
     """
-    from collections import Counter
     mono_chars: Counter[str] = Counter()
     total_chars: Counter[str] = Counter()
     for b in spatial_blocks:

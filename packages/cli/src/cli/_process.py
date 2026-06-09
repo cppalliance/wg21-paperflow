@@ -13,11 +13,15 @@ import argparse
 import asyncio
 import sys
 
+import pydantic_ai.exceptions
+from pipeline import PipelineError, process_paper
+
+from cli.progress import make_progress_handler
+from cli.targets import MONTH_RE, resolve_pid
 from paperstore.backend import StorageBackend
 from paperstore.errors import MissingMetaError
+from paperstore.progress import ProgressEvent
 from paperstore.stages import STAGE_NAMES
-
-from cli.targets import MONTH_RE, resolve_pid
 
 
 def _parse_classifier_overrides(raw: list[str] | None) -> dict[str, str] | None:
@@ -45,10 +49,6 @@ def run_process_command(
     through: int,
 ) -> int:
     """Run process_paper for the given target through the given stage."""
-    from pipeline import process_paper, PipelineError
-    from cli.progress import make_progress_handler
-    import pydantic_ai.exceptions
-
     target = args.targets[0]
     debug = getattr(args, "debug", False)
     trace = getattr(args, "trace", False)
@@ -121,8 +121,6 @@ def run_process_command(
 
     progress_ctx, on_progress = make_progress_handler(verb.capitalize())
     show_outer = len(papers) > 1
-
-    from paperstore.progress import ProgressEvent
 
     failed = 0
     total = len(papers)

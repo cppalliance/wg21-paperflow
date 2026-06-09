@@ -30,6 +30,12 @@ from pathlib import Path
 import httpx
 
 from cli.errors import EmptyTargetsError, MixedTargetsError
+from cli.models import Paper
+from cli.orchestrator import convert_one_paper
+from cli.targets import MONTH_RE, resolve_pid
+from mailing.download import content_length, default_client, download_paper
+from mailing.scrape import discover_years, fetch_all_mailings_for_year
+from tomd.lib.check_content import run_content_check_report
 from paperstore import parse_authors_raw
 from paperstore.backend import PaperRow, StorageBackend
 from paperstore.errors import (
@@ -138,8 +144,6 @@ async def run_mailing(
     updates mailing metadata (title, authors, url, dates) without touching
     downloaded sources or converted markdown.
     """
-    from mailing.scrape import discover_years, fetch_all_mailings_for_year
-
     if current_year is None:
         current_year = str(datetime.now(timezone.utc).year)
 
@@ -219,8 +223,6 @@ async def run_download(
     ``on_progress`` is invoked after each task completion with a
     :class:`~paperstore.progress.ProgressEvent`.
     """
-    from mailing.download import content_length, default_client, download_paper
-
     concurrency = max(1, concurrency)
     target_type = _validate_targets(targets)
     all_papers = _papers_from_scope(targets, target_type, backend)
@@ -356,9 +358,6 @@ async def run_convert(
     ``on_progress`` is invoked after each task completion with a
     :class:`~paperstore.progress.ProgressEvent`.
     """
-    from cli.orchestrator import convert_one_paper
-    from cli.models import Paper
-
     concurrency = max(1, concurrency)
     target_type = _validate_targets(targets)
     all_papers = _papers_from_scope(targets, target_type, backend)
@@ -518,8 +517,6 @@ def _rows_for_content_check_targets(
     year-month) reaches :func:`run_content_check`. The older
     :func:`_papers_from_scope` predates year-month targets.
     """
-    from cli.targets import MONTH_RE, resolve_pid
-
     seen: set[str] = set()
     rows: list[PaperRow] = []
 
@@ -568,8 +565,6 @@ def run_content_check(
     from the workspace path. Skips papers missing either source or
     markdown.
     """
-    from tomd.lib.check_content import run_content_check_report
-
     workers = max(1, workers)
     rows = _rows_for_content_check_targets(targets, backend)
 

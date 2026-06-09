@@ -20,6 +20,16 @@ from contextlib import nullcontext
 from typing import Any, ContextManager
 
 from paperstore.progress import ProgressCallback, ProgressEvent
+from rich.console import Console
+from rich.progress import (
+    BarColumn,
+    MofNCompleteColumn,
+    Progress,
+    SpinnerColumn,
+    TextColumn,
+    TimeElapsedColumn,
+)
+from rich.table import Column
 
 
 def make_progress_handler(
@@ -36,17 +46,6 @@ def make_progress_handler(
     The rich spinner animates continuously between step events. The
     context manager must stay open for the entire operation.
     """
-    from rich.console import Console
-    from rich.progress import (
-        BarColumn,
-        MofNCompleteColumn,
-        Progress,
-        SpinnerColumn,
-        TextColumn,
-        TimeElapsedColumn,
-    )
-    from rich.table import Column
-
     console = Console(stderr=True)
     if not console.is_terminal:
         return nullcontext(), None
