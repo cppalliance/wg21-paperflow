@@ -5,7 +5,7 @@ import re
 import urllib.parse
 from collections import deque
 
-from bs4 import BeautifulSoup, Comment, Tag, NavigableString
+from bs4 import BeautifulSoup, CData, Comment, Tag, NavigableString
 
 from .. import strip_format_chars, ALLOWED_LINK_SCHEMES
 
@@ -468,37 +468,63 @@ def _render_wording_div(el: Tag, generator: str) -> str:
 _CODE_BLOCK_TAGS = frozenset({"pre", "code-block"})
 
 
+def _indent(text: str) -> str:
+    """Indent every line by two spaces (list-continuation depth)."""
+    return "\n".join("  " + line for line in text.split("\n"))
+
+
 def _render_list(el: Tag, marker: str, generator: str) -> str | None:
-    """Render an ordered or unordered list."""
-    items = []
-    for i, li in enumerate(el.find_all("li", recursive=False)):
-        prefix = f"{i + 1}." if marker == "1." else "-"
-        # Detach nested sublists before capturing inline text so they are not
-        # walked into by _inline_text (which would duplicate their contents).
-        subs = [sub.extract()
-                for sub in li.find_all(_LIST_CONTAINER_TAGS, recursive=False)]
-        nested_parts = []
-        for sub in subs:
-            sub_rendered = _render_element(sub, generator)
-            if sub_rendered:
-                indented = "\n".join("  " + line for line in sub_rendered.split("\n"))
-                nested_parts.append(indented)
+    """Render an ordered or unordered list.
 
-        # Extract code blocks before inlining so they are rendered as
-        # fenced blocks rather than flattened to inline text.
-        code_parts = []
-        for cb in li.find_all(_CODE_BLOCK_TAGS, recursive=False):
-            rendered = _render_element(cb.extract(), generator)
+    Direct ``<li>`` children become list items. Any other direct child (a
+    nested ``<ol>``/``<ul>`` with no wrapping ``<li>``, or a loose
+    ``<p>``/``<pre>``/``<blockquote>``/``<div>``/text) is rendered through the
+    normal element dispatch and indented under the preceding item rather than
+    silently dropped; if it precedes the first item it is emitted standalone.
+    Only ``<li>`` advances the item counter, so interspersed children do not
+    perturb ordered-list numbering.
+    """
+    items: list[str] = []
+    item_index = 0
+    # Materialize: the <li> branch calls .extract() during iteration.
+    for child in list(el.children):
+        if isinstance(child, Tag) and child.name == "li":
+            item_index += 1
+            prefix = f"{item_index}." if marker == "1." else "-"
+            # Detach nested sublists before capturing inline text so they are not
+            # walked into by _inline_text (which would duplicate their contents).
+            subs = [sub.extract()
+                    for sub in child.find_all(_LIST_CONTAINER_TAGS, recursive=False)]
+            nested_parts = []
+            for sub in subs:
+                sub_rendered = _render_element(sub, generator)
+                if sub_rendered:
+                    nested_parts.append(_indent(sub_rendered))
+
+            # Extract code blocks before inlining so they are rendered as
+            # fenced blocks rather than flattened to inline text.
+            code_parts = []
+            for cb in child.find_all(_CODE_BLOCK_TAGS, recursive=False):
+                rendered = _render_element(cb.extract(), generator)
+                if rendered:
+                    code_parts.append(rendered)
+
+            text = _collapse_whitespace(_inline_text(child))
+            if text:
+                items.append(f"{prefix} {text}")
+            items.extend(code_parts)
+            items.extend(nested_parts)
+        elif isinstance(child, Tag):
+            # Non-<li> direct child: render via the normal dispatch and indent
+            # under the preceding item (standalone if there is no item yet).
+            rendered = _render_element(child, generator)
             if rendered:
-                code_parts.append(rendered)
-
-        text = _collapse_whitespace(_inline_text(li))
-        if text:
-            items.append(f"{prefix} {text}")
-        for cp in code_parts:
-            items.append(cp)
-        for np in nested_parts:
-            items.append(np)
+                items.append(_indent(rendered) if item_index else rendered)
+        elif isinstance(child, NavigableString) and not isinstance(child, (Comment, CData)):
+            # Loose text directly in the list (Comment/CData are not content).
+            text = _collapse_whitespace(str(child)).strip()
+            if text:
+                items.append(("  " + text) if item_index else text)
     return "\n".join(items) if items else None
 
 
@@ -874,10 +900,20 @@ def _render_blockquote(el: Tag, generator: str) -> str | None:
 
 
 def _render_dl(el: Tag, generator: str) -> str | None:
-    """Render a definition list."""
+    """Render a definition list.
+
+    ``<dt>``/``<dd>`` render as term/definition. Any other direct child is
+    rendered through the normal element dispatch rather than dropped; loose
+    text is kept (Comment/CData are not content).
+    """
     items = []
-    for child in el.children:
+    for child in list(el.children):
         if not isinstance(child, Tag):
+            if (isinstance(child, NavigableString)
+                    and not isinstance(child, (Comment, CData))):
+                text = _collapse_whitespace(str(child)).strip()
+                if text:
+                    items.append(text)
             continue
         if child.name == "dt":
             text = _inline_text(child).strip()
@@ -893,6 +929,10 @@ def _render_dl(el: Tag, generator: str) -> str | None:
             if text:
                 items.append(f": {text}")
             items.extend(code_parts)
+        else:
+            rendered = _render_element(child, generator)
+            if rendered:
+                items.append(rendered)
     return "\n".join(items) if items else None
 
 
