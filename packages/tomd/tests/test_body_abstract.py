@@ -5,12 +5,11 @@
 """Unit tests for body/abstract.py functions."""
 
 from conftest import make_section
-from tomd.lib.pdf.types import SectionKind, Confidence
+from tomd.lib.pdf.types import SectionKind
 from tomd.lib.body.abstract import (
     dedup_abstract,
     promote_abstract_from_uncertain,
     reorder_abstract_in_uncertain,
-    rescue_stranded_abstract_body,
     strip_metadata_from_uncertain,
 )
 

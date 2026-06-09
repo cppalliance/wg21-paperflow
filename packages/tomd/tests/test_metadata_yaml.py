@@ -4,9 +4,8 @@
 
 """Unit tests for metadata_yaml strip and format modules."""
 
-import pytest
 from conftest import make_section
-from tomd.lib.pdf.types import SectionKind, Confidence
+from tomd.lib.pdf.types import SectionKind
 from tomd.lib.metadata_yaml.strip import (
     _matches_author_name,
     _is_content_heading,

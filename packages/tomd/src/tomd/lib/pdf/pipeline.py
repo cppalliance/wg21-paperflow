@@ -40,7 +40,6 @@ from .table import detect_tables, exclude_table_regions
 from .wg21 import extract_metadata_from_blocks
 from .emit import emit_markdown, emit_prompts
 from .types import (
-    KNOWN_SECTIONS,
     Confidence,
     Section,
     SectionKind,

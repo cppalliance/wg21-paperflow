@@ -4,7 +4,6 @@
 
 """Unit tests for new table detection passes added in PR #109."""
 
-import pytest
 from tomd.lib.pdf.types import Span, Line, Block
 from tomd.lib.pdf.table import (
     _gap_asymmetry_reject,
