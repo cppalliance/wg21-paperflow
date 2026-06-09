@@ -15,6 +15,7 @@ from .. import (
 # two "what is a TOC" definitions stay a single source of truth (see #122).
 from ..toc import MIN_TOC_RUN, is_toc_label, normalize_toc_entry
 from .glyphs import GLYPH_FONT_SENTINEL, UNKNOWN_GLYPH
+from .wording import is_foreign_chromatic
 from .types import (
     Block, Line, Span, Section, SectionKind, Confidence,
     FigureRegion,
@@ -2010,6 +2011,21 @@ def _detect_code_blocks(sections: list[Section]) -> list[Section]:
     return result
 
 
+def _section_has_foreign_chromatic(sec: Section) -> bool:
+    """True if any non-link span carries a syntax-highlighting color.
+
+    Foreign chromatic = chromatic but outside the green (ins) / red (del)
+    / blue (link) bands. Its presence marks the section as a
+    syntax-highlighted code listing. Mirrors the block-level
+    ``_block_has_foreign_colors`` filter in :mod:`wording`.
+    """
+    return any(
+        is_foreign_chromatic(s.color)
+        for ln in sec.lines for s in ln.spans
+        if s.text.strip() and not s.link_url
+    )
+
+
 def _classify_wording_sections(sections: list[Section]) -> list[Section]:
     """Reclassify sections containing wording-marked spans."""
     for sec in sections:
@@ -2023,6 +2039,16 @@ def _classify_wording_sections(sections: list[Section]) -> list[Section]:
             continue
         roles = {s.wording_role for s in wording_spans}
         non_context = roles - {"context"}
+        # Syntax-highlighted code, not wording markup. A foreign chromatic
+        # color (cyan, olive, purple, ...) is the signature of syntax
+        # highlighting. When the only wording signal is green ("ins"), that
+        # green is a keyword highlight hue that happened to fall in the ins
+        # band, not a real insertion, so the section stays CODE rather than
+        # collapsing into a single wording line. Sections with a red /
+        # strikethrough deletion ("del") are genuine WG21 wording even when
+        # the surrounding code is syntax-highlighted, so they are exempt.
+        if non_context == {"ins"} and _section_has_foreign_chromatic(sec):
+            continue
         if non_context == {"ins"}:
             sec.kind = SectionKind.WORDING_ADD
         elif non_context == {"del"}:

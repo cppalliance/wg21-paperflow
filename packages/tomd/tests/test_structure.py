@@ -1344,6 +1344,69 @@ class TestSplitMixedMonoSections:
         assert any("upper bound" in s.text for s in paras)
 
 
+class TestWordingSectionCodeGuard:
+    """A syntax-highlighted code block must not be reclassified as wording.
+
+    Some WG21 papers print appendix code listings with keyword syntax
+    highlighting whose keyword color (e.g. green ``#008547``, hue ~152)
+    falls inside the wording "ins" hue band, so ``classify_wording``
+    stamps a stray ``ins`` role on the keyword. When the all-monospace
+    listing has already been merged into a ``CODE`` section, a foreign
+    chromatic color elsewhere in the section (cyan/olive syntax colors)
+    proves it is syntax highlighting, not diff markup, so the section
+    must stay ``CODE`` and render as a fenced block instead of collapsing
+    into a single ``:::wording-add`` line.
+    """
+
+    _GREEN_INS = 0x008547   # ins green keyword, hue ~152
+    _FOREIGN_CYAN = 0x006895  # syntax-highlight cyan, hue ~198 (not ins/del/link)
+    _BLACK = 0x000000
+
+    def _code_section(self, spans):
+        line = Line(spans=spans)
+        return Section(
+            kind=SectionKind.CODE,
+            text=" ".join(s.text for s in spans),
+            lines=[line],
+            confidence=Confidence.HIGH,
+        )
+
+    def test_syntax_highlighted_code_stays_code(self):
+        keyword = Span(text="template", color=self._GREEN_INS,
+                       monospace=True, wording_role="ins")
+        cyan = Span(text="bool", color=self._FOREIGN_CYAN, monospace=True)
+        sec = self._code_section([keyword, cyan])
+
+        _classify_wording_sections([sec])
+
+        assert sec.kind == SectionKind.CODE
+
+    def test_green_only_wording_code_still_reclassified(self):
+        # Control: no foreign chromatic color means genuine green-only
+        # wording-as-code is still promoted, so the guard is targeted.
+        keyword = Span(text="constexpr", color=self._GREEN_INS,
+                       monospace=True, wording_role="ins")
+        black = Span(text="void f();", color=self._BLACK, monospace=True)
+        sec = self._code_section([keyword, black])
+
+        _classify_wording_sections([sec])
+
+        assert sec.kind == SectionKind.WORDING_ADD
+
+    def test_deletion_amid_syntax_highlighting_stays_wording(self):
+        # A genuine strikethrough deletion ("del") inside syntax-highlighted
+        # monospace code (foreign chromatic spans present) is real WG21
+        # wording and must NOT be suppressed by the ins-only code guard.
+        deletion = Span(text="__j", color=self._BLACK,
+                        monospace=True, wording_role="del")
+        magenta = Span(text="__k", color=0xFF00FF, monospace=True)
+        sec = self._code_section([deletion, magenta])
+
+        _classify_wording_sections([sec])
+
+        assert sec.kind == SectionKind.WORDING_REMOVE
+
+
 class TestBlockFontSize:
     def test_line_count_voting(self):
         """Block.font_size uses line-count voting, not character weighting."""
