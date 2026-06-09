@@ -1,3 +1,7 @@
+# Copyright (c) 2026 C++ Alliance, Inc. (https://cppalliance.org)
+# Distributed under the Boost Software License, Version 1.0.
+# https://www.boost.org/LICENSE_1_0.txt
+
 """Docling ML backend for table enrichment and discovery.
 
 Provides table structure detection via Docling's TableFormer model,
@@ -178,11 +182,13 @@ def extract_docling_tables(
         # Collect page heights to flip table bboxes to top-left.
         import fitz as _fitz
         _pdf_doc = _fitz.open(str(pdf_path))
-        page_heights: dict[int, float] = {
-            pg: _pdf_doc[pg].rect.height
-            for pg in range(_pdf_doc.page_count)
-        }
-        _pdf_doc.close()
+        try:
+            page_heights: dict[int, float] = {
+                pg: _pdf_doc[pg].rect.height
+                for pg in range(_pdf_doc.page_count)
+            }
+        finally:
+            _pdf_doc.close()
 
         page_tables: dict[int, list[dict]] = {}
 
@@ -234,7 +240,7 @@ def extract_docling_tables(
                   len(page_tables))
         return page_tables
 
-    except Exception:
+    except Exception:  # Docling is optional enrichment; any failure falls back to rule-based tables
         _log.warning("Docling table extraction failed", exc_info=True)
         return {}
 

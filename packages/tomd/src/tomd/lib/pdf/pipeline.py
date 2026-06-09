@@ -71,6 +71,7 @@ _TOC_BODY_PROTECT_MIN_WORDS = 10
 _NUMBERED_LINE_RE = re.compile(r"^\s*\d+[\.\)]\s+\S")
 _BARE_PAGE_NUM_RE = re.compile(r"^\s*\d{1,3}\s*$")
 _LABEL_TOC_MIN_NUMBERED_LINES = 3
+_TOC_LABEL_MAX_WORDS = 4
 
 # Two-column detection: minimum gap (points) between the right edge of left-
 # column blocks and the left edge of right-column blocks to declare two
@@ -714,80 +715,6 @@ def _parse_pdf_info_date(raw: str) -> str:
     return ""
 
 
-def _enrich_pdf_reply_to(
-    metadata: dict, blocks: list, *, max_lines: int = 30
-) -> None:
-    """Safety-net post-pass: scan page 0 for emails missed by labeled extractors.
-
-    Mirrors the HTML _enrich_reply_to pattern. Runs after wg21/structure merge.
-    """
-    if not isinstance(metadata.get("reply-to"), list):
-        metadata["reply-to"] = []
-    from .. import EMAIL_RE
-
-    page0_lines: list[str] = []
-    for b in blocks:
-        if b.page_num != 0:
-            continue
-        for ln in b.lines:
-            page0_lines.append(ln.text.strip())
-            if len(page0_lines) >= max_lines:
-                break
-        if len(page0_lines) >= max_lines:
-            break
-
-    existing = metadata.get("reply-to", [])
-    existing_joined = " ".join(existing)
-    existing_emails = {e.lower() for e in EMAIL_RE.findall(existing_joined)}
-
-    page0_text = "\n".join(page0_lines)
-    page0_emails = EMAIL_RE.findall(page0_text)
-    missing = [e for e in page0_emails if e.lower() not in existing_emails]
-    if not missing:
-        return
-
-    _NAMED_EMAIL_RE = re.compile(
-        r"([A-Z][A-Za-z.''\- ]+?)\s*[<(](" + EMAIL_RE.pattern + r")[)>]"
-    )
-    _BARE_EMAIL_RE = re.compile(
-        r"^\s*[<(]?(" + EMAIL_RE.pattern + r")[)>]?\s*$"
-    )
-    line_map: dict[str, str] = {}
-    for idx, line in enumerate(page0_lines):
-        for m in _NAMED_EMAIL_RE.finditer(line):
-            name = m.group(1).strip().rstrip(",/;")
-            line_map[m.group(2).lower()] = name
-        m = _BARE_EMAIL_RE.match(line)
-        if m and m.group(1).lower() not in line_map:
-            if idx > 0:
-                prev = page0_lines[idx - 1].strip().rstrip(":")
-                if prev and "@" not in prev and "<" not in prev:
-                    line_map[m.group(1).lower()] = prev
-
-    paired: set[str] = set()
-    for email in missing:
-        name = line_map.get(email.lower(), "")
-        if name:
-            for idx, entry in enumerate(existing):
-                if entry == name or (
-                    "<" not in entry and "@" not in entry
-                    and name.lower().startswith(entry.lower())
-                ):
-                    existing[idx] = f"{entry} <{email}>"
-                    paired.add(email.lower())
-                    break
-
-    for email in missing:
-        if email.lower() in paired:
-            continue
-        name = line_map.get(email.lower(), "")
-        if name:
-            existing.append(f"{name} <{email}>")
-        else:
-            existing.append(f"<{email}>")
-    metadata["reply-to"] = existing
-
-
 def run_pipeline(
     path: Path,
     *,
@@ -1284,7 +1211,7 @@ def run_pipeline(
                     non_toc_known.add(fl.lower().rstrip(":"))
 
         protected = set()
-        for idx in toc_indices:
+        for idx in sorted(toc_indices):
             sec = sections[idx]
             if sec.kind == SectionKind.HEADING:
                 fl = sec.text.split("\n")[0].strip()
@@ -1342,7 +1269,6 @@ def run_pipeline(
         if toc_indices:
             sections[:] = [s for i, s in enumerate(sections) if i not in toc_indices]
 
-    _TOC_LABEL_MAX_WORDS = 4
     sections[:] = [
         s for s in sections
         if not (s.kind == SectionKind.PARAGRAPH

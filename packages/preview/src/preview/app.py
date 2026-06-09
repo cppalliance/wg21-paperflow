@@ -49,7 +49,7 @@ def create_app(
     title = _resolve_title(backend, pid)
     try:
         source_format = backend.get_source_path(pid).suffix.lstrip(".").upper()
-    except Exception:
+    except Exception:  # paper may have no source yet; default to PDF label
         source_format = "PDF"
 
     app = Flask(
@@ -69,6 +69,14 @@ def create_app(
             source_format=source_format,
             reload_event=_RELOAD_EVENT,
         )
+
+    @app.after_request
+    def _no_cache(response: Response) -> Response:
+        """Prevent browser from caching iframe content across paper switches."""
+        response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+        response.headers["Pragma"] = "no-cache"
+        response.headers["Expires"] = "0"
+        return response
 
     @app.get("/source")
     def source():

@@ -809,6 +809,7 @@ def _detect_side_by_side_tables(
 _INLINE_GRID_MIN_LINES = 4        # at least 2 rows x 2 cols
 _INLINE_GRID_COL_GAP = 30.0       # min x-gap to count as distinct column
 _INLINE_GRID_Y_BAND = 5.0         # max y-difference for same-row lines
+_INLINE_GRID_VALID_ROW_RATIO = 0.75  # fraction of rows that must span 2+ cols
 _INLINE_GRID_MIN_ROWS = 2
 
 
@@ -898,7 +899,7 @@ def _detect_inline_grid_tables(
             continue
 
         # Strict guard: at least 75% of rows must be multi-column.
-        if valid_rows < len(rows) * 0.75:
+        if valid_rows < len(rows) * _INLINE_GRID_VALID_ROW_RATIO:
             continue
 
         # Build cell data: rows x cols.
@@ -917,6 +918,15 @@ def _detect_inline_grid_tables(
 
         text = _render_table_text(all_rows_data)
 
+        strategy = TableStrategy.PIPE_TABLE
+        for row in all_rows_data:
+            for cell_spans in row:
+                if any("\n" in s.text for s in cell_spans):
+                    strategy = TableStrategy.HTML_TABLE
+                    break
+            if strategy == TableStrategy.HTML_TABLE:
+                break
+
         table_sections.append(Section(
             kind=SectionKind.TABLE,
             text=text,
@@ -925,7 +935,7 @@ def _detect_inline_grid_tables(
             page_num=block.page_num,
             columns=all_rows_data,
             table_kind=TableKind.INLINE_GRID.value,
-            table_strategy=TableStrategy.PIPE_TABLE.value,
+            table_strategy=strategy.value,
         ))
         used.add(bi)
         _log.debug("Inline-grid table: %d rows x %d cols on page %d",
@@ -1546,6 +1556,8 @@ def _block_horizontal_row_relaxed(
         return None
     y_centers = [(ln.bbox[1] + ln.bbox[3]) / 2 for ln in block.lines]
     if max(y_centers) - min(y_centers) <= _HORIZONTAL_ROW_Y_TOLERANCE:
+        if _gap_asymmetry_reject(block.lines):
+            return None
         return [ln.bbox[0] for ln in block.lines]
     y_spread = max(y_centers) - min(y_centers)
     if y_spread <= _HORIZONTAL_ROW_Y_TOLERANCE_WIDE:
@@ -1556,6 +1568,8 @@ def _block_horizontal_row_relaxed(
                 non_overlapping = False
                 break
         if non_overlapping:
+            if _gap_asymmetry_reject(by_x):
+                return None
             return [ln.bbox[0] for ln in by_x]
     return None
 
@@ -2356,7 +2370,6 @@ def _detect_column_aligned_tables(
             # separators in logical_rows[0]: if the text before the
             # first \n is a short label (<=5 words) in most cells, split
             # row 0 into a clean header and a spillover data fragment.
-            _HEADER_MAX_WORDS = 5
             if logical_rows:
                 row0 = logical_rows[0]
                 cells_with_nl = 0
@@ -2369,7 +2382,7 @@ def _detect_column_aligned_tables(
                         cells_with_nl += 1
                         pre_text = "".join(
                             s.text for s in cell_spans[:nl_idx]).strip()
-                        if len(pre_text.split()) <= _HEADER_MAX_WORDS:
+                        if len(pre_text.split()) <= _COLALIGN_HEADER_MAX_WORDS:
                             short_pre_nl += 1
 
                 if cells_with_nl >= 2 and short_pre_nl == cells_with_nl:
@@ -2557,6 +2570,27 @@ _SPEC_TABLE_Y_BAND = 15.0
 # Section-number pattern for heading detection (stop boundary).
 _SPEC_HEADING_NUM_RE = re.compile(r"^\d+(?:\.\d+)*\s")
 
+_SPEC_HEADING_SUBSECTION_RE = re.compile(r"^\d+\.\d+")
+
+_DATA_MARKERS_RE = re.compile(
+    r"^(Returns|Effects|Preconditions|Postconditions|"
+    r"Synchronization|Shall|Same|Requires|Remarks)\b",
+    re.IGNORECASE)
+
+_SPEC_COL_NAMES_RE = re.compile(
+    r"\b(expression|return\s+type|assertion|pre/post|"
+    r"preconditions?|postconditions?|requirements?)\b",
+    re.IGNORECASE)
+
+_COL_HEADER_RE = re.compile(
+    r"^(expression|return\s+type|assertion|conditions|"
+    r"pre/post-conditions|assertion/note\s+pre/post-?)$",
+    re.IGNORECASE,
+)
+
+_COLALIGN_HEADER_MAX_WORDS = 5
+_SPEC_HEADER_MAX_WORDS = 4
+
 
 def _is_spec_heading_block(block: Block) -> bool:
     """True if *block* looks like a section heading (stop boundary).
@@ -2575,7 +2609,7 @@ def _is_spec_heading_block(block: Block) -> bool:
         return False
     if first.is_bold and first.font_size > 10:
         return True
-    if first.font_size >= 10.5 and re.match(r"^\d+\.\d+", text):
+    if first.font_size >= 10.5 and _SPEC_HEADING_SUBSECTION_RE.match(text):
         return True
     return False
 
@@ -2891,6 +2925,7 @@ def _detect_spec_tables_by_label(
             continue
 
         sorted_ybands = sorted(yband_cells)
+        yband_index = {yk: i for i, yk in enumerate(sorted_ybands)}
 
         # ----- Remove repeated headers (cross-page) -----
         # PDFs repeat table headers at the top of each new page.
@@ -2923,7 +2958,7 @@ def _detect_spec_tables_by_label(
                     # Also drop the next y-band if it is a header
                     # continuation (col 0 empty, short text in
                     # last column only).
-                    idx_in_sorted = sorted_ybands.index(yk)
+                    idx_in_sorted = yband_index[yk]
                     if idx_in_sorted + 1 < len(sorted_ybands):
                         nxt = sorted_ybands[idx_in_sorted + 1]
                         nxt_col0 = "".join(
@@ -3062,12 +3097,6 @@ def _detect_spec_tables_by_label(
         # The split point is the FIRST segment that looks like data:
         # long (>5 words) or starts with a known data marker like
         # "Returns:", "Effects:", "Preconditions:".
-        _HEADER_MAX_WORDS = 4
-        _DATA_MARKERS = re.compile(
-            r"^(Returns|Effects|Preconditions|Postconditions|"
-            r"Synchronization|Shall|Same|Requires|Remarks)\b",
-            re.IGNORECASE)
-
         def _find_header_split(cell_spans: list[Span]) -> int | None:
             """Return span index where header ends and data begins."""
             nl_indices = [
@@ -3083,8 +3112,8 @@ def _detect_spec_tables_by_label(
                 if not post_text:
                     continue
                 first_segment = post_text.split("\n")[0].strip()
-                if (len(first_segment.split()) > _HEADER_MAX_WORDS
-                        or _DATA_MARKERS.match(first_segment)):
+                if (len(first_segment.split()) > _SPEC_HEADER_MAX_WORDS
+                        or _DATA_MARKERS_RE.match(first_segment)):
                     return nl_idx
             return None
 
@@ -3171,15 +3200,12 @@ def _detect_spec_tables_by_label(
         # one column name characteristic of WG21 requirement tables.
         # This prevents the pass from consuming general "Table N"
         # labels in non-spec papers (e.g. side-by-side code figures).
-        _SPEC_COL_NAMES = re.compile(
-            r"\b(expression|return\s+type|assertion|pre/post|"
-            r"preconditions?|postconditions?|requirements?)\b",
-            re.IGNORECASE)
+        
         header_text = " ".join(
             "".join(s.text for s in cell).strip()
             for cell in logical_rows[0]
         )
-        if not _SPEC_COL_NAMES.search(header_text):
+        if not _SPEC_COL_NAMES_RE.search(header_text):
             _log.debug(
                 "Spec table 'Table %d' rejected: header '%s' lacks "
                 "WG21 spec column names", table_num,
@@ -3212,11 +3238,7 @@ def _detect_spec_tables_by_label(
         # type", "assertion/note pre/post-conditions" as separate
         # blocks above the Table label).  Without this, they leak
         # as plain-text paragraphs in the output.
-        _COL_HEADER_RE = re.compile(
-            r"^(expression|return\s+type|assertion|conditions|"
-            r"pre/post-conditions|assertion/note\s+pre/post-?)$",
-            re.IGNORECASE,
-        )
+        
         for j in range(label_gi - 1, max(label_gi - 6, -1), -1):
             if j < 0:
                 break

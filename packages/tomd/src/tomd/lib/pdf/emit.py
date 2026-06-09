@@ -500,7 +500,7 @@ def _render_code_comparison(sec: Section) -> str:
         first_row = rows[0]
         first_row_texts = []
         for cell in first_row:
-            t = "".join(s.text for s in cell).strip()
+            t = "".join(_decode_dingbats(s).text for s in cell).strip()
             first_row_texts.append(t)
         if all(len(t.split()) <= 3 for t in first_row_texts) and any(first_row_texts):
             headers = first_row_texts
@@ -537,7 +537,8 @@ def _render_table_as_text(sec: Section) -> str:
     for row in sec.columns:
         row_parts = []
         for cell_spans in row:
-            cell_text = "".join(s.text for s in cell_spans).strip()
+            cell_text = "".join(
+                _decode_dingbats(s).text for s in cell_spans).strip()
             if cell_text:
                 row_parts.append(cell_text)
         if row_parts:

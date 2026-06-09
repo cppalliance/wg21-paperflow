@@ -16,6 +16,10 @@ from .wg21 import _LABEL_RE as _WG21_LABEL_RE
 
 _log = logging.getLogger(__name__)
 
+_EDGE_BLOCK_MAX_HEIGHT = 30.0
+_EDGE_BLOCK_TOP_MAX_Y = 60.0
+_EDGE_BLOCK_BOTTOM_MIN_Y = 700.0
+
 
 def _y_bucket(bbox: tuple[float, float, float, float]) -> float:
     """Quantize a bbox's vertical center to the Y_TOLERANCE grid."""
@@ -210,7 +214,9 @@ def strip_repeating(blocks: list[Block], repeating: set[tuple[float, str]],
         if stripped_y_buckets and kept_lines:
             blk_height = block.bbox[3] - block.bbox[1]
             blk_top = block.bbox[1]
-            is_edge_block = blk_height < 30.0 and (blk_top < 60.0 or blk_top > 700.0)
+            is_edge_block = (blk_height < _EDGE_BLOCK_MAX_HEIGHT
+                             and (blk_top < _EDGE_BLOCK_TOP_MAX_Y
+                                  or blk_top > _EDGE_BLOCK_BOTTOM_MIN_Y))
             if is_edge_block:
                 kept_lines = [
                     ln for ln in kept_lines

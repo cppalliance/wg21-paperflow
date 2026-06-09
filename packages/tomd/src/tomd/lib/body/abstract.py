@@ -7,8 +7,12 @@ import re
 from dataclasses import replace
 
 from tomd.lib.pdf.types import Confidence, KNOWN_SECTIONS, Section, SectionKind
+from tomd.lib.metadata_yaml.strip import _CONTENT_HEADING_NUM_RE
 
 _log = logging.getLogger(__name__)
+
+_MIN_ABSTRACT_BODY_WORDS = 10
+_MAX_ABSTRACT_BODY_WORDS = 200
 
 
 def dedup_abstract(sections: list[Section]) -> None:
@@ -267,16 +271,13 @@ def promote_abstract_from_uncertain(sections: list[Section]) -> None:
     - No existing content heading (numbered or known-section name) exists
       on page 0. If one exists, strip_pre_content_paragraphs already has a
       boundary and the Abstract would not be stripped.
-    - No existing Abstract HEADING exists anywhere in sections.
+    - No existing Abstract HEADING exists on page 0 (a duplicate on a later
+      page is caught by dedup_abstract downstream).
     - The abstract body must contain at least 10 words.
 
     Must run BEFORE strip_pre_content_paragraphs in the pipeline.
     Mutates *sections* in-place.
     """
-    _MIN_ABSTRACT_BODY_WORDS = 10
-    _MAX_ABSTRACT_BODY_WORDS = 200
-    _CONTENT_HEADING_NUM_RE = re.compile(r"^\d{1,2}(?:\.\d+)*\.?\s")
-
     # Guard: skip if a content heading already exists on page 0.
     # strip_pre_content_paragraphs uses _is_content_heading as its boundary;
     # if one exists on page 0 it won't strip Abstract-containing sections.

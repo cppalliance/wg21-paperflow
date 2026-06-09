@@ -27,6 +27,10 @@ _BOX_GROUP_Y_TOLERANCE = 80.0
 _BOX_GROUP_X_TOLERANCE = 300.0
 _MIN_BOXES_FOR_FIGURE = 2
 _FIGURE_BBOX_MARGIN = 5.0
+_BRIDGE_TOLERANCE = 25.0
+_CONNECTOR_THIN_SIDE_MAX = 3.0
+_CONNECTOR_MIN_HORIZ_DX = 5.0
+_CONNECTOR_REGION_MARGIN = 15.0
 
 _ARROWHEAD_MAX_SIZE = 20.0
 _ARROWHEAD_MIN_ITEMS = 2
@@ -116,8 +120,6 @@ def _merge_connected_groups(
     """
     if len(groups) <= 1 or not connectors:
         return groups
-
-    _BRIDGE_TOLERANCE = 25.0
 
     def _pt_near_any_box(pt: tuple[float, float],
                          boxes: list[tuple]) -> bool:
@@ -307,7 +309,7 @@ def _is_dashed_connector(path: dict) -> tuple | None:
         return None
 
     w, h = rect.width, rect.height
-    if min(w, h) > 3.0:
+    if min(w, h) > _CONNECTOR_THIN_SIDE_MAX:
         return None
     if max(w, h) < _CONNECTOR_MIN_LENGTH:
         return None
@@ -463,7 +465,7 @@ def _detect_sequence_diagram(
     if not arrow_events and connectors:
         for ci, (cs, ce) in enumerate(connectors):
             dx = abs(ce[0] - cs[0])
-            if dx < 5.0:
+            if dx < _CONNECTOR_MIN_HORIZ_DX:
                 continue
             si = _nearest_box(cs, logical)
             ti = _nearest_box(ce, logical)
@@ -693,7 +695,7 @@ def _connector_in_region(
     bbox: tuple[float, float, float, float],
 ) -> bool:
     """True if at least one endpoint of the connector is inside the region."""
-    margin = 15.0
+    margin = _CONNECTOR_REGION_MARGIN
     x0, y0, x1, y1 = bbox
     for pt in conn:
         if (x0 - margin <= pt[0] <= x1 + margin
