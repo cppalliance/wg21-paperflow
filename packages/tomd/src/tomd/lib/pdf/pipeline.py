@@ -1960,6 +1960,9 @@ def run_pipeline(
     structural_hints = _toc_structural_hints(sections) if not heading_texts else None
     # A body heading matches itself in heading_texts; pass per-section heading
     # flags so find_toc_indices excludes them and does not delete the body.
+    # This refined guard supersedes the coarser non_toc_indices skip: it keeps
+    # the _toc_structured exception so a genuine numbered TOC entry that section
+    # numbering classified as a heading is still stripped.
     is_heading = [sec.kind == SectionKind.HEADING for sec in sections]
     toc_indices = find_toc_indices(
         texts,
