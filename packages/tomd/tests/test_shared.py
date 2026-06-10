@@ -13,7 +13,11 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from tomd.lib.shared import apply_strip_leading_h1, override_revision_from_filename
+from tomd.lib.shared import (
+    apply_strip_leading_h1,
+    override_revision_from_filename,
+    strip_redundant_body_meta,
+)
 
 
 class TestApplyStripLeadingH1:
@@ -61,6 +65,28 @@ class TestApplyStripLeadingH1:
         assert "Body." in result
 
 
+class TestEmitCleanup:
+    _H1_THEN_METADATA_TABLE = (
+        "---\n"
+        'title: "T"\n'
+        "---\n"
+        "# T\n"
+        "\n"
+        "| Document | P1 |\n"
+        "| Date | x |\n"
+        "---\n"
+        "Body.\n"
+    )
+
+    def test_h1_then_metadata_table_stripped_by_emit_sequence(self):
+        md = self._H1_THEN_METADATA_TABLE
+        md = strip_redundant_body_meta(md)
+        md = apply_strip_leading_h1(md, "T")
+        assert "| Document |" not in md
+        assert "# T" not in md
+        assert "Body." in md
+
+
 class TestOverrideRevisionFromFilename:
     def test_revision_mismatch_updates_document(self):
         metadata = {"document": "P1234R0"}
@@ -79,3 +105,18 @@ class TestOverrideRevisionFromFilename:
         path = Path("p5678r3.pdf")
         override_revision_from_filename(metadata, path)
         assert metadata["document"] == "P1234R0"
+
+    def test_revision_match_is_noop(self):
+        metadata = {"document": "P1234R3"}
+        override_revision_from_filename(metadata, Path("p1234r3.pdf"))
+        assert metadata["document"] == "P1234R3"
+
+    def test_stem_without_revision_left_alone(self):
+        metadata = {"document": "P1234R0"}
+        override_revision_from_filename(metadata, Path("p1234.pdf"))
+        assert metadata["document"] == "P1234R0"
+
+    def test_missing_document_key_is_noop(self):
+        metadata: dict = {}
+        override_revision_from_filename(metadata, Path("p1234r3.pdf"))
+        assert metadata == {}

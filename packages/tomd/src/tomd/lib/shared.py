@@ -499,7 +499,17 @@ def _strip_metadata_table(md: str) -> str:
     if body_start < 0:
         return md
     body_start += 1
-    body = md[body_start:].lstrip("\n")
+    body_raw = md[body_start:]
+    # Skip a leading H1 (with surrounding blank lines) so we still recognize
+    # a metadata table that immediately follows a duplicate title heading.
+    skip = 0
+    stripped = body_raw.lstrip("\n")
+    if stripped.startswith("# ") and not stripped.startswith("## "):
+        nl = stripped.find("\n")
+        skip = (len(body_raw) - len(stripped)) + (
+            nl + 1 if nl >= 0 else len(stripped)
+        )
+    body = body_raw[skip:].lstrip("\n")
 
     if not body.startswith("|"):
         return md
@@ -840,6 +850,8 @@ def normalize_date(text: str) -> str | None:
         return f"{year:04d}-{month_num:02d}-{day:02d}"
     return None
 
+# Capture-group split (prefix / number / optional revision) for filename
+# override; broader document shapes live in DOC_NUM_PATTERN / DOC_NUM_RE.
 _PID_BASE_RE = re.compile(r"([DPN])(\d{3,5})(?:R(\d+))?", re.IGNORECASE)
 
 _revision_log = _logging.getLogger(__name__)
