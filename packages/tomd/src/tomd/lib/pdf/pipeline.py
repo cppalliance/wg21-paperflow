@@ -41,6 +41,7 @@ from .types import (
     SkipReason,
     is_readable,
 )
+from ..shared import override_revision_from_filename
 from ..toc import find_toc_indices
 
 __all__ = ["run_pipeline", "PipelineResult", "ExtractedImage"]
@@ -49,32 +50,6 @@ _log = logging.getLogger(__name__)
 
 _STANDALONE_PAGE_RE = re.compile(r'^\d{1,4}$')
 _TOC_X_TOLERANCE = 5.0
-
-_PID_BASE_RE = re.compile(r"([DPN])(\d{3,5})(?:R(\d+))?", re.IGNORECASE)
-
-
-def _override_revision_from_filename(metadata: dict, path: Path) -> None:
-    """Override document revision from filename when the base paper number
-    matches but revisions differ. Skip when the extracted document has a
-    D-prefix (draft), since D/P mismatches are expected WG21 workflow."""
-    if "document" not in metadata:
-        return
-    doc_m = _PID_BASE_RE.search(metadata["document"])
-    stem_m = _PID_BASE_RE.search(path.stem)
-    if not doc_m or not stem_m:
-        return
-    if doc_m.group(1).upper() == "D":
-        return
-    if doc_m.group(2) != stem_m.group(2):
-        return
-    stem_rev = stem_m.group(3)
-    doc_rev = doc_m.group(3)
-    if stem_rev is not None and stem_rev != doc_rev:
-        prefix = stem_m.group(1).upper()
-        number = stem_m.group(2)
-        metadata["document"] = f"{prefix}{number}R{stem_rev}"
-        _log.debug("Overrode document revision from filename: %s -> %s",
-                   f"{doc_m.group(0)}", metadata["document"])
 
 
 def _toc_structural_hints(sections) -> list[bool]:
@@ -1073,7 +1048,7 @@ def run_pipeline(
     if "date" not in metadata and pdf_info_date:
         metadata["date"] = pdf_info_date
 
-    _override_revision_from_filename(metadata, path)
+    override_revision_from_filename(metadata, path)
 
     if not metadata.get("title"):
         for sec in sections:

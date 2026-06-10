@@ -23,7 +23,7 @@ For deeper technique tables and module maps, see [`lib/pdf/ARCHITECTURE.md`](lib
 - **Honest output:** When paths disagree badly, the emitter marks **uncertain** regions and fills prompts with both texts rather than silently picking one ([`CLAUDE.md`](CLAUDE.md)).
 - **MuPDF in the body:** For disagreements, MuPDF text is what ships in the Markdown; spatial text is for reconciliation prompts ([`ARCHITECTURE.md`](lib/pdf/ARCHITECTURE.md)).
 - **Multi-signal structure:** Headings, lists, code, tables, and wording use several signals on purpose; single-signal tweaks are risky for the full corpus ([`CLAUDE.md`](CLAUDE.md)).
-- **Shared post-emit helpers:** PDF and HTML paths both call [`lib/__init__.py`](lib/__init__.py) helpers such as `dedup_paragraphs`, `strip_redundant_body_meta`, and `strip_leading_h1` after assembly.
+- **Shared post-emit helpers:** PDF and HTML paths both call [`lib/__init__.py`](lib/__init__.py) helpers such as `dedup_paragraphs`, `strip_redundant_body_meta`, and `apply_strip_leading_h1` after assembly.
 
 ## Before changing behavior
 
@@ -347,7 +347,7 @@ Tightening similarity without prompts; loosening TOC detection; aggressive parag
 
 **Revision**
 
-- If stem revision differs from embedded **non-D** document id revision, **rewrite document id** from filename ([`_override_revision_from_filename`](lib/pdf/__init__.py)).
+- If stem revision differs from embedded **non-D** document id revision, **rewrite document id** from filename ([`override_revision_from_filename`](lib/shared.py)).
 
 **Title**
 

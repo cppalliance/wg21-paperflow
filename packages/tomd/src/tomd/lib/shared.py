@@ -3,6 +3,7 @@
 import logging as _logging
 import re
 import unicodedata
+from pathlib import Path
 
 _NAMED_ENTITIES = {
     0xC0: "&Agrave;", 0xC1: "&Aacute;", 0xC2: "&Acirc;", 0xC3: "&Atilde;",
@@ -282,6 +283,18 @@ def _titles_match(h1: str, title: str) -> bool:
         return re.sub(r"\s+", " ", s).strip()
     h1_n, title_n = normalize(h1), normalize(title)
     return h1_n == title_n or title_n.startswith(h1_n)
+
+
+def apply_strip_leading_h1(md: str, title: str) -> str:
+    """Strip a leading H1 from the body after YAML front matter."""
+    fm_end = _find_front_matter_end(md)
+    if fm_end is None:
+        return md
+    line_end = md.find("\n", fm_end)
+    if line_end < 0:
+        return md
+    body = strip_leading_h1(md[line_end + 1:], title)
+    return md[: line_end + 1] + body
 
 
 _REDUNDANT_META_RE = re.compile(
@@ -826,6 +839,37 @@ def normalize_date(text: str) -> str | None:
         )
         return f"{year:04d}-{month_num:02d}-{day:02d}"
     return None
+
+_PID_BASE_RE = re.compile(r"([DPN])(\d{3,5})(?:R(\d+))?", re.IGNORECASE)
+
+_revision_log = _logging.getLogger(__name__)
+
+
+def override_revision_from_filename(metadata: dict, path: Path) -> None:
+    """Override document revision from filename when the base paper number
+    matches but revisions differ. Skip when the extracted document has a
+    D-prefix (draft), since D/P mismatches are expected WG21 workflow."""
+    if "document" not in metadata:
+        return
+    doc_m = _PID_BASE_RE.search(metadata["document"])
+    stem_m = _PID_BASE_RE.search(path.stem)
+    if not doc_m or not stem_m:
+        return
+    if doc_m.group(1).upper() == "D":
+        return
+    if doc_m.group(2) != stem_m.group(2):
+        return
+    stem_rev = stem_m.group(3)
+    doc_rev = doc_m.group(3)
+    if stem_rev is not None and stem_rev != doc_rev:
+        prefix = stem_m.group(1).upper()
+        number = stem_m.group(2)
+        metadata["document"] = f"{prefix}{number}R{stem_rev}"
+        _revision_log.debug(
+            "Overrode document revision from filename: %s -> %s",
+            f"{doc_m.group(0)}", metadata["document"],
+        )
+
 
 # Core pattern shapes (no anchors, no label context) reused across modules
 # so every document- and section-number pattern has a single source of truth.
