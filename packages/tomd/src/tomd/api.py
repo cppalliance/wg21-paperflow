@@ -35,7 +35,6 @@ import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from tomd.lib.metadata_yaml.format import format_front_matter, sanitize_metadata
 from tomd.errors import UnsupportedSourceFormatError
 from tomd.lib import (
     apply_strip_leading_h1,

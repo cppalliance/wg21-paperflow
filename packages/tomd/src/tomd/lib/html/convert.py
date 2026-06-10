@@ -12,7 +12,6 @@ from .. import (
     override_revision_from_filename,
     strip_redundant_body_meta,
 )
-from ..metadata_yaml.format import format_front_matter
 from .. import DOC_NUM_RE, strip_orphan_toc_list
 from . import extract as _extract
 from . import render as _render
@@ -48,8 +47,11 @@ def _override_revision_from_filename(metadata: dict, path: Path) -> None:
         prefix = stem_m.group(1).upper()
         number = stem_m.group(2)
         metadata["document"] = f"{prefix}{number}R{stem_rev}"
-        _log.debug("Overrode document revision from filename: %s -> %s",
-                   f"{doc_m.group(0)}", metadata["document"])
+        _log.debug(
+            "Overrode document revision from filename: %s -> %s",
+            f"{doc_m.group(0)}",
+            metadata["document"],
+        )
 
 
 def convert_html(
@@ -93,7 +95,8 @@ def convert_html(
 
     if html_images_result is not None:
         _render.rewrite_imgs_via_manifest(
-            soup, html_images_result.src_to_entry,
+            soup,
+            html_images_result.src_to_entry,
         )
 
     body_md = _render.render_body(soup, generator)
@@ -101,8 +104,14 @@ def convert_html(
     if html_images_result is not None and html_images_result.images_truncated:
         kept = len(html_images_result.images)
         total = html_images_result.source_image_count
-        body_md = body_md.rstrip() + "\n\n" + TRUNCATION_MARKER_TEMPLATE.format(
-            kept=kept, total=total, dropped=total - kept,
+        body_md = (
+            body_md.rstrip()
+            + "\n\n"
+            + TRUNCATION_MARKER_TEMPLATE.format(
+                kept=kept,
+                total=total,
+                dropped=total - kept,
+            )
         )
 
     if metadata and "title" not in metadata:

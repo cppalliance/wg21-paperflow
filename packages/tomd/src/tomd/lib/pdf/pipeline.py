@@ -33,14 +33,16 @@ from .spans import normalize_spans
 from .structure import (compare_extractions, structure_body,
                         _is_known_section, _TITLE_PID_PREFIX_RE)
 from ..metadata_yaml.extract import (
-    extract_metadata as _extract_metadata_yaml,
     apply_pdf_metadata_fallbacks as _apply_pdf_metadata_fallbacks,
+    enrich_pdf_reply_to as _enrich_pdf_reply_to,
+    extract_metadata as _extract_metadata_yaml,
 )
 from .table import detect_tables, exclude_table_regions
 from .wg21 import extract_metadata_from_blocks
 from .emit import emit_markdown, emit_prompts
 from .types import (
     Confidence,
+    KNOWN_SECTIONS,
     Section,
     SectionKind,
     SkipReason,
@@ -1202,7 +1204,6 @@ def run_pipeline(
     # pathway (wg21, structure, heading fallback, PDF info). Import from
     # structure where the regex is defined to keep a single source of truth.
     if metadata.get("title"):
-        from .structure import _TITLE_PID_PREFIX_RE
         stripped = _TITLE_PID_PREFIX_RE.sub("", metadata["title"]).strip()
         if stripped:
             metadata["title"] = stripped

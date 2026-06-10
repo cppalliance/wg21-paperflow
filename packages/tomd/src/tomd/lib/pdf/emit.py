@@ -12,7 +12,6 @@ from .. import (
     strip_redundant_body_meta,
     strip_orphan_toc_list,
 )
-from ..metadata_yaml.format import format_front_matter
 from ..shared import _find_front_matter_end
 from .cleanup import normalize_whitespace
 from .glyphs import (
