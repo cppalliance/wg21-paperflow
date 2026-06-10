@@ -5,11 +5,12 @@
 """Unit tests for body/abstract.py functions."""
 
 from conftest import make_section
-from tomd.lib.pdf.types import SectionKind
+from tomd.lib.pdf.types import SectionKind, Line, Span
 from tomd.lib.body.abstract import (
     dedup_abstract,
     promote_abstract_from_uncertain,
     reorder_abstract_in_uncertain,
+    rescue_stranded_abstract_body,
     strip_metadata_from_uncertain,
 )
 
@@ -164,3 +165,69 @@ class TestReorderAbstractInUncertain:
         original = list(sections)
         reorder_abstract_in_uncertain(sections)
         assert len(sections) == len(original)
+
+    def test_abstract_moved_to_top_of_uncertain(self):
+        """UNCERTAIN section with Abstract buried after other content."""
+        text = "CONTENTS\nIntroduction....1\nAbstract\nThis paper proposes."
+        sections = [
+            make_section(text, kind=SectionKind.UNCERTAIN, page_num=0),
+        ]
+        reorder_abstract_in_uncertain(sections)
+        result_lines = sections[0].text.split("\n")
+        assert result_lines[0].strip().lower() == "abstract"
+
+
+class TestRescueStrandedAbstractBody:
+    """Tests for rescue_stranded_abstract_body."""
+
+    def _make_sec_with_y(self, text, kind, page_num, top_y):
+        """Helper: section with a specific top-y coordinate."""
+        line = Line(
+            spans=[Span(text=text)],
+            bbox=(72.0, top_y, 500.0, top_y + 12.0),
+        )
+        from dataclasses import replace as dc_replace
+        sec = make_section(text, kind=kind, page_num=page_num)
+        return dc_replace(sec, lines=[line])
+
+    def test_rescues_stranded_body(self):
+        """Abstract heading + next heading with no body => paragraph rescued."""
+        abstract_hdr = self._make_sec_with_y(
+            "Abstract", SectionKind.HEADING, 0, 100.0)
+        next_hdr = self._make_sec_with_y(
+            "Background", SectionKind.HEADING, 0, 200.0)
+        stranded_para = self._make_sec_with_y(
+            "This paper proposes a new approach to memory management.",
+            SectionKind.PARAGRAPH, 0, 110.0)
+
+        sections = [abstract_hdr, next_hdr, stranded_para]
+        rescue_stranded_abstract_body(sections)
+        assert sections[1].text.startswith("This paper proposes")
+        assert sections[1].kind == SectionKind.PARAGRAPH
+
+    def test_no_rescue_when_closer_to_next_heading(self):
+        """Paragraph closer to the next heading stays in place."""
+        abstract_hdr = self._make_sec_with_y(
+            "Abstract", SectionKind.HEADING, 0, 100.0)
+        next_hdr = self._make_sec_with_y(
+            "Background", SectionKind.HEADING, 0, 200.0)
+        para = self._make_sec_with_y(
+            "Background content here.",
+            SectionKind.PARAGRAPH, 0, 195.0)
+
+        sections = [abstract_hdr, next_hdr, para]
+        rescue_stranded_abstract_body(sections)
+        assert sections[2].text.startswith("Background content")
+
+    def test_no_rescue_when_body_already_present(self):
+        """Abstract already has body text => nothing to rescue."""
+        abstract_hdr = self._make_sec_with_y(
+            "Abstract", SectionKind.HEADING, 0, 100.0)
+        body = self._make_sec_with_y(
+            "Existing abstract body.", SectionKind.PARAGRAPH, 0, 112.0)
+        next_hdr = self._make_sec_with_y(
+            "Introduction", SectionKind.HEADING, 0, 200.0)
+
+        sections = [abstract_hdr, body, next_hdr]
+        rescue_stranded_abstract_body(sections)
+        assert sections[1].text == "Existing abstract body."

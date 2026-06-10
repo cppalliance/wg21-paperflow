@@ -3913,6 +3913,9 @@ def detect_tables(
                 j = result.advance_to
                 continue
 
+            # Branch 4 failure falls through here. Today this is safe because
+            # _is_column_aligned_orphan and _is_partial_row are mutually exclusive
+            # (orphan blocks are single-line; partial row rejects single-line).
             # Branch 5: partial row
             result = _try_partial_row(
                 blocks, j, ref_cols, column_xs, table_blocks)
