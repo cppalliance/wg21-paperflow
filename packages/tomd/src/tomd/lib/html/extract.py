@@ -1057,6 +1057,12 @@ def strip_boilerplate(soup: BeautifulSoup, generator: str) -> list[str]:
     if header:
         header.decompose()
 
+    if generator == "mpark":
+        # Interactive toggle form ("No syntax highlighting", "Hide deleted
+        # text") that otherwise leaks into the body.
+        for form in soup.find_all("form", class_="view-controls"):
+            form.decompose()
+
     if generator == "bikeshed":
         for div in soup.find_all("div", {"data-fill-with": True}):
             div.decompose()
