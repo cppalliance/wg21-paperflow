@@ -722,6 +722,7 @@ def structure_sections(sections: list[Section],
 
     structured = _detect_lists_by_position(structured)
     structured = _merge_paragraphs(structured)
+    structured = _split_mixed_mono_sections(structured)
     structured = _detect_code_blocks(structured)
     structured = [s for s in structured if _detect_lang_label(s) is None]
     structured = _classify_wording_sections(structured)
@@ -1038,6 +1039,100 @@ def _detect_lang_label(sec: Section) -> str | None:
     """Check if a section is a code block language label."""
     text = strip_format_chars(sec.text).strip().lower()
     return _LANG_LABELS.get(text)
+
+
+_SPLIT_MIN_MONO_LINES = 3
+
+# A line-leading C++ comment ("//" but not a URL's "://") marks a
+# non-monospace line as code in a different font (papers often set
+# section-reference comments like "// [c.math.lerp]" in italic serif),
+# so the splitter keeps it with the adjacent code rather than splitting
+# it off as prose.
+_CODE_COMMENT_RE = re.compile(r"^\s*//[^/]")
+
+
+def _split_mixed_mono_sections(sections: list[Section]) -> list[Section]:
+    """Split PARAGRAPH sections that mix a monospace code run with prose.
+
+    compare_extractions can deliver a single section whose lines are a
+    long monospace code run preceded or followed by proportional-font
+    prose (observed on P4231R0, where a synopsis crossing a page
+    boundary arrived merged with the next prose paragraph). Left
+    intact, the section is not all-monospace, so _detect_code_blocks
+    cannot absorb it into the adjacent code run (the fence splits at
+    the page boundary) and _rescue_unfenced_code later promotes the
+    entire section, prose included, to CODE.
+
+    Only prose at the section's edges is split off, and only when the
+    remaining core is cleanly monospace with at least
+    _SPLIT_MIN_MONO_LINES code lines. Non-monospace lines *inside* a
+    code run (mixed-font code such as p0533r9's italic
+    `// see [library.c]` comments) disqualify the section entirely:
+    that pattern is one code block, not code-plus-prose, and is left
+    for _rescue_unfenced_code to promote whole.
+    """
+    result: list[Section] = []
+    for sec in sections:
+        if sec.kind != SectionKind.PARAGRAPH:
+            result.append(sec)
+            continue
+        segments = _split_lines_at_mono_runs(sec.lines)
+        if len(segments) <= 1:
+            result.append(sec)
+            continue
+        _log.info("Split mixed mono/prose section on page %d into %d parts",
+                  sec.page_num, len(segments))
+        for seg in segments:
+            text = "\n".join(ln.text for ln in seg)
+            result.append(replace(sec, text=text, lines=seg,
+                                  page_num=seg[0].page_num))
+    return result
+
+
+def _split_lines_at_mono_runs(lines: list[Line]) -> list[list[Line]]:
+    """Partition lines into edge-prose segments and a monospace core.
+
+    Returns a single segment (no split) unless the lines form a
+    cleanly monospace core of at least _SPLIT_MIN_MONO_LINES code
+    lines with prose at one or both edges. Blank lines are neutral:
+    inside the core they stay with the code; at an edge with prose
+    they go to the prose segment.
+    """
+    def label(ln: Line) -> str:
+        if not ln.text.strip():
+            return "blank"
+        if _line_is_monospace(ln) or _CODE_COMMENT_RE.match(ln.text):
+            return "mono"
+        return "prose"
+
+    labels = [label(ln) for ln in lines]
+    n = len(lines)
+    core_start = 0
+    while core_start < n and labels[core_start] != "mono":
+        core_start += 1
+    core_end = n
+    while core_end > core_start and labels[core_end - 1] != "mono":
+        core_end -= 1
+
+    core = labels[core_start:core_end]
+    if "prose" in core or core.count("mono") < _SPLIT_MIN_MONO_LINES:
+        return [lines]
+    lead_prose = "prose" in labels[:core_start]
+    trail_prose = "prose" in labels[core_end:]
+    if not lead_prose and not trail_prose:
+        return [lines]
+
+    segments: list[list[Line]] = []
+    if lead_prose:
+        segments.append(lines[:core_start])
+    else:
+        core_start = 0
+    if trail_prose:
+        segments.append(lines[core_start:core_end])
+        segments.append(lines[core_end:])
+    else:
+        segments.append(lines[core_start:])
+    return segments
 
 
 def _detect_code_blocks(sections: list[Section]) -> list[Section]:
