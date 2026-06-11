@@ -102,7 +102,7 @@ def _make_toc_section(title: str, page: str, x: float = 400.0) -> "Section":
 
 
 def _hints(sections) -> "list[bool]":
-    from tomd.lib.pdf.__init__ import _toc_structural_hints
+    from tomd.lib.pdf.pipeline import _toc_structural_hints
     return _toc_structural_hints(sections)
 
 
@@ -149,7 +149,7 @@ class TestStructuralTocHints:
 
     def test_outlier_x_position_excluded_from_hints(self):
         """A candidate whose x differs from the cluster is not marked as a hint."""
-        from tomd.lib.pdf.__init__ import _toc_structural_hints, _TOC_X_TOLERANCE
+        from tomd.lib.pdf.pipeline import _TOC_X_TOLERANCE, _toc_structural_hints
         normal_x = 400.0
         outlier_x = normal_x + _TOC_X_TOLERANCE + 20.0
         secs = [
