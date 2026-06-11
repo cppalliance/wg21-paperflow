@@ -636,6 +636,26 @@ class TestDenormalizedTable:
         assert "<table>" not in md
         assert "Line1 Line2" in md
 
+    def test_code_table_blank_lines_no_paragraph_break(self):
+        """Blank lines in <pre><code> must not break Markdown HTML block."""
+        html = """
+        <table>
+        <tr><th>A</th><th>B</th></tr>
+        <tr>
+          <td><pre><code>line1;
+
+line2;</code></pre></td>
+          <td><pre><code>fix1;
+
+fix2;</code></pre></td>
+        </tr>
+        </table>
+        """
+        md = render_body(parse_html(html), "mpark")
+        assert "<table" in md
+        assert "&#10;" in md
+        assert "\n\n" not in md.split("<pre")[1].split("</pre>")[0]
+
     def test_pipe_in_cell_escaped(self):
         """Pipe characters in cell content must be escaped."""
         html = """
