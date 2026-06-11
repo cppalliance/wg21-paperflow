@@ -787,6 +787,7 @@ def _render_mixed_code_table(el: Tag) -> str | None:
             if code_el:
                 code_text = code_el.get_text().strip()
                 escaped = _html.escape(code_text)
+                escaped = escaped.replace("\n\n", "\n&#10;\n")
                 parts.append(
                     f'<{tag} style="{_S}">'
                     f'<pre style="margin: 0;"><code>{escaped}</code></pre>'
