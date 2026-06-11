@@ -833,8 +833,12 @@ def _filter_sections_inside_vector_images(
                 if in_band:
                     continue
 
-        # 4. Other PARAGRAPH: per-line filter against unextended bbox.
-        if sec.kind != SectionKind.PARAGRAPH:
+        # 4. PARAGRAPH / UNCERTAIN: per-line filter against unextended bbox.
+        # UNCERTAIN is included because dual-path disagreement on a region
+        # inside a vector cluster (e.g. P3127R1 page 6's set-description
+        # block) produces an UNCERTAIN section whose lines are still
+        # geometrically inside the cluster and must be filtered.
+        if sec.kind not in (SectionKind.PARAGRAPH, SectionKind.UNCERTAIN):
             kept.append(sec)
             continue
         if not sec.lines:
