@@ -11,7 +11,9 @@ from .. import (
     format_front_matter,
     strip_leading_h1,
     strip_redundant_body_meta,
+    strip_orphan_toc_list,
 )
+from ..metadata_yaml.format import format_front_matter
 from . import extract as _extract
 from . import render as _render
 from .images import HtmlImagesResult
@@ -25,7 +27,11 @@ _PID_BASE_RE = re.compile(r"([DPN])(\d{3,5})(?:R(\d+))?", re.IGNORECASE)
 def _override_revision_from_filename(metadata: dict, path: Path) -> None:
     """Override document revision from filename when the base paper number
     matches but revisions differ. Skip when the extracted document has a
-    D-prefix (draft), since D/P mismatches are expected WG21 workflow."""
+    D-prefix (draft), since D/P mismatches are expected WG21 workflow.
+
+    Identical to metadata_yaml.extract.override_revision_from_filename;
+    duplicated here to avoid a circular import chain through pdf.__init__.
+    """
     if "document" not in metadata:
         return
     doc_m = _PID_BASE_RE.search(metadata["document"])
@@ -130,6 +136,7 @@ def convert_html(
                 md = md[:fm_end + 1] + body
 
     md = strip_redundant_body_meta(md)
+    md = strip_orphan_toc_list(md)
 
     if metadata:
         fm_end = md.find("---", 4)
