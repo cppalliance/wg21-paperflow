@@ -511,6 +511,19 @@ def _has_spans(el: Tag) -> bool:
 
 
 
+_BR_MULTILINE_MIN_CELLS = 2
+
+def _has_br_multiline_cells(el: Tag) -> bool:
+    """True when enough cells contain <br>, making pipe-table lossy."""
+    count = 0
+    for cell in el.find_all(["td", "th"]):
+        if cell.find("br"):
+            count += 1
+            if count >= _BR_MULTILINE_MIN_CELLS:
+                return True
+    return False
+
+
 def _needs_flat_reconstruction(el: Tag) -> bool:
     """Return True for tables that need the descendant-walking flat path.
 
@@ -811,6 +824,9 @@ def _render_table(el: Tag) -> str | None:
 
     if _has_spans(el):
         return _render_denormalized_table(el)
+
+    if _has_br_multiline_cells(el):
+        return _render_mixed_code_table(el)
 
     rows: list[list[str]] = []
     containers = el.find_all(["thead", "tbody", "tfoot"], recursive=False)

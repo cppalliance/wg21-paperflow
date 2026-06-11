@@ -1,7 +1,7 @@
 """Tests for lib.html.render."""
 
 from tomd.lib.html.extract import parse_html
-from tomd.lib.html.render import render_body
+from tomd.lib.html.render import render_body, _MIXED_TABLE_MARKER
 
 
 class TestHeading:
@@ -486,11 +486,42 @@ class TestDenormalizedTable:
         assert "| 1 | 2 |" in md
 
     def test_br_in_cell_becomes_space(self):
-        """Cells with <br> should collapse to single-line pipe table cells."""
+        """Single-cell <br> stays as pipe table (below threshold)."""
         html = """
         <table>
         <tr><th>Col</th></tr>
         <tr><td>Line1<br>Line2</td></tr>
+        </table>
+        """
+        md = render_body(parse_html(html), "mpark")
+        assert "<table>" not in md
+        assert "Line1 Line2" in md
+
+    def test_br_multiline_cells_become_html_table(self):
+        """Tables with 2+ cells containing <br> route to HTML table."""
+        html = """
+        <table>
+        <thead><tr><th>Unary</th><th>Binary</th></tr></thead>
+        <tbody><tr>
+          <td>+q<br>-q<br>++q</td>
+          <td>q + kind<br>q - kind<br>q * q2</td>
+        </tr></tbody>
+        </table>
+        """
+        md = render_body(parse_html(html), "mpark")
+        assert "<table" in md
+        assert "<br" in md
+        assert _MIXED_TABLE_MARKER in md
+
+    def test_single_br_cell_stays_pipe(self):
+        """Only one cell with <br> stays as pipe table."""
+        html = """
+        <table>
+        <thead><tr><th>A</th><th>B</th></tr></thead>
+        <tbody><tr>
+          <td>Line1<br>Line2</td>
+          <td>No break here</td>
+        </tr></tbody>
         </table>
         """
         md = render_body(parse_html(html), "mpark")
