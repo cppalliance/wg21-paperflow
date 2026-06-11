@@ -456,6 +456,11 @@ def drop_leaked_toc_headings(sections: list[Section]) -> list[Section]:
     `15.1.1`). It is body-safe by construction: an empty heading has no body, so
     no prose, code, table, or list can be removed or re-parented.
 
+    "Empty" is interpreted loosely: non-trivial sections that are themselves
+    heading titles recurring later (neighbour TOC entries that `find_toc_indices`
+    did not strip, e.g. long chapter titles formatted as a list) are treated as
+    transparent and do not block the preceding heading's eligibility.
+
     Pure and deterministic (D7): built by ordered iteration; the removal set
     gates membership only and never feeds prompt-bound output.
     """
@@ -467,8 +472,15 @@ def drop_leaked_toc_headings(sections: list[Section]) -> list[Section]:
         if sec.kind == SectionKind.HEADING:
             title_indices.setdefault(_normalize_toc_entry(sec.text), []).append(i)
 
+    def _is_toc_neighbour(j: int) -> bool:
+        """True if sections[j] is a non-heading that is itself a heading title
+        recurring later — i.e. another leaked TOC entry, not body prose."""
+        norm_j = _normalize_toc_entry(sections[j].text)
+        return any(k > j for k in title_indices.get(norm_j, []))
+
     # 2. mark removable-eligible headings: empty (no substantial body before the
-    #    next heading) AND title recurs as a *later* heading.
+    #    next heading, where neighbour TOC entries count as transparent) AND
+    #    title recurs as a *later* heading.
     eligible = [False] * n
     for i, sec in enumerate(sections):
         if sec.kind != SectionKind.HEADING:
@@ -477,7 +489,7 @@ def drop_leaked_toc_headings(sections: list[Section]) -> list[Section]:
         for j in range(i + 1, n):
             if sections[j].kind == SectionKind.HEADING:
                 break
-            if not _section_is_trivial(sections[j]):
+            if not _section_is_trivial(sections[j]) and not _is_toc_neighbour(j):
                 empty = False
                 break
         if not empty:
@@ -486,10 +498,10 @@ def drop_leaked_toc_headings(sections: list[Section]) -> list[Section]:
         if any(k > i for k in title_indices.get(norm, [])):
             eligible[i] = True
 
-    # 3. group eligible headings into contiguous runs (only trivial sections sit
-    #    between consecutive members, which condition 2's emptiness guarantees),
-    #    keep runs >= MIN_TOC_RUN, reject a strictly-deepening container stack,
-    #    and sweep the run's in-span trivial fragments plus a preceding label.
+    # 3. group eligible headings into contiguous runs (only trivial sections or
+    #    TOC-neighbour sections sit between consecutive members), keep runs >=
+    #    MIN_TOC_RUN, reject a strictly-deepening container stack, and sweep the
+    #    run's in-span fragments plus a preceding label.
     heading_idx = [i for i in range(n) if sections[i].kind == SectionKind.HEADING]
     to_remove: set[int] = set()
 
@@ -501,18 +513,27 @@ def drop_leaked_toc_headings(sections: list[Section]) -> list[Section]:
             return  # strictly-deepening clause hierarchy, not a TOC
         for i in run:
             to_remove.add(i)
-        # Trivial fragments (split page numbers) within the run's empty span,
+        # Trivial fragments and TOC-neighbour entries within the run's span,
         # up to the next real heading after the last entry.
         end = next((k for k in heading_idx if k > run[-1]), n)
         for j in range(run[0] + 1, end):
-            if (sections[j].kind != SectionKind.HEADING
-                    and _section_is_trivial(sections[j])):
-                to_remove.add(j)
-        # A "Table of Contents" / "Contents" label immediately preceding the run.
+            if sections[j].kind != SectionKind.HEADING:
+                if _section_is_trivial(sections[j]) or _is_toc_neighbour(j):
+                    to_remove.add(j)
+        # A "Table of Contents" / "Contents" label immediately preceding the
+        # run. Paragraph-kind labels are caught by sweeping back through trivial
+        # non-headings; heading-kind labels (e.g. "### Table of Contents") are
+        # caught by the explicit heading check.
         p = run[0] - 1
-        while (p >= 0 and sections[p].kind != SectionKind.HEADING
-               and _section_is_trivial(sections[p])):
-            if _is_toc_label(sections[p].text):
+        while p >= 0:
+            sec_p = sections[p]
+            if sec_p.kind == SectionKind.HEADING:
+                if _is_toc_label(sec_p.text):
+                    to_remove.add(p)
+                break
+            if not _section_is_trivial(sec_p):
+                break
+            if _is_toc_label(sec_p.text):
                 to_remove.add(p)
             p -= 1
 
