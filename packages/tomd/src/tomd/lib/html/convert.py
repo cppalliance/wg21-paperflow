@@ -8,7 +8,6 @@ from pathlib import Path
 from .. import (
     DOC_NUM_RE,
     dedup_paragraphs,
-    format_front_matter,
     strip_leading_h1,
     strip_redundant_body_meta,
     strip_orphan_toc_list,

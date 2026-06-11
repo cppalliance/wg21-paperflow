@@ -46,6 +46,7 @@ from .types import (
     SkipReason,
     is_readable,
 )
+from .. import DOC_NUM_RE
 from ..toc import find_toc_indices, has_dot_leader, _is_toc_label
 from ..metadata_yaml.strip import (
     strip_metadata_headings as _strip_metadata_headings_new,
