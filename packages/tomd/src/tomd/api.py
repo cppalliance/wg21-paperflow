@@ -35,16 +35,15 @@ import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from tomd.lib.metadata_yaml.format import format_front_matter, sanitize_metadata
 from tomd.errors import UnsupportedSourceFormatError
 from tomd.lib import (
-    format_front_matter,
-    sanitize_metadata,
     strip_freeform_metadata_lines,
     strip_leading_h1,
     EMAIL_RE,
 )
 from tomd.lib.html import convert_html
-from tomd.lib.pdf import ExtractedImage, convert_pdf, run_pipeline
+from tomd.lib.pdf import ExtractedImage, PipelineResult, SkipReason, run_pipeline
 
 __all__ = ["ConvertedPaper", "convert_paper", "convert_paper_full"]
 
@@ -59,8 +58,8 @@ class ConvertedPaper:
     convert orchestration uses this structured form to persist image
     bytes and decide whether to invalidate downstream pipelines.
 
-    ``skipped`` is True for slide-decks, standards-draft early exits,
-    or unreadable sources. In that case ``markdown`` is the empty
+    ``skipped`` is True for empty PDFs, slide decks, standards-draft
+    early exits, or unreadable sources. In that case ``markdown`` is the empty
     string and ``images`` is empty - the caller writes nothing to
     disk and accumulates the paper in a "skipped" report bucket.
     """
@@ -72,9 +71,26 @@ class ConvertedPaper:
     source_image_count: int = 0
     images_truncated: bool = False
     skipped: bool = False
-    skip_reason: str = ""
+    skip_reason: SkipReason | None = None
     source_raster_count: int = 0
     source_vector_count: int = 0
+
+    @classmethod
+    def skipped_from(cls, raw: PipelineResult) -> "ConvertedPaper":
+        """Translate a skipped :class:`PipelineResult` into a skipped
+        :class:`ConvertedPaper`.
+        """
+        return cls(
+            markdown="",
+            prompts=raw.prompts,
+            intent="",
+            images=[],
+            source_image_count=0,
+            images_truncated=False,
+            skipped=True,
+            skip_reason=raw.skip_reason,
+        )
+
 
 logger = logging.getLogger(__name__)
 
@@ -90,8 +106,8 @@ _FALLBACK_KEY_MAP = {
     "title": "title",
     "paper_id": "document",
     "document_date": "date",
-    "subgroup": "audience",       # mailing row key
-    "target_group": "audience",   # DB row key (SqliteBackend)
+    "subgroup": "audience",  # mailing row key
+    "target_group": "audience",  # DB row key (SqliteBackend)
     "authors": "reply-to",
 }
 
@@ -101,9 +117,7 @@ _FALLBACK_KEY_MAP = {
 # paper_id (P/N-number) is the canonical identifier.
 _OVERRIDE_KEYS = {"document"}
 
-_FRONT_MATTER_RE = re.compile(
-    r"\A---\s*\n(?P<body>.*?)\n---\s*\n?", re.DOTALL
-)
+_FRONT_MATTER_RE = re.compile(r"\A---\s*\n(?P<body>.*?)\n---\s*\n?", re.DOTALL)
 
 
 def _strip_toc_replace(m: re.Match[str]) -> str:
@@ -204,7 +218,7 @@ def _normalize_front_matter(md: str, mailing_meta: dict | None) -> str:
     match = _FRONT_MATTER_RE.match(md)
     if match:
         parsed = _parse_front_matter_body(match.group("body"))
-        rest = md[match.end():]
+        rest = md[match.end() :]
     else:
         parsed = {}
         rest = md
@@ -221,10 +235,7 @@ def _normalize_front_matter(md: str, mailing_meta: dict | None) -> str:
         # Bare-name-only reply-to (no emails) should not block the
         # mailing fallback: the mailing may have richer author+email data.
         rt = parsed.get("reply-to")
-        if (
-            isinstance(rt, list) and rt
-            and not any(EMAIL_RE.search(e) for e in rt)
-        ):
+        if isinstance(rt, list) and rt and not any(EMAIL_RE.search(e) for e in rt):
             present.discard("reply-to")
         added_yaml_keys: set[str] = set()
         for src_key, yaml_key in _FALLBACK_KEY_MAP.items():
@@ -243,7 +254,8 @@ def _normalize_front_matter(md: str, mailing_meta: dict | None) -> str:
             if yaml_key == "date":
                 logger.debug(
                     "Date fallback from mailing (%s=%r): source had no date",
-                    src_key, val,
+                    src_key,
+                    val,
                 )
             parsed[yaml_key] = val
             added_yaml_keys.add(yaml_key)
@@ -282,8 +294,8 @@ def _strip_body_metadata_text(md: str) -> str:
     if not match:
         return md
 
-    front = md[:match.end()]
-    body = md[match.end():]
+    front = md[: match.end()]
+    body = md[match.end() :]
 
     lines = body.split("\n")
     to_remove: set[int] = set()
@@ -326,29 +338,17 @@ def _strip_body_metadata_text(md: str) -> str:
     return front + "\n".join(new_lines)
 
 
-def _convert_with_tomd(path: Path) -> tuple[str, list[str] | None]:
-    """Dispatch to the appropriate tomd converter by file suffix."""
-    suffix = path.suffix.lower()
-    if suffix == ".pdf":
-        return convert_pdf(path)
-    if suffix in (".html", ".htm"):
-        return convert_html(path)
-    raise UnsupportedSourceFormatError(
-        f"Unsupported source format {suffix!r} for {path.name}; "
-        f"expected .pdf, .html, or .htm"
-    )
-
-
 @dataclass(frozen=True)
 class _RawConversion:
     """Internal shape returned by :func:`_convert_with_tomd_full`."""
+
     md: str
     prompts: list[str] | None
     images: list[ExtractedImage]
     source_image_count: int
     images_truncated: bool
     skipped: bool
-    skip_reason: str
+    skip_reason: SkipReason | None
     source_raster_count: int = 0
     source_vector_count: int = 0
 
@@ -403,16 +403,22 @@ def _convert_with_tomd_full(
         md, prompts = convert_html(path, html_images_result=html_result)
         if html_result is None:
             return _RawConversion(
-                md=md, prompts=prompts,
-                images=[], source_image_count=0, images_truncated=False,
-                skipped=False, skip_reason="",
+                md=md,
+                prompts=prompts,
+                images=[],
+                source_image_count=0,
+                images_truncated=False,
+                skipped=False,
+                skip_reason=None,
             )
         return _RawConversion(
-            md=md, prompts=prompts,
+            md=md,
+            prompts=prompts,
             images=list(html_result.images),
             source_image_count=html_result.source_image_count,
             images_truncated=html_result.images_truncated,
-            skipped=False, skip_reason="",
+            skipped=False,
+            skip_reason=None,
         )
     raise UnsupportedSourceFormatError(
         f"Unsupported source format {suffix!r} for {path.name}; "
@@ -432,7 +438,7 @@ def _extract_intent_from_front_matter(md: str) -> str:
     intent_match = _INTENT_LINE_RE.search(body)
     if not intent_match:
         return ""
-    return intent_match.group(1).strip().strip('"\'')
+    return intent_match.group(1).strip().strip("\"'")
 
 
 def convert_paper_full(
@@ -478,30 +484,29 @@ def convert_paper_full(
     if raw.prompts:
         logger.warning(
             "tomd [%s] flagged %d uncertain region(s)",
-            paper_id, len(raw.prompts),
+            paper_id,
+            len(raw.prompts),
         )
 
     if raw.skipped:
-        return ConvertedPaper(
-            markdown="",
-            prompts=raw.prompts,
-            intent="",
-            images=[],
-            source_image_count=0,
-            images_truncated=False,
-            skipped=True,
-            skip_reason=raw.skip_reason,
+        return ConvertedPaper.skipped_from(
+            PipelineResult(
+                md="",
+                prompts=raw.prompts,
+                skipped=True,
+                skip_reason=raw.skip_reason,
+            )
         )
 
     if not raw.md or not raw.md.strip():
         raise RuntimeError(
-            f"tomd produced empty markdown for {paper_id} (slide deck, "
-            f"standards draft, or unreadable source)."
+            f"tomd produced empty markdown for {paper_id} "
+            f"({source_path.suffix.lower()} source; not a typed skip)."
         )
 
     md = _normalize_front_matter(raw.md, meta)
     md = _strip_body_metadata_text(md)
-    md = strip_freeform_metadata_lines(md)
+    md = strip_freeform_metadata_lines(md, metadata=meta)
 
     # Re-run H1 stripping: leaked metadata before the H1 may have
     # blocked strip_leading_h1 in the emit layer.
@@ -527,7 +532,7 @@ def convert_paper_full(
         source_image_count=raw.source_image_count,
         images_truncated=raw.images_truncated,
         skipped=False,
-        skip_reason="",
+        skip_reason=None,
         source_raster_count=raw.source_raster_count,
         source_vector_count=raw.source_vector_count,
     )
@@ -553,6 +558,6 @@ def convert_paper(
     if r.skipped:
         raise RuntimeError(
             f"tomd produced empty markdown for {paper_id} "
-            f"({r.skip_reason or 'slide deck, standards draft, or unreadable source'})."
+            f"({r.skip_reason.value if r.skip_reason else 'slide deck, standards draft, or unreadable source'})."
         )
     return r.markdown, r.prompts, r.intent
