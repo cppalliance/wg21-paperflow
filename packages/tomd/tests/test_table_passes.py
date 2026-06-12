@@ -4,12 +4,19 @@
 
 """Unit tests for new table detection passes added in PR #109."""
 
+from types import SimpleNamespace
+
 from tomd.lib.pdf.types import Span, Line, Block
 from tomd.lib.pdf.table import (
     _gap_asymmetry_reject,
     _block_horizontal_row_relaxed,
     _try_wrapped_partial_row,
 )
+from tomd.lib.pdf.pipeline import _detect_drawing_grids
+
+# Page height of a 595x842 portrait page (P3100R6 geometry), shared by
+# the drawing-grid tests and the rotation fixtures below.
+_PAGE_H = 842.0
 
 
 def _line(text: str, x0: float, y0: float, x1: float, y1: float) -> Line:
@@ -237,3 +244,120 @@ class TestWrappedPartialRow:
         blocks = self._established_table() + [frag]
         assert _try_wrapped_partial_row(
             blocks, 2, self.REF_COLS, self.COLUMN_XS, blocks[:2]) is None
+
+
+class _FakePage:
+    """Stub page exposing get_drawings()/get_text() with synthetic items."""
+
+    def __init__(self, lines, text_lines=None):
+        self._lines = lines
+        self._text_lines = text_lines or []
+
+    def get_drawings(self):
+        return [
+            {"items": [("l", SimpleNamespace(x=x0, y=y0),
+                        SimpleNamespace(x=x1, y=y1))]}
+            for x0, y0, x1, y1 in self._lines
+        ]
+
+    def get_text(self, kind, flags=0):
+        return {
+            "blocks": [{
+                "type": 0,
+                "lines": [{"bbox": bbox} for bbox in self._text_lines],
+            }]
+        }
+
+
+def _grid_lines(x0, x1, ys):
+    """Horizontal rules at each y plus full-height verticals at x0/x1."""
+    lines = [(x0, y, x1, y) for y in ys]
+    lines.append((x0, ys[0], x0, ys[-1]))
+    lines.append((x1, ys[0], x1, ys[-1]))
+    return lines
+
+
+def _two_col_text(ys, left_x=200.0, right_x=300.0):
+    """Two side-by-side text cells per row band (a real table)."""
+    cells = []
+    for y in ys:
+        cells.append((left_x, y, left_x + 40, y + 11))
+        cells.append((right_x, y, right_x + 90, y + 11))
+    return cells
+
+
+class TestDetectDrawingGrids:
+    """Tests for _detect_drawing_grids: bordered grids find_tables missed."""
+
+    PAGE_H = _PAGE_H
+
+    def test_p3100r6_geometry_detected(self):
+        """The real P3100R6 page-66 grid (8 h-rules, verticals) is found."""
+        ys = [565.0, 578.9, 581.3, 595.2, 609.2, 623.1, 637.1, 637.5]
+        text = _two_col_text([566.1, 583.0, 597.0, 610.9, 624.9])
+        page = _FakePage(_grid_lines(190.0, 405.0, ys), text)
+        grids = _detect_drawing_grids(page, self.PAGE_H, [])
+        assert len(grids) == 1
+        bbox = grids[0]["bbox"]
+        assert bbox[0] == 190.0 and bbox[2] == 405.0
+        # Synthetic entry must carry the full find_tables shape with
+        # row_count=0 so Pass 5 skips it.
+        assert grids[0]["row_count"] == 0
+        assert grids[0]["cells"] == []
+
+    def test_full_page_margin_rules_rejected(self):
+        """Full-page-height rules (wording margins) must not become grids."""
+        ys = [74.0, 190.0, 306.0, 422.0, 538.0, 654.0, 769.0]
+        text = _two_col_text([100.0, 220.0, 340.0, 460.0, 580.0],
+                             left_x=210.0, right_x=270.0)
+        page = _FakePage(_grid_lines(205.0, 320.0, ys), text)
+        grids = _detect_drawing_grids(page, self.PAGE_H, [])
+        assert grids == []
+
+    def test_too_few_horizontals_rejected(self):
+        ys = [565.0, 595.0, 637.0]
+        text = _two_col_text([570.0, 600.0])
+        page = _FakePage(_grid_lines(190.0, 405.0, ys), text)
+        assert _detect_drawing_grids(page, self.PAGE_H, []) == []
+
+    def test_missing_vertical_borders_rejected(self):
+        """Horizontal rules without side borders (e.g. hr separators)."""
+        ys = [565.0, 580.0, 595.0, 610.0, 625.0]
+        text = _two_col_text([567.0, 582.0, 597.0, 612.0])
+        page = _FakePage([(190.0, y, 405.0, y) for y in ys], text)
+        assert _detect_drawing_grids(page, self.PAGE_H, []) == []
+
+    def test_already_covered_by_find_tables_skipped(self):
+        ys = [565.0, 580.0, 595.0, 610.0, 625.0]
+        text = _two_col_text([567.0, 582.0, 597.0, 612.0])
+        page = _FakePage(_grid_lines(190.0, 405.0, ys), text)
+        existing = [{"bbox": (185.0, 560.0, 410.0, 630.0)}]
+        assert _detect_drawing_grids(page, self.PAGE_H, existing) == []
+
+    def test_boxed_code_single_column_rejected(self):
+        """Bordered wording/code boxes (one line per y-band) are not tables."""
+        ys = [565.0, 580.0, 595.0, 610.0, 625.0]
+        # One text line per band, varying indentation (code box pattern).
+        text = [
+            (200.0, 567.0, 380.0, 578.0),
+            (215.0, 582.0, 390.0, 593.0),
+            (215.0, 597.0, 350.0, 608.0),
+            (200.0, 612.0, 360.0, 623.0),
+        ]
+        page = _FakePage(_grid_lines(190.0, 405.0, ys), text)
+        assert _detect_drawing_grids(page, self.PAGE_H, []) == []
+
+    def test_mostly_single_cell_bands_rejected(self):
+        """A grid where most rows hold one cell is a box stack, not a table."""
+        ys = [565.0, 580.0, 595.0, 610.0, 625.0, 640.0]
+        text = [
+            # 2 multi-cell bands...
+            (200.0, 567.0, 240.0, 578.0), (300.0, 567.0, 390.0, 578.0),
+            (200.0, 582.0, 240.0, 593.0), (300.0, 582.0, 390.0, 593.0),
+            # ...but 3 single-cell bands dominate
+            (200.0, 597.0, 390.0, 608.0),
+            (200.0, 612.0, 390.0, 623.0),
+            (200.0, 627.0, 390.0, 638.0),
+        ]
+        page = _FakePage(_grid_lines(190.0, 405.0, ys), text)
+        assert _detect_drawing_grids(page, self.PAGE_H, []) == []

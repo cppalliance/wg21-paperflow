@@ -1,9 +1,9 @@
-"""PDF to Markdown converter - pipeline entry point."""
+﻿"""PDF to Markdown converter - pipeline entry point."""
 
 import fitz
 import logging
 import re
-from collections import Counter
+from collections import Counter, defaultdict
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -126,6 +126,161 @@ def _toc_structural_hints(sections) -> list[bool]:
         elif x is None or abs(x - med_x) <= _TOC_X_TOLERANCE:
             result[i] = True
     return result
+
+
+# ─── Drawing-grid detection ────────────────────────────────────────────
+# MuPDF find_tables() misses some small bordered tables. This fallback
+# detects rectangular grids from vector drawing lines and injects them
+# as synthetic entries so Pass 2b (inline-grid) can fire.
+
+_DRAWING_GRID_SPAN_TOL = 5.0       # grouping tolerance for horizontal lines
+_DRAWING_GRID_AXIS_TOL = 1.0       # max skew for an axis-aligned line
+_DRAWING_GRID_MIN_HORIZONTALS = 5   # 5+ h-lines = header + 2 data rows minimum
+_DRAWING_GRID_MIN_WIDTH = 50.0      # reject tiny decorative boxes
+_DRAWING_GRID_VERT_TOL = 3.0        # tolerance for matching vertical borders
+_DRAWING_GRID_Y_DEDUP = 3.0         # merge near-identical y-values
+_DRAWING_GRID_MAX_HEIGHT_RATIO = 0.7  # reject grids taller than 70% of page
+_DRAWING_GRID_BAND_TOL = 4.0       # y-band grouping for multi-cell check
+_DRAWING_GRID_MIN_MULTI_BANDS = 2  # bands that must hold 2+ cells side by side
+_DRAWING_GRID_COVER_FRAC = 0.5     # find_tables overlap that counts as covered
+
+
+def _page_text_line_bboxes(page) -> list[tuple[float, float, float, float]]:
+    """Bboxes of all text lines on *page*, for the grid multi-cell check."""
+    try:
+        data = page.get_text("dict", flags=0)
+    except Exception:
+        # Firewall around MuPDF: a malformed page must not abort the
+        # whole conversion, it just loses the drawing-grid fallback.
+        return []
+    return [
+        tuple(line["bbox"])
+        for blk in data.get("blocks", [])
+        if blk.get("type") == 0
+        for line in blk.get("lines", [])
+    ]
+
+
+def _detect_drawing_grids(
+    page, page_height: float,
+    existing_tables: list[dict],
+) -> list[dict]:
+    """Detect bordered table grids from page drawings that find_tables missed.
+
+    Returns a list of synthetic table entries (bbox dicts) suitable for
+    injection into page_mupdf_tables.
+    """
+    try:
+        drawings = page.get_drawings()
+    except Exception:
+        # Firewall around MuPDF, same rationale as _page_text_line_bboxes.
+        return []
+
+    h_lines: list[tuple[float, float, float]] = []
+    v_xs: list[float] = []
+
+    for d in drawings:
+        for item in d["items"]:
+            if item[0] == "l":
+                p1, p2 = item[1], item[2]
+                if abs(p1.y - p2.y) < _DRAWING_GRID_AXIS_TOL:
+                    h_lines.append((min(p1.x, p2.x), max(p1.x, p2.x), p1.y))
+                elif abs(p1.x - p2.x) < _DRAWING_GRID_AXIS_TOL:
+                    v_xs.append(p1.x)
+
+    if len(h_lines) < _DRAWING_GRID_MIN_HORIZONTALS:
+        return []
+
+    # Bucket h-lines by rounded span. Bucketing has hard edges (lines
+    # straddling a bucket boundary split into two groups), but distance
+    # clustering was tried and rejected: it merges vertically stacked
+    # sibling tables with near-identical spans into one grid.
+    h_by_span: dict[tuple[float, float], list[float]] = defaultdict(list)
+    for hx0, hx1, hy in h_lines:
+        key = (round(hx0 / _DRAWING_GRID_SPAN_TOL) * _DRAWING_GRID_SPAN_TOL,
+               round(hx1 / _DRAWING_GRID_SPAN_TOL) * _DRAWING_GRID_SPAN_TOL)
+        h_by_span[key].append(hy)
+
+    results: list[dict] = []
+    text_lines: list[tuple[float, float, float, float]] | None = None
+    for (x0, x1), ys in h_by_span.items():
+        if len(ys) < _DRAWING_GRID_MIN_HORIZONTALS:
+            continue
+        if (x1 - x0) < _DRAWING_GRID_MIN_WIDTH:
+            continue
+
+        ys_sorted = sorted(ys)
+        y_min, y_max = ys_sorted[0], ys_sorted[-1]
+        grid_height = y_max - y_min
+
+        if grid_height > page_height * _DRAWING_GRID_MAX_HEIGHT_RATIO:
+            continue
+
+        # Require vertical borders on both sides
+        left_verts = any(abs(v - x0) < _DRAWING_GRID_VERT_TOL for v in v_xs)
+        right_verts = any(abs(v - x1) < _DRAWING_GRID_VERT_TOL for v in v_xs)
+        if not left_verts or not right_verts:
+            continue
+
+        # Deduplicate y-values to count actual rows
+        unique_ys: list[float] = []
+        for y in ys_sorted:
+            if not unique_ys or abs(y - unique_ys[-1]) > _DRAWING_GRID_Y_DEDUP:
+                unique_ys.append(y)
+        if len(unique_ys) < 3:  # need at least 2 data rows
+            continue
+
+        grid_bbox = (x0, y_min, x1, y_max)
+
+        # Multi-cell check: bordered wording/code boxes also produce
+        # stacked horizontal rules, but their text is one line per
+        # y-band. A real table has 2+ side-by-side cells in most rows.
+        if text_lines is None:
+            text_lines = _page_text_line_bboxes(page)
+        bands: list[float] = []  # y-band centers
+        band_cells: list[int] = []
+        for lx0, ly0, lx1, ly1 in text_lines:
+            ymid = (ly0 + ly1) / 2.0
+            xmid = (lx0 + lx1) / 2.0
+            if not (y_min <= ymid <= y_max and x0 <= xmid <= x1):
+                continue
+            for bi, band_y in enumerate(bands):
+                if abs(ymid - band_y) <= _DRAWING_GRID_BAND_TOL:
+                    band_cells[bi] += 1
+                    break
+            else:
+                bands.append(ymid)
+                band_cells.append(1)
+        multi_bands = sum(1 for c in band_cells if c >= 2)
+        if multi_bands < _DRAWING_GRID_MIN_MULTI_BANDS:
+            continue
+        if multi_bands * 2 < len(band_cells):
+            continue  # mostly single-cell rows: a box, not a table
+
+        # Skip if already covered by find_tables
+        already_covered = any(
+            _bbox_overlap_fraction(grid_bbox, ft["bbox"])
+            > _DRAWING_GRID_COVER_FRAC
+            for ft in existing_tables
+        )
+        if already_covered:
+            continue
+
+        # Full find_tables() entry shape so downstream passes can read all
+        # keys safely. row_count=0 makes Pass 5 (MuPDF Native) skip the
+        # entry; only Pass 2b (inline-grid) acts on it, via the bbox.
+        results.append({
+            "bbox": grid_bbox,
+            "row_count": 0,
+            "col_count": 0,
+            "cells": [],
+            "header_names": None,
+            "extract": [],
+            "rot": None,
+        })
+
+    return results
+
 
 
 def _detect_column_split(blocks: list, page_width: float) -> float | None:
@@ -958,6 +1113,17 @@ def run_pipeline(
             except Exception:
                 _log.debug("find_tables() failed on page %d", pg_num,
                            exc_info=True)
+
+            # Fallback: detect bordered grids from drawing lines that
+            # find_tables() missed and inject as synthetic entries.
+            drawing_grids = _detect_drawing_grids(
+                page, page.rect.height,
+                page_mupdf_tables.get(pg_num, []),
+            )
+            if drawing_grids:
+                _log.debug("Drawing-grid fallback found %d grid(s) on page %d",
+                           len(drawing_grids), pg_num)
+                page_mupdf_tables.setdefault(pg_num, []).extend(drawing_grids)
 
         if all_figure_regions:
             _log.info("Detected %d figure region(s)", len(all_figure_regions))
