@@ -1,4 +1,4 @@
-"""Table detection, classification, and rendering strategy from MuPDF blocks.
+﻿"""Table detection, classification, and rendering strategy from MuPDF blocks.
 
 Table Family (6 kinds, corpus-validated against 768 tables from 124 WG21 PDFs):
 
@@ -754,14 +754,24 @@ def _detect_side_by_side_tables(
                 deferred = False
                 for tbl in page_mupdf_tables.get(page, []):
                     tb = tbl["bbox"]
-                    if tbl.get("row_count", 0) < _SBS_MUPDF_DEFER_MIN_ROWS:
+                    rot = tbl.get("rot")
+                    # Rotated entries are mostly 1-row band fragments,
+                    # so the min-rows gate must not apply to them: any
+                    # overlap defers to the rotation-aware Pass 5.
+                    if (rot is None
+                            and tbl.get("row_count", 0)
+                            < _SBS_MUPDF_DEFER_MIN_ROWS):
                         continue
-                    overlap_x = max(0, min(body_x1, tb[2]) - max(body_x0, tb[0]))
-                    overlap_y = max(0, min(body_y1, tb[3]) - max(body_y0, tb[1]))
+                    # find_tables bboxes live in reading space; map the
+                    # body bbox there on rotated pages (see _rot_midpoint).
+                    bx0, by0, bx1, by1 = _rot_bbox(
+                        (body_x0, body_y0, body_x1, body_y1), rot)
+                    overlap_x = max(0, min(bx1, tb[2]) - max(bx0, tb[0]))
+                    overlap_y = max(0, min(by1, tb[3]) - max(by0, tb[1]))
                     if overlap_x > 0 and overlap_y > 0:
-                        body_area = max((body_x1 - body_x0) * (body_y1 - body_y0), 1)
+                        body_area = max((bx1 - bx0) * (by1 - by0), 1)
                         overlap_ratio = (overlap_x * overlap_y) / body_area
-                        if overlap_ratio > 0.30:
+                        if rot is not None or overlap_ratio > 0.30:
                             _log.debug(
                                 "SBS deferred to MuPDF Native: page %d, "
                                 "overlap=%.0f%%, MuPDF rows=%d",
@@ -838,10 +848,15 @@ def _detect_inline_grid_tables(
     table_sections: list[Section] = []
     used: set[int] = set()
 
-    # Pre-build set of (page, y_mid) ranges from MuPDF tables for fast lookup.
+    # Pre-build set of (page, y_mid) ranges from MuPDF tables for fast
+    # lookup.  Entries carrying a rotation matrix are excluded: the
+    # x/y clustering below operates in page space, which is transposed
+    # on rotated pages; Pass 5 handles those rotation-aware.
     mupdf_ranges: list[tuple[int, float, float, float, float]] = []
     for pg, tbls in (page_mupdf_tables or {}).items():
         for tbl in tbls:
+            if tbl.get("rot") is not None:
+                continue
             bbox = tbl["bbox"]
             mupdf_ranges.append((pg, bbox[0], bbox[1], bbox[2], bbox[3]))
 
@@ -1037,6 +1052,41 @@ def _maybe_transpose_label_table(
     return [header_row, data_cells]
 
 
+def _rot_midpoint(
+    bbox: tuple[float, float, float, float],
+    rot: Optional[tuple[float, ...]],
+) -> tuple[float, float]:
+    """Midpoint of bbox, mapped through a rotation matrix if given.
+
+    On rotated pages find_tables() reports geometry in reading
+    (display) space while extract_mupdf blocks stay in unrotated page
+    space. ``rot`` is the page rotation matrix (a, b, c, d, e, f) that
+    maps page space into reading space; ``None`` means no rotation.
+    """
+    x = (bbox[0] + bbox[2]) / 2.0
+    y = (bbox[1] + bbox[3]) / 2.0
+    if rot is None:
+        return x, y
+    a, b, c, d, e, f = rot
+    return a * x + c * y + e, b * x + d * y + f
+
+
+def _rot_bbox(
+    bbox: tuple[float, float, float, float],
+    rot: Optional[tuple[float, ...]],
+) -> tuple[float, float, float, float]:
+    """Bbox mapped through a rotation matrix (normalized), see _rot_midpoint."""
+    if rot is None:
+        return bbox
+    a, b, c, d, e, f = rot
+    x0 = a * bbox[0] + c * bbox[1] + e
+    y0 = b * bbox[0] + d * bbox[1] + f
+    x1 = a * bbox[2] + c * bbox[3] + e
+    y1 = b * bbox[2] + d * bbox[3] + f
+    return (min(x0, x1), min(y0, y1), max(x0, x1), max(y0, y1))
+
+
+
 def _detect_mupdf_native_tables(
     blocks: list[Block],
     page_mupdf_tables: dict[int, list[dict]],
@@ -1061,6 +1111,9 @@ def _detect_mupdf_native_tables(
             row_count = tbl_info["row_count"]
             col_count = tbl_info["col_count"]
             cells = tbl_info["cells"]
+            # Rotation matrix for rotated pages (synthetic entries and
+            # tests may omit the key).
+            rot = tbl_info.get("rot")
 
             if row_count < 2 or col_count < 1:
                 continue
@@ -1147,8 +1200,7 @@ def _detect_mupdf_native_tables(
                     continue
                 if blk.page_num != page_num:
                     continue
-                bmid_y = (blk.bbox[1] + blk.bbox[3]) / 2.0
-                bmid_x = (blk.bbox[0] + blk.bbox[2]) / 2.0
+                bmid_x, bmid_y = _rot_midpoint(blk.bbox, rot)
                 if (bbox[0] - margin <= bmid_x <= bbox[2] + margin
                         and bbox[1] - margin <= bmid_y <= bbox[3] + margin):
                     table_block_indices.append(idx)
@@ -1165,8 +1217,7 @@ def _detect_mupdf_native_tables(
             for idx in table_block_indices:
                 blk = blocks[idx]
                 for ln in blk.lines:
-                    lmid_x = (ln.bbox[0] + ln.bbox[2]) / 2.0
-                    lmid_y = (ln.bbox[1] + ln.bbox[3]) / 2.0
+                    lmid_x, lmid_y = _rot_midpoint(ln.bbox, rot)
 
                     best_r, best_c = -1, -1
                     best_score = float("inf")
@@ -1668,17 +1719,25 @@ def _split_trailing_horizontal_rows(
 
 def _detect_horizontal_row_tables(
     blocks: list[Block],
+    rotated_pages: frozenset[int],
 ) -> tuple[list[Section], set[int]]:
     """Detect tables formed by consecutive horizontal-row blocks.
 
     Two or more adjacent blocks on the same page, each with 3+ lines
     at identical y-level and matching cell count, form a table.
+
+    *rotated_pages* are skipped: the y-level geometry assumes upright
+    text and produces garbage rows there; Pass 5 handles those pages
+    rotation-aware.
     """
     table_sections: list[Section] = []
     used: set[int] = set()
     i = 0
 
     while i < len(blocks):
+        if blocks[i].page_num in rotated_pages:
+            i += 1
+            continue
         cols = _block_horizontal_row(blocks[i])
         if cols is None:
             i += 1
@@ -2111,6 +2170,7 @@ def _detect_column_aligned_tables(
     blocks: list[Block],
     *,
     two_column_pages: frozenset[int] = frozenset(),
+    rotated_pages: frozenset[int],
 ) -> tuple[list[Section], set[int]]:
     """Detect borderless tables via span-level x-position clustering.
 
@@ -2142,8 +2202,12 @@ def _detect_column_aligned_tables(
     for page_num in sorted(page_blocks):
         idx_blocks = page_blocks[page_num]
 
-        # Skip pages with two-column paper layout.
+        # Skip pages with two-column paper layout, and rotated pages:
+        # the y-band/x-bucket geometry below assumes upright text and
+        # produces garbage there; Pass 5 handles those rotation-aware.
         if page_num in two_column_pages:
+            continue
+        if page_num in rotated_pages:
             continue
 
         # Collect span x-positions per y-band.
@@ -3885,6 +3949,14 @@ def detect_tables(
     """
     column_xs = _find_column_xs(blocks)  # geometric second signal
 
+    # Pages whose find_tables() results carry a rotation matrix: the
+    # upright-geometry passes (1, 3, 4) stand down there and Pass 5
+    # handles those pages rotation-aware.
+    rotated_pages = frozenset(
+        pg for pg, tbls in (page_mupdf_tables or {}).items()
+        if any(t.get("rot") is not None for t in tbls)
+    )
+
     table_sections: list[Section] = []
 
     # Pass 0: label-anchored spec tables ("Table N - XYZ requirements").
@@ -4093,7 +4165,12 @@ def detect_tables(
                                 if sp.monospace:
                                     mono_spans += 1
                 p1_mono_ratio = mono_spans / total_spans if total_spans else 0
-                if p1_mono_ratio < _MONO_RATIO_THRESHOLD:
+                page_tbls = page_mupdf_tables.get(p1_page, [])
+                # Rotated pages: Pass 1 column geometry operates in page
+                # space where the rotated table layout is meaningless, so
+                # the mono-ratio escape hatch must not keep its result.
+                if (p1_mono_ratio < _MONO_RATIO_THRESHOLD
+                        or p1_page in rotated_pages):
                     # Use only blocks on p1_page for bounding box.
                     # Cross-page tables mix y-coordinates from
                     # different pages, inflating p1_h and defeating
@@ -4104,8 +4181,27 @@ def detect_tables(
                     p1_y1 = max(b.bbox[3] for b in same_pg)
                     p1_x0 = min(b.bbox[0] for b in same_pg)
                     p1_x1 = max(b.bbox[2] for b in same_pg)
-                    for tbl in page_mupdf_tables.get(p1_page, []):
+                    for tbl in page_tbls:
                         tb = tbl["bbox"]
+                        rot = tbl.get("rot")
+                        # find_tables bboxes live in reading space; map
+                        # the Pass 1 bbox there on rotated pages.
+                        rx0, ry0, rx1, ry1 = _rot_bbox(
+                            (p1_x0, p1_y0, p1_x1, p1_y1), rot)
+                        ov_x = max(0, min(rx1, tb[2]) - max(rx0, tb[0]))
+                        ov_y = max(0, min(ry1, tb[3]) - max(ry0, tb[1]))
+                        if rot is not None:
+                            # Rotated page: any overlap defers to Pass 5,
+                            # which is rotation-aware. The min-rows and
+                            # phantom guards are calibrated for upright
+                            # pages and would keep Pass 1's garbage here.
+                            if ov_x > 0 and ov_y > 0:
+                                _log.debug(
+                                    "Pass 1 deferred to MuPDF Native "
+                                    "(rotated page %d)", p1_page)
+                                p1_deferred = True
+                                break
+                            continue
                         if tbl.get("row_count", 0) < _SBS_MUPDF_DEFER_MIN_ROWS:
                             continue
                         # Phantom guard: if MuPDF's table is much
@@ -4113,14 +4209,12 @@ def detect_tables(
                         # merged prose with the real table. Keep the
                         # Pass 1 detection.
                         mupdf_h = tb[3] - tb[1]
-                        p1_h = max(p1_y1 - p1_y0, 1.0)
+                        p1_h = max(ry1 - ry0, 1.0)
                         if mupdf_h > p1_h * 3.0:
                             continue
-                        ov_x = max(0, min(p1_x1, tb[2]) - max(p1_x0, tb[0]))
-                        ov_y = max(0, min(p1_y1, tb[3]) - max(p1_y0, tb[1]))
                         if ov_x > 0 and ov_y > 0:
                             p1_area = max(
-                                (p1_x1 - p1_x0) * (p1_y1 - p1_y0), 1)
+                                (rx1 - rx0) * (ry1 - ry0), 1)
                             if (ov_x * ov_y) / p1_area > 0.30:
                                 _log.debug(
                                     "Pass 1 deferred to MuPDF Native: "
@@ -4222,7 +4316,8 @@ def detect_tables(
         table_sections.extend(thr_tables)
 
     # Pass 3: narrow horizontal-row tables (e.g. vote/poll grids)
-    hr_tables, hr_used = _detect_horizontal_row_tables(remaining)
+    hr_tables, hr_used = _detect_horizontal_row_tables(
+        remaining, rotated_pages=rotated_pages)
     if hr_tables:
         table_sections.extend(hr_tables)
         remaining = [b for idx, b in enumerate(remaining)
@@ -4230,7 +4325,8 @@ def detect_tables(
 
     # Pass 4: geometric column grouping (borderless tables)
     geo_tables, geo_used = _detect_column_aligned_tables(
-        remaining, two_column_pages=two_column_pages)
+        remaining, two_column_pages=two_column_pages,
+        rotated_pages=rotated_pages)
     if geo_tables:
         table_sections.extend(geo_tables)
         remaining = [b for idx, b in enumerate(remaining)
@@ -4255,8 +4351,6 @@ def detect_tables(
     # which pass produced the table.
     absorbed: set[int] = set()
     for ts in table_sections:
-        if not ts.columns or len(ts.columns) < 2:
-            continue
         ncols = len(ts.columns[0])
         ts_y_top = min(ln.bbox[1] for ln in ts.lines) if ts.lines else 0
         # Get column x-positions from the first data row's spans.

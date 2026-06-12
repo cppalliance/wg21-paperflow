@@ -1,4 +1,4 @@
-﻿"""PDF to Markdown converter - pipeline entry point."""
+"""PDF to Markdown converter - pipeline entry point."""
 
 import fitz
 import logging
@@ -36,7 +36,7 @@ from ..metadata_yaml.extract import (
     extract_metadata as _extract_metadata_yaml,
     apply_pdf_metadata_fallbacks as _apply_pdf_metadata_fallbacks,
 )
-from .table import detect_tables, exclude_table_regions
+from .table import detect_tables, exclude_table_regions, _rot_bbox, _rot_midpoint
 from .wg21 import extract_metadata_from_blocks
 from .emit import emit_markdown, emit_prompts
 from .types import (
@@ -282,7 +282,6 @@ def _detect_drawing_grids(
     return results
 
 
-
 def _detect_column_split(blocks: list, page_width: float) -> float | None:
     """Find the x-coordinate that separates two text columns on a page.
 
@@ -329,24 +328,42 @@ def _detect_column_split(blocks: list, page_width: float) -> float | None:
     return best_split
 
 
-def _column_aware_sort(blocks: list, page_widths: dict[int, float]) -> None:
+def _column_aware_sort(
+    blocks: list,
+    page_widths: dict[int, float],
+    page_rotations: dict[int, tuple] | None = None,
+) -> None:
     """Sort blocks by reading order: page, then column (if two-column), then y.
 
     For two-column pages the left column is emitted entirely before the
     right column, preserving within-column y-order.  Single-column pages
     fall back to simple y-midpoint sorting (the P3625R1 fix).
+
+    Rotated pages (page_rotations maps page -> rotation matrix) sort by
+    the reading-space y-midpoint: block bboxes stay in unrotated page
+    space, where the raw y-order does not match visual reading order.
     """
     page_blocks: dict[int, list] = {}
     for b in blocks:
         page_blocks.setdefault(b.page_num, []).append(b)
 
+    rotations = page_rotations or {}
     splits: dict[int, float | None] = {}
     for pg, pblocks in page_blocks.items():
+        if pg in rotations:
+            # Column detection works on page-space x, which is
+            # meaningless on rotated pages; sort_key short-circuits
+            # before reading splits for these pages.
+            continue
         pw = page_widths.get(pg, 612.0)
         splits[pg] = _detect_column_split(pblocks, pw)
 
     def sort_key(b):
         pg = b.page_num
+        rot = rotations.get(pg)
+        if rot is not None:
+            _, ry = _rot_midpoint(b.bbox, rot)
+            return (pg, 0, ry)
         y_mid = (b.bbox[1] + b.bbox[3]) / 2
         split = splits.get(pg)
         if split is not None:
@@ -1007,6 +1024,9 @@ def run_pipeline(
         all_spatial_blocks = []
         all_edge_items = []
         page_widths: dict[int, float] = {}
+        # Rotated pages: pg -> rotation matrix (page space -> reading
+        # space).  Used for reading-order sorting and table insertion.
+        page_rotations: dict[int, tuple] = {}
         per_page_image_candidates: list = []
         # Sub-threshold raster glyphs (font-replacement emoji) and the
         # text-layer emoji bboxes used to skip coincident positions.
@@ -1018,6 +1038,8 @@ def run_pipeline(
         for pg_num in range(result.page_count):
             page = doc[pg_num]
             page_widths[pg_num] = page.rect.width
+            if page.rotation:
+                page_rotations[pg_num] = tuple(page.rotation_matrix)
 
             mupdf_blocks = extract_mupdf(page, pg_num)
             spatial_blocks = extract_spatial(page, pg_num)
@@ -1098,16 +1120,29 @@ def run_pipeline(
                 raw_drawings, pg_num, page.rect.width)
             all_figure_regions.extend(page_figures)
 
+            # Intentional: runs unconditionally (independent of ml_tables).
+            # Three table-detection passes rely on the MuPDF signal:
+            # SBS deferral (Pass 0/2), inline-grid overlap (Pass 2b),
+            # and MuPDF Native (Pass 5).  Cost accepted across the
+            # 382-paper corpus.  Gate behind a flag if profiling shows
+            # this dominates conversion time on large documents.
             try:
                 ft = page.find_tables()
                 if ft.tables:
+                    # On rotated pages find_tables() reports bboxes in
+                    # reading (display) space while extract_mupdf blocks
+                    # stay in unrotated page space. Pass the rotation
+                    # matrix so Pass 5 can map block/line midpoints into
+                    # reading space before cell assignment.
+                    rot = page_rotations.get(pg_num)
                     page_mupdf_tables[pg_num] = [
                         {"bbox": tuple(t.bbox),
                          "row_count": t.row_count,
                          "col_count": t.col_count,
                          "cells": [tuple(c) if c else None for c in t.cells],
                          "header_names": t.header.names if t.header else None,
-                         "extract": t.extract()}
+                         "extract": t.extract(),
+                         "rot": rot}
                         for t in ft.tables
                     ]
             except Exception:
@@ -1116,6 +1151,11 @@ def run_pipeline(
 
             # Fallback: detect bordered grids from drawing lines that
             # find_tables() missed and inject as synthetic entries.
+            # Skipped on rotated pages: the h/v line classification works
+            # in page space and Pass 2b consuming such an entry would
+            # build a transposed table; Pass 5 owns rotated pages.
+            if pg_num in page_rotations:
+                continue
             drawing_grids = _detect_drawing_grids(
                 page, page.rect.height,
                 page_mupdf_tables.get(pg_num, []),
@@ -1204,8 +1244,8 @@ def run_pipeline(
     # text despite higher y-positions) the merge target is wrong and
     # continuation text lands on the wrong block.  Sorting first ensures
     # "last block on the page" means visually bottom-most.
-    _column_aware_sort(all_mupdf_blocks, page_widths)
-    _column_aware_sort(all_spatial_blocks, page_widths)
+    _column_aware_sort(all_mupdf_blocks, page_widths, page_rotations)
+    _column_aware_sort(all_spatial_blocks, page_widths, page_rotations)
 
     all_mupdf_blocks = cleanup_text(all_mupdf_blocks)
     all_spatial_blocks = cleanup_text(all_spatial_blocks)
@@ -1265,6 +1305,9 @@ def run_pipeline(
         data_on_label_page = (
             ts.lines and ts.lines[0].page_num == ts.page_num
         )
+        # On rotated pages compare in reading space; page-space y does
+        # not reflect visual order there.
+        ts_rot = page_rotations.get(ts.page_num)
         for i, sec in enumerate(sections):
             if sec.page_num > ts.page_num:
                 sections.insert(i, ts)
@@ -1273,7 +1316,8 @@ def run_pipeline(
             if (data_on_label_page
                     and sec.page_num == ts.page_num and sec.lines
                     and ts.lines
-                    and sec.lines[0].bbox[1] > ts.lines[0].bbox[1]):
+                    and _rot_bbox(sec.lines[0].bbox, ts_rot)[1]
+                    > _rot_bbox(ts.lines[0].bbox, ts_rot)[1]):
                 sections.insert(i, ts)
                 inserted = True
                 break

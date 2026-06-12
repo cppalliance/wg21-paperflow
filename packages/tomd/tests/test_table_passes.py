@@ -11,8 +11,10 @@ from tomd.lib.pdf.table import (
     _gap_asymmetry_reject,
     _block_horizontal_row_relaxed,
     _try_wrapped_partial_row,
+    _rot_midpoint,
+    _detect_mupdf_native_tables,
 )
-from tomd.lib.pdf.pipeline import _detect_drawing_grids
+from tomd.lib.pdf.pipeline import _column_aware_sort, _detect_drawing_grids
 
 # Page height of a 595x842 portrait page (P3100R6 geometry), shared by
 # the drawing-grid tests and the rotation fixtures below.
@@ -361,3 +363,122 @@ class TestDetectDrawingGrids:
         ]
         page = _FakePage(_grid_lines(190.0, 405.0, ys), text)
         assert _detect_drawing_grids(page, self.PAGE_H, []) == []
+
+
+# 90-degree rotation matrix of a 595x842 portrait page (P3100R6 appendix
+# geometry): maps unrotated page space into reading space via
+# (x, y) -> (842 - y, x).
+_ROT90 = (0.0, 1.0, -1.0, 0.0, _PAGE_H, 0.0)
+
+
+def _rotated_line(text: str, rx: float, ry: float) -> Line:
+    """Line whose page-space bbox maps to reading-space center (rx, ry)."""
+    x, y = ry, _PAGE_H - rx
+    return Line(spans=[Span(text=text, font_size=10.0)],
+                bbox=(x - 5, y - 5, x + 5, y + 5))
+
+
+class TestRotMidpoint:
+    def test_no_rotation_returns_plain_midpoint(self):
+        assert _rot_midpoint((10.0, 20.0, 30.0, 40.0), None) == (20.0, 30.0)
+
+    def test_rot90_maps_into_reading_space(self):
+        # Page-space midpoint (100, 742) -> reading space (842-742, 100).
+        assert _rot_midpoint((90.0, 732.0, 110.0, 752.0), _ROT90) == (
+            100.0, 100.0)
+
+
+class TestMupdfNativeRotatedPage:
+    """Pass 5 on rotated pages: cell assignment uses reading space.
+
+    Models the P3100R6 appendix (pages rotated 90 degrees): find_tables()
+    reports table/cell bboxes in reading space while extract_mupdf block
+    bboxes stay in unrotated page space.  Without the rot matrix every
+    line lands in the wrong cell (or none).
+    """
+
+    # 3 columns: keeps the 2-column label-transpose heuristic out of play.
+    EXPECTED = [
+        ["Name", "Meaning", "Notes"],
+        ["pre", "a precondition check", "evaluated on entry"],
+        ["post", "a postcondition check", "evaluated on exit"],
+    ]
+
+    def _tbl_info(self, rot):
+        # 3x3 grid in reading space: rows at y 50/120/190,
+        # cols at x 50/200/400.
+        cells = [
+            (50.0, 50.0, 200.0, 120.0), (200.0, 50.0, 400.0, 120.0),
+            (400.0, 50.0, 560.0, 120.0),
+            (50.0, 120.0, 200.0, 190.0), (200.0, 120.0, 400.0, 190.0),
+            (400.0, 120.0, 560.0, 190.0),
+            (50.0, 190.0, 200.0, 260.0), (200.0, 190.0, 400.0, 260.0),
+            (400.0, 190.0, 560.0, 260.0),
+        ]
+        return {
+            "bbox": (50.0, 50.0, 560.0, 260.0),
+            "row_count": 3, "col_count": 3,
+            "cells": cells,
+            "header_names": None,
+            "extract": [list(r) for r in self.EXPECTED],
+            "rot": rot,
+        }
+
+    def _blocks(self):
+        # One block per cell, placed at reading-space cell centers but
+        # carrying page-space bboxes (as extract_mupdf delivers them).
+        col_x = (125.0, 300.0, 480.0)
+        row_y = (85.0, 155.0, 225.0)
+        blocks = []
+        for ri, row in enumerate(self.EXPECTED):
+            for ci, txt in enumerate(row):
+                ln = _rotated_line(txt, col_x[ci], row_y[ri])
+                blocks.append(Block(lines=[ln], bbox=ln.bbox, page_num=0))
+        return blocks
+
+    def test_rotated_cells_assigned_correctly(self):
+        sections, used = _detect_mupdf_native_tables(
+            self._blocks(), {0: [self._tbl_info(_ROT90)]})
+        assert len(sections) == 1
+        rows = [
+            ["".join(s.text for s in cell) for cell in row]
+            for row in sections[0].columns
+        ]
+        assert rows == self.EXPECTED
+
+    def test_without_rot_matrix_assembly_degrades(self):
+        """Control: same geometry minus the matrix must not pair correctly."""
+        sections, used = _detect_mupdf_native_tables(
+            self._blocks(), {0: [self._tbl_info(None)]})
+        for sec in sections:
+            rows = [
+                ["".join(s.text for s in cell) for cell in row]
+                for row in sec.columns
+            ]
+            assert rows != self.EXPECTED
+
+class TestColumnAwareSortRotated:
+    """_column_aware_sort uses reading-space y on rotated pages."""
+
+    def test_rotated_page_sorts_by_reading_order(self):
+        # Reading order: heading (ry 30), table row (ry 100), footer
+        # (ry 200).  In page space their y-order is inverted (the 90
+        # degree rotation maps reading-y onto page-x).
+        ln_heading = _rotated_line("Appendix", 100.0, 30.0)
+        heading = Block(lines=[ln_heading], bbox=ln_heading.bbox, page_num=0)
+        ln_row = _rotated_line("data", 100.0, 100.0)
+        row = Block(lines=[ln_row], bbox=ln_row.bbox, page_num=0)
+        ln_footer = _rotated_line("73", 100.0, 200.0)
+        footer = Block(lines=[ln_footer], bbox=ln_footer.bbox, page_num=0)
+        blocks = [footer, row, heading]
+        _column_aware_sort(blocks, {0: 595.0}, {0: _ROT90})
+        assert [b.text for b in blocks] == ["Appendix", "data", "73"]
+
+    def test_without_rotation_map_behavior_unchanged(self):
+        a = Block(lines=[_line("top", 10, 50, 100, 60)],
+                  bbox=(10, 50, 100, 60), page_num=0)
+        b = Block(lines=[_line("bottom", 10, 500, 100, 510)],
+                  bbox=(10, 500, 100, 510), page_num=0)
+        blocks = [b, a]
+        _column_aware_sort(blocks, {0: 595.0})
+        assert [blk.text for blk in blocks] == ["top", "bottom"]
