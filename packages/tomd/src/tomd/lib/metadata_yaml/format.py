@@ -29,6 +29,8 @@ _NON_AUTHOR_RE = re.compile(
 
 FRONT_MATTER_ORDER = ("title", "document", "date", "intent", "audience", "reply-to")
 
+FrontMatterDict = dict[str, str | list[str]]
+
 FRONT_MATTER_RE = re.compile(r"\A---\s*\n(?P<body>.*?)\n---\s*\n?", re.DOTALL)
 
 _LIST_ITEM_RE = re.compile(r"^\s+-\s+(.*)$")
@@ -58,9 +60,9 @@ def _unquote_yaml_scalar(s: str) -> str:
     return "".join(out)
 
 
-def _parse_front_matter_body(body: str) -> dict:
+def _parse_front_matter_body(body: str) -> FrontMatterDict:
     """Parse a YAML front-matter body into a dict."""
-    parsed: dict = {}
+    parsed: FrontMatterDict = {}
     lines = body.splitlines()
     i = 0
     while i < len(lines):
@@ -102,10 +104,11 @@ def _parse_front_matter_body(body: str) -> dict:
     return parsed
 
 
-def parse_front_matter(md: str) -> dict:
+def parse_front_matter(md: str) -> FrontMatterDict:
     """Parse YAML front matter from markdown into a metadata dict.
 
-    Returns an empty dict when no front matter block is present.
+    Scalar keys map to ``str``; list-valued keys (e.g. ``reply-to``) map to
+    ``list[str]``. Returns an empty dict when no front matter block is present.
     """
     match = FRONT_MATTER_RE.match(md)
     if not match:

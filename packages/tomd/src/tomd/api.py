@@ -142,7 +142,7 @@ def _normalize_front_matter(md: str, mailing_meta: dict | None) -> str:
     ``_apply_metadata_fallback``, and ``_canonicalize_front_matter``.
     """
     parsed = parse_front_matter(md)
-    rest = strip_front_matter(md) if parsed else md
+    rest = strip_front_matter(md)
 
     if not parsed and not mailing_meta:
         return md
