@@ -422,16 +422,12 @@ def convert_paper_full(
 
     # Re-run H1 stripping: leaked metadata before the H1 may have
     # blocked strip_leading_h1 in the emit layer.
-    title_m = re.search(r'^title:\s*"?(.+?)"?\s*$', md, re.MULTILINE)
-    if title_m and md.startswith("---"):
-        fm_close = md.find("\n---", 3)
-        if fm_close >= 0:
-            body_start = md.find("\n", fm_close + 1)
-            if body_start >= 0:
-                body_start += 1
-                body = md[body_start:]
-                body = strip_leading_h1(body, title_m.group(1))
-                md = md[:body_start] + body
+    match = FRONT_MATTER_RE.match(md)
+    if match:
+        title = parse_front_matter(md).get("title")
+        if isinstance(title, str) and title:
+            body = strip_leading_h1(strip_front_matter(md), title)
+            md = md[: match.end()] + body
 
     md = _strip_toc(md)
 
