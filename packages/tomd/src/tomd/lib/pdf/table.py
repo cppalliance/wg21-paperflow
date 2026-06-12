@@ -1,4 +1,4 @@
-﻿"""Table detection, classification, and rendering strategy from MuPDF blocks.
+"""Table detection, classification, and rendering strategy from MuPDF blocks.
 
 Table Family (6 kinds, corpus-validated against 768 tables from 124 WG21 PDFs):
 
@@ -44,6 +44,7 @@ Optional Docling enrichment (ml_tables=True):
 import logging
 import re
 from collections import Counter, defaultdict
+from collections.abc import Set as AbstractSet
 from dataclasses import replace
 from enum import Enum
 from typing import NamedTuple, Optional
@@ -1086,6 +1087,316 @@ def _rot_bbox(
     return (min(x0, x1), min(y0, y1), max(x0, x1), max(y0, y1))
 
 
+# Banded rotated-table assembly (Pass 5 pre-step).  Geometry tolerances
+# match the main Pass 5 loop; the band gap tolerance allows a band block
+# to touch the adjacent fragment edges.  Rotated pages further apart
+# than the page gap belong to independent tables and are never stitched.
+_BANDED_CLUSTER_TOL = 10.0
+_BANDED_MARGIN = 5.0
+_BANDED_BAND_GAP_TOL = 2.0
+_BANDED_MAX_PAGE_GAP = 2
+
+
+def _norm_row_texts(row: list[list]) -> tuple[str, ...]:
+    """Whitespace-normalized text per cell, for row comparisons."""
+    return tuple(
+        " ".join("".join(s.text for s in cell).split())
+        for cell in row
+    )
+
+
+def _banded_header_match(row: list[list], header_norm: tuple[str, ...]) -> bool:
+    """True when row repeats the canonical header (pre-normalized).
+
+    Per-page header repeats may differ in a single cell (e.g. the
+    P3100R6 appendix header has a typo on its first page only).  The
+    tolerance is restricted to 3+ column tables: in a 2-column table a
+    data row sharing one cell with the header is most likely real data,
+    and dropping it would be silent data loss.
+    """
+    a = _norm_row_texts(row)
+    if len(a) != len(header_norm):
+        return False
+    mismatches = sum(1 for x, y in zip(a, header_norm) if x != y)
+    allowed = 1 if len(header_norm) >= 3 else 0
+    return mismatches <= allowed
+
+
+def _assemble_rotated_fragment(
+    tbl_info: dict,
+    blocks: list[Block],
+    rot: tuple[float, ...],
+    exclude: AbstractSet[int],
+) -> tuple[list[list[list]], list, set[int]]:
+    """Assemble one find_tables() fragment on a rotated page.
+
+    Clusters the fragment's cell bboxes into a grid (same thresholds as
+    the main Pass 5 loop) and assigns block lines to cells via
+    reading-space midpoints.  Block indices in *exclude* (band heading
+    candidates) are never claimed.  Returns (rows, lines,
+    block_indices); rows that are completely empty are dropped.
+    """
+    page_num = tbl_info["page_num"]
+    bbox = tbl_info["bbox"]
+    valid_cells = [c for c in tbl_info["cells"] if c is not None]
+    if not valid_cells:
+        return [], [], set()
+
+    y_tops = sorted(set(round(c[1], 1) for c in valid_cells))
+    y_clusters: list[float] = []
+    for yt in y_tops:
+        if not y_clusters or abs(yt - y_clusters[-1]) > _BANDED_CLUSTER_TOL:
+            y_clusters.append(yt)
+        else:
+            y_clusters[-1] = (y_clusters[-1] + yt) / 2.0
+    x_mids = sorted(set(round((c[0] + c[2]) / 2.0, 1) for c in valid_cells))
+    x_clusters: list[float] = []
+    for xm in x_mids:
+        if not x_clusters or abs(xm - x_clusters[-1]) > _BANDED_CLUSTER_TOL:
+            x_clusters.append(xm)
+        else:
+            x_clusters[-1] = (x_clusters[-1] + xm) / 2.0
+
+    nrows, ncols = len(y_clusters), len(x_clusters)
+    cell_grid: list[list[tuple | None]] = [
+        [None] * ncols for _ in range(nrows)
+    ]
+    for c in valid_cells:
+        ri = min(range(nrows), key=lambda r: abs(c[1] - y_clusters[r]))
+        ci = min(range(ncols),
+                 key=lambda k: abs((c[0] + c[2]) / 2.0 - x_clusters[k]))
+        cell_grid[ri][ci] = c
+
+    rows_data: list[list[list]] = [
+        [[] for _ in range(ncols)] for _ in range(nrows)
+    ]
+    lines = []
+    block_indices: set[int] = set()
+    m = _BANDED_MARGIN
+    for idx, blk in enumerate(blocks):
+        if blk.page_num != page_num or idx in exclude:
+            continue
+        bmx, bmy = _rot_midpoint(blk.bbox, rot)
+        if not (bbox[0] - m <= bmx <= bbox[2] + m
+                and bbox[1] - m <= bmy <= bbox[3] + m):
+            continue
+        block_indices.add(idx)
+        for ln in blk.lines:
+            lmx, lmy = _rot_midpoint(ln.bbox, rot)
+            best_r, best_c = -1, -1
+            best_score = float("inf")
+            for ri in range(nrows):
+                for ci in range(ncols):
+                    cb = cell_grid[ri][ci]
+                    if cb is None:
+                        continue
+                    if (cb[0] - m <= lmx <= cb[2] + m
+                            and cb[1] - m <= lmy <= cb[3] + m):
+                        cw = max(cb[2] - cb[0], 1.0)
+                        ch = max(cb[3] - cb[1], 1.0)
+                        score = (abs(lmx - (cb[0] + cb[2]) / 2.0) / cw
+                                 + abs(lmy - (cb[1] + cb[3]) / 2.0) / ch)
+                        if score < best_score:
+                            best_score = score
+                            best_r, best_c = ri, ci
+            if best_r >= 0:
+                cell = rows_data[best_r][best_c]
+                if cell and ln.spans:
+                    cell.append(Span(text="\n"))
+                cell.extend(ln.spans)
+            lines.append(ln)
+
+    rows = [r for r in rows_data if any(cell for cell in r)]
+    return rows, lines, block_indices
+
+
+def _assemble_banded_run(
+    run_pages: list[int],
+    blocks: list[Block],
+    page_mupdf_tables: dict[int, list[dict]],
+) -> tuple[list[Section], set[int], set[int]]:
+    """Banded assembly over one contiguous run of rotated pages.
+
+    Returns (sections, used_block_indices, consumed_entry_ids).  When
+    the run has no category band, everything is left to the main Pass 5
+    loop and all three results are empty.
+    """
+    # Stream of (page, reading_y, kind, payload) items in reading order.
+    stream: list[tuple] = []
+    n_bands = 0
+    run_entry_ids: set[int] = set()
+    for pg in run_pages:
+        entries = [e for e in page_mupdf_tables[pg]
+                   if e.get("rot") is not None]
+        run_entry_ids |= {id(e) for e in entries}
+        rot = entries[0]["rot"]
+        frags = sorted(entries, key=lambda e: e["bbox"][1])
+
+        # Identify band candidates before fragments claim blocks: the
+        # claim margin is wider than the band gap tolerance, so a band
+        # heading hugging a fragment edge would otherwise be swallowed
+        # into a table cell.
+        x_lo = min(e["bbox"][0] for e in frags)
+        x_hi = max(e["bbox"][2] for e in frags)
+        band_candidates: dict[int, float] = {}
+        for idx, blk in enumerate(blocks):
+            if blk.page_num != pg or len(blk.lines) != 1:
+                continue
+            bmx, bmy = _rot_midpoint(blk.bbox, rot)
+            if not (x_lo - _BANDED_MARGIN <= bmx <= x_hi + _BANDED_MARGIN):
+                continue
+            for k in range(len(frags) - 1):
+                if (frags[k]["bbox"][3] - _BANDED_BAND_GAP_TOL <= bmy
+                        <= frags[k + 1]["bbox"][1] + _BANDED_BAND_GAP_TOL):
+                    band_candidates[idx] = bmy
+                    break
+
+        page_items: list[tuple] = []
+        for e in frags:
+            rows, lines, bidx = _assemble_rotated_fragment(
+                {**e, "page_num": pg}, blocks, rot,
+                exclude=band_candidates.keys())
+            if not rows:
+                continue
+            page_items.append(
+                (pg, e["bbox"][1], "frag", (rows, lines, bidx, id(e))))
+
+        if not page_items:
+            continue
+
+        for bmy in band_candidates.values():
+            page_items.append((pg, bmy, "band", None))
+            n_bands += 1
+        page_items.sort(key=lambda it: it[1])
+        stream.extend(page_items)
+
+    if n_bands == 0:
+        return [], set(), set()
+
+    # Walk the stream: bands open a new category; fragments append
+    # their rows to the current category.  The first assembled row of
+    # the run is the canonical header; rows that repeat it are dropped
+    # (interior dedup).  Fragments whose column count differs from the
+    # header belong to a different table and stay with the main loop.
+    header: list[list] | None = None
+    header_norm: tuple[str, ...] | None = None
+    categories: list[dict] = []
+    current: dict | None = None
+    used: set[int] = set()
+    skipped_entry_ids: set[int] = set()
+    for pg, _y, kind, payload in stream:
+        if kind == "band":
+            current = {"page_num": pg, "rows": [], "lines": []}
+            categories.append(current)
+            continue
+        rows, lines, bidx, entry_id = payload
+        if header is not None and rows and len(rows[0]) != len(header):
+            skipped_entry_ids.add(entry_id)
+            continue
+        if current is None:
+            # Pre-band area: holds the canonical header fragment (and
+            # any intro rows, which get their own unlabeled section).
+            current = {"page_num": pg, "rows": [], "lines": []}
+            categories.append(current)
+        used |= bidx
+        current["lines"].extend(lines)
+        for row in rows:
+            if header is None:
+                header = row
+                header_norm = _norm_row_texts(header)
+                continue
+            if _banded_header_match(row, header_norm):
+                continue
+            current["rows"].append(row)
+
+    # Classify once over all data rows: every category is a slice of
+    # the same logical table, so kind/strategy must be uniform.  The
+    # row transformation step (code-row merging) is re-applied per
+    # category because the classifier's merged rows cross category
+    # boundaries.
+    all_rows = [r for cat in categories for r in cat["rows"]]
+    if not all_rows:
+        return [], set(), set()
+    kind_val, strategy_val, _ = _classify_and_annotate(all_rows)
+
+    sections: list[Section] = []
+    for cat in categories:
+        if not cat["rows"]:
+            continue
+        cat_rows = cat["rows"]
+        if kind_val == TableKind.CODE_COMPARISON.value:
+            cat_rows = _merge_code_rows(cat_rows)
+        # Copy the header per section: downstream enrichment mutates
+        # section columns in place, and a shared row object would leak
+        # edits across sibling categories.
+        columns = [[list(cell) for cell in header]] + cat_rows
+        sections.append(Section(
+            kind=SectionKind.TABLE,
+            text=_render_table_text(columns),
+            confidence=Confidence.HIGH,
+            lines=cat["lines"],
+            page_num=cat["page_num"],
+            columns=columns,
+            table_kind=kind_val,
+            table_strategy=strategy_val,
+            table_source="banded_grid",
+        ))
+        _log.debug(
+            "Banded rotated table: %d rows x %d cols starting page %d (%s)",
+            len(columns), len(columns[0]), cat["page_num"], kind_val)
+
+    return sections, used, run_entry_ids - skipped_entry_ids
+
+
+def _detect_banded_rotated_tables(
+    blocks: list[Block],
+    page_mupdf_tables: dict[int, list[dict]],
+) -> tuple[list[Section], set[int], set[int]]:
+    """Stitch find_tables() fragments on rotated pages into category tables.
+
+    Category bands (unclaimed single-line blocks sitting between two
+    fragments, within the table x-range) act as merge barriers: each
+    band starts a new table section, and fragments between bands are
+    stitched together, across pages when a category spans several
+    pages.  1-row fragments are continuation rows here, not noise.
+    The band blocks themselves stay unclaimed so the prose pipeline
+    renders them as headings.
+
+    Rotated pages are grouped into contiguous runs (max gap
+    _BANDED_MAX_PAGE_GAP); each run is assembled independently so an
+    unrelated rotated table elsewhere in the document is never stitched
+    into this one.  Runs without a band are left to the main Pass 5
+    loop (today's behavior).
+
+    Returns (sections, used_block_indices, consumed_entry_ids); the
+    main loop skips exactly the entries whose id() is in the consumed
+    set.
+    """
+    rot_pages = sorted(
+        pg for pg, entries in page_mupdf_tables.items()
+        if any(e.get("rot") is not None for e in entries)
+    )
+    if not rot_pages:
+        return [], set(), set()
+
+    runs: list[list[int]] = [[rot_pages[0]]]
+    for pg in rot_pages[1:]:
+        if pg - runs[-1][-1] <= _BANDED_MAX_PAGE_GAP:
+            runs[-1].append(pg)
+        else:
+            runs.append([pg])
+
+    sections: list[Section] = []
+    used: set[int] = set()
+    consumed: set[int] = set()
+    for run_pages in runs:
+        r_sections, r_used, r_consumed = _assemble_banded_run(
+            run_pages, blocks, page_mupdf_tables)
+        sections.extend(r_sections)
+        used |= r_used
+        consumed |= r_consumed
+    return sections, used, consumed
+
 
 def _detect_mupdf_native_tables(
     blocks: list[Block],
@@ -1105,8 +1416,18 @@ def _detect_mupdf_native_tables(
     if not page_mupdf_tables:
         return table_sections, used
 
+    # Pre-step: banded assembly for rotated pages.  Entries it consumed
+    # are skipped by the main loop below; entries it left alone (runs
+    # without bands, column-count mismatches) fall through.
+    banded_sections, banded_used, banded_consumed = (
+        _detect_banded_rotated_tables(blocks, page_mupdf_tables))
+    table_sections.extend(banded_sections)
+    used |= banded_used
+
     for page_num in sorted(page_mupdf_tables):
         for tbl_info in page_mupdf_tables[page_num]:
+            if id(tbl_info) in banded_consumed:
+                continue
             bbox = tbl_info["bbox"]
             row_count = tbl_info["row_count"]
             col_count = tbl_info["col_count"]
@@ -1438,6 +1759,13 @@ def _detect_mupdf_native_tables(
                     continue
                 sec_a = table_sections[si]
                 sec_b = table_sections[si + 1]
+                # Banded sections are deliberately split at category
+                # bands; never re-merge them.  Their line bboxes are
+                # in unrotated page space, so the y-guards below would
+                # be meaningless anyway.
+                if (sec_a.table_source == "banded_grid"
+                        or sec_b.table_source == "banded_grid"):
+                    continue
                 if not (sec_a.columns and sec_b.columns):
                     continue
                 if len(sec_a.columns[0]) != len(sec_b.columns[0]):
@@ -4351,6 +4679,12 @@ def detect_tables(
     # which pass produced the table.
     absorbed: set[int] = set()
     for ts in table_sections:
+        if not ts.columns or len(ts.columns) < 2:
+            continue
+        # Banded sections live on rotated pages where the page-space
+        # y-geometry below is meaningless; they carry their own header.
+        if ts.table_source == "banded_grid":
+            continue
         ncols = len(ts.columns[0])
         ts_y_top = min(ln.bbox[1] for ln in ts.lines) if ts.lines else 0
         # Get column x-positions from the first data row's spans.

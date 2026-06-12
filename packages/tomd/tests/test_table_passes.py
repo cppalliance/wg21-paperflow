@@ -13,6 +13,7 @@ from tomd.lib.pdf.table import (
     _try_wrapped_partial_row,
     _rot_midpoint,
     _detect_mupdf_native_tables,
+    _detect_banded_rotated_tables,
 )
 from tomd.lib.pdf.pipeline import _column_aware_sort, _detect_drawing_grids
 
@@ -456,6 +457,215 @@ class TestMupdfNativeRotatedPage:
                 for row in sec.columns
             ]
             assert rows != self.EXPECTED
+
+
+def _banded_frag(row_ys, col_xs=(50.0, 200.0, 400.0, 560.0)):
+    """A find_tables fragment dict in reading space.
+
+    row_ys: list of (y_top, y_bot) per row; col_xs: column boundaries.
+    """
+    cells = []
+    for (yt, yb) in row_ys:
+        for k in range(len(col_xs) - 1):
+            cells.append((col_xs[k], yt, col_xs[k + 1], yb))
+    bbox = (col_xs[0], row_ys[0][0], col_xs[-1], row_ys[-1][1])
+    return {
+        "bbox": bbox,
+        "row_count": len(row_ys), "col_count": len(col_xs) - 1,
+        "cells": cells,
+        "header_names": None,
+        "extract": [],
+        "rot": _ROT90,
+    }
+
+
+class TestBandedRotatedAssembly:
+    """Banded assembly path: fragment stitching with band barriers.
+
+    Models the P3100R6 appendix: a rotated page where find_tables()
+    splits one logical table into fragments separated by category-band
+    blocks.  1-row fragments are continuation rows; bands start a new
+    section and stay unclaimed (rendered as prose headings).
+    """
+
+    HEADER = ["Name", "Meaning", "Notes"]
+    ROW_PRE = ["pre", "a precondition", "on entry"]
+    ROW_POST = ["post", "a postcondition", "on exit"]
+    ROW_ASSERT = ["assert", "an assertion", "mid-body"]
+
+    COL_CENTERS = (125.0, 300.0, 480.0)
+
+    def _row_blocks(self, texts, ry):
+        blocks = []
+        for ci, txt in enumerate(texts):
+            ln = _rotated_line(txt, self.COL_CENTERS[ci], ry)
+            blocks.append(Block(lines=[ln], bbox=ln.bbox, page_num=0))
+        return blocks
+
+    def _band_block(self, text, ry):
+        ln = _rotated_line(text, 100.0, ry)
+        return Block(lines=[ln], bbox=ln.bbox, page_num=0)
+
+    def _setup(self, frag2_rows):
+        """Header frag / band / 1-row frag / band / 2-row frag."""
+        frags = [
+            _banded_frag([(50.0, 80.0)]),
+            _banded_frag([(100.0, 160.0)]),
+            _banded_frag([(180.0, 240.0), (240.0, 300.0)]),
+        ]
+        blocks = []
+        blocks += self._row_blocks(self.HEADER, 65.0)
+        band1 = self._band_block("I. Contracts", 90.0)
+        blocks.append(band1)
+        blocks += self._row_blocks(self.ROW_PRE, 130.0)
+        band2 = self._band_block("II. Checks", 170.0)
+        blocks.append(band2)
+        row_ys = (210.0, 270.0)
+        for texts, ry in zip(frag2_rows, row_ys):
+            blocks += self._row_blocks(texts, ry)
+        band_indices = {blocks.index(band1), blocks.index(band2)}
+        return blocks, frags, band_indices
+
+    @staticmethod
+    def _texts(section):
+        return [
+            ["".join(s.text for s in cell) for cell in row]
+            for row in section.columns
+        ]
+
+    def test_band_barriers_split_into_categories(self):
+        blocks, frags, band_idx = self._setup(
+            [self.ROW_POST, self.ROW_ASSERT])
+        sections, used = _detect_mupdf_native_tables(blocks, {0: frags})
+        assert len(sections) == 2
+        assert all(s.table_source == "banded_grid" for s in sections)
+        # Category I: canonical header + the 1-row fragment.
+        assert self._texts(sections[0]) == [self.HEADER, self.ROW_PRE]
+        # Category II: canonical header + both rows of fragment 2.
+        assert self._texts(sections[1]) == [
+            self.HEADER, self.ROW_POST, self.ROW_ASSERT]
+
+    def test_band_blocks_stay_unclaimed(self):
+        blocks, frags, band_idx = self._setup(
+            [self.ROW_POST, self.ROW_ASSERT])
+        sections, used = _detect_mupdf_native_tables(blocks, {0: frags})
+        assert not (used & band_idx)
+
+    def test_repeated_header_dropped(self):
+        # Fragment 2 starts with a per-page header repeat that differs
+        # from the canonical header in one cell (the P3100R6 typo case).
+        blocks, frags, band_idx = self._setup(
+            [["Nam", "Meaning", "Notes"], self.ROW_POST])
+        sections, used = _detect_mupdf_native_tables(blocks, {0: frags})
+        assert len(sections) == 2
+        assert self._texts(sections[1]) == [self.HEADER, self.ROW_POST]
+
+    def test_without_bands_does_not_fire(self):
+        blocks, frags, band_idx = self._setup(
+            [self.ROW_POST, self.ROW_ASSERT])
+        blocks = [b for i, b in enumerate(blocks) if i not in band_idx]
+        sections, used, consumed = _detect_banded_rotated_tables(
+            blocks, {0: frags})
+        assert consumed == set()
+        assert sections == []
+
+    def test_without_rot_does_not_fire(self):
+        blocks, frags, band_idx = self._setup(
+            [self.ROW_POST, self.ROW_ASSERT])
+        frags = [{**f, "rot": None} for f in frags]
+        sections, used, consumed = _detect_banded_rotated_tables(
+            blocks, {0: frags})
+        assert consumed == set()
+
+    def test_band_hugging_fragment_edge_still_splits(self):
+        """A band heading inside the claim margin of the next fragment
+        must stay a band (review fix: band detection runs before block
+        claiming, otherwise the heading is swallowed into a cell)."""
+        blocks, frags, band_idx = self._setup(
+            [self.ROW_POST, self.ROW_ASSERT])
+        # Move band 2 from ry 170 to ry 179: 1pt above fragment 3's top
+        # edge (180), well inside its 5pt claim margin.
+        for i in band_idx:
+            if blocks[i].text == "II. Checks":
+                ln = _rotated_line("II. Checks", 100.0, 179.0)
+                blocks[i] = Block(lines=[ln], bbox=ln.bbox, page_num=0)
+        sections, used = _detect_mupdf_native_tables(blocks, {0: frags})
+        assert len(sections) == 2
+        assert self._texts(sections[1]) == [
+            self.HEADER, self.ROW_POST, self.ROW_ASSERT]
+        # The heading itself must not appear in any cell.
+        all_cells = [c for s in sections for row in self._texts(s)
+                     for c in row]
+        assert "II. Checks" not in all_cells
+
+    def test_two_column_header_repeat_requires_exact_match(self):
+        """In a 2-column table a data row sharing one cell with the
+        header is real data, not a header repeat (review fix: the
+        1-mismatch tolerance applies only to 3+ column tables)."""
+        two_cols = (50.0, 200.0, 400.0)
+        frags = [
+            _banded_frag([(50.0, 80.0)], col_xs=two_cols),
+            _banded_frag([(100.0, 160.0)], col_xs=two_cols),
+        ]
+        header = ["Default", "Meaning"]
+        data_row = ["Default", "checks enabled"]
+        blocks = []
+        for ci, txt in enumerate(header):
+            ln = _rotated_line(txt, (125.0, 300.0)[ci], 65.0)
+            blocks.append(Block(lines=[ln], bbox=ln.bbox, page_num=0))
+        blocks.append(self._band_block("I. Modes", 90.0))
+        for ci, txt in enumerate(data_row):
+            ln = _rotated_line(txt, (125.0, 300.0)[ci], 130.0)
+            blocks.append(Block(lines=[ln], bbox=ln.bbox, page_num=0))
+        sections, used = _detect_mupdf_native_tables(blocks, {0: frags})
+        assert len(sections) == 1
+        assert self._texts(sections[0]) == [header, data_row]
+
+    def test_distant_rotated_table_not_absorbed(self):
+        """An independent rotated table on a far page is its own run and
+        must not be stitched into the banded table (review fix)."""
+        blocks, frags, band_idx = self._setup(
+            [self.ROW_POST, self.ROW_ASSERT])
+
+        # Independent 3x3 rotated table on page 20, different column
+        # count irrelevant: distance alone must isolate it.
+        other_rows = [
+            ["Opt", "Type", "Doc"],
+            ["-O2", "level", "speed"],
+            ["-Og", "level", "debug"],
+        ]
+        cells = []
+        row_ys = [(50.0, 120.0), (120.0, 190.0), (190.0, 260.0)]
+        col_xs = (50.0, 200.0, 400.0, 560.0)
+        for yt, yb in row_ys:
+            for k in range(len(col_xs) - 1):
+                cells.append((col_xs[k], yt, col_xs[k + 1], yb))
+        tbl20 = {
+            "bbox": (50.0, 50.0, 560.0, 260.0),
+            "row_count": 3, "col_count": 3,
+            "cells": cells,
+            "header_names": None,
+            "extract": [list(r) for r in other_rows],
+            "rot": _ROT90,
+        }
+        for ri, row in enumerate(other_rows):
+            for ci, txt in enumerate(row):
+                ln = _rotated_line(txt, self.COL_CENTERS[ci],
+                                   (85.0, 155.0, 225.0)[ri])
+                blocks.append(Block(lines=[ln], bbox=ln.bbox, page_num=20))
+
+        sections, used = _detect_mupdf_native_tables(
+            blocks, {0: frags, 20: [tbl20]})
+        banded = [s for s in sections if s.table_source == "banded_grid"]
+        assert len(banded) == 2
+        assert self._texts(banded[0]) == [self.HEADER, self.ROW_PRE]
+        assert self._texts(banded[1]) == [
+            self.HEADER, self.ROW_POST, self.ROW_ASSERT]
+        # Page 20 keeps its own table, assembled by the main loop.
+        others = [s for s in sections if s.page_num == 20]
+        assert len(others) == 1
+        assert self._texts(others[0]) == other_rows
+
 
 class TestColumnAwareSortRotated:
     """_column_aware_sort uses reading-space y on rotated pages."""
