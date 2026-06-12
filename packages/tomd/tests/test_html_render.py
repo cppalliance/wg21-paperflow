@@ -1,5 +1,7 @@
 """Tests for lib.html.render."""
 
+import re
+
 from tomd.lib.html.extract import parse_html
 from tomd.lib.html.render import render_body
 
@@ -27,6 +29,26 @@ class TestHeading:
         md = render_body(soup, "mpark")
         assert "## Bold Heading" in md
         assert "**" not in md
+
+    def test_h1_rooted_body_shifted_to_h2(self):
+        # Body headings start at H2 (the front-matter title is the only H1).
+        soup = parse_html(
+            "<body><h1>Introduction</h1><h2>Background</h2>"
+            "<h3>Detail</h3></body>")
+        md = render_body(soup, "mpark")
+        assert "## Introduction" in md
+        assert "### Background" in md
+        assert "#### Detail" in md
+        assert not re.search(r"(?m)^# ", md)
+
+    def test_h2_rooted_body_unchanged(self):
+        # Already-correct papers must not be shifted (no blanket offset).
+        soup = parse_html(
+            "<body><h2>Introduction</h2><h3>Background</h3></body>")
+        md = render_body(soup, "mpark")
+        assert "## Introduction" in md
+        assert "### Background" in md
+        assert not re.search(r"(?m)^# ", md)
 
 
 class TestParagraph:

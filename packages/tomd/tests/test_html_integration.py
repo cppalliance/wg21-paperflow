@@ -1,5 +1,6 @@
 """Integration tests for lib.html.convert_html."""
 
+import re
 from pathlib import Path
 
 from tomd.lib.html import convert_html
@@ -45,6 +46,31 @@ def test_convert_html_unknown_generator_prompts(tmp_path):
     assert "HTML-to-Markdown conversion" in joined
     assert "Unrecognized" in joined
     assert "Only content" in md
+
+
+def test_convert_html_body_headings_start_at_h2(tmp_path):
+    # H1-rooted body sections are shifted to H2 (title is the only H1), and a
+    # leading body heading that duplicates the title is dropped even though it
+    # now arrives as H2 rather than H1.
+    html = """<!DOCTYPE html><html><head></head><body>
+<header id="title-block-header">
+<h1 class="title">My Great Paper</h1>
+<table><tr><td>Document #:</td><td>P7R0</td></tr></table>
+</header>
+<h1>My Great Paper</h1>
+<p>Intro.</p>
+<h1>Section One</h1>
+<p>Body.</p>
+<h2>Subsection</h2>
+</body></html>"""
+    path = _write(tmp_path, "shift.html", html)
+    md, _ = convert_html(path)
+    body = md.split("---", 2)[-1]
+    assert not re.search(r"(?m)^# ", body)
+    assert "## Section One" in md
+    assert "### Subsection" in md
+    assert "## My Great Paper" not in md
+    assert md.count("My Great Paper") == 1
 
 
 def test_convert_html_unicode_preserved(tmp_path):
