@@ -106,6 +106,7 @@ def render_markdown(
         rendered = out_path.read_text(encoding="utf-8")
 
     rendered = _inline_scrivener_images(rendered)
+    rendered = _fix_split_ol_numbering(rendered)
 
     # Scrivener's emitted CSS only styles <article>; without a body rule the
     # iframe inherits the OS dark-mode background, leaving scrivener's dark
@@ -226,6 +227,51 @@ def _table_rows_to_html(rows: list[list[str]]) -> list[str] | None:
         lines.append("</tbody>")
     lines.append("</table>")
     return lines
+
+
+# Scrivener emits lowercase tags, so the patterns and the string scans
+# below are consistently case-sensitive.
+_SPLIT_OL_RE = re.compile(r"</ol>\s*(?:<table[\s\S]*?</table>\s*)+<ol>")
+
+_OL_LI_COUNT_RE = re.compile(r"<li[\s>]")
+
+
+def _fix_split_ol_numbering(html_text: str) -> str:
+    """Add ``start`` to ``<ol>`` tags that follow a split caused by a table.
+
+    Scrivener splits a single ordered list around block-level elements
+    (pipe tables) without emitting ``start="N"`` on the continuation
+    ``<ol>``.  This post-pass counts ``<li>`` elements in the preceding
+    ``<ol>`` and sets the correct ``start`` so the browser continues
+    numbering.
+
+    Replacements apply iteratively, not via one ``re.sub`` pass: with
+    two tables splitting the same list, the second continuation must
+    see the ``start`` already added to the first one, otherwise its
+    numbering restarts from the original un-fixed fragment.
+    """
+    pos = 0
+    while True:
+        match = _SPLIT_OL_RE.search(html_text, pos)
+        if match is None:
+            return html_text
+        fragment = match.group(0)
+        prior_html = html_text[:match.start()]
+        # Count all <li> in the preceding <ol> (the last one before the break)
+        last_ol_start = prior_html.rfind("<ol")
+        if last_ol_start == -1:
+            pos = match.end()
+            continue
+        preceding_ol = prior_html[last_ol_start:]
+        li_count = len(_OL_LI_COUNT_RE.findall(preceding_ol))
+        # Check if the preceding <ol> had a start attribute
+        ol_tag = preceding_ol[:preceding_ol.index(">") + 1]
+        start_match = re.search(r'start="(\d+)"', ol_tag)
+        base = int(start_match.group(1)) if start_match else 1
+        next_start = base + li_count
+        replacement = fragment.replace("<ol>", f'<ol start="{next_start}">', 1)
+        html_text = html_text[:match.start()] + replacement + html_text[match.end():]
+        pos = match.start() + len(replacement)
 
 
 _IMG_SRC_RE = re.compile(r'(<img\b[^>]*\bsrc=")([^"]+)(")', re.IGNORECASE)

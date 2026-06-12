@@ -24,6 +24,7 @@ import pytest
 
 from paperstore import SqliteBackend
 from preview.render import (
+    _fix_split_ol_numbering,
     _image_data_url,
     _image_data_url_cached,
     _render_blockquote_tables,
@@ -296,6 +297,63 @@ def test_image_ref_in_bq_table_cell_inlined(backend: SqliteBackend):
     out = render_markdown(md, backend=backend, pid="P1")
     assert '<td><img src="data:image/png;base64,' in out
     assert "&lt;img" not in out
+
+
+# ---- _fix_split_ol_numbering -------------------------------------------------
+
+
+def test_split_ol_gets_start_attribute():
+    """Scrivener splits an <ol> around a table without start= on the
+    continuation; the post-pass adds it so numbering continues."""
+    html_text = (
+        "<ol><li>a</li><li>b</li></ol>"
+        "<table><tr><td>x</td></tr></table>"
+        "<ol><li>c</li></ol>"
+    )
+    out = _fix_split_ol_numbering(html_text)
+    assert '<ol start="3"><li>c</li></ol>' in out
+
+
+def test_split_ol_respects_existing_start():
+    """A preceding <ol start=N> shifts the continuation's base."""
+    html_text = (
+        '<ol start="5"><li>a</li></ol>'
+        "<table><tr><td>x</td></tr></table>"
+        "<ol><li>b</li></ol>"
+    )
+    out = _fix_split_ol_numbering(html_text)
+    assert '<ol start="6"><li>b</li></ol>' in out
+
+
+def test_split_ol_chained_splits_accumulate():
+    """Two tables splitting the same list: the second continuation must
+    build on the start= added to the first, not restart from the
+    original fragment (iterative replacement, not one re.sub pass)."""
+    html_text = (
+        "<ol><li>a</li><li>b</li></ol>"
+        "<table><tr><td>x</td></tr></table>"
+        "<ol><li>c</li></ol>"
+        "<table><tr><td>y</td></tr></table>"
+        "<ol><li>d</li></ol>"
+    )
+    out = _fix_split_ol_numbering(html_text)
+    assert '<ol start="3"><li>c</li></ol>' in out
+    assert '<ol start="4"><li>d</li></ol>' in out
+
+
+def test_table_between_unrelated_lists_untouched():
+    """No preceding <ol> before the match means nothing to continue;
+    the fragment stays unchanged."""
+    html_text = (
+        "</ol><table><tr><td>x</td></tr></table><ol><li>a</li></ol>"
+    )
+    out = _fix_split_ol_numbering(html_text)
+    assert out == html_text
+
+
+def test_html_without_split_ol_unchanged():
+    html_text = "<ol><li>a</li></ol><p>text</p><table></table>"
+    assert _fix_split_ol_numbering(html_text) == html_text
 
 
 # ---- cache invalidation -----------------------------------------------------
