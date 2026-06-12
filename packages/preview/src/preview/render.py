@@ -81,13 +81,19 @@ def render_markdown(
     """
     style_dict = dict(_load_style(style))
 
+    # Table pass first: it html-escapes cell text, so it must not see
+    # the <img data:...> tags the image pass produces (the base64 blob
+    # would become visible text). Running images second also inlines
+    # image refs sitting inside converted table cells.
+    md_text = _render_blockquote_tables(md_text or "")
+
     if backend is not None and pid is not None:
-        md_text = _rewrite_paper_image_refs(md_text or "", backend, pid)
+        md_text = _rewrite_paper_image_refs(md_text, backend, pid)
 
     with tempfile.TemporaryDirectory(prefix="paperflow-preview-") as tmp:
         tmp_path = Path(tmp)
         md_path = tmp_path / "paper.md"
-        md_path.write_text(md_text or "", encoding="utf-8")
+        md_path.write_text(md_text, encoding="utf-8")
         out_path = tmp_path / "paper.html"
         build_html(
             md_path=md_path,
@@ -110,6 +116,116 @@ def render_markdown(
     if idx == -1:
         return _LIGHT_SCHEME_OVERRIDE + rendered
     return rendered[:idx] + _LIGHT_SCHEME_OVERRIDE + rendered[idx:]
+
+
+# A pipe-table row inside a blockquote: `>` marker(s), then a
+# `|`-delimited row. The prefix keeps its exact text so the generated
+# HTML lines stay inside the same blockquote nesting level.
+_BQ_TABLE_ROW_RE = re.compile(r"^(?P<prefix>\s{0,3}>[>\s]*)\|(?P<row>.*\|)\s*$")
+
+# A GFM separator cell: dashes with optional alignment colons.
+_BQ_TABLE_SEP_CELL_RE = re.compile(r"^:?-+:?$")
+
+# A fenced-code delimiter, optionally inside a blockquote. Lines inside
+# a fence are code samples and must never be rewritten.
+_FENCE_LINE_RE = re.compile(r"^\s{0,3}(?:>\s{0,3})*(?:`{3,}|~{3,})")
+
+
+def _render_blockquote_tables(md_text: str) -> str:
+    """Replace pipe tables inside blockquotes with raw HTML tables.
+
+    Scrivener's markdown engine does not parse pipe tables within
+    blockquotes; the rows survive as literal text collapsed into a
+    single paragraph. Raw HTML ``<table>`` blocks inside blockquotes
+    pass through scrivener intact (same pass-through behavior the
+    image pre-pass relies on), and a native pipe table renders to
+    attribute-less ``<table>`` markup, so the substitute is styled
+    identically to a top-level table.
+
+    Cell text is HTML-escaped; inline markdown inside cells is NOT
+    rendered (it would appear literally). Tables outside blockquotes
+    are untouched - scrivener handles those natively.
+    """
+    lines = md_text.split("\n")
+    out: list[str] = []
+    in_fence = False
+    i = 0
+    while i < len(lines):
+        if _FENCE_LINE_RE.match(lines[i]):
+            in_fence = not in_fence
+            out.append(lines[i])
+            i += 1
+            continue
+        match = None if in_fence else _BQ_TABLE_ROW_RE.match(lines[i])
+        if match is None:
+            out.append(lines[i])
+            i += 1
+            continue
+        start = i
+        prefix = match.group("prefix")
+        depth = prefix.count(">")
+        rows: list[list[str]] = []
+        while i < len(lines):
+            m = _BQ_TABLE_ROW_RE.match(lines[i])
+            # A change in quote depth ends the run: rows of a nested
+            # quote must not be absorbed into the outer table.
+            if m is None or m.group("prefix").count(">") != depth:
+                break
+            rows.append(_split_table_row(m.group("row")))
+            i += 1
+        table_lines = _table_rows_to_html(rows)
+        if table_lines is None:
+            out.extend(lines[start:i])
+        else:
+            out.extend(prefix + line for line in table_lines)
+    return "\n".join(out)
+
+
+def _split_table_row(row: str) -> list[str]:
+    """Split GFM row content (sans leading ``|``) into stripped cells.
+
+    Splits on unescaped pipes only, then unescapes ``\\|`` so escaped
+    pipes inside cells survive as literal ``|`` characters.
+    """
+    cells = re.split(r"(?<!\\)\|", row)
+    if cells and cells[-1].strip() == "":
+        cells = cells[:-1]
+    return [c.strip().replace("\\|", "|") for c in cells]
+
+
+def _table_rows_to_html(rows: list[list[str]]) -> list[str] | None:
+    """Build ``<table>`` lines from parsed rows, or None if not a table.
+
+    Requires a header row followed by a GFM separator row. Data rows
+    are normalized to the header's column count (extra cells dropped,
+    missing cells padded), matching GFM behavior.
+    """
+    if len(rows) < 2:
+        return None
+    header, separator, *body = rows
+    # GFM: the separator must exist, contain only dash cells, and match
+    # the header's column count - otherwise the block is not a table.
+    if (
+        not separator
+        or len(separator) != len(header)
+        or not all(_BQ_TABLE_SEP_CELL_RE.match(cell) for cell in separator)
+    ):
+        return None
+
+    width = len(header)
+
+    def cells_html(cells: list[str], tag: str) -> str:
+        padded = (cells + [""] * width)[:width]
+        inner = "".join(f"<{tag}>{html.escape(c)}</{tag}>" for c in padded)
+        return f"<tr>{inner}</tr>"
+
+    lines = ["<table>", "<thead>", cells_html(header, "th"), "</thead>"]
+    if body:
+        lines.append("<tbody>")
+        lines.extend(cells_html(row, "td") for row in body)
+        lines.append("</tbody>")
+    lines.append("</table>")
+    return lines
 
 
 _IMG_SRC_RE = re.compile(r'(<img\b[^>]*\bsrc=")([^"]+)(")', re.IGNORECASE)
