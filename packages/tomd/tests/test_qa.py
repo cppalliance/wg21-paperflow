@@ -5,6 +5,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+from tomd.lib.metadata_yaml.format import parse_front_matter
 from tomd.lib.pdf.qa import compute_metrics
 
 
@@ -244,6 +245,35 @@ class TestMetadata:
         m = compute_metrics(md)
         assert m.front_matter_count >= 1
         assert not any("front matter" in i for i in m.issues)
+
+    def test_d4036_front_matter_count_includes_intent(self):
+        """intent is part of FRONT_MATTER_ORDER and must be counted."""
+        md = (_FIXTURES_DIR / "d4036-why-not-span.md").read_text(encoding="utf-8")
+        m = compute_metrics(md, file="d4036")
+        assert m.front_matter_count == 6
+
+    def test_front_matter_parser_agreement_with_shared(self):
+        """QA reads the same title and reply-to shape as parse_front_matter."""
+        md = (
+            "---\n"
+            'title: "Symmetric Transfer and Sender Composition"\n'
+            "document: P2583R0\n"
+            "date: 2026-02-22\n"
+            "audience: LEWG\n"
+            "reply-to:\n"
+            '  - "Mungo Gill <mungo.gill@me.com>"\n'
+            '  - "Vinnie Falco <vinnie.falco@gmail.com>"\n'
+            "---\n\n"
+            "## Abstract\n\n"
+            "Body.\n"
+        )
+        shared = parse_front_matter(md)
+        assert shared["title"] == "Symmetric Transfer and Sender Composition"
+        assert isinstance(shared["reply-to"], list)
+        assert len(shared["reply-to"]) == 2
+        m = compute_metrics(md)
+        assert m.front_matter_count == 5
+        assert m.has_doc_number is True
 
 
 class TestLowVariety:
@@ -614,7 +644,7 @@ class TestReferenceFixtures:
         assert m.heading_level_skips == 0
         assert m.table_count == 5
         assert m.code_block_count == 4
-        assert m.front_matter_count == 5
+        assert m.front_matter_count == 6
         assert m.has_doc_number is True
         assert m.unfenced_code_lines == 0
         assert m.mojibake_count == 0

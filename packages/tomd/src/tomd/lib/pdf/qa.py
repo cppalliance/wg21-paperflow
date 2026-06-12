@@ -25,15 +25,14 @@ from pathlib import Path
 from ftfy.badness import badness as _ftfy_badness
 import mistune
 
+from tomd.lib.metadata_yaml.format import FRONT_MATTER_ORDER, parse_front_matter
+
 __all__ = ["QAMetrics", "compute_metrics", "run_qa_report"]
 
 _log = logging.getLogger(__name__)
 
-_FRONT_MATTER_RE = re.compile(r"^---\n(.+?\n)---", re.DOTALL)
 _UNCERTAIN_MARKER = "tomd:uncertain"
 _LOSSY_TABLE_MARKER = "tomd:lossy-table"
-
-_FRONT_MATTER_FIELDS = frozenset({"title", "document", "date", "reply-to", "audience"})
 _WG21_DOC_NUM_RE = re.compile(r"[DPN]\d{3,5}R?\d*", re.IGNORECASE)
 
 _WORDING_DIV_RE = re.compile(r"^:::wording", re.MULTILINE)
@@ -94,21 +93,6 @@ class QAMetrics:
     empty_output: bool = False
     score: int = 100
     issues: list[str] = field(default_factory=list)
-
-
-def _parse_front_matter(md_text: str) -> dict[str, str]:
-    """Extract YAML front matter fields and values from Markdown text."""
-    m = _FRONT_MATTER_RE.match(md_text)
-    if not m:
-        return {}
-    fields: dict[str, str] = {}
-    for line in m.group(1).split("\n"):
-        if ":" in line:
-            key = line.split(":")[0].strip().lower()
-            val = line.split(":", 1)[1].strip() if ":" in line else ""
-            if key:
-                fields[key] = val
-    return fields
 
 
 def _paragraph_plain_text(node: dict) -> str:
@@ -249,7 +233,7 @@ def _count_mojibake(md_text: str) -> int:
     """
     prose = _CODE_FENCE_RE.sub("", md_text)
     prose = _INLINE_CODE_RE.sub("", prose)
-    front = _parse_front_matter(md_text)
+    front = parse_front_matter(md_text)
     title = front.get("title", "")
     if (_UNICODE_TOPIC_RE.search(title)
             or _GLYPH_PLACEHOLDER_MARKER_RE.search(md_text)):
@@ -338,8 +322,8 @@ def compute_metrics(md_text: str, file: str = "") -> QAMetrics:
 
     # Front matter: mistune doesn't parse YAML, so we check raw text.
     # The AST's leading thematic_break confirms the --- opener.
-    fm_fields = _parse_front_matter(md_text)
-    m.front_matter_count = sum(1 for f in _FRONT_MATTER_FIELDS if f in fm_fields)
+    fm_fields = parse_front_matter(md_text)
+    m.front_matter_count = sum(1 for k in FRONT_MATTER_ORDER if k in fm_fields)
     doc_val = fm_fields.get("document", "")
     m.has_doc_number = bool(_WG21_DOC_NUM_RE.search(doc_val))
 

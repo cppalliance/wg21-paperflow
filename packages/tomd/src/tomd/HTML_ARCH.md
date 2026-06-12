@@ -22,7 +22,7 @@ Deep technique numbering lives in [`lib/html/ARCHITECTURE.md`](lib/html/ARCHITEC
 - **Single DOM truth:** Unlike PDF, there is no dual extraction or per-page uncertainty routing; structure comes from the parsed tree ([`ARCHITECTURE.md`](lib/html/ARCHITECTURE.md)).
 - **Forgiving parse:** BeautifulSoup uses the stdlib **`html.parser`**, which tolerates malformed HTML but can mis-nest tags; the renderer applies explicit repairs ([`extract.py`](lib/html/extract.py), [`render.py`](lib/html/render.py)).
 - **Problems become prompts:** Unknown generators and other issues are recorded as strings and wrapped into LLM-ready prompts ([`convert_html`](lib/html/convert.py)).
-- **Shared emit helpers:** PDF and HTML both call [`lib/__init__.py`](lib/__init__.py) `format_front_matter`, `dedup_paragraphs`, `strip_redundant_body_meta`, `strip_orphan_toc_list`, and `strip_leading_h1` after assembly.
+- **Shared emit helpers:** PDF and HTML both call `format_front_matter` from [`lib/metadata_yaml/format.py`](lib/metadata_yaml/format.py) (re-exported via [`lib/__init__.py`](lib/__init__.py)), plus `dedup_paragraphs`, `strip_redundant_body_meta`, `strip_orphan_toc_list`, and `strip_leading_h1` after assembly.
 
 ## Before changing behavior
 

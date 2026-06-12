@@ -14,41 +14,11 @@ from pathlib import Path
 
 import pytest
 
+from tomd.lib import parse_front_matter
+
 _FIXTURES = Path(__file__).resolve().parent / "fixtures"
 _D4036 = _FIXTURES / "d4036-gold-standard.md"
 _P2583R3_PDF = _FIXTURES / "p2583r3-gold-standard.pdf"
-
-
-def _parse_front_matter(md: str) -> dict:
-    """Extract YAML front matter as a flat dict."""
-    if not md.startswith("---"):
-        return {}
-    end = md.find("---", 4)
-    if end < 0:
-        return {}
-    block = md[4:end].strip()
-    result = {}
-    current_key = None
-    current_list = None
-    for line in block.split("\n"):
-        if line.startswith("  - "):
-            if current_key and current_list is not None:
-                current_list.append(line[4:].strip().strip('"'))
-            continue
-        m = re.match(r"^(\S+):\s*(.*)", line)
-        if m:
-            if current_key and current_list is not None:
-                result[current_key] = current_list
-            current_key = m.group(1)
-            val = m.group(2).strip()
-            if val:
-                result[current_key] = val.strip('"')
-                current_list = None
-            else:
-                current_list = []
-    if current_key and current_list is not None:
-        result[current_key] = current_list
-    return result
 
 
 @pytest.fixture
@@ -58,7 +28,7 @@ def d4036_md():
 
 @pytest.fixture
 def d4036_fm(d4036_md):
-    return _parse_front_matter(d4036_md)
+    return parse_front_matter(d4036_md)
 
 
 class TestD4036FrontMatter:
@@ -164,7 +134,7 @@ class TestP2583R3Wording:
 
     def test_has_front_matter(self, p2583r3_md):
         assert p2583r3_md.startswith("---")
-        fm = _parse_front_matter(p2583r3_md)
+        fm = parse_front_matter(p2583r3_md)
         assert "title" in fm
         assert "document" in fm
 

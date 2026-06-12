@@ -129,7 +129,8 @@ per-window, not per-paper.
 
 **T4. Mistune AST walk**
 - `_extract_markdown_stream`
-- Strips front matter (`_FRONT_MATTER_RE`) and tomd HTML markers
+- Strips front matter (`strip_front_matter` from `lib/metadata_yaml/format.py`)
+  and tomd HTML markers
   (`_TOMD_HTML_MARKER_RE`, e.g. `<!-- tomd:uncertain:L10-L20 -->`)
   before parsing. Otherwise these would appear as drift tokens.
 - Walks the AST collecting text from inline nodes (`text`, `codespan`,

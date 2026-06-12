@@ -25,8 +25,11 @@ from tomd.lib.shared import (  # noqa: F401
 
 from tomd.lib.metadata_yaml.format import (  # noqa: F401
     FRONT_MATTER_ORDER,
+    FRONT_MATTER_RE,
     format_front_matter,
+    parse_front_matter,
     sanitize_metadata,
+    strip_front_matter,
 )
 
 __all__ = [
@@ -51,6 +54,9 @@ __all__ = [
     "strip_orphan_toc_list",
     "strip_redundant_body_meta",
     "FRONT_MATTER_ORDER",
+    "FRONT_MATTER_RE",
     "format_front_matter",
+    "parse_front_matter",
     "sanitize_metadata",
+    "strip_front_matter",
 ]

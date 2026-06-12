@@ -55,6 +55,7 @@ from paperstore.backend import StorageBackend
 from paperstore.errors import MissingPaperMdError, MissingSourceError
 from tomd.errors import CheckContentArgError
 from tomd.lib.html.extract import detect_generator, strip_boilerplate
+from tomd.lib.metadata_yaml.format import strip_front_matter
 
 __all__ = [
     "ContentCheckResult",
@@ -340,9 +341,6 @@ _SKIP_TYPES = frozenset({"thematic_break", "blank_line"})
 _TOMD_HTML_MARKER_RE = re.compile(
     r"<!--\s*tomd:[^>]*?-->", re.IGNORECASE | re.DOTALL,
 )
-_FRONT_MATTER_RE = re.compile(r"^---\n.+?\n---\n?", re.DOTALL)
-
-
 def _collect_node_text(node: dict, out: list[str]) -> None:
     """Walk a mistune AST node, appending text to ``out``."""
     ntype = node.get("type", "")
@@ -383,7 +381,7 @@ def _extract_markdown_stream(md_text: str) -> tuple[str, ...]:
     Front matter and tomd-emitted ``<!-- tomd:* -->`` markers are
     stripped before AST parsing so they do not appear as drift tokens.
     """
-    body = _FRONT_MATTER_RE.sub("", md_text, count=1)
+    body = strip_front_matter(md_text)
     body = _TOMD_HTML_MARKER_RE.sub(" ", body)
     tokens_raw: list[str] = []
     for node in _AST_RENDERER(body):
