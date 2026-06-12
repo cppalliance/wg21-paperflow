@@ -575,35 +575,83 @@ _CODE_BLOCK_TAGS = frozenset({"pre", "code-block"})
 
 def _render_list(el: Tag, marker: str, generator: str) -> str | None:
     """Render an ordered or unordered list."""
-    items = []
-    for i, li in enumerate(el.find_all("li", recursive=False)):
-        prefix = f"{i + 1}." if marker == "1." else "-"
-        # Detach nested sublists before capturing inline text so they are not
-        # walked into by _inline_text (which would duplicate their contents).
-        subs = [sub.extract()
-                for sub in li.find_all(_LIST_CONTAINER_TAGS, recursive=False)]
-        nested_parts = []
-        for sub in subs:
-            sub_rendered = _render_element(sub, generator)
-            if sub_rendered:
-                indented = "\n".join("  " + line for line in sub_rendered.split("\n"))
-                nested_parts.append(indented)
+    items: list[str] = []
+    li_index = 0
+    for child in el.children:
+        if isinstance(child, NavigableString):
+            continue
+        if child.name == "li":
+            prefix = f"{li_index + 1}." if marker == "1." else "-"
+            li_index += 1
+            # Detach nested sublists before capturing inline text so they
+            # are not walked into by _inline_text (duplicating contents).
+            subs = [sub.extract()
+                    for sub in child.find_all(_LIST_CONTAINER_TAGS, recursive=False)]
+            nested_parts = []
+            for sub in subs:
+                sub_rendered = _render_element(sub, generator)
+                if sub_rendered:
+                    indented = "\n".join("  " + line for line in sub_rendered.split("\n"))
+                    nested_parts.append(indented)
 
-        # Extract code blocks before inlining so they are rendered as
-        # fenced blocks rather than flattened to inline text.
-        code_parts = []
-        for cb in li.find_all(_CODE_BLOCK_TAGS, recursive=False):
-            rendered = _render_element(cb.extract(), generator)
-            if rendered:
-                code_parts.append(rendered)
+            code_parts = []
+            for cb in child.find_all(_CODE_BLOCK_TAGS, recursive=False):
+                rendered = _render_element(cb.extract(), generator)
+                if rendered:
+                    code_parts.append(rendered)
 
-        text = _collapse_whitespace(_inline_text(li))
-        if text:
-            items.append(f"{prefix} {text}")
-        for cp in code_parts:
-            items.append(cp)
-        for np in nested_parts:
-            items.append(np)
+            table_parts: list[str] = []
+            for tbl in child.find_all("table"):
+                # A table nested inside another table is rendered as part
+                # of its outer table; extracting it here would duplicate
+                # its content.
+                if tbl.find_parent("table") is not None:
+                    continue
+                rendered = _render_table(tbl.extract())
+                if rendered:
+                    table_parts.append(rendered)
+
+            text = _collapse_whitespace(_inline_text(child))
+            if text:
+                items.append(f"{prefix} {text}")
+            elif marker == "1." and (code_parts or table_parts
+                                     or nested_parts):
+                # The item's only content was extracted above: keep a bare
+                # marker so ordered-list numbering stays continuous.
+                # Unordered lists carry no numbering, so a bare dash
+                # would be pure noise there.
+                items.append(prefix)
+            for cp in code_parts:
+                items.append(cp)
+            for tp in table_parts:
+                items.append("\n" + tp)
+            for np in nested_parts:
+                items.append(np)
+        else:
+            # Non-<li> child (e.g. <blockquote> wrapping a <table>):
+            # render any tables at their natural DOM position.
+            if child.name == "table":
+                rendered = _render_table(child)
+                if rendered:
+                    items.append("\n" + rendered)
+                continue
+            extracted_table = False
+            for tbl in child.find_all("table"):
+                if tbl.find_parent("table") is not None:
+                    continue
+                rendered = _render_table(tbl.extract())
+                if rendered:
+                    items.append("\n" + rendered)
+                    extracted_table = True
+            # Keep text accompanying an extracted table (e.g. a caption
+            # in the wrapper).  Children without tables stay dropped:
+            # in practice they are navigation chrome, and rescuing them
+            # injects noise into the body.
+            if extracted_table:
+                text = _collapse_whitespace(_inline_text(child))
+                if text:
+                    items.append(text)
+
     return "\n".join(items) if items else None
 
 

@@ -1022,6 +1022,131 @@ class TestListCodeExtraction:
         assert "```" not in md
 
 
+class TestListTableExtraction:
+    """Tables inside <li> should be rendered as tables, not flattened."""
+
+    def test_table_inside_list_item(self):
+        html = """
+        <ol>
+        <li>Text before table.
+          <blockquote>
+          <table border="1">
+          <tr><th>A</th><th>B</th></tr>
+          <tr><td>1</td><td>2</td></tr>
+          </table>
+          </blockquote>
+        </li>
+        <li>Second item.</li>
+        </ol>
+        """
+        md = render_body(parse_html(html), "mpark")
+        assert "1. Text before table." in md
+        assert "| A | B |" in md
+        assert "| 1 | 2 |" in md
+        assert "2. Second item." in md
+
+    def test_table_in_blockquote_sibling_of_li(self):
+        """Table inside <blockquote> sibling of <li> renders between items."""
+        html = """
+        <ol>
+        <li>Consistency text.</li>
+        <blockquote>
+          <table border="1">
+          <tr><th>Col A</th><th>Col B</th></tr>
+          <tr><td>1</td><td>2</td></tr>
+          </table>
+        </blockquote>
+        <li>Safety text.</li>
+        </ol>
+        """
+        md = render_body(parse_html(html), "mpark")
+        assert "1. Consistency text." in md
+        assert "| Col A | Col B |" in md
+        assert "| 1 | 2 |" in md
+        assert "2. Safety text." in md
+        # Table must appear between items 1 and 2, not after both.
+        assert md.index("| Col A |") < md.index("2. Safety text.")
+
+    def test_table_direct_child_of_li(self):
+        html = """
+        <ul>
+        <li>Item with table
+          <table>
+          <tr><th>X</th></tr>
+          <tr><td>Y</td></tr>
+          </table>
+        </li>
+        </ul>
+        """
+        md = render_body(parse_html(html), "mpark")
+        assert "- Item with table" in md
+        assert "| X |" in md
+        assert "| Y |" in md
+
+    def test_nested_table_rendered_once(self):
+        """A table inside a table is part of the outer render, not a copy."""
+        html = """
+        <ul>
+        <li>Item
+          <table>
+          <tr><td>OUTERCELL</td>
+          <td><table><tr><td>INNERCELL</td></tr></table></td></tr>
+          </table>
+        </li>
+        </ul>
+        """
+        md = render_body(parse_html(html), "mpark")
+        assert md.count("INNERCELL") == 1
+        assert md.count("OUTERCELL") == 1
+
+    def test_table_direct_child_of_list(self):
+        """A <table> sitting directly between <li> siblings is rendered."""
+        html = """
+        <ol>
+        <li>First item.</li>
+        <table>
+        <tr><th>DirectHdr</th></tr>
+        <tr><td>DirectCell</td></tr>
+        </table>
+        <li>Second item.</li>
+        </ol>
+        """
+        md = render_body(parse_html(html), "mpark")
+        assert "1. First item." in md
+        assert "| DirectHdr |" in md
+        assert "| DirectCell |" in md
+        assert "2. Second item." in md
+
+    def test_li_with_only_table_keeps_marker(self):
+        """Numbering stays continuous when an item holds only a table."""
+        html = """
+        <ol>
+        <li>First</li>
+        <li><table><tr><th>H</th></tr><tr><td>V</td></tr></table></li>
+        <li>Third</li>
+        </ol>
+        """
+        md = render_body(parse_html(html), "mpark")
+        assert "1. First" in md
+        assert "2." in md
+        assert "3. Third" in md
+
+    def test_blockquote_text_next_to_table_preserved(self):
+        """Prose accompanying a table in a non-li child is not dropped."""
+        html = """
+        <ol>
+        <li>One.</li>
+        <blockquote>IMPORTANT NOTE TEXT
+          <table><tr><td>T</td></tr></table>
+        </blockquote>
+        <li>Two.</li>
+        </ol>
+        """
+        md = render_body(parse_html(html), "mpark")
+        assert "| T |" in md
+        assert "IMPORTANT NOTE TEXT" in md
+
+
 class TestDlCodeExtraction:
     """<pre> and <code-block> inside <dd> should be fenced, not flattened."""
 
