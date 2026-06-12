@@ -121,7 +121,7 @@ def convert_html(
             fm_end = md.find("\n", fm_end)
             if fm_end >= 0:
                 body = md[fm_end + 1:]
-                body = strip_leading_h1(body, title)
+                body = strip_leading_h1(body, title, max_level=2)
                 md = md[:fm_end + 1] + body
 
     md = strip_redundant_body_meta(md)
@@ -132,7 +132,7 @@ def convert_html(
             fm_end = md.find("\n", fm_end)
             if fm_end >= 0:
                 body = md[fm_end + 1:]
-                body = strip_leading_h1(body, title)
+                body = strip_leading_h1(body, title, max_level=2)
                 md = md[:fm_end + 1] + body
 
     md = md.rstrip() + "\n"
