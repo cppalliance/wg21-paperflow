@@ -273,6 +273,9 @@ def _render_element(el: Tag, generator: str) -> str | None:
         return f"`{text}`" if text.strip() else None
 
     if tag == "code":
+        if generator == "hatemplate" and "itemdeclcode" in (el.get("class") or []):
+            text = el.get_text().strip("\n")
+            return f"```cpp\n{text}\n```" if text.strip() else None
         code_div = el.find("div", class_="code")
         if code_div:
             text = code_div.get_text()
@@ -444,6 +447,11 @@ def _render_div(el: Tag, generator: str) -> str | None:
     if any(c in classes for c in ("wording", "wording-add", "wording-remove")):
         return _render_wording_div(el, generator)
 
+    if generator == "hatemplate" and any(
+        c in classes for c in ("para", "texpara", "sentence")
+    ):
+        return _render_eelis_block(el, generator)
+
     parts = []
     _render_children(el, parts, generator)
     result = "\n\n".join(p for p in parts if p.strip())
@@ -463,6 +471,29 @@ def _render_wording_div(el: Tag, generator: str) -> str:
     _render_children(el, parts, generator)
     inner = "\n\n".join(p for p in parts if p.strip())
     return f"{fence}\n\n{inner}\n\n:::"
+
+
+def _render_eelis_block(el: Tag, generator: str) -> str | None:
+    """Render an eelis/draft (hatemplate) wording block.
+
+    The .para / .texpara / .sentence divs are block-level wrappers around
+    inline prose or a code synopsis. A synopsis (span.codeblock or <pre>)
+    is fenced as C++; sentence prose is flowed into a single paragraph.
+    Margin chrome (paragraph numbers, source links) is already removed by
+    strip_boilerplate.
+    """
+    code = el.find("span", class_="codeblock") or el.find("pre")
+    if code:
+        text = code.get_text().strip("\n")
+        return f"```cpp\n{text}\n```" if text.strip() else None
+    # Sentences (and itemized sub-paragraphs) are block-level divs that abut
+    # without whitespace; flow them as prose with a separating space so they
+    # do not merge ("maximum limit.When limits..."). _collapse_whitespace
+    # folds the resulting double spaces.
+    for sentence in el.find_all("div", class_="sentence"):
+        sentence.append(" ")
+    text = _collapse_whitespace(_inline_text(el))
+    return text or None
 
 
 _CODE_BLOCK_TAGS = frozenset({"pre", "code-block"})
