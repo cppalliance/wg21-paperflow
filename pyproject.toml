@@ -14,6 +14,7 @@ dependencies = [
     "assay",
     "cli",
     "preview",
+    "cpp-mcp",
 ]
 
 [dependency-groups]
@@ -39,6 +40,7 @@ agora        = {workspace = true}
 assay        = {workspace = true}
 cli          = {workspace = true}
 preview      = {workspace = true}
+cpp-mcp      = {workspace = true}
 scrivener  = {git = "https://github.com/gregjkal/wg21-scrivener.git"}
 
 [tool.pytest.ini_options]
