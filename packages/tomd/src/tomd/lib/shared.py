@@ -265,7 +265,7 @@ def strip_leading_h1(body: str, title: str = "", max_level: int = 1) -> str:
         stripped = line.strip()
         if not stripped:
             continue
-        m = re.match(r"(#{1,6})\s+(.*)", stripped)
+        m = re.match(r"(#{1,6})\s+(.+)", stripped)
         if m and len(m.group(1)) <= max_level:
             level = len(m.group(1))
             h_text = m.group(2).strip()

@@ -136,7 +136,7 @@ def render_body(soup: BeautifulSoup, generator: str) -> str:
     return "\n\n".join(p for p in parts if p.strip())
 
 
-def _normalize_heading_levels(body):
+def _normalize_heading_levels(body: Tag) -> None:
     """Shift body headings so the shallowest renders at H2.
 
     The front-matter contract reserves H1 for the document title, so body
@@ -156,7 +156,7 @@ def _normalize_heading_levels(body):
     if offset == 0:
         return
     for el in headings:
-        level = min(max(int(el.name[1]) + offset, 1), 6)
+        level = min(int(el.name[1]) + offset, 6)
         el.name = f"h{level}"
 
 
