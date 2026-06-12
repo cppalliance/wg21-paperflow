@@ -647,6 +647,58 @@ class TestLinksExtended:
         assert "nohref" in md
 
 
+class TestBlockquoteBareInline:
+    """Bare inline content directly under <blockquote> (P3104R5).
+
+    Papers emit <blockquote><b>ACTION</b>: text ... without a <p>
+    wrapper. Without normalization, the label and its text split into
+    separate paragraphs and the bold markers are lost.
+    """
+
+    def test_bare_label_and_text_stay_one_paragraph(self):
+        html = (
+            "<blockquote><b>ACTION</b>: Ask SG6 to look at the paper\n"
+            "and bring up issues back to LEWG if exists. "
+            "<p><b>POLL</b>: Forward the paper.</p></blockquote>"
+        )
+        md = render_body(parse_html(html), "bikeshed")
+        assert (
+            "> **ACTION**: Ask SG6 to look at the paper "
+            "and bring up issues back to LEWG if exists." in md
+        )
+        assert "> **POLL**: Forward the paper." in md
+
+    def test_block_children_end_the_run(self):
+        # Inline run, then a table, then another inline run: the table
+        # must stay a table and the runs must become two paragraphs.
+        html = (
+            "<blockquote>Before <i>table</i>"
+            "<table><tr><td>X</td></tr></table>"
+            "After text</blockquote>"
+        )
+        md = render_body(parse_html(html), "mpark")
+        assert "> Before *table*" in md
+        assert "| X |" in md
+        assert "> After text" in md
+
+    def test_br_ends_the_run(self):
+        # An explicit <br> between bare text lines (poll tallies) must
+        # keep the lines separate instead of collapsing them into one.
+        html = "<blockquote>SF F N A SA<br>3 4 5 1 0</blockquote>"
+        md = render_body(parse_html(html), "mpark")
+        assert "SF F N A SA 3 4 5 1 0" not in md
+        assert "> SF F N A SA" in md
+        assert "> 3 4 5 1 0" in md
+
+    def test_whitespace_only_nodes_no_empty_paragraph(self):
+        # The whitespace between <p> siblings must not become a <p>.
+        html = "<blockquote>\n  <p>One</p>\n  <p>Two</p>\n</blockquote>"
+        md = render_body(parse_html(html), "mpark")
+        assert md.count("One") == 1
+        assert "> One" in md
+        assert "> Two" in md
+
+
 class TestBlockquoteExtended:
     def test_nested_paragraphs(self):
         md = render_body(
@@ -654,7 +706,9 @@ class TestBlockquoteExtended:
             "mpark",
         )
         assert "> First" in md
-        assert "Second" in md
+        # The paragraphs stay separated by a blank quoted line; the
+        # bare-inline wrap pass must not merge them.
+        assert "> \n> Second" in md
 
     def test_empty_blockquote_omitted(self):
         md = render_body(parse_html("<blockquote></blockquote><p>x</p>"), "mpark")

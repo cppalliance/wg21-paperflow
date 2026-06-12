@@ -168,6 +168,64 @@ def _fix_misnested_table_cells(soup: BeautifulSoup) -> None:
                         changed = True
 
 
+_INLINE_RENDER_TAGS = frozenset({
+    "span", "a", "code", "em", "strong", "b", "i", "sub", "sup",
+    "ins", "del", "mark", "small", "s", "u", "abbr", "cite",
+    "dfn", "var", "kbd", "samp", "time", "data", "wbr",
+    "h-", "f-serif",
+})
+
+_BARE_INLINE_TAGS = _INLINE_RENDER_TAGS | {"img", "tt-"}
+
+
+def _wrap_bare_blockquote_inline(soup: BeautifulSoup) -> None:
+    """Wrap bare inline runs under ``<blockquote>`` in ``<p>`` elements.
+
+    Some papers place inline content (text nodes, ``<b>``, ``<a>``, ...)
+    directly under ``<blockquote>`` without a ``<p>`` wrapper. The
+    renderer treats every child as its own block, so a label like
+    ``<b>ACTION</b>: text`` splits into two paragraphs and the bold
+    markers are lost. Wrapping each run of consecutive inline children
+    in a ``<p>`` routes them through the paragraph renderer, which
+    keeps the run as one paragraph with inline formatting intact.
+    Block-level children end the current run and stay untouched.
+
+    A run is only wrapped if it contains a visible bare text node.
+    A lone inline container (``<small>``/``<ins>`` holding an entire
+    wording block) keeps its line structure; the paragraph renderer
+    would collapse its internal newlines into one line. ``<br>`` ends
+    the run: an explicit line break (poll tallies, addresses) must not
+    be collapsed into the surrounding text.
+    """
+    for bq in soup.find_all("blockquote"):
+        run: list = []
+
+        def _flush() -> None:
+            if not run:
+                return
+            has_bare_text = any(
+                isinstance(n, NavigableString)
+                and not isinstance(n, Comment)
+                and str(n).strip()
+                for n in run
+            )
+            if has_bare_text:
+                p = soup.new_tag("p")
+                run[0].insert_before(p)
+                for node in run:
+                    p.append(node.extract())
+            run.clear()
+
+        for child in list(bq.children):
+            if isinstance(child, NavigableString) or (
+                isinstance(child, Tag) and child.name in _BARE_INLINE_TAGS
+            ):
+                run.append(child)
+            else:
+                _flush()
+        _flush()
+
+
 def render_body(soup: BeautifulSoup, generator: str) -> str:
     """Render the HTML body to Markdown.
 
@@ -177,6 +235,7 @@ def render_body(soup: BeautifulSoup, generator: str) -> str:
     _fix_misnested_blocks(soup)
     _fix_misnested_list_items(soup)
     _fix_misnested_table_cells(soup)
+    _wrap_bare_blockquote_inline(soup)
     body = soup.find("body") or soup
     parts: list[str] = []
     _render_children(body, parts, generator)
@@ -279,10 +338,7 @@ def _render_element(el: Tag, generator: str) -> str | None:
             text = text.strip("\n")
             return f"```cpp\n{text}\n```"
 
-    if tag in ("span", "a", "code", "em", "strong", "b", "i", "sub", "sup",
-               "ins", "del", "mark", "small", "s", "u", "abbr", "cite",
-               "dfn", "var", "kbd", "samp", "time", "data", "wbr",
-               "h-", "f-serif"):
+    if tag in _INLINE_RENDER_TAGS:
         return _render_inline(el)
 
     parts = []
