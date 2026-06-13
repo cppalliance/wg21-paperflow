@@ -3443,6 +3443,9 @@ def _try_wrapped_partial_row(
         if not line.spans or not line.text.strip():
             continue
         x0 = line.bbox[0]
+        # Both signals are required, not redundant: column_xs is a column
+        # that recurs across 2+ rows, a stricter check than ref_cols (the
+        # single seed block's positions).
         if not any(abs(x0 - cx) <= _COLUMN_X_TOLERANCE for cx in column_xs):
             return None
         ci = min(range(len(ref_cols)), key=lambda c: abs(x0 - ref_cols[c]))
