@@ -3403,6 +3403,62 @@ def _try_subset_columns_absorb(
     return None
 
 
+def _try_wrapped_partial_row(
+    blocks: list[Block],
+    j: int,
+    ref_cols: list[float],
+    column_xs: frozenset[float],
+    table_blocks: list[Block],
+) -> Optional[_MatchResult]:
+    """Branch 3b: multi-line fragment of a wrapped row in non-first columns.
+
+    When two adjacent value columns sit closer than _COLUMN_GAP_THRESHOLD,
+    MuPDF groups them into one block whose lines fall short of the gap, so
+    _block_column_positions rejects it as non-columnar and Branches 1-3 all
+    miss it.  Left unhandled, a single wrapped data row breaks the table in
+    two and orphans its right-hand cells into prose.
+
+    Recognize it as a partial row via the geometric column signal: every
+    non-empty line must align (within _COLUMN_X_TOLERANCE) to a known
+    column in both column_xs and ref_cols, none of them the left-margin
+    label column (index 0, which would be prose), and the covered columns
+    must be a strict subset of ref_cols.  The block must sit on the same
+    page within _PARTIAL_ROW_MAX_Y_GAP of the previous row (a same-band
+    right-hand fragment has a small negative gap, hence the abs()).
+    """
+    block = blocks[j]
+    if len(table_blocks) < 2 or len(block.lines) < 2:
+        return None
+    if block.page_num != table_blocks[-1].page_num:
+        return None
+    if _block_column_positions(block) is not None:
+        return None
+    if _block_is_monospace(block) or _block_is_monospace(table_blocks[0]):
+        return None
+    if abs(block.bbox[1] - table_blocks[-1].bbox[3]) > _PARTIAL_ROW_MAX_Y_GAP:
+        return None
+
+    covered: set[int] = set()
+    for line in block.lines:
+        if not line.spans or not line.text.strip():
+            continue
+        x0 = line.bbox[0]
+        if not any(abs(x0 - cx) <= _COLUMN_X_TOLERANCE for cx in column_xs):
+            return None
+        ci = min(range(len(ref_cols)), key=lambda c: abs(x0 - ref_cols[c]))
+        if ci == 0 or abs(x0 - ref_cols[ci]) > _COLUMN_X_TOLERANCE:
+            return None
+        covered.add(ci)
+
+    if not 0 < len(covered) < len(ref_cols):
+        return None
+    return _MatchResult(
+        advance_to=j + 1,
+        absorbed_ids=frozenset({id(block)}),
+        multi_orphan=True,
+    )
+
+
 def _try_single_orphan(
     blocks: list[Block],
     j: int,
@@ -3893,6 +3949,17 @@ def detect_tables(
             # Branch 3: subset columns (partial absorption)
             result = _try_subset_columns_absorb(
                 blocks, j, ref_cols, table_blocks)
+            if result is not None:
+                table_blocks.append(blocks[j])
+                partial_absorbed.update(result.absorbed_ids)
+                multi_orphan_used = True
+                j = result.advance_to
+                continue
+
+            # Branch 3b: wrapped partial-row fragment (narrow-gap cells that
+            # _block_column_positions rejects, but aligned to known columns)
+            result = _try_wrapped_partial_row(
+                blocks, j, ref_cols, column_xs, table_blocks)
             if result is not None:
                 table_blocks.append(blocks[j])
                 partial_absorbed.update(result.absorbed_ids)
