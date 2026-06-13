@@ -180,14 +180,17 @@ def strip_repeating(blocks: list[Block], repeating: set[tuple[float, str]],
                 + patterns_by_y.get(y_key, [])
                 + patterns_by_y.get(y_key + Y_TOLERANCE, []))
 
-    def _matches(text: str, rpattern: str) -> bool:
+    def _matches(text: str, rpattern: str, whole_line: bool = False) -> bool:
         if rpattern == text:
             return True
         if rpattern == "__PAGE_NUM__" and PAGE_NUM_RE.match(text):
             return True
         if rpattern == "__DOC_NUM__" and DOC_NUM_RE.search(text):
             return True
-        if (rpattern == "__EDGE_BAND__"
+        # A footer band strips whole short lines, never individual spans:
+        # span-level matching would shred a long body line that happens to
+        # share the band's y (each short span would match the word cap).
+        if (rpattern == "__EDGE_BAND__" and whole_line
                 and len(text.split()) <= RUNNING_FOOTER_MAX_WORDS):
             return True
         return False
@@ -210,7 +213,7 @@ def strip_repeating(blocks: list[Block], repeating: set[tuple[float, str]],
                 kept_lines.append(line)
                 continue
 
-            if any(_matches(text, rp) for rp in line_patterns):
+            if any(_matches(text, rp, whole_line=True) for rp in line_patterns):
                 if block.page_num == 0 and line.bbox[1] < _page0_meta_y:
                     kept_lines.append(line)
                     continue

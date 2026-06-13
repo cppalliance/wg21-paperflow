@@ -170,24 +170,22 @@ def _render_heading_spans(sec: Section) -> str:
     rows = [(ln.bbox[1], ln.font_size,
              _render_line_spans(ln, suppress_bold=True).strip())
             for ln in sec.lines]
-    rows = [(y, fs, text) for (y, fs, text) in rows if text]
+    rows = [r for r in rows if r[2]]
     if not rows:
-        return f"{prefix} {sec.text.split(chr(10))[0].strip()}"
+        first_line = sec.text.split("\n")[0].strip()
+        return f"{prefix} {first_line}"
 
     anchor_y, anchor_fs, _ = rows[0]
     row_tol = anchor_fs * _HEADING_SAME_ROW_FONT_FRACTION
 
     seen: set[str] = set()
     parts: list[str] = []
-    for y, _fs, text in rows:
-        if abs(y - anchor_y) > row_tol:
-            continue
-        if text in seen:
-            continue
-        seen.add(text)
-        parts.append(text)
+    for y, _, text in rows:
+        if abs(y - anchor_y) <= row_tol and text not in seen:
+            seen.add(text)
+            parts.append(text)
 
-    return f"{prefix} {' '.join(parts).strip()}"
+    return f"{prefix} {' '.join(parts)}"
 
 
 def _normalize_bullet(char: str) -> str:

@@ -225,6 +225,23 @@ def test_strip_repeating_edge_band_strips_short_footer_keeps_body():
     assert body in texts
 
 
+def test_strip_repeating_edge_band_does_not_shred_body_spans():
+    """A long (>word-cap) body line sharing the band y must keep all its
+    spans: the band rule matches whole short lines, never individual spans
+    (each short span would otherwise hit the word cap and be stripped)."""
+    words = ["this", "genuine", "body", "line", "has", "many", "short",
+             "spans", "that", "run", "wide"]
+    spans = [Span(text=w + " ", font_name="Body", font_size=11.0,
+                  bbox=(50.0 + i * 40, 790.0, 80.0 + i * 40, 802.0))
+             for i, w in enumerate(words)]
+    line = Line(spans=spans, bbox=(50.0, 790.0, 500.0, 802.0), page_num=0)
+    block = Block(lines=[line], bbox=line.bbox, page_num=0)
+    repeating = {(796.0, "__EDGE_BAND__")}
+    result = strip_repeating([block], repeating)
+    kept = [s.text.strip() for blk in result for ln in blk.lines for s in ln.spans]
+    assert kept == words
+
+
 def test_strip_repeating_edge_band_strips_roman_footer():
     """The band strip also removes a footer using a roman page number
     ("Contents ii") even though roman numerals aren't bare page numbers:
