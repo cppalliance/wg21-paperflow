@@ -255,9 +255,34 @@ def render_body(soup: BeautifulSoup, generator: str) -> str:
     _fix_misnested_table_cells(soup)
     _wrap_bare_blockquote_inline(soup)
     body = soup.find("body") or soup
+    _normalize_heading_levels(body)
     parts: list[str] = []
     _render_children(body, parts, generator)
     return "\n\n".join(p for p in parts if p.strip())
+
+
+def _normalize_heading_levels(body: Tag) -> None:
+    """Shift body headings so the shallowest renders at H2.
+
+    The front-matter contract reserves H1 for the document title, so body
+    headings start at H2. HTML papers arrive both <h1>-rooted and <h2>-rooted,
+    so shift every heading relative to the document's shallowest heading rather
+    than applying a blanket offset (which would corrupt already-H2-rooted
+    papers). Renaming the tags lets _render_heading pick up the shift through
+    its existing int(el.name[1]) read.
+    """
+    headings = [
+        el for el in body.find_all(list(_HEADING_TAGS))
+        if _inline_text(el, _HEADING_SKIP_CLASSES).strip()
+    ]
+    if not headings:
+        return
+    offset = max(0, 2 - min(int(el.name[1]) for el in headings))
+    if offset == 0:
+        return
+    for el in headings:
+        level = min(int(el.name[1]) + offset, 6)
+        el.name = f"h{level}"
 
 
 def _render_children(element, parts: list[str], generator: str):

@@ -112,11 +112,14 @@ def dedup_paragraphs(md: str) -> str:
 DEFAULT_FENCE_LANG = "cpp"
 
 
-def strip_leading_h1(body: str, title: str = "") -> str:
-    """Remove a leading H1 from body text if it duplicates the front-matter title.
+def strip_leading_h1(body: str, title: str = "", max_level: int = 1) -> str:
+    """Remove a leading heading from body text if it duplicates the title.
 
-    Strips the first non-blank line if it is an ATX H1 (starts with '# ') and
-    either matches the front-matter title or is the very first content.
+    Strips the first non-blank line if it is an ATX heading no deeper than
+    `max_level` and either matches the front-matter title or (H1 only) is the
+    very first content. The HTML path passes `max_level=2`: its body headings
+    start at H2 (the title is the only H1), so a title-duplicate first heading
+    arrives as `## Title`, not `# Title`. PDF keeps the default H1-only behavior.
     Also handles plaintext title echoes (no '#' prefix) and promotes a bare
     "Abstract" line immediately following to ``## Abstract``.
     """
@@ -129,9 +132,13 @@ def strip_leading_h1(body: str, title: str = "") -> str:
             continue
         if stripped.startswith("<!--") and stripped.endswith("-->"):
             continue
-        if stripped.startswith("# ") and not stripped.startswith("## "):
-            h1_text = stripped[2:].strip()
-            if not title_clean or _titles_match(h1_text, title_clean):
+        m = re.match(r"(#{1,6})\s+(.+)", stripped)
+        if m and len(m.group(1)) <= max_level:
+            level = len(m.group(1))
+            h_text = m.group(2).strip()
+            if (level == 1 and not title_clean) or (
+                title_clean and _titles_match(h_text, title_clean)
+            ):
                 lines[i] = ""
                 title_removed_at = i
             break
