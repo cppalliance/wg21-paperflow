@@ -37,7 +37,6 @@ from cli.orchestrator import convert_one_paper
 from cli.targets import MONTH_RE, resolve_pid
 from mailing.download import content_length, default_client, download_paper
 from mailing.scrape import discover_years, fetch_all_mailings_for_year
-from tomd.lib.check_content import run_content_check_report
 from paperstore import parse_authors_raw
 from paperstore.backend import PaperRow, StorageBackend
 from paperstore.errors import (
@@ -518,6 +517,7 @@ async def run_convert(
 # run_citations
 # ---------------------------------------------------------------------------
 
+
 async def run_citations(
     targets: list[str],
     backend: StorageBackend,
@@ -575,10 +575,14 @@ async def run_citations(
 
         if on_progress is not None:
             try:
-                on_progress(ProgressEvent(
-                    step=i + 1, total=total, name=pid,
-                    pct=(i + 1) / total if total else 1.0,
-                ))
+                on_progress(
+                    ProgressEvent(
+                        step=i + 1,
+                        total=total,
+                        name=pid,
+                        pct=(i + 1) / total if total else 1.0,
+                    )
+                )
             except Exception:
                 logger.warning("on_progress hook raised; disabling", exc_info=True)
                 on_progress = None
@@ -643,7 +647,10 @@ def _make_stderr_progress() -> ProgressCallback:
 
     def handler(event: ProgressEvent) -> None:
         line = format_batch_progress_line(
-            event.step, event.total, event.name, t0,
+            event.step,
+            event.total,
+            event.name,
+            t0,
         )
         print(line, end="", file=sys.stderr)
         sys.stderr.flush()
@@ -703,7 +710,9 @@ def run_content_check(
     )
     print(
         format_content_check_report(
-            batch.results, batch.skipped, batch.errors,
+            batch.results,
+            batch.skipped,
+            batch.errors,
         ),
         end="",
     )
@@ -711,10 +720,7 @@ def run_content_check(
         write_content_check_json_atomic(json_path, batch.results)
         print(f"\nDetailed metrics written to {json_path}")
 
-    failed = [
-        {"paper_id": pid, "reason": msg}
-        for pid, msg in batch.errors
-    ]
+    failed = [{"paper_id": pid, "reason": msg} for pid, msg in batch.errors]
 
     failed_ids = {entry["paper_id"] for entry in failed}
 
@@ -770,8 +776,10 @@ async def run_full(
         results["citations"] = await run_citations(targets, backend, force=force)
     except Exception as exc:
         logger.exception("run_citations failed; convert results unaffected")
-        results["citations"] = {"succeeded": [], "skipped": [], "failed": [
-            {"paper_id": "*", "error": str(exc)}
-        ]}
+        results["citations"] = {
+            "succeeded": [],
+            "skipped": [],
+            "failed": [{"paper_id": "*", "error": str(exc)}],
+        }
 
     return results
