@@ -1128,3 +1128,106 @@ class TestCodeParagraphDetection:
         html = "<p>   </p>"
         md = render_body(parse_html(html), "dascandy/fiets")
         assert md.strip() == "" or "```" not in md
+
+
+class TestListChildDrop:
+    """Non-<li> direct children of a list are rendered, not silently dropped."""
+
+    def _md(self, html):
+        return render_body(parse_html(html), "mpark")
+
+    def test_renders_nested_list_direct_child(self):
+        # Outer <ol> has no <li> of its own, only a nested <ol>: the inner list
+        # is the content and renders standalone at top level (not indented).
+        md = self._md("<ol><ol><li>inner</li></ol></ol>")
+        assert "inner" in md
+        assert "1. inner" in md
+        assert "  1. inner" not in md  # standalone: no outer item to indent under
+
+    def test_ol_ol_wording_content_recovered(self):
+        # P4179R0's real shape: the synopsis <pre> sits inside a <blockquote>
+        # inside the <li>. Part 1 recovers the CONTENT (the list is no longer
+        # dropped). The <pre> stays flattened by _inline_text (the deferred
+        # <li>-internal flattening), so we assert presence, not a code fence.
+        md = self._md(
+            "<div><ol><ol>"
+            "<li><p>Add a feature-test macro</p>"
+            "<blockquote><pre>#define __cpp_lib_x</pre></blockquote></li>"
+            "<li><p>Modify</p>"
+            "<blockquote><pre>namespace std {}</pre></blockquote></li>"
+            "</ol></ol></div>"
+        )
+        assert "__cpp_lib_x" in md
+        assert "namespace std {}" in md
+
+    def test_renders_loose_paragraph_child_indented(self):
+        md = self._md("<ul><li>a</li><p>note</p></ul>")
+        assert "note" in md
+        assert "\n  note" in md  # indented under the preceding item
+
+    def test_renders_direct_child_pre_fenced(self):
+        # A <pre> that is a direct child of the list (not <li>-internal) renders
+        # as a fenced block via the normal element dispatch.
+        md = self._md("<ol><li>Add:</li><pre>code();</pre></ol>")
+        assert "code();" in md
+        assert "```" in md
+
+    def test_renders_direct_child_blockquote(self):
+        md = self._md("<ul><li>a</li><blockquote>quoted</blockquote></ul>")
+        assert "quoted" in md
+        assert ">" in md
+
+    def test_renders_loose_text_child(self):
+        md = self._md("<ul><li>a</li>loose text here</ul>")
+        assert "loose text here" in md
+
+    def test_non_li_child_before_first_item_standalone(self):
+        md = self._md("<ol><p>intro</p><li>a</li></ol>")
+        assert "intro" in md
+        assert "1. a" in md
+        assert "  intro" not in md  # no preceding item: standalone, not indented
+
+    def test_ordered_numbering_counts_only_li(self):
+        md = self._md("<ol><li>a</li><p>x</p><li>b</li></ol>")
+        assert "1. a" in md
+        assert "2. b" in md
+        assert "3." not in md  # the <p> does not advance the counter
+
+    def test_comment_child_produces_no_output(self):
+        md = self._md("<ul><li>a</li><!-- secret build note --></ul>")
+        assert "secret" not in md
+        assert "build note" not in md
+
+    def test_whitespace_text_between_items_no_spurious_item(self):
+        md = self._md("<ul><li>a</li>\n   \n<li>b</li></ul>")
+        assert md == "- a\n- b"
+
+    def test_nested_sublist_in_li_unchanged(self):
+        md = self._md("<ul><li>a<ul><li>b</li></ul></li></ul>")
+        assert md == "- a\n  - b"
+
+    def test_code_block_in_li_unchanged(self):
+        md = self._md("<ol><li>x<pre>code</pre></li></ol>")
+        assert "1. x" in md
+        assert "```" in md
+        assert "code" in md
+
+
+class TestDlChildDrop:
+    """Non-dt/dd direct children of a <dl> are rendered, not silently dropped."""
+
+    def _md(self, html):
+        return render_body(parse_html(html), "mpark")
+
+    def test_renders_non_dt_dd_child(self):
+        md = self._md("<dl><dt>term</dt><dd>def</dd><p>note</p></dl>")
+        assert "note" in md
+
+    def test_comment_child_produces_no_output(self):
+        md = self._md("<dl><dt>t</dt><dd>d</dd><!-- c --></dl>")
+        assert "c " not in md and "\nc" not in md
+
+    def test_dt_dd_unchanged(self):
+        md = self._md("<dl><dt>term</dt><dd>def</dd></dl>")
+        assert "**term**" in md
+        assert ": def" in md
