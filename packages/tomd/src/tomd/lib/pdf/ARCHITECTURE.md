@@ -344,7 +344,7 @@ Enums:
 - Design constraint: takes ONLY a Markdown string. No page count, no file format, no pipeline internals. Every signal is derived from the text via mistune AST parsing. This keeps scoring format-agnostic and decoupled from the converter. Do not add parameters that leak converter state.
 - Signals: heading count, code block count, list/table count, front-matter field count, uncertain region markers (`<!-- tomd:uncertain -->`), unfenced code lines (C++ syntax patterns in paragraphs), paragraph count, structural variety
 - "Long document" threshold (`_LONG_DOC_PARAGRAPHS = 10`) gates penalties that only make sense for substantial documents (no-headings, low-variety)
-- `run_qa_report` handles batch execution with parallel workers and straggler timeout
+- `run_qa_batch` handles batch execution via `lib/batch.run_parallel_batch` with parallel workers and straggler timeout; `format_qa_report` formats stdout output (CLI-owned)
 
 ## Module Map
 
@@ -363,7 +363,7 @@ Enums:
 | `structure.py` | Comparison, heading/list/code classification | `compare_extractions`, `structure_sections` | ~939 |
 | `emit.py` | Markdown and prompts generation | `emit_markdown`, `emit_prompts` | ~401 |
 | `wg21.py` | WG21 metadata extraction | `extract_metadata_from_blocks` | ~199 |
-| `qa.py` | Markdown QA scoring (mistune AST) | `compute_metrics`, `run_qa_report` | ~326 |
+| `qa.py` | Markdown QA scoring (mistune AST) | `compute_metrics`, `run_qa_batch`, `format_qa_report` | ~326 |
 | `similarity.py` | Fuzzy string comparison | `similar` | ~66 |
 | `toc.py` | TOC detection and removal | `find_toc_indices` | ~159 |
 | **Total** | | **24 public functions** | **~4132** |

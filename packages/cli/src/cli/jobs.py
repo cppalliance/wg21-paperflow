@@ -24,6 +24,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import sys
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -37,6 +39,16 @@ from paperstore.errors import (
     MissingSourceError,
 )
 from paperstore.progress import ProgressCallback, ProgressEvent
+from tomd.lib.batch import (
+    format_batch_finished,
+    format_batch_progress_line,
+    format_batch_timeout,
+)
+from tomd.lib.check_content import (
+    format_content_check_report,
+    run_content_check_batch,
+    write_content_check_json_atomic,
+)
 from tomd.lib.pdf import SkipReason
 
 logger = logging.getLogger(__name__)
@@ -506,6 +518,8 @@ async def run_convert(
 # run_content_check
 # ---------------------------------------------------------------------------
 
+_CONTENT_CHECK_TIMEOUT = 120
+
 
 def _rows_for_content_check_targets(
     targets: list[str],
@@ -553,23 +567,35 @@ def _rows_for_content_check_targets(
     return rows
 
 
+def _make_stderr_progress() -> ProgressCallback:
+    """Build a progress handler that writes batch lines to stderr."""
+    t0 = time.monotonic()
+
+    def handler(event: ProgressEvent) -> None:
+        line = format_batch_progress_line(
+            event.step, event.total, event.name, t0,
+        )
+        print(line, end="", file=sys.stderr)
+        sys.stderr.flush()
+
+    return handler
+
+
 def run_content_check(
     targets: list[str],
     backend: StorageBackend,
     *,
     json_path: Path | None = None,
     workers: int = 1,
-    timeout: int = 120,
+    timeout: int = _CONTENT_CHECK_TIMEOUT,
 ) -> dict:
     """Compare source text against converted markdown for the given targets.
 
-    Synchronous. ``run_content_check_report`` does its own
+    Synchronous. ``run_content_check_batch`` does its own
     ``ProcessPoolExecutor`` parallelism; workers re-open the backend
     from the workspace path. Skips papers missing either source or
     markdown.
     """
-    from tomd.lib.check_content import run_content_check_report
-
     workers = max(1, workers)
     rows = _rows_for_content_check_targets(targets, backend)
 
@@ -589,16 +615,43 @@ def run_content_check(
     if not items:
         return {"succeeded": [], "skipped": skipped, "failed": []}
 
-    run_content_check_report(
+    batch = run_content_check_batch(
         items,
-        json_path=json_path,
         workers=workers,
         timeout=timeout,
+        on_progress=_make_stderr_progress(),
     )
+
+    if batch.timed_out:
+        print(
+            format_batch_timeout(batch.timed_out, timeout),
+            file=sys.stderr,
+        )
+    print(
+        format_batch_finished(batch.elapsed_sec, len(items)),
+        file=sys.stderr,
+    )
+    print(
+        format_content_check_report(
+            batch.results, batch.skipped, batch.errors,
+        ),
+        end="",
+    )
+    if json_path is not None:
+        write_content_check_json_atomic(json_path, batch.results)
+        print(f"\nDetailed metrics written to {json_path}")
+
+    failed = [
+        {"paper_id": pid, "reason": msg}
+        for pid, msg in batch.errors
+    ]
+
+    failed_ids = {entry["paper_id"] for entry in failed}
+
     return {
-        "succeeded": [pid for pid, _ in items],
+        "succeeded": [pid for pid, _ in items if pid not in failed_ids],
         "skipped": skipped,
-        "failed": [],
+        "failed": failed,
     }
 
 
