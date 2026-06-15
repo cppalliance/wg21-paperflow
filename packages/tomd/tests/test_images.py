@@ -36,6 +36,8 @@ from tomd.lib.pdf.images import (
     finalize_extraction,
 )
 from tomd.lib.pdf.pipeline import (
+    _CROSS_PAGE_STRUCTURAL_BOTTOM_MIN_PT,
+    _NEAR_PAGE_TOP_PT,
     _filter_overlapping_vector_images,
     _filter_sections_inside_vector_images,
     _filter_vector_images_against_structural,
@@ -2023,7 +2025,8 @@ class TestFilterVectorImagesAgainstStructural:
         assert kept_images == [img]
 
     def test_section_on_different_page_does_not_filter(self):
-        """A TABLE on page 7 must not filter vector images on page 8."""
+        """A TABLE on a prior page must not filter a vector image that is
+        not near the top of the page (y0 > _NEAR_PAGE_TOP_PT)."""
         img = _ext_img(page=8, bbox=(100, 100, 300, 250))
         table_sec = _structural_section(
             kind=SectionKind.TABLE, page_num=6,  # 0-based -> page 7
@@ -2103,6 +2106,149 @@ class TestFilterVectorImagesAgainstStructural:
             _filter_vector_images_against_structural([img], [code_sec])
         )
         assert dropped == 1, "50% overlap is the boundary - drops"
+        assert kept_images == []
+
+    # -- Cross-page tests -------------------------------------------------------
+
+    def test_structural_filter_cross_page_drops_top_of_page_vector(self):
+        """A vector at y0=57 on page 2 whose x-range overlaps a tall TABLE on
+        page 1 (y1 > _CROSS_PAGE_STRUCTURAL_BOTTOM_MIN_PT) must be dropped:
+        it is an overflow continuation of the prior-page table."""
+        # TABLE on page 1: Section.page_num=0, keyed at 1 in structural dict.
+        table_sec = _structural_section(
+            kind=SectionKind.TABLE, page_num=0,
+            bbox=(100, 60, 400, 750),
+        )
+        # Vector on page 2 (1-based) with y0=57 and overlapping x-range.
+        img = _ext_img(page=2, bbox=(150, 57, 380, 170))
+        kept_images, _kept_sections, dropped = (
+            _filter_vector_images_against_structural([img], [table_sec])
+        )
+        assert dropped == 1
+        assert kept_images == []
+
+    def test_structural_filter_cross_page_image_not_near_top_kept(self):
+        """A vector at y0=80 (> _NEAR_PAGE_TOP_PT=75) does not trigger the
+        cross-page check, even when the prior-page TABLE is tall."""
+        table_sec = _structural_section(
+            kind=SectionKind.TABLE, page_num=0,
+            bbox=(100, 60, 400, 750),
+        )
+        img = _ext_img(page=2, bbox=(150, 80, 380, 200))
+        kept_images, _kept_sections, dropped = (
+            _filter_vector_images_against_structural([img], [table_sec])
+        )
+        assert dropped == 0
+        assert len(kept_images) == 1
+
+    def test_structural_filter_cross_page_near_top_boundary_drops(self):
+        """A vector at y0 exactly equal to _NEAR_PAGE_TOP_PT triggers the
+        cross-page check (condition is <=)."""
+        table_sec = _structural_section(
+            kind=SectionKind.TABLE, page_num=0,
+            bbox=(100, 60, 400, 750),
+        )
+        img = _ext_img(page=2, bbox=(150, _NEAR_PAGE_TOP_PT, 380, 200))
+        kept_images, _kept_sections, dropped = (
+            _filter_vector_images_against_structural([img], [table_sec])
+        )
+        assert dropped == 1, (
+            f"y0={_NEAR_PAGE_TOP_PT} is exactly at the boundary -- drops"
+        )
+        assert kept_images == []
+
+    def test_structural_filter_cross_page_no_x_overlap_keeps_vector(self):
+        """When x-ranges of the vector and the prior-page TABLE do not
+        overlap, the overlap fraction is zero and the vector is kept."""
+        table_sec = _structural_section(
+            kind=SectionKind.TABLE, page_num=0,
+            bbox=(100, 60, 300, 750),
+        )
+        # Image x-range (350--500) does not overlap table x-range (100--300).
+        img = _ext_img(page=2, bbox=(350, 57, 500, 170))
+        kept_images, _kept_sections, dropped = (
+            _filter_vector_images_against_structural([img], [table_sec])
+        )
+        assert dropped == 0
+        assert len(kept_images) == 1
+
+    def test_structural_filter_cross_page_short_prior_table_keeps_vector(self):
+        """A TABLE on the prior page that does not reach
+        _CROSS_PAGE_STRUCTURAL_BOTTOM_MIN_PT (y1=649) is excluded from
+        the cross-page check, so the vector is kept."""
+        table_sec = _structural_section(
+            kind=SectionKind.TABLE, page_num=0,
+            bbox=(100, 60, 400, _CROSS_PAGE_STRUCTURAL_BOTTOM_MIN_PT - 1),
+        )
+        img = _ext_img(page=2, bbox=(150, 57, 380, 170))
+        kept_images, _kept_sections, dropped = (
+            _filter_vector_images_against_structural([img], [table_sec])
+        )
+        assert dropped == 0
+        assert len(kept_images) == 1
+
+    def test_structural_filter_cross_page_bottom_boundary_drops(self):
+        """A TABLE with y1 exactly equal to _CROSS_PAGE_STRUCTURAL_BOTTOM_MIN_PT
+        qualifies for the cross-page check (condition is >=). Pairs with the
+        short-table test above to pin the exact boundary."""
+        table_sec = _structural_section(
+            kind=SectionKind.TABLE, page_num=0,
+            bbox=(100, 60, 400, _CROSS_PAGE_STRUCTURAL_BOTTOM_MIN_PT),
+        )
+        img = _ext_img(page=2, bbox=(150, 57, 380, 170))
+        kept_images, _kept_sections, dropped = (
+            _filter_vector_images_against_structural([img], [table_sec])
+        )
+        assert dropped == 1, (
+            f"table y1={_CROSS_PAGE_STRUCTURAL_BOTTOM_MIN_PT} is exactly "
+            "at the boundary -- drops"
+        )
+        assert kept_images == []
+
+    def test_structural_filter_cross_page_first_page_kept(self):
+        """A vector on page 1 (im.page=1) triggers the cross-page check
+        (y0=57 <= 75) but looks up page 0, which is never in the dict
+        (pages are 1-based). No prior section is found, so the vector is
+        kept. A TABLE on page 3 is included to prevent the early-return
+        fast path from bypassing the loop entirely."""
+        # TABLE on page 3 makes structural_bboxes_by_page non-empty.
+        table_sec = _structural_section(
+            kind=SectionKind.TABLE, page_num=2,
+            bbox=(100, 60, 400, 750),
+        )
+        img = _ext_img(page=1, bbox=(150, 57, 380, 170))
+        kept_images, _kept_sections, dropped = (
+            _filter_vector_images_against_structural([img], [table_sec])
+        )
+        assert dropped == 0
+        assert len(kept_images) == 1
+
+    def test_structural_filter_cross_page_same_page_unchanged(self):
+        """Same-page filtering is not affected by the cross-page change:
+        a vector fully inside a TABLE on the same page is still dropped."""
+        table_sec = _structural_section(
+            kind=SectionKind.TABLE, page_num=1,
+            bbox=(50, 50, 450, 300),
+        )
+        img = _ext_img(page=2, bbox=(100, 100, 400, 250))
+        kept_images, _kept_sections, dropped = (
+            _filter_vector_images_against_structural([img], [table_sec])
+        )
+        assert dropped == 1
+        assert kept_images == []
+
+    def test_structural_filter_cross_page_code_section(self):
+        """The cross-page check applies to CODE sections on the prior page,
+        not only TABLE sections."""
+        code_sec = _structural_section(
+            kind=SectionKind.CODE, page_num=0,
+            bbox=(100, 60, 400, 750),
+        )
+        img = _ext_img(page=2, bbox=(150, 57, 380, 170))
+        kept_images, _kept_sections, dropped = (
+            _filter_vector_images_against_structural([img], [code_sec])
+        )
+        assert dropped == 1
         assert kept_images == []
 
 

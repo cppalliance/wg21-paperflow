@@ -1,14 +1,17 @@
 """DOM-to-Markdown rendering for WG21 HTML papers."""
 
+import html as _html
 import re
 import urllib.parse
+from collections import deque
 
-from bs4 import BeautifulSoup, Comment, Tag, NavigableString
+from bs4 import BeautifulSoup, CData, Comment, Tag, NavigableString
 
-from .. import strip_format_chars, SECTION_NUM_PREFIX_RE, ALLOWED_LINK_SCHEMES
+from .. import strip_format_chars, ALLOWED_LINK_SCHEMES
 
 _BOLD_WRAP_RE = re.compile(r"^\*\*(.+)\*\*$")
 _LOSSY_TABLE_MARKER = "<!-- tomd:lossy-table -->"
+_MIXED_TABLE_MARKER = "<!-- tomd:mixed-table -->"
 _COLLAPSE_WS_RE = re.compile(r"\s+")
 
 _HEADING_TAGS = frozenset({"h1", "h2", "h3", "h4", "h5", "h6"})
@@ -35,7 +38,6 @@ def _fix_misnested_blocks(soup: BeautifulSoup) -> None:
 
     Uses a worklist to avoid rescanning the entire DOM on each fix.
     """
-    from collections import deque
 
     def _has_block_child(tag: Tag) -> bool:
         return any(isinstance(c, Tag) and c.name in _BLOCK_TAGS for c in tag.children)
@@ -97,7 +99,6 @@ def _fix_misnested_list_items(soup: BeautifulSoup) -> None:
 
     Uses a worklist to avoid rescanning the entire DOM on each fix.
     """
-    from collections import deque
 
     def _direct_li_children(li: Tag) -> list[Tag]:
         return li.find_all("li", recursive=False)
@@ -121,6 +122,128 @@ def _fix_misnested_list_items(soup: BeautifulSoup) -> None:
                 worklist.append(nested_li)
 
 
+_TABLE_CELL_TAGS = frozenset({"td", "th"})
+_TABLE_SECTION_TAGS = ("tbody", "thead", "tfoot")
+
+
+def _fix_misnested_table_cells(soup: BeautifulSoup) -> None:
+    """Repair table rows and cells wrongly nested by html.parser.
+
+    html.parser does not auto-close ``<td>``, ``<th>``, or ``<tr>`` when
+    it encounters a new opening tag of the same type. This causes three
+    kinds of mangling:
+
+    0. ``<tbody>``/``<thead>``/``<tfoot>`` trapped inside a ``<td>``/
+       ``<th>`` cell (the cell before the section tag was never closed).
+       We unwrap these so their children become direct children of the
+       cell, which lets phases 1 and 2 see the trapped rows. Section
+       tags belonging to a legitimately nested ``<table>`` inside the
+       cell are left alone.
+
+    1. ``<tr>`` nested inside ``<td>``/``<th>`` instead of being a sibling
+       row. We promote these to direct children of the table container
+       (``<tbody>``, ``<thead>``, ``<tfoot>``, or ``<table>``).
+
+    2. ``<td>``/``<th>`` nested inside another ``<td>``/``<th>`` instead
+       of being siblings within the same ``<tr>``. We flatten these by
+       repeatedly extracting nested cells.
+    """
+    for table in soup.find_all("table"):
+        # Phase 0: unwrap section tags trapped inside cells. The
+        # ownership guard restricts each pass of the outer loop to
+        # sections whose nearest <table> is the current one: sections
+        # of a legitimately nested <table> keep their structure, and
+        # malformed nested tables are repaired in their own pass.
+        for cell in table.find_all(_TABLE_CELL_TAGS):
+            for section in cell.find_all(_TABLE_SECTION_TAGS):
+                if section.find_parent("table") is table:
+                    section.unwrap()
+
+        container = (
+            table.find(list(_TABLE_SECTION_TAGS), recursive=False)
+            or table
+        )
+        # Phase 1: promote <tr> elements trapped inside cells to the
+        # table container level.
+        for cell in table.find_all(_TABLE_CELL_TAGS):
+            nested_trs = cell.find_all("tr", recursive=False)
+            for nested_tr in nested_trs:
+                container.append(nested_tr.extract())
+
+        # Phase 2: flatten <td>/<th> nested inside other <td>/<th>
+        # within each <tr>.
+        for tr in table.find_all("tr"):
+            changed = True
+            while changed:
+                changed = False
+                for cell in tr.find_all(_TABLE_CELL_TAGS, recursive=False):
+                    nested = cell.find_all(
+                        _TABLE_CELL_TAGS, recursive=False,
+                    )
+                    if nested:
+                        for nested_cell in reversed(nested):
+                            cell.insert_after(nested_cell.extract())
+                        changed = True
+
+
+_INLINE_RENDER_TAGS = frozenset({
+    "span", "a", "code", "em", "strong", "b", "i", "sub", "sup",
+    "ins", "del", "mark", "small", "s", "u", "abbr", "cite",
+    "dfn", "var", "kbd", "samp", "time", "data", "wbr",
+    "h-", "f-serif",
+})
+
+_BARE_INLINE_TAGS = _INLINE_RENDER_TAGS | {"img", "tt-"}
+
+
+def _wrap_bare_blockquote_inline(soup: BeautifulSoup) -> None:
+    """Wrap bare inline runs under ``<blockquote>`` in ``<p>`` elements.
+
+    Some papers place inline content (text nodes, ``<b>``, ``<a>``, ...)
+    directly under ``<blockquote>`` without a ``<p>`` wrapper. The
+    renderer treats every child as its own block, so a label like
+    ``<b>ACTION</b>: text`` splits into two paragraphs and the bold
+    markers are lost. Wrapping each run of consecutive inline children
+    in a ``<p>`` routes them through the paragraph renderer, which
+    keeps the run as one paragraph with inline formatting intact.
+    Block-level children end the current run and stay untouched.
+
+    A run is only wrapped if it contains a visible bare text node.
+    A lone inline container (``<small>``/``<ins>`` holding an entire
+    wording block) keeps its line structure; the paragraph renderer
+    would collapse its internal newlines into one line. ``<br>`` ends
+    the run: an explicit line break (poll tallies, addresses) must not
+    be collapsed into the surrounding text.
+    """
+    for bq in soup.find_all("blockquote"):
+        run: list = []
+
+        def _flush() -> None:
+            if not run:
+                return
+            has_bare_text = any(
+                isinstance(n, NavigableString)
+                and not isinstance(n, Comment)
+                and str(n).strip()
+                for n in run
+            )
+            if has_bare_text:
+                p = soup.new_tag("p")
+                run[0].insert_before(p)
+                for node in run:
+                    p.append(node.extract())
+            run.clear()
+
+        for child in list(bq.children):
+            if isinstance(child, NavigableString) or (
+                isinstance(child, Tag) and child.name in _BARE_INLINE_TAGS
+            ):
+                run.append(child)
+            else:
+                _flush()
+        _flush()
+
+
 def render_body(soup: BeautifulSoup, generator: str) -> str:
     """Render the HTML body to Markdown.
 
@@ -129,10 +252,37 @@ def render_body(soup: BeautifulSoup, generator: str) -> str:
     """
     _fix_misnested_blocks(soup)
     _fix_misnested_list_items(soup)
+    _fix_misnested_table_cells(soup)
+    _wrap_bare_blockquote_inline(soup)
     body = soup.find("body") or soup
+    _normalize_heading_levels(body)
     parts: list[str] = []
     _render_children(body, parts, generator)
     return "\n\n".join(p for p in parts if p.strip())
+
+
+def _normalize_heading_levels(body: Tag) -> None:
+    """Shift body headings so the shallowest renders at H2.
+
+    The front-matter contract reserves H1 for the document title, so body
+    headings start at H2. HTML papers arrive both <h1>-rooted and <h2>-rooted,
+    so shift every heading relative to the document's shallowest heading rather
+    than applying a blanket offset (which would corrupt already-H2-rooted
+    papers). Renaming the tags lets _render_heading pick up the shift through
+    its existing int(el.name[1]) read.
+    """
+    headings = [
+        el for el in body.find_all(list(_HEADING_TAGS))
+        if _inline_text(el, _HEADING_SKIP_CLASSES).strip()
+    ]
+    if not headings:
+        return
+    offset = max(0, 2 - min(int(el.name[1]) for el in headings))
+    if offset == 0:
+        return
+    for el in headings:
+        level = min(int(el.name[1]) + offset, 6)
+        el.name = f"h{level}"
 
 
 def _render_children(element, parts: list[str], generator: str):
@@ -212,21 +362,29 @@ def _render_element(el: Tag, generator: str) -> str | None:
             return "> " + inner.replace("\n", "\n> ")
         return None
 
+    if tag == "abstract-block":
+        parts = []
+        _render_children(el, parts, generator)
+        inner = "\n\n".join(p for p in parts if p.strip())
+        if inner:
+            return f"## Abstract\n\n{inner}"
+        return None
+
     if tag == "tt-":
         text = el.get_text()
         return f"`{text}`" if text.strip() else None
 
     if tag == "code":
+        if generator == "hatemplate" and "itemdeclcode" in (el.get("class") or []):
+            text = el.get_text().strip("\n")
+            return f"```cpp\n{text}\n```" if text.strip() else None
         code_div = el.find("div", class_="code")
         if code_div:
             text = code_div.get_text()
             text = text.strip("\n")
             return f"```cpp\n{text}\n```"
 
-    if tag in ("span", "a", "code", "em", "strong", "b", "i", "sub", "sup",
-               "ins", "del", "mark", "small", "s", "u", "abbr", "cite",
-               "dfn", "var", "kbd", "samp", "time", "data", "wbr",
-               "h-", "f-serif"):
+    if tag in _INLINE_RENDER_TAGS:
         return _render_inline(el)
 
     parts = []
@@ -239,16 +397,7 @@ _ALT_TEXT_ESCAPE_RE = re.compile(r"([\[\]\\])")
 
 
 def _render_img(el: Tag) -> str | None:
-    """Render ``<img>`` as ``![alt](src)``. Skips when ``src`` is absent.
-
-    HTML rendering is opt-in via :func:`rewrite_imgs_via_manifest`: that
-    pre-pass mutates the soup so each ``<img>`` carries the on-disk
-    stored filename in ``src`` and the prioritized caption text in
-    ``alt``. When the caller does not run that pre-pass (e.g. test
-    fixtures), ``<img>`` elements lack a manifest mapping and are
-    suppressed - we never emit a giant ``data:`` URI or an unresolvable
-    remote URL into markdown.
-    """
+    """Render ``<img>`` as ``![alt](src)``. Skips when ``src`` is absent."""
     src = (el.get("src") or "").strip()
     if not src:
         return None
@@ -261,21 +410,7 @@ def rewrite_imgs_via_manifest(
     soup: BeautifulSoup,
     src_to_entry: dict,
 ) -> None:
-    """Mutate each ``<img>`` so its ``src`` and ``alt`` reflect the manifest.
-
-    ``src_to_entry`` maps the original ``src=`` attribute (data: URI or
-    URL) to the :class:`HtmlImageEntry` produced by the mailing fetcher.
-    For each ``<img>``:
-
-    - When the original src is in the map: replace ``src`` with the
-      stored filename and ``alt`` with the prioritized caption
-      (``caption_text`` from a sibling ``<figcaption>``, falling back
-      to the original ``alt`` attribute).
-    - When not in the map (over the 20-image cap, or fetch failed
-      during mailing): strip ``src`` so :func:`_render_img` skips the
-      element. This is how the cap excludes images from markdown
-      without raising.
-    """
+    """Mutate each ``<img>`` so its ``src`` and ``alt`` reflect the manifest."""
     for img in soup.find_all("img"):
         src = (img.get("src") or "").strip()
         entry = src_to_entry.get(src)
@@ -296,12 +431,11 @@ def _render_heading(el: Tag) -> str | None:
     if len(el.name) < 2 or not el.name[1].isdigit():
         return ""
     level = int(el.name[1])
-    text = _inline_text_excluding(el, _HEADING_SKIP_CLASSES).strip()
+    text = _inline_text(el, _HEADING_SKIP_CLASSES).strip()
     if not text:
         return None
     text = text.replace("\n", " ")
     text = re.sub(r"  +", " ", text)
-    text = SECTION_NUM_PREFIX_RE.sub("", text)
     text = _BOLD_WRAP_RE.sub(r"\1", text)
     return f"{'#' * level} {text}"
 
@@ -412,6 +546,11 @@ def _render_div(el: Tag, generator: str) -> str | None:
     if any(c in classes for c in ("wording", "wording-add", "wording-remove")):
         return _render_wording_div(el, generator)
 
+    if generator == "hatemplate" and any(
+        c in classes for c in ("para", "texpara", "sentence")
+    ):
+        return _render_eelis_block(el, generator)
+
     parts = []
     _render_children(el, parts, generator)
     result = "\n\n".join(p for p in parts if p.strip())
@@ -433,40 +572,89 @@ def _render_wording_div(el: Tag, generator: str) -> str:
     return f"{fence}\n\n{inner}\n\n:::"
 
 
+def _render_eelis_block(el: Tag, generator: str) -> str | None:
+    """Render an eelis/draft (hatemplate) wording block.
+
+    The .para / .texpara / .sentence divs are block-level wrappers around
+    inline prose or a code synopsis. A synopsis (span.codeblock or <pre>)
+    is fenced as C++; sentence prose is flowed into a single paragraph.
+    Margin chrome (paragraph numbers, source links) is already removed by
+    strip_boilerplate.
+    """
+    code = el.find("span", class_="codeblock") or el.find("pre")
+    if code:
+        text = code.get_text().strip("\n")
+        return f"```cpp\n{text}\n```" if text.strip() else None
+    # Sentences (and itemized sub-paragraphs) are block-level divs that abut
+    # without whitespace; flow them as prose with a separating space so they
+    # do not merge ("maximum limit.When limits..."). _collapse_whitespace
+    # folds the resulting double spaces.
+    for sentence in el.find_all("div", class_="sentence"):
+        sentence.append(" ")
+    text = _collapse_whitespace(_inline_text(el))
+    return text or None
+
+
 _CODE_BLOCK_TAGS = frozenset({"pre", "code-block"})
 
 
+def _indent(text: str) -> str:
+    """Indent every line by two spaces (list-continuation depth)."""
+    return "\n".join("  " + line for line in text.split("\n"))
+
+
 def _render_list(el: Tag, marker: str, generator: str) -> str | None:
-    """Render an ordered or unordered list."""
-    items = []
-    for i, li in enumerate(el.find_all("li", recursive=False)):
-        prefix = f"{i + 1}." if marker == "1." else "-"
-        # Detach nested sublists before capturing inline text so they are not
-        # walked into by _inline_text (which would duplicate their contents).
-        subs = [sub.extract()
-                for sub in li.find_all(_LIST_CONTAINER_TAGS, recursive=False)]
-        nested_parts = []
-        for sub in subs:
-            sub_rendered = _render_element(sub, generator)
-            if sub_rendered:
-                indented = "\n".join("  " + line for line in sub_rendered.split("\n"))
-                nested_parts.append(indented)
+    """Render an ordered or unordered list.
 
-        # Extract code blocks before inlining so they are rendered as
-        # fenced blocks rather than flattened to inline text.
-        code_parts = []
-        for cb in li.find_all(_CODE_BLOCK_TAGS, recursive=False):
-            rendered = _render_element(cb.extract(), generator)
+    Direct ``<li>`` children become list items. Any other direct child (a
+    nested ``<ol>``/``<ul>`` with no wrapping ``<li>``, or a loose
+    ``<p>``/``<pre>``/``<blockquote>``/``<div>``/text) is rendered through the
+    normal element dispatch and indented under the preceding item rather than
+    silently dropped; if it precedes the first item it is emitted standalone.
+    Only ``<li>`` advances the item counter, so interspersed children do not
+    perturb ordered-list numbering.
+    """
+    items: list[str] = []
+    item_index = 0
+    # Materialize: the <li> branch calls .extract() during iteration.
+    for child in list(el.children):
+        if isinstance(child, Tag) and child.name == "li":
+            item_index += 1
+            prefix = f"{item_index}." if marker == "1." else "-"
+            # Detach nested sublists before capturing inline text so they are not
+            # walked into by _inline_text (which would duplicate their contents).
+            subs = [sub.extract()
+                    for sub in child.find_all(_LIST_CONTAINER_TAGS, recursive=False)]
+            nested_parts = []
+            for sub in subs:
+                sub_rendered = _render_element(sub, generator)
+                if sub_rendered:
+                    nested_parts.append(_indent(sub_rendered))
+
+            # Extract code blocks before inlining so they are rendered as
+            # fenced blocks rather than flattened to inline text.
+            code_parts = []
+            for cb in child.find_all(_CODE_BLOCK_TAGS, recursive=False):
+                rendered = _render_element(cb.extract(), generator)
+                if rendered:
+                    code_parts.append(rendered)
+
+            text = _collapse_whitespace(_inline_text(child))
+            if text:
+                items.append(f"{prefix} {text}")
+            items.extend(code_parts)
+            items.extend(nested_parts)
+        elif isinstance(child, Tag):
+            # Non-<li> direct child: render via the normal dispatch and indent
+            # under the preceding item (standalone if there is no item yet).
+            rendered = _render_element(child, generator)
             if rendered:
-                code_parts.append(rendered)
-
-        text = _collapse_whitespace(_inline_text(li))
-        if text:
-            items.append(f"{prefix} {text}")
-        for cp in code_parts:
-            items.append(cp)
-        for np in nested_parts:
-            items.append(np)
+                items.append(_indent(rendered) if item_index else rendered)
+        elif isinstance(child, NavigableString) and not isinstance(child, (Comment, CData)):
+            # Loose text directly in the list (Comment/CData are not content).
+            text = _collapse_whitespace(str(child)).strip()
+            if text:
+                items.append(("  " + text) if item_index else text)
     return "\n".join(items) if items else None
 
 
@@ -490,20 +678,13 @@ def _needs_flat_reconstruction(el: Tag) -> bool:
     for cell in el.find_all(["th", "td"]):
         if cell.find(["th", "td"]):
             return True
-        if cell.find(["pre", "ol", "ul", "blockquote"]):
+        if cell.find(["ol", "ul", "blockquote"]):
             return True
         if cell.find("p") and len(cell.find_all("p")) > 1:
             return True
     return False
 
 
-
-def _has_br_in_cells(el: Tag) -> bool:
-    """Return True if any cell contains a <br> tag."""
-    for cell in el.find_all(["th", "td"]):
-        if cell.find("br"):
-            return True
-    return False
 
 
 def _cell_own_text(cell: Tag) -> str:
@@ -660,12 +841,115 @@ def _render_table_flat(el: Tag) -> str:
     return "\n".join(lines)
 
 
+def _is_pure_code_table(el: Tag) -> bool:
+    """Return True when the table is a headerless pure code dump.
+
+    A table qualifies as pure code only when ALL of:
+    1. It has no ``<th>`` header cells (no column labels to preserve).
+    2. Every ``<td>`` data cell contains ``<pre>`` or ``<code-block>``.
+
+    Tables with headers always go to the mixed renderer so that
+    Before/After, Current/Proposed, and other comparison labels
+    are preserved in the output.
+    """
+    if el.find("th"):
+        return False
+    td_cells = el.find_all("td")
+    if not td_cells:
+        return True
+    return all(td.find(list(_CODE_BLOCK_TAGS)) for td in td_cells)
+
+
+_ALLOWED_CELL_TAGS = frozenset({
+    "a", "ins", "del", "em", "strong", "b", "i", "code",
+    "sub", "sup", "br", "span", "mark", "s", "u",
+})
+
+
+def _cell_inner_html(cell: Tag) -> str:
+    """Return sanitized inner HTML for a non-code table cell.
+
+    Keeps safe inline tags (links, ins/del, emphasis) as HTML so they
+    render correctly inside an HTML table. Strips all other tags but
+    keeps their text content. Text nodes are HTML-escaped.
+    """
+    parts: list[str] = []
+    for child in cell.children:
+        if isinstance(child, Comment):
+            continue
+        if isinstance(child, NavigableString):
+            parts.append(_html.escape(str(child)))
+        elif isinstance(child, Tag):
+            if child.name in _ALLOWED_CELL_TAGS:
+                parts.append(str(child))
+            else:
+                parts.append(_html.escape(child.get_text()))
+    return _COLLAPSE_WS_RE.sub(" ", "".join(parts)).strip()
+
+
+def _render_mixed_code_table(el: Tag) -> str | None:
+    """Render a table with mixed code and text cells as an HTML table.
+
+    Preserves tabular structure with ``<pre><code>`` for code cells and
+    plain escaped text for non-code cells. Keeps headers, row associations,
+    and non-code content (checkmarks, status, URLs) that ``_render_code_table``
+    would discard.
+    """
+    trs = []
+    containers = el.find_all(["thead", "tbody", "tfoot"], recursive=False)
+    if containers:
+        for container in containers:
+            trs.extend(container.find_all("tr", recursive=False))
+    else:
+        trs = el.find_all("tr", recursive=False)
+
+    if not trs:
+        return None
+
+    num_cols = max(
+        len(tr.find_all(["td", "th"], recursive=False)) for tr in trs
+    )
+    if num_cols == 0:
+        return None
+
+    col_w = f"{100 // num_cols}%"
+    _S = (f"border: 1px solid #999; padding: 6px 10px; "
+          f"vertical-align: top; width: {col_w};")
+    parts: list[str] = [
+        _MIXED_TABLE_MARKER,
+        '<table border="1" rules="all" cellpadding="6" cellspacing="0"'
+        ' style="border-collapse: collapse; width: 100%;">',
+    ]
+
+    for tr in trs:
+        parts.append("<tr>")
+        cells = tr.find_all(["td", "th"], recursive=False)
+        for cell in cells:
+            tag = cell.name
+            code_el = cell.find(list(_CODE_BLOCK_TAGS))
+            if code_el:
+                code_text = code_el.get_text().strip()
+                escaped = _html.escape(code_text)
+                parts.append(
+                    f'<{tag} style="{_S}">'
+                    f'<pre style="margin: 0;"><code>{escaped}</code></pre>'
+                    f'</{tag}>')
+            else:
+                inner = _cell_inner_html(cell)
+                parts.append(f'<{tag} style="{_S}">{inner}</{tag}>')
+        parts.append("</tr>")
+
+    parts.append("</table>")
+    return "\n".join(parts)
+
+
 def _render_table(el: Tag) -> str | None:
     """Render a table as a Markdown pipe table.
 
-    Tables whose cells contain <pre> or <code-block> elements cannot be
-    represented as pipe tables. For those, extract the code blocks as
-    fenced code and skip the table structure.
+    Tables whose cells contain <pre> or <code-block> elements are routed
+    based on code-cell ratio: pure code tables (>=80% code data cells) go
+    to ``_render_code_table``; mixed-content tables go to
+    ``_render_mixed_code_table`` which preserves tabular structure.
 
     Tables with rowspan/colspan are denormalized into flat pipe tables.
     Tables with parser-mangled DOM (nested cells from unclosed tags) are
@@ -674,7 +958,9 @@ def _render_table(el: Tag) -> str | None:
     flat reconstruction path.
     """
     if el.find(_CODE_BLOCK_TAGS):
-        return _render_code_table(el)
+        if _is_pure_code_table(el):
+            return _render_code_table(el)
+        return _render_mixed_code_table(el)
 
     if _needs_flat_reconstruction(el):
         return _render_table_flat(el)
@@ -744,10 +1030,20 @@ def _render_blockquote(el: Tag, generator: str) -> str | None:
 
 
 def _render_dl(el: Tag, generator: str) -> str | None:
-    """Render a definition list."""
+    """Render a definition list.
+
+    ``<dt>``/``<dd>`` render as term/definition. Any other direct child is
+    rendered through the normal element dispatch rather than dropped; loose
+    text is kept (Comment/CData are not content).
+    """
     items = []
-    for child in el.children:
+    for child in list(el.children):
         if not isinstance(child, Tag):
+            if (isinstance(child, NavigableString)
+                    and not isinstance(child, (Comment, CData))):
+                text = _collapse_whitespace(str(child)).strip()
+                if text:
+                    items.append(text)
             continue
         if child.name == "dt":
             text = _inline_text(child).strip()
@@ -763,6 +1059,10 @@ def _render_dl(el: Tag, generator: str) -> str | None:
             if text:
                 items.append(f": {text}")
             items.extend(code_parts)
+        else:
+            rendered = _render_element(child, generator)
+            if rendered:
+                items.append(rendered)
     return "\n".join(items) if items else None
 
 
@@ -771,24 +1071,13 @@ def _render_inline(el: Tag) -> str:
     return _inline_text(el)
 
 
-def _inline_text_excluding(el: Tag, skip_classes: frozenset[str]) -> str:
-    """Like _inline_text but skips child elements with any class in skip_classes."""
-    parts = []
-    for child in el.children:
-        if isinstance(child, Comment):
-            continue
-        if isinstance(child, NavigableString):
-            parts.append(str(child))
-        elif isinstance(child, Tag):
-            child_classes = set(child.get("class", []))
-            if child_classes & skip_classes:
-                continue
-            parts.append(_inline_text(child))
-    return "".join(parts)
+def _inline_text(el: Tag, skip_classes: frozenset[str] = frozenset()) -> str:
+    """Convert an element's content to inline Markdown text.
 
-
-def _inline_text(el: Tag) -> str:
-    """Convert an element's content to inline Markdown text."""
+    `skip_classes` drops direct children carrying any of those classes (used
+    by headings to strip section-number and self-link spans) while preserving
+    inline formatting such as <code> on the remaining children.
+    """
     parts = []
     for child in el.children:
         if isinstance(child, Comment):
@@ -797,6 +1086,9 @@ def _inline_text(el: Tag) -> str:
             parts.append(str(child))
         elif isinstance(child, Tag):
             tag = child.name
+
+            if skip_classes and skip_classes.intersection(child.get("class") or []):
+                continue
 
             if tag in ("style", "script"):
                 continue
