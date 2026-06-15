@@ -6,10 +6,6 @@ reply-to:
 
 ---
 
-| P4012R0 | A `really_convertible_to` definition |
-| --- | --- |
-| 11.3 | modify [simd.ctor] |
-
 ## In [simd.ctore], change:
 
 :::wording
