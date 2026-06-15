@@ -889,8 +889,8 @@ def _render_list(el: Tag, marker: str, generator: str) -> str | None:
     label plus document-order continuation blocks). Any other direct child (a
     nested list with no wrapping ``<li>``, or a loose
     ``<p>``/``<pre>``/``<blockquote>``/text) is a continuation of the preceding
-    item — indented to that item's marker width and blank-line separated unless
-    it is a nested list — rather than silently dropped; before the first item it
+    item, indented to that item's marker width and blank-line separated unless
+    it is a nested list, rather than silently dropped; before the first item it
     is emitted standalone. Only ``<li>`` advances the item counter, so
     interspersed children do not perturb ordered-list numbering.
     """
