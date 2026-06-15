@@ -113,11 +113,14 @@ def dedup_paragraphs(md: str) -> str:
 DEFAULT_FENCE_LANG = "cpp"
 
 
-def strip_leading_h1(body: str, title: str = "") -> str:
-    """Remove a leading H1 from body text if it duplicates the front-matter title.
+def strip_leading_h1(body: str, title: str = "", max_level: int = 1) -> str:
+    """Remove a leading heading from body text if it duplicates the title.
 
-    Strips the first non-blank line if it is an ATX H1 (starts with '# ') and
-    either matches the front-matter title or is the very first content.
+    Strips the first non-blank line if it is an ATX heading no deeper than
+    `max_level` and either matches the front-matter title or (H1 only) is the
+    very first content. The HTML path passes `max_level=2`: its body headings
+    start at H2 (the title is the only H1), so a title-duplicate first heading
+    arrives as `## Title`, not `# Title`. PDF keeps the default H1-only behavior.
     Also handles plaintext title echoes (no '#' prefix) and promotes a bare
     "Abstract" line immediately following to ``## Abstract``.
     """
@@ -130,9 +133,13 @@ def strip_leading_h1(body: str, title: str = "") -> str:
             continue
         if stripped.startswith("<!--") and stripped.endswith("-->"):
             continue
-        if stripped.startswith("# ") and not stripped.startswith("## "):
-            h1_text = stripped[2:].strip()
-            if not title_clean or _titles_match(h1_text, title_clean):
+        m = re.match(r"(#{1,6})\s+(.+)", stripped)
+        if m and len(m.group(1)) <= max_level:
+            level = len(m.group(1))
+            h_text = m.group(2).strip()
+            if (level == 1 and not title_clean) or (
+                title_clean and _titles_match(h_text, title_clean)
+            ):
                 lines[i] = ""
                 title_removed_at = i
             break
@@ -169,15 +176,15 @@ def _titles_match(h1: str, title: str) -> bool:
     return h1_n == title_n or title_n.startswith(h1_n)
 
 
-def apply_strip_leading_h1(md: str, title: str) -> str:
-    """Strip a leading H1 from the body after YAML front matter."""
+def apply_strip_leading_h1(md: str, title: str, max_level: int = 1) -> str:
+    """Strip a leading title heading from the body after YAML front matter."""
     fm_end = _find_front_matter_end(md)
     if fm_end is None:
         return md
     line_end = md.find("\n", fm_end)
     if line_end < 0:
         return md
-    body = strip_leading_h1(md[line_end + 1:], title)
+    body = strip_leading_h1(md[line_end + 1:], title, max_level)
     return md[: line_end + 1] + body
 
 
@@ -610,15 +617,21 @@ def _strip_metadata_table(md: str) -> str:
         return md
     body_start += 1
     body_raw = md[body_start:]
-    # Skip a leading H1 (with surrounding blank lines) so we still recognize
-    # a metadata table that immediately follows a duplicate title heading.
+    # Title-matched skip: peel one leading H1/H2 title heading so we still
+    # recognize a metadata pipe table that follows a duplicate title heading.
+    # Enables single-pass cleanup together with apply_strip_leading_h1.
+    title_m = re.search(r'^title:\s*"?(.+?)"?\s*$', md[:fm_end], re.MULTILINE)
+    title_clean = title_m.group(1).strip().strip('"').strip() if title_m else ""
     skip = 0
-    stripped = body_raw.lstrip("\n")
-    if stripped.startswith("# ") and not stripped.startswith("## "):
+    if title_clean:
+        stripped = body_raw.lstrip("\n")
         nl = stripped.find("\n")
-        skip = (len(body_raw) - len(stripped)) + (
-            nl + 1 if nl >= 0 else len(stripped)
-        )
+        first_line = stripped if nl < 0 else stripped[:nl]
+        hm = re.match(r"(#{1,2})\s+(.+)", first_line.strip())
+        if hm and _titles_match(hm.group(2).strip(), title_clean):
+            skip = (len(body_raw) - len(stripped)) + (
+                nl + 1 if nl >= 0 else len(stripped)
+            )
     body = body_raw[skip:].lstrip("\n")
 
     if not body.startswith("|"):

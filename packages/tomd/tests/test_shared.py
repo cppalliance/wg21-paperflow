@@ -14,8 +14,10 @@ from __future__ import annotations
 from pathlib import Path
 
 from tomd.lib.shared import (
+    _strip_metadata_table,
     apply_strip_leading_h1,
     override_revision_from_filename,
+    strip_leading_h1,
     strip_redundant_body_meta,
 )
 
@@ -64,6 +66,12 @@ class TestApplyStripLeadingH1:
         assert "# Before --- After" not in result
         assert "Body." in result
 
+    def test_apply_strip_leading_h1_max_level_2_strips_h2(self):
+        md = '---\ntitle: "My Paper"\n---\n## My Paper\n\nBody.\n'
+        result = apply_strip_leading_h1(md, "My Paper", 2)
+        assert "## My Paper" not in result
+        assert "Body." in result
+
 
 class TestEmitCleanup:
     _H1_THEN_METADATA_TABLE = (
@@ -85,6 +93,18 @@ class TestEmitCleanup:
         assert "| Document |" not in md
         assert "# T" not in md
         assert "Body." in md
+
+    def test_h2_then_metadata_table_stripped_when_title_matches(self):
+        md = (
+            '---\ntitle: "My Paper"\n---\n'
+            "## My Paper\n\n"
+            "| Document | P0000 |\n|----------|-------|\n\n"
+            "Body.\n"
+        )
+        out = _strip_metadata_table(md)
+        assert "| Document |" not in out
+        assert "## My Paper" not in out
+        assert "Body." in out
 
 
 class TestOverrideRevisionFromFilename:
@@ -120,3 +140,33 @@ class TestOverrideRevisionFromFilename:
         metadata: dict = {}
         override_revision_from_filename(metadata, Path("p1234r3.pdf"))
         assert metadata == {}
+
+
+class TestStripLeadingH1:
+    def test_strips_h1_title_duplicate(self):
+        out = strip_leading_h1("# My Paper\n\nBody.", "My Paper")
+        assert not out.lstrip().startswith("#")
+        assert "Body." in out
+
+    def test_strips_h1_first_content_when_no_title(self):
+        out = strip_leading_h1("# Anything\n\nBody.", "")
+        assert not out.lstrip().startswith("#")
+
+    def test_leaves_non_matching_h1(self):
+        out = strip_leading_h1("# Other\n\nBody.", "My Paper")
+        assert out.lstrip().startswith("# Other")
+
+    def test_default_does_not_strip_h2(self):
+        # PDF path keeps H1-only behavior: an H2 title-dup is left alone.
+        out = strip_leading_h1("## My Paper\n\nBody.", "My Paper")
+        assert out.lstrip().startswith("## My Paper")
+
+    def test_max_level_2_strips_h2_title_duplicate(self):
+        # HTML path: body headings start at H2, so the title-dup arrives as H2.
+        out = strip_leading_h1("## My Paper\n\nBody.", "My Paper", max_level=2)
+        assert not out.lstrip().startswith("#")
+        assert "Body." in out
+
+    def test_max_level_2_leaves_deeper_heading(self):
+        out = strip_leading_h1("### My Paper\n\nBody.", "My Paper", max_level=2)
+        assert out.lstrip().startswith("### My Paper")
