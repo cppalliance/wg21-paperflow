@@ -3,7 +3,7 @@
 import fitz
 import logging
 import re
-from collections import Counter
+from collections import Counter, defaultdict
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -36,7 +36,7 @@ from ..metadata_yaml.extract import (
     extract_metadata as _extract_metadata_yaml,
     apply_pdf_metadata_fallbacks as _apply_pdf_metadata_fallbacks,
 )
-from .table import detect_tables, exclude_table_regions
+from .table import detect_tables, exclude_table_regions, _rot_bbox, _rot_midpoint
 from .wg21 import extract_metadata_from_blocks
 from .emit import emit_markdown, emit_prompts
 from .types import (
@@ -128,6 +128,162 @@ def _toc_structural_hints(sections) -> list[bool]:
     return result
 
 
+# ─── Drawing-grid detection ────────────────────────────────────────────
+# MuPDF find_tables() misses some small bordered tables. This fallback
+# detects rectangular grids from vector drawing lines and injects them
+# as synthetic entries so Pass 2b (inline-grid) can fire.
+
+_DRAWING_GRID_SPAN_TOL = 5.0       # grouping tolerance for horizontal lines
+_DRAWING_GRID_AXIS_TOL = 1.0       # max skew for an axis-aligned line
+_DRAWING_GRID_MIN_HORIZONTALS = 5   # 5+ h-lines = header + 2 data rows minimum
+_DRAWING_GRID_MIN_WIDTH = 50.0      # reject tiny decorative boxes
+_DRAWING_GRID_VERT_TOL = 3.0        # tolerance for matching vertical borders
+_DRAWING_GRID_Y_DEDUP = 3.0         # merge near-identical y-values
+_DRAWING_GRID_MIN_UNIQUE_ROWS = 3  # deduped rules: header + 2 data rows minimum
+_DRAWING_GRID_MAX_HEIGHT_RATIO = 0.7  # reject grids taller than 70% of page
+_DRAWING_GRID_BAND_TOL = 4.0       # y-band grouping for multi-cell check
+_DRAWING_GRID_MIN_MULTI_BANDS = 2  # bands that must hold 2+ cells side by side
+_DRAWING_GRID_MIN_MULTI_BAND_FRACTION = 0.5  # multi-cell bands >= half of all bands
+_DRAWING_GRID_COVER_FRAC = 0.5     # find_tables overlap that counts as covered
+
+
+def _page_text_line_bboxes(page) -> list[tuple[float, float, float, float]]:
+    """Bboxes of all text lines on *page*, for the grid multi-cell check."""
+    try:
+        data = page.get_text("dict", flags=0)
+    except Exception:
+        # Firewall around MuPDF: a malformed page must not abort the
+        # whole conversion, it just loses the drawing-grid fallback.
+        return []
+    return [
+        tuple(line["bbox"])
+        for blk in data.get("blocks", [])
+        if blk.get("type") == 0
+        for line in blk.get("lines", [])
+    ]
+
+
+def _detect_drawing_grids(
+    page, page_height: float,
+    existing_tables: list[dict],
+) -> list[dict]:
+    """Detect bordered table grids from page drawings that find_tables missed.
+
+    Returns a list of synthetic table entries (bbox dicts) suitable for
+    injection into page_mupdf_tables.
+    """
+    try:
+        drawings = page.get_drawings()
+    except Exception:
+        # Firewall around MuPDF, same rationale as _page_text_line_bboxes.
+        return []
+
+    h_lines: list[tuple[float, float, float]] = []
+    v_xs: list[float] = []
+
+    for d in drawings:
+        for item in d["items"]:
+            if item[0] == "l":
+                p1, p2 = item[1], item[2]
+                if abs(p1.y - p2.y) < _DRAWING_GRID_AXIS_TOL:
+                    h_lines.append((min(p1.x, p2.x), max(p1.x, p2.x), p1.y))
+                elif abs(p1.x - p2.x) < _DRAWING_GRID_AXIS_TOL:
+                    v_xs.append(p1.x)
+
+    if len(h_lines) < _DRAWING_GRID_MIN_HORIZONTALS:
+        return []
+
+    # Bucket h-lines by rounded span. Bucketing has hard edges (lines
+    # straddling a bucket boundary split into two groups), but distance
+    # clustering was tried and rejected: it merges vertically stacked
+    # sibling tables with near-identical spans into one grid.
+    h_by_span: dict[tuple[float, float], list[float]] = defaultdict(list)
+    for hx0, hx1, hy in h_lines:
+        key = (round(hx0 / _DRAWING_GRID_SPAN_TOL) * _DRAWING_GRID_SPAN_TOL,
+               round(hx1 / _DRAWING_GRID_SPAN_TOL) * _DRAWING_GRID_SPAN_TOL)
+        h_by_span[key].append(hy)
+
+    results: list[dict] = []
+    text_lines: list[tuple[float, float, float, float]] | None = None
+    for (x0, x1), ys in h_by_span.items():
+        if len(ys) < _DRAWING_GRID_MIN_HORIZONTALS:
+            continue
+        if (x1 - x0) < _DRAWING_GRID_MIN_WIDTH:
+            continue
+
+        ys_sorted = sorted(ys)
+        y_min, y_max = ys_sorted[0], ys_sorted[-1]
+        grid_height = y_max - y_min
+
+        if grid_height > page_height * _DRAWING_GRID_MAX_HEIGHT_RATIO:
+            continue
+
+        # Require vertical borders on both sides
+        left_verts = any(abs(v - x0) < _DRAWING_GRID_VERT_TOL for v in v_xs)
+        right_verts = any(abs(v - x1) < _DRAWING_GRID_VERT_TOL for v in v_xs)
+        if not left_verts or not right_verts:
+            continue
+
+        # Deduplicate y-values to count actual rows
+        unique_ys: list[float] = []
+        for y in ys_sorted:
+            if not unique_ys or abs(y - unique_ys[-1]) > _DRAWING_GRID_Y_DEDUP:
+                unique_ys.append(y)
+        if len(unique_ys) < _DRAWING_GRID_MIN_UNIQUE_ROWS:
+            continue
+
+        grid_bbox = (x0, y_min, x1, y_max)
+
+        # Multi-cell check: bordered wording/code boxes also produce
+        # stacked horizontal rules, but their text is one line per
+        # y-band. A real table has 2+ side-by-side cells in most rows.
+        if text_lines is None:
+            text_lines = _page_text_line_bboxes(page)
+        bands: list[float] = []  # y-band centers
+        band_cells: list[int] = []
+        for lx0, ly0, lx1, ly1 in text_lines:
+            ymid = (ly0 + ly1) / 2.0
+            xmid = (lx0 + lx1) / 2.0
+            if not (y_min <= ymid <= y_max and x0 <= xmid <= x1):
+                continue
+            for bi, band_y in enumerate(bands):
+                if abs(ymid - band_y) <= _DRAWING_GRID_BAND_TOL:
+                    band_cells[bi] += 1
+                    break
+            else:
+                bands.append(ymid)
+                band_cells.append(1)
+        multi_bands = sum(1 for c in band_cells if c >= 2)
+        if multi_bands < _DRAWING_GRID_MIN_MULTI_BANDS:
+            continue
+        if multi_bands < len(band_cells) * _DRAWING_GRID_MIN_MULTI_BAND_FRACTION:
+            continue  # mostly single-cell rows: a box, not a table
+
+        # Skip if already covered by find_tables
+        already_covered = any(
+            _bbox_overlap_fraction(grid_bbox, ft["bbox"])
+            > _DRAWING_GRID_COVER_FRAC
+            for ft in existing_tables
+        )
+        if already_covered:
+            continue
+
+        # Full find_tables() entry shape so downstream passes can read all
+        # keys safely. row_count=0 makes Pass 5 (MuPDF Native) skip the
+        # entry; only Pass 2b (inline-grid) acts on it, via the bbox.
+        results.append({
+            "bbox": grid_bbox,
+            "row_count": 0,
+            "col_count": 0,
+            "cells": [],
+            "header_names": None,
+            "extract": [],
+            "rot": None,
+        })
+
+    return results
+
+
 def _detect_column_split(blocks: list, page_width: float) -> float | None:
     """Find the x-coordinate that separates two text columns on a page.
 
@@ -174,24 +330,42 @@ def _detect_column_split(blocks: list, page_width: float) -> float | None:
     return best_split
 
 
-def _column_aware_sort(blocks: list, page_widths: dict[int, float]) -> None:
+def _column_aware_sort(
+    blocks: list,
+    page_widths: dict[int, float],
+    page_rotations: dict[int, tuple] | None = None,
+) -> None:
     """Sort blocks by reading order: page, then column (if two-column), then y.
 
     For two-column pages the left column is emitted entirely before the
     right column, preserving within-column y-order.  Single-column pages
     fall back to simple y-midpoint sorting (the P3625R1 fix).
+
+    Rotated pages (page_rotations maps page -> rotation matrix) sort by
+    the reading-space y-midpoint: block bboxes stay in unrotated page
+    space, where the raw y-order does not match visual reading order.
     """
     page_blocks: dict[int, list] = {}
     for b in blocks:
         page_blocks.setdefault(b.page_num, []).append(b)
 
+    rotations = page_rotations or {}
     splits: dict[int, float | None] = {}
     for pg, pblocks in page_blocks.items():
+        if pg in rotations:
+            # Column detection works on page-space x, which is
+            # meaningless on rotated pages; sort_key short-circuits
+            # before reading splits for these pages.
+            continue
         pw = page_widths.get(pg, 612.0)
         splits[pg] = _detect_column_split(pblocks, pw)
 
     def sort_key(b):
         pg = b.page_num
+        rot = rotations.get(pg)
+        if rot is not None:
+            _, ry = _rot_midpoint(b.bbox, rot)
+            return (pg, 0, ry)
         y_mid = (b.bbox[1] + b.bbox[3]) / 2
         split = splits.get(pg)
         if split is not None:
@@ -852,6 +1026,9 @@ def run_pipeline(
         all_spatial_blocks = []
         all_edge_items = []
         page_widths: dict[int, float] = {}
+        # Rotated pages: pg -> rotation matrix (page space -> reading
+        # space).  Used for reading-order sorting and table insertion.
+        page_rotations: dict[int, tuple] = {}
         per_page_image_candidates: list = []
         # Sub-threshold raster glyphs (font-replacement emoji) and the
         # text-layer emoji bboxes used to skip coincident positions.
@@ -863,6 +1040,8 @@ def run_pipeline(
         for pg_num in range(result.page_count):
             page = doc[pg_num]
             page_widths[pg_num] = page.rect.width
+            if page.rotation:
+                page_rotations[pg_num] = tuple(page.rotation_matrix)
 
             mupdf_blocks = extract_mupdf(page, pg_num)
             spatial_blocks = extract_spatial(page, pg_num)
@@ -943,21 +1122,50 @@ def run_pipeline(
                 raw_drawings, pg_num, page.rect.width)
             all_figure_regions.extend(page_figures)
 
+            # Intentional: runs unconditionally (independent of ml_tables).
+            # Three table-detection passes rely on the MuPDF signal:
+            # SBS deferral (Pass 0/2), inline-grid overlap (Pass 2b),
+            # and MuPDF Native (Pass 5).  Cost accepted across the
+            # 382-paper corpus.  Gate behind a flag if profiling shows
+            # this dominates conversion time on large documents.
             try:
                 ft = page.find_tables()
                 if ft.tables:
+                    # On rotated pages find_tables() reports bboxes in
+                    # reading (display) space while extract_mupdf blocks
+                    # stay in unrotated page space. Pass the rotation
+                    # matrix so Pass 5 can map block/line midpoints into
+                    # reading space before cell assignment.
+                    rot = page_rotations.get(pg_num)
                     page_mupdf_tables[pg_num] = [
                         {"bbox": tuple(t.bbox),
                          "row_count": t.row_count,
                          "col_count": t.col_count,
                          "cells": [tuple(c) if c else None for c in t.cells],
                          "header_names": t.header.names if t.header else None,
-                         "extract": t.extract()}
+                         "extract": t.extract(),
+                         "rot": rot}
                         for t in ft.tables
                     ]
             except Exception:
                 _log.debug("find_tables() failed on page %d", pg_num,
                            exc_info=True)
+
+            # Fallback: detect bordered grids from drawing lines that
+            # find_tables() missed and inject as synthetic entries.
+            # Skipped on rotated pages: the h/v line classification works
+            # in page space and Pass 2b consuming such an entry would
+            # build a transposed table; Pass 5 owns rotated pages.
+            if pg_num in page_rotations:
+                continue
+            drawing_grids = _detect_drawing_grids(
+                page, page.rect.height,
+                page_mupdf_tables.get(pg_num, []),
+            )
+            if drawing_grids:
+                _log.debug("Drawing-grid fallback found %d grid(s) on page %d",
+                           len(drawing_grids), pg_num)
+                page_mupdf_tables.setdefault(pg_num, []).extend(drawing_grids)
 
         if all_figure_regions:
             _log.info("Detected %d figure region(s)", len(all_figure_regions))
@@ -1038,8 +1246,8 @@ def run_pipeline(
     # text despite higher y-positions) the merge target is wrong and
     # continuation text lands on the wrong block.  Sorting first ensures
     # "last block on the page" means visually bottom-most.
-    _column_aware_sort(all_mupdf_blocks, page_widths)
-    _column_aware_sort(all_spatial_blocks, page_widths)
+    _column_aware_sort(all_mupdf_blocks, page_widths, page_rotations)
+    _column_aware_sort(all_spatial_blocks, page_widths, page_rotations)
 
     all_mupdf_blocks = cleanup_text(all_mupdf_blocks)
     all_spatial_blocks = cleanup_text(all_spatial_blocks)
@@ -1099,6 +1307,9 @@ def run_pipeline(
         data_on_label_page = (
             ts.lines and ts.lines[0].page_num == ts.page_num
         )
+        # On rotated pages compare in reading space; page-space y does
+        # not reflect visual order there.
+        ts_rot = page_rotations.get(ts.page_num)
         for i, sec in enumerate(sections):
             if sec.page_num > ts.page_num:
                 sections.insert(i, ts)
@@ -1107,7 +1318,8 @@ def run_pipeline(
             if (data_on_label_page
                     and sec.page_num == ts.page_num and sec.lines
                     and ts.lines
-                    and sec.lines[0].bbox[1] > ts.lines[0].bbox[1]):
+                    and _rot_bbox(sec.lines[0].bbox, ts_rot)[1]
+                    > _rot_bbox(ts.lines[0].bbox, ts_rot)[1]):
                 sections.insert(i, ts)
                 inserted = True
                 break
