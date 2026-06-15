@@ -739,10 +739,10 @@ def _filter_sections_inside_vector_images(
     # Index vector images by 1-based page for the structural drops
     # and the per-line filter; the caption-shaped drops also need the
     # ``ExtractedImage`` instance itself so they can record captures
-    # against ``id(image)``. Sort by ``(page, im.bbox.y1, im.bbox.x0)``
+    # against ``id(image)``. Sort by ``(page, im.bbox.y0, im.bbox.x0)``
     # so that, when two vectors' extended caption bands overlap on
-    # the same page, the upper one (smaller ``y1``) wins attribution.
-    # The y1 tiebreak matches the WG21 convention that a caption sits
+    # the same page, the upper one (smaller ``y0``) wins attribution.
+    # The y0 tiebreak matches the WG21 convention that a caption sits
     # below the figure it captions.
     vector_images_by_page: dict[int, list[ExtractedImage]] = {}
     for im in images:
