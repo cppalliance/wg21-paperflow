@@ -12,6 +12,7 @@ from .. import (
     strip_redundant_body_meta,
     strip_orphan_toc_list,
 )
+from .. import tables as _tables
 from ..shared import _find_front_matter_end
 from .cleanup import normalize_whitespace
 from .glyphs import (
@@ -648,13 +649,16 @@ def _render_html_table(sec: Section) -> str:
     rows = sec.columns
     is_continuation = getattr(sec, "table_continuation", False)
     num_cols = max(len(row) for row in rows)
-    col_w = f"{100 // num_cols}%" if num_cols else "50%"
-    _S = (f"border: 1px solid #999; padding: 6px 10px; "
-          f"vertical-align: top; width: {col_w};")
-    parts: list[str] = [
-        '<table border="1" rules="all" cellpadding="6" cellspacing="0"'
-        ' style="border-collapse: collapse; width: 100%;">',
-    ]
+    # Shared markup (table tag, cell style, <pre><code> wrapping) lives in
+    # lib/tables.py so PDF and HTML comparison tables render identically.
+    _S = _tables.cell_style(num_cols)
+    parts: list[str] = []
+    # Mark code comparisons as structure-preserving, matching the HTML
+    # renderer. Other html_table kinds (SPEC_TABLE, nb_ballot) are not
+    # "mixed code" tables, so they carry no marker.
+    if getattr(sec, "table_kind", None) == "code_comparison":
+        parts.append(_tables.MIXED_TABLE_MARKER)
+    parts.append(_tables.TABLE_OPEN)
 
     # NB-ballot cells: newlines are MuPDF line-wrapping artifacts from
     # narrow PDF columns, not semantic breaks. Collapse to spaces.
@@ -706,20 +710,17 @@ def _render_html_table(sec: Section) -> str:
                 ).strip()
             else:
                 text = "\n".join(cell_lines).strip()
-            escaped = _html.escape(text)
-            rs_attr = ""
-            if ci == 0 and ri in col0_rowspan:
-                rs_attr = f' rowspan="{col0_rowspan[ri]}"'
+            rowspan = col0_rowspan[ri] if (ci == 0 and ri in col0_rowspan) else 1
             if is_header or not text:
-                parts.append(
-                    f'<{tag} style="{_S}"{rs_attr}>{escaped}</{tag}>')
+                # Header/empty cells carry plain escaped text (the PDF side
+                # has spans, not inline tags); text_cell emits it verbatim.
+                parts.append(_tables.text_cell(
+                    tag, _html.escape(text), _S, rowspan=rowspan))
             else:
-                parts.append(
-                    f'<{tag} style="{_S}"{rs_attr}>'
-                    f'<pre style="margin: 0;">{escaped}</pre></{tag}>')
+                parts.append(_tables.code_cell(tag, text, _S, rowspan=rowspan))
         parts.append("</tr>")
 
-    parts.append("</table>")
+    parts.append(_tables.TABLE_CLOSE)
     return "\n".join(parts)
 
 

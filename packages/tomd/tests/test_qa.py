@@ -118,10 +118,10 @@ class TestLossyTableCount:
         m = compute_metrics(md)
         assert m.score == 100
 
-    def test_labeled_code_grid_emits_no_lossy_marker(self):
-        """A clean labeled code-comparison grid is no longer lossy: the HTML
-        renderer emits labels instead of a marker, so it contributes 0 to
-        lossy_table_count. Pins the intentional marker/metric change."""
+    def test_mixed_code_table_not_counted_as_lossy(self):
+        """A headered code-comparison renders as a structure-preserving mixed
+        table (``tomd:mixed-table``), which is distinct from a lossy table:
+        it does not contribute to lossy_table_count."""
         html = """
         <table>
         <thead><tr><th>Before</th><th>After</th></tr></thead>
@@ -132,6 +132,7 @@ class TestLossyTableCount:
         </table>
         """
         md = render_body(parse_html(html), "mpark")
+        assert "<!-- tomd:mixed-table -->" in md
         assert "<!-- tomd:lossy-table -->" not in md
         m = compute_metrics("## Heading\n\n" + md + "\n")
         assert m.lossy_table_count == 0
