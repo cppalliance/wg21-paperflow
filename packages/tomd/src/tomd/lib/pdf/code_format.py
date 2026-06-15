@@ -125,6 +125,10 @@ def _split_at_line_comment(line: str) -> tuple[str, str]:
     verbatim. Returns ``(line, "")`` if no comment is present. Quoted
     sections are excluded by the caller via :func:`_has_string_literal`,
     so a naive search is safe here.
+
+    Block comments (``/* ... */``) are not handled: they may span lines
+    and can contain ``//`` inside string literals, so a line-local split
+    would be unsafe without a fuller lexer.
     """
     idx = line.find("//")
     if idx < 0:
