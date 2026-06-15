@@ -19,6 +19,14 @@ _GOLDEN_STEMS = (
     "p2040r0",
     "p3714r0",
     "p1112r4",
+    # TOC-stripping regression guards (issue #122): p4174r0 = total-loss bug paper
+    # (body must survive), p4004r1 = partial-loss bug paper (sensitive mid-body
+    # guard). The "TOC stays stripped" direction is covered by the synthetic
+    # test_toc.py cases, not a golden: no corpus paper cleanly strips its
+    # visible (space-separated dot-leader) TOC, so a golden would only enshrine
+    # a pre-existing leak.
+    "p4174r0",
+    "p4004r1",
 )
 
 

@@ -1203,8 +1203,11 @@ def run_pipeline(
     heading_texts = {sec.text.split("\n")[0].strip()
                      for sec in sections if sec.kind == SectionKind.HEADING}
     structural_hints = _toc_structural_hints(sections) if not heading_texts else None
+    # A body heading matches itself in heading_texts; pass per-section heading
+    # flags so find_toc_indices excludes them and does not delete the body.
+    is_heading = [sec.kind == SectionKind.HEADING for sec in sections]
     toc_indices = find_toc_indices(texts, heading_texts, structural_hints,
-                                   full_texts=full_texts)
+                                   full_texts=full_texts, is_heading=is_heading)
 
     # Plausibility guard: reject phantom TOC detection.
     # A valid TOC must have at least one confirming signal:
