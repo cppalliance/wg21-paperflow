@@ -1,5 +1,6 @@
 """HTML parsing, generator detection, metadata extraction, and boilerplate stripping."""
 
+import base64
 import logging
 import re
 
@@ -151,7 +152,7 @@ def detect_generator(soup: BeautifulSoup) -> str:
     """Identify which tool generated this HTML paper.
 
     Returns one of: "mpark", "bikeshed", "hackmd", "wg21", "schultke",
-    "dascandy/fiets", "hand-written", "unknown".
+    "dascandy/fiets", "hatemplate", "hand-written", "unknown".
     Checks meta generator tag first, then structural heuristics.
     """
     for meta in soup.find_all("meta"):
@@ -164,6 +165,8 @@ def detect_generator(soup: BeautifulSoup) -> str:
                 return "bikeshed"
             if "dascandy/fiets" in content.lower():
                 return "dascandy/fiets"
+            if "hatemplate" in content.lower():
+                return "hatemplate"
     if soup.find("link", href=_HACKMD_RE):
         return "hackmd"
     title_tag = soup.find("title")
@@ -203,6 +206,8 @@ def extract_metadata(soup: BeautifulSoup, generator: str) -> dict:
         metadata = _extract_wg21_metadata(soup)
     elif generator == "schultke":
         metadata = _extract_schultke_metadata(soup)
+    elif generator == "hatemplate":
+        metadata = _extract_hatemplate_metadata(soup)
     else:
         metadata = _extract_generic_metadata(soup)
 
@@ -674,6 +679,72 @@ def _extract_schultke_metadata(soup: BeautifulSoup) -> dict:
     return metadata
 
 
+def _decode_hatemplate_email(href: str) -> str:
+    """Recover the real address from an eelis/draft obfuscated mailto.
+
+    The href is ``mailto:<decoy> #<base64>`` where the base64 decodes to
+    ``Display Name <email>?subject=...``. Returns the bare email, or "".
+    """
+    if "#" not in href:
+        return ""
+    encoded = href.split("#", 1)[1].strip()
+    try:
+        decoded = base64.b64decode(encoded).decode("utf-8", "replace")
+    except ValueError:
+        return ""
+    m = EMAIL_RE.search(decoded)
+    return m.group(0) if m else ""
+
+
+def _extract_hatemplate_metadata(soup: BeautifulSoup) -> dict:
+    """eelis/draft (hatemplate): metadata in ``<nav><div class="paper-info">``.
+
+    Fields are key/value span pairs: a ``<span class="key">Label:</span>``
+    immediately followed by a value ``<span>``. Author addresses are
+    obfuscated mailto links whose real address is base64-encoded after a
+    ``#`` (see ``_decode_hatemplate_email``). The Audience row is also a
+    mailto (the subgroup mailing list), so only Author/Reply-to/Editor rows
+    feed reply-to.
+    """
+    metadata: dict = {}
+
+    h1 = soup.find("h1")
+    if h1:
+        metadata["title"] = h1.get_text(" ", strip=True)
+
+    info = soup.find("div", class_="paper-info")
+    if not info:
+        return metadata
+
+    for key_span in info.find_all("span", class_="key"):
+        label = _normalize_label(key_span.get_text(strip=True))
+        value_span = key_span.find_next_sibling("span")
+        if value_span is None or "key" in (value_span.get("class") or []):
+            continue
+
+        if "number" in label or "document" in label:
+            m = DOC_NUM_RE.search(value_span.get_text(strip=True))
+            if m:
+                metadata["document"] = m.group(0).upper()
+        elif label == "date":
+            parsed_date = normalize_date(value_span.get_text(strip=True))
+            if parsed_date:
+                metadata["date"] = parsed_date
+        elif "audience" in label:
+            metadata["audience"] = value_span.get_text(" ", strip=True)
+        elif "author" in label or "reply" in label or "editor" in label:
+            name = value_span.get_text(" ", strip=True)
+            link = value_span.find("a", href=lambda h: h and "mailto:" in h)
+            email = _decode_hatemplate_email(link.get("href", "")) if link else ""
+            entry = f"{name} <{email}>" if email else name
+            if entry:
+                existing = metadata.setdefault("reply-to", [])
+                if entry not in existing:
+                    existing.append(entry)
+
+    return metadata
+
+
 def _extract_generic_metadata(soup: BeautifulSoup) -> dict:
     """Fallback: try common patterns.
 
@@ -1085,6 +1156,23 @@ def strip_boilerplate(soup: BeautifulSoup, generator: str) -> list[str]:
             el.decompose()
         for el in soup.find_all("div", class_="toc"):
             el.decompose()
+
+    if generator == "hatemplate":
+        # eelis/draft: the metadata header and acknowledgements live in
+        # <nav>; the collapse toggle is <div id="hide">. Both are chrome.
+        for nav in soup.find_all("nav"):
+            nav.decompose()
+        hide = soup.find("div", id="hide")
+        if hide:
+            hide.decompose()
+        # The margin column: paragraph-number anchors, GitHub source-link
+        # "#" anchors, and code-declaration "🔗" anchors. None are content.
+        for chrome in soup.find_all(
+            "div",
+            class_=lambda c: c
+            and ("marginalizedparent" in c or "sourceLinkParent" in c),
+        ):
+            chrome.decompose()
 
     if generator == "unknown":
         problems.append(
