@@ -1,7 +1,13 @@
 """Tests for lib.html.render."""
 
+import re
+
 from tomd.lib.html.extract import parse_html
-from tomd.lib.html.render import render_body
+from tomd.lib.html.render import (
+    render_body,
+    _fix_misnested_table_cells,
+    _LOSSY_TABLE_MARKER,
+)
 
 
 class TestHeading:
@@ -26,6 +32,26 @@ class TestHeading:
         md = render_body(soup, "mpark")
         assert "## Bold Heading" in md
         assert "**" not in md
+
+    def test_h1_rooted_body_shifted_to_h2(self):
+        # Body headings start at H2 (the front-matter title is the only H1).
+        soup = parse_html(
+            "<body><h1>Introduction</h1><h2>Background</h2>"
+            "<h3>Detail</h3></body>")
+        md = render_body(soup, "mpark")
+        assert "## Introduction" in md
+        assert "### Background" in md
+        assert "#### Detail" in md
+        assert not re.search(r"(?m)^# ", md)
+
+    def test_h2_rooted_body_unchanged(self):
+        # Already-correct papers must not be shifted (no blanket offset).
+        soup = parse_html(
+            "<body><h2>Introduction</h2><h3>Background</h3></body>")
+        md = render_body(soup, "mpark")
+        assert "## Introduction" in md
+        assert "### Background" in md
+        assert not re.search(r"(?m)^# ", md)
 
 
 class TestParagraph:
@@ -410,6 +436,87 @@ class TestTableExtended:
         assert "| 1 | 2 |" in md or "| 1 | 2 | |" in md
 
 
+class TestTbodyInCellUnwrap:
+    """Phase 0 of _fix_misnested_table_cells: <tbody> trapped in a cell.
+
+    WG21 papers (13/198 in the corpus, e.g. P2956R2) emit unclosed
+    <td> tags followed by <tbody>; html.parser then nests the whole
+    <tbody> inside the last open cell, hiding its rows from the
+    renderer.
+    """
+
+    def test_trapped_tbody_code_cells_not_lost(self):
+        # Models the P2956R2 construct. Without the unwrap, the second
+        # header cell and the second code cell are silently dropped.
+        html = """
+        <table>
+        <tr>
+        <td>Source
+        <td>Output
+        <tbody>
+        <tr>
+        <td><pre>codeA</pre>
+        <td><pre>codeB</pre>
+        </tbody>
+        </table>
+        """
+        md = render_body(parse_html(html), "mpark")
+        assert "Source" in md
+        assert "Output" in md
+        assert "codeA" in md
+        assert "codeB" in md
+
+    def test_trapped_tbody_avoids_lossy_path(self):
+        # Without the unwrap this table renders via the lossy flat
+        # reconstruction; with it, the regular pipe-table path applies.
+        html = """
+        <table>
+        <tr>
+        <td>Source
+        <td>Output
+        <tbody>
+        <tr><td>codeA</td><td>codeB</td></tr>
+        </tbody>
+        </table>
+        """
+        md = render_body(parse_html(html), "mpark")
+        assert _LOSSY_TABLE_MARKER not in md
+        assert "| codeA | codeB |" in md
+
+    def test_malformed_nested_table_repaired_locally(self):
+        # A nested table with its own trapped <tbody> is repaired
+        # within itself; its rows must not migrate into the outer
+        # table during the outer table's pass.
+        html = (
+            "<table><tr><td>Outer"
+            "<table><tr><td>InnerHdr"
+            "<tbody><tr><td>InnerData</td></tr></tbody>"
+            "</table>"
+            "</td></tr></table>"
+        )
+        soup = parse_html(html)
+        _fix_misnested_table_cells(soup)
+        inner = soup.find("table").find("table")
+        data_cell = soup.find(
+            lambda t: t.name == "td" and t.get_text(strip=True) == "InnerData"
+        )
+        assert data_cell.find_parent("table") is inner
+
+    def test_legit_nested_table_tbody_untouched(self):
+        # The nearest-table guard: a <tbody> belonging to a valid
+        # nested <table> inside a cell must keep its structure.
+        html = (
+            "<table><tr><td>"
+            "<table><tbody><tr><td>Inner</td></tr></tbody></table>"
+            "</td></tr></table>"
+        )
+        soup = parse_html(html)
+        _fix_misnested_table_cells(soup)
+        inner = soup.find("table").find("table")
+        assert inner is not None
+        assert inner.find("tbody") is not None
+
+
 class TestDenormalizedTable:
     """Tables with rowspan/colspan are denormalized into flat pipe tables."""
 
@@ -647,6 +754,58 @@ class TestLinksExtended:
         assert "nohref" in md
 
 
+class TestBlockquoteBareInline:
+    """Bare inline content directly under <blockquote> (P3104R5).
+
+    Papers emit <blockquote><b>ACTION</b>: text ... without a <p>
+    wrapper. Without normalization, the label and its text split into
+    separate paragraphs and the bold markers are lost.
+    """
+
+    def test_bare_label_and_text_stay_one_paragraph(self):
+        html = (
+            "<blockquote><b>ACTION</b>: Ask SG6 to look at the paper\n"
+            "and bring up issues back to LEWG if exists. "
+            "<p><b>POLL</b>: Forward the paper.</p></blockquote>"
+        )
+        md = render_body(parse_html(html), "bikeshed")
+        assert (
+            "> **ACTION**: Ask SG6 to look at the paper "
+            "and bring up issues back to LEWG if exists." in md
+        )
+        assert "> **POLL**: Forward the paper." in md
+
+    def test_block_children_end_the_run(self):
+        # Inline run, then a table, then another inline run: the table
+        # must stay a table and the runs must become two paragraphs.
+        html = (
+            "<blockquote>Before <i>table</i>"
+            "<table><tr><td>X</td></tr></table>"
+            "After text</blockquote>"
+        )
+        md = render_body(parse_html(html), "mpark")
+        assert "> Before *table*" in md
+        assert "| X |" in md
+        assert "> After text" in md
+
+    def test_br_ends_the_run(self):
+        # An explicit <br> between bare text lines (poll tallies) must
+        # keep the lines separate instead of collapsing them into one.
+        html = "<blockquote>SF F N A SA<br>3 4 5 1 0</blockquote>"
+        md = render_body(parse_html(html), "mpark")
+        assert "SF F N A SA 3 4 5 1 0" not in md
+        assert "> SF F N A SA" in md
+        assert "> 3 4 5 1 0" in md
+
+    def test_whitespace_only_nodes_no_empty_paragraph(self):
+        # The whitespace between <p> siblings must not become a <p>.
+        html = "<blockquote>\n  <p>One</p>\n  <p>Two</p>\n</blockquote>"
+        md = render_body(parse_html(html), "mpark")
+        assert md.count("One") == 1
+        assert "> One" in md
+        assert "> Two" in md
+
+
 class TestBlockquoteExtended:
     def test_nested_paragraphs(self):
         md = render_body(
@@ -654,7 +813,9 @@ class TestBlockquoteExtended:
             "mpark",
         )
         assert "> First" in md
-        assert "Second" in md
+        # The paragraphs stay separated by a blank quoted line; the
+        # bare-inline wrap pass must not merge them.
+        assert "> \n> Second" in md
 
     def test_empty_blockquote_omitted(self):
         md = render_body(parse_html("<blockquote></blockquote><p>x</p>"), "mpark")
