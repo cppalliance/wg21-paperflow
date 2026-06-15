@@ -1,7 +1,11 @@
 """Tests for lib.html.render."""
 
 from tomd.lib.html.extract import parse_html
-from tomd.lib.html.render import render_body
+from tomd.lib.html.render import (
+    render_body,
+    _fix_misnested_table_cells,
+    _LOSSY_TABLE_MARKER,
+)
 
 
 class TestHeading:
@@ -408,6 +412,87 @@ class TestTableExtended:
         """
         md = render_body(parse_html(html), "mpark")
         assert "| 1 | 2 |" in md or "| 1 | 2 | |" in md
+
+
+class TestTbodyInCellUnwrap:
+    """Phase 0 of _fix_misnested_table_cells: <tbody> trapped in a cell.
+
+    WG21 papers (13/198 in the corpus, e.g. P2956R2) emit unclosed
+    <td> tags followed by <tbody>; html.parser then nests the whole
+    <tbody> inside the last open cell, hiding its rows from the
+    renderer.
+    """
+
+    def test_trapped_tbody_code_cells_not_lost(self):
+        # Models the P2956R2 construct. Without the unwrap, the second
+        # header cell and the second code cell are silently dropped.
+        html = """
+        <table>
+        <tr>
+        <td>Source
+        <td>Output
+        <tbody>
+        <tr>
+        <td><pre>codeA</pre>
+        <td><pre>codeB</pre>
+        </tbody>
+        </table>
+        """
+        md = render_body(parse_html(html), "mpark")
+        assert "Source" in md
+        assert "Output" in md
+        assert "codeA" in md
+        assert "codeB" in md
+
+    def test_trapped_tbody_avoids_lossy_path(self):
+        # Without the unwrap this table renders via the lossy flat
+        # reconstruction; with it, the regular pipe-table path applies.
+        html = """
+        <table>
+        <tr>
+        <td>Source
+        <td>Output
+        <tbody>
+        <tr><td>codeA</td><td>codeB</td></tr>
+        </tbody>
+        </table>
+        """
+        md = render_body(parse_html(html), "mpark")
+        assert _LOSSY_TABLE_MARKER not in md
+        assert "| codeA | codeB |" in md
+
+    def test_malformed_nested_table_repaired_locally(self):
+        # A nested table with its own trapped <tbody> is repaired
+        # within itself; its rows must not migrate into the outer
+        # table during the outer table's pass.
+        html = (
+            "<table><tr><td>Outer"
+            "<table><tr><td>InnerHdr"
+            "<tbody><tr><td>InnerData</td></tr></tbody>"
+            "</table>"
+            "</td></tr></table>"
+        )
+        soup = parse_html(html)
+        _fix_misnested_table_cells(soup)
+        inner = soup.find("table").find("table")
+        data_cell = soup.find(
+            lambda t: t.name == "td" and t.get_text(strip=True) == "InnerData"
+        )
+        assert data_cell.find_parent("table") is inner
+
+    def test_legit_nested_table_tbody_untouched(self):
+        # The nearest-table guard: a <tbody> belonging to a valid
+        # nested <table> inside a cell must keep its structure.
+        html = (
+            "<table><tr><td>"
+            "<table><tbody><tr><td>Inner</td></tr></tbody></table>"
+            "</td></tr></table>"
+        )
+        soup = parse_html(html)
+        _fix_misnested_table_cells(soup)
+        inner = soup.find("table").find("table")
+        assert inner is not None
+        assert inner.find("tbody") is not None
 
 
 class TestDenormalizedTable:

@@ -123,14 +123,22 @@ def _fix_misnested_list_items(soup: BeautifulSoup) -> None:
 
 
 _TABLE_CELL_TAGS = frozenset({"td", "th"})
+_TABLE_SECTION_TAGS = ("tbody", "thead", "tfoot")
 
 
 def _fix_misnested_table_cells(soup: BeautifulSoup) -> None:
     """Repair table rows and cells wrongly nested by html.parser.
 
     html.parser does not auto-close ``<td>``, ``<th>``, or ``<tr>`` when
-    it encounters a new opening tag of the same type. This causes two
+    it encounters a new opening tag of the same type. This causes three
     kinds of mangling:
+
+    0. ``<tbody>``/``<thead>``/``<tfoot>`` trapped inside a ``<td>``/
+       ``<th>`` cell (the cell before the section tag was never closed).
+       We unwrap these so their children become direct children of the
+       cell, which lets phases 1 and 2 see the trapped rows. Section
+       tags belonging to a legitimately nested ``<table>`` inside the
+       cell are left alone.
 
     1. ``<tr>`` nested inside ``<td>``/``<th>`` instead of being a sibling
        row. We promote these to direct children of the table container
@@ -141,8 +149,18 @@ def _fix_misnested_table_cells(soup: BeautifulSoup) -> None:
        repeatedly extracting nested cells.
     """
     for table in soup.find_all("table"):
+        # Phase 0: unwrap section tags trapped inside cells. The
+        # ownership guard restricts each pass of the outer loop to
+        # sections whose nearest <table> is the current one: sections
+        # of a legitimately nested <table> keep their structure, and
+        # malformed nested tables are repaired in their own pass.
+        for cell in table.find_all(_TABLE_CELL_TAGS):
+            for section in cell.find_all(_TABLE_SECTION_TAGS):
+                if section.find_parent("table") is table:
+                    section.unwrap()
+
         container = (
-            table.find(["tbody", "thead", "tfoot"], recursive=False)
+            table.find(list(_TABLE_SECTION_TAGS), recursive=False)
             or table
         )
         # Phase 1: promote <tr> elements trapped inside cells to the
