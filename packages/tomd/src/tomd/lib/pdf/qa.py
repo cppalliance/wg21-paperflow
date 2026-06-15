@@ -11,12 +11,12 @@ and prevents coupling between the scorer and the converter.
 """
 
 import contextlib
-from collections.abc import Sequence
 import json
 import logging
 import os
 import re
 import tempfile
+from collections.abc import Sequence
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
@@ -437,12 +437,20 @@ def _score(m: QAMetrics) -> tuple[int, list[str]]:
 
 
 def _qa_one(item: tuple[str, str]) -> dict:
-    """Score the Markdown for a single ``(paper_id, markdown_text)`` pair."""
+    """Score the Markdown for a single ``(paper_id, markdown_text)`` pair.
+
+    Scoring failures (anything raised inside :func:`compute_metrics`) are
+    converted in-process to ``QAMetrics(score=0, issues=["qa error: ..."])``
+    so one malformed paper does not abort the batch. These appear as
+    zero-score rows in ``QABatchResult.metrics``, not in
+    ``QABatchResult.errors``. Only worker-level failures the in-process
+    handler cannot see (process crash, ``ProcessPoolExecutor`` timeout) are
+    routed to ``errors`` by :func:`run_parallel_batch`.
+    """
     paper_id, md_text = item
     try:
         m = compute_metrics(md_text, file=paper_id)
         return asdict(m)
-    # Batch robustness: one bad paper must not crash the run
     except Exception as exc:
         _log.error("QA failed for %s: %s", paper_id, exc)
         m = QAMetrics(file=paper_id, score=0,
@@ -456,7 +464,15 @@ def _qa_metrics_from_dict(d: dict) -> QAMetrics:
 
 @dataclass(frozen=True)
 class QABatchResult:
-    """Outcome of a batch QA scoring run."""
+    """Outcome of a batch QA scoring run.
+
+    ``metrics`` holds successfully scored papers (including in-process
+    scoring failures rendered as zero-score rows; see :func:`_qa_one`).
+    ``errors`` is the canonical list of worker-level failures and is what
+    :func:`format_qa_report` renders. ``timed_out`` is a typed subset view
+    of ``errors`` (paper ids only) for callers that need to enumerate just
+    the timeouts without parsing error messages.
+    """
 
     metrics: tuple[QAMetrics, ...]
     errors: tuple[tuple[str, str], ...]
@@ -511,10 +527,24 @@ def run_qa_batch(
     )
 
 
-def format_qa_report(results: Sequence[QAMetrics]) -> str:
+def format_qa_report(
+    results: Sequence[QAMetrics],
+    errors: Sequence[tuple[str, str]] = (),
+) -> str:
     """Return the ranked QA report text for stdout."""
     total = len(results)
     lines: list[str] = []
+
+    lines.append(f"\ntomd QA Report: {total} files")
+    lines.append("=" * 40)
+
+    if total == 0:
+        lines.append("\nNo papers were scored.")
+        if errors:
+            lines.append(f"\nErrors: {len(errors)}")
+            for pid, msg in errors[:10]:
+                lines.append(f"  {pid}: {msg}")
+        return "\n".join(lines) + "\n"
 
     buckets = {"90-100": 0, "70-89": 0, "50-69": 0, "0-49": 0}
     for r in results:
@@ -527,8 +557,6 @@ def format_qa_report(results: Sequence[QAMetrics]) -> str:
         else:
             buckets["0-49"] += 1
 
-    lines.append(f"\ntomd QA Report: {total} files")
-    lines.append("=" * 40)
     lines.append("\nScore Distribution:")
     for label, count in buckets.items():
         pct = 100 * count / total if total else 0
@@ -556,10 +584,15 @@ def format_qa_report(results: Sequence[QAMetrics]) -> str:
             issue_str = ", ".join(r.issues) if r.issues else "ok"
             lines.append(f"  {r.score:>5}  {name:<40}  {issue_str}")
 
+    if errors:
+        lines.append(f"\nErrors: {len(errors)}")
+        for pid, msg in errors[:10]:
+            lines.append(f"  {pid}: {msg}")
+
     return "\n".join(lines) + "\n"
 
 
-def write_qa_json_atomic(path: Path, results: list[QAMetrics]) -> None:
+def write_qa_json_atomic(path: Path, results: Sequence[QAMetrics]) -> None:
     """Atomically write per-paper QA metrics as JSON."""
     rows = [asdict(r) for r in results]
     path.parent.mkdir(parents=True, exist_ok=True)

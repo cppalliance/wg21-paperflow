@@ -79,6 +79,42 @@ def test_format_qa_report_contains_expected_sections():
     assert "a.md" in text
 
 
+def test_format_qa_report_renders_errors():
+    text = format_qa_report(
+        (),
+        errors=(("P9999R0", "timeout (no progress for 120s)"),),
+    )
+    assert "Errors: 1" in text
+    assert "P9999R0" in text
+    assert "timeout (no progress for 120s)" in text
+    assert "No papers were scored." in text
+    assert "Score Distribution" not in text
+    assert "Worst" not in text
+
+
+def test_format_qa_report_empty_input_is_terse():
+    text = format_qa_report(())
+    assert "No papers were scored." in text
+    assert "Score Distribution" not in text
+    assert "Worst" not in text
+    assert "Errors" not in text
+
+
+def test_format_qa_report_renders_errors_alongside_metrics():
+    results = [
+        QAMetrics(file="good.md", score=100, issues=[]),
+    ]
+    text = format_qa_report(
+        results,
+        errors=(("bad.md", "worker failed"),),
+    )
+    assert "tomd QA Report: 1 files" in text
+    assert "Score Distribution:" in text
+    assert "Errors: 1" in text
+    assert "bad.md" in text
+    assert "worker failed" in text
+
+
 def test_write_qa_json_atomic_round_trip(tmp_path: Path):
     metrics = [QAMetrics(file="a.md", score=90, issues=[])]
     path = tmp_path / "qa.json"
