@@ -885,10 +885,10 @@ def _has_spans(el: Tag) -> bool:
 _BR_MULTILINE_MIN_CELLS = 2
 
 def _has_br_multiline_cells(el: Tag) -> bool:
-    """True when enough cells contain <br>, making pipe-table lossy."""
+    """True when enough cells contain direct-child <br>, making pipe-table lossy."""
     count = 0
     for cell in el.find_all(["td", "th"]):
-        if cell.find("br"):
+        if cell.find("br", recursive=False):
             count += 1
             if count >= _BR_MULTILINE_MIN_CELLS:
                 return True
