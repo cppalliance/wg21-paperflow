@@ -70,6 +70,7 @@ from .docling_backend import (
     absorb_cross_page_spec_rows as _absorb_cross_page_spec_rows,
     discover_tables_with_docling as _discover_tables_with_docling,
 )
+from ._fitz_lock import _FITZ_LOCK
 
 __all__ = ["run_pipeline", "PipelineResult", "ExtractedImage"]
 
@@ -1372,6 +1373,7 @@ def run_pipeline(
     result = PipelineResult()
     doc = None
     vector_stats = _VectorExtractionStats() if extract_vector else None
+    _FITZ_LOCK.acquire()  # see _fitz_lock.py for why this lock is required
     try:
         doc = fitz.open(str(path))
         page_count = doc.page_count
@@ -1558,6 +1560,7 @@ def run_pipeline(
     finally:
         if doc is not None:
             doc.close()
+        _FITZ_LOCK.release()
 
     if all_hidden:
         total_hidden = sum(len(v) for v in all_hidden.values())
