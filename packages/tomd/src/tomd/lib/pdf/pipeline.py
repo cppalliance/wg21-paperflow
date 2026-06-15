@@ -384,13 +384,13 @@ def _line_in_caption_band(
     """Return True if ``line_bbox.y0`` lies in the caption band of ``im_bbox``.
 
     The band runs from ``im_bbox.y1`` (exclusive lower edge of the
-    image) to ``im_bbox.y1 + _CAPTION_SEARCH_RADIUS_BELOW_PT`` and is
+    image) to ``im_bbox.y1 + _FIGURE_CAPTION_BAND_BELOW_PT`` and is
     **y-only**, with no horizontal gate. This is identical to the
     predicate :func:`images._caption_for` uses to attribute alt-text
-    to an image; the two functions share the same constant
-    (``_CAPTION_SEARCH_RADIUS_BELOW_PT``) and the same y-only shape so
-    the body-drop and alt-text attribution always fire on the same
-    set of caption lines.
+    to an image; both use the same numeric depth
+    (``_FIGURE_CAPTION_BAND_BELOW_PT == _CAPTION_SEARCH_RADIUS_BELOW_PT``)
+    and the same y-only shape so the body-drop and alt-text attribution
+    always fire on the same set of caption lines.
 
     **Predicate-equality invariant**: this helper drives the
     **overall-caption section drop** (the ``_CAPTION_LABEL_RE`` path),
@@ -411,7 +411,7 @@ def _line_in_caption_band(
     The boundary semantics match :func:`images._caption_for` exactly:
     ``im_y1 <= line.y0 <= im_y1 + radius`` (inclusive on both ends).
     """
-    return im_bbox[3] <= line_bbox[1] <= im_bbox[3] + _CAPTION_SEARCH_RADIUS_BELOW_PT
+    return im_bbox[3] <= line_bbox[1] <= im_bbox[3] + _FIGURE_CAPTION_BAND_BELOW_PT
 
 
 def _line_in_caption_region(
@@ -422,7 +422,7 @@ def _line_in_caption_region(
 
     Wider than :func:`_line_in_caption_band`: this returns True when
     ``line_bbox.y0`` is anywhere in
-    ``[im_bbox.y0, im_bbox.y1 + _CAPTION_SEARCH_RADIUS_BELOW_PT]``,
+    ``[im_bbox.y0, im_bbox.y1 + _FIGURE_CAPTION_BAND_BELOW_PT]``,
     covering both "between stacked sub-figures, inside the cluster"
     and "below the cluster, in the caption band".
 
@@ -440,7 +440,7 @@ def _line_in_caption_region(
     stay on :func:`_line_in_caption_band` so it remains
     predicate-equal to :func:`images._caption_for`.
     """
-    return im_bbox[1] <= line_bbox[1] <= im_bbox[3] + _CAPTION_SEARCH_RADIUS_BELOW_PT
+    return im_bbox[1] <= line_bbox[1] <= im_bbox[3] + _FIGURE_CAPTION_BAND_BELOW_PT
 
 
 def _section_bbox(
