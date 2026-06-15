@@ -13,14 +13,13 @@ import argparse
 import asyncio
 import sys
 
-from cli.jobs import run_content_check, run_convert
+from cli.jobs import run_content_check, run_convert, _CONTENT_CHECK_TIMEOUT
 from cli.progress import make_progress_handler
 from paperstore.backend import StorageBackend
 from paperstore.stages import STAGES
 
 
 _CONTENT_CHECK_WORKERS = 1
-_CONTENT_CHECK_TIMEOUT = 120
 
 
 def command(args: argparse.Namespace, backend: StorageBackend) -> int:

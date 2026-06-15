@@ -8,6 +8,7 @@ from tomd.lib.pdf.types import Span, Line, Block
 from tomd.lib.pdf.table import (
     _gap_asymmetry_reject,
     _block_horizontal_row_relaxed,
+    _try_wrapped_partial_row,
 )
 
 
@@ -137,3 +138,102 @@ class TestBlockHorizontalRowRelaxed:
             _line("Overlap2", 100, 105, 200, 115),
         ])
         assert _block_horizontal_row_relaxed(block, min_cells=2) is None
+
+
+def _bbox_block(lines: list[Line], monospace: bool = False) -> Block:
+    """Build a Block whose bbox encloses its lines (optionally monospace)."""
+    if monospace:
+        for ln in lines:
+            for sp in ln.spans:
+                sp.monospace = True
+    x0 = min(ln.bbox[0] for ln in lines)
+    y0 = min(ln.bbox[1] for ln in lines)
+    x1 = max(ln.bbox[2] for ln in lines)
+    y1 = max(ln.bbox[3] for ln in lines)
+    return Block(lines=lines, bbox=(x0, y0, x1, y1), page_num=0)
+
+
+class TestWrappedPartialRow:
+    """Tests for _try_wrapped_partial_row (Pass 1 Branch 3b).
+
+    Models the P4182R1 Table A defect: a data row whose Heap and Hosted
+    cells sit 41pt apart (below _COLUMN_GAP_THRESHOLD), so MuPDF groups
+    them into one non-columnar block that splits the table without this
+    branch.
+    """
+
+    # Table A header columns: Category, Coro, TLS, PMR, Heap, Hosted.
+    REF_COLS = [66.7, 294.2, 339.1, 373.4, 438.8, 480.0]
+    COLUMN_XS = frozenset(REF_COLS)
+
+    def _established_table(self) -> list[Block]:
+        """Header + one data row, ending at y1=472.2 (the Full RTOS anchor)."""
+        header = _bbox_block([_line(t, x, 344.6, x + 20, 358.2)
+                              for t, x in zip("ABCDEF", self.REF_COLS)])
+        anchor = _bbox_block([
+            _line("Full RTOS", 66.7, 458.6, 196.4, 472.2),
+            _line("Yes", 294.2, 458.6, 307.1, 472.2),
+            _line("Yes", 339.1, 458.6, 352.0, 472.2),
+            _line("Hosted", 373.4, 458.6, 400.7, 472.2),
+        ])
+        return [header, anchor]
+
+    def _right_fragment(self) -> Block:
+        """Heap + Hosted cells, same y-band as the anchor, 41pt gap."""
+        return _bbox_block([
+            _line("Yes", 438.8, 458.6, 451.6, 472.2),
+            _line("Partial to", 480.0, 458.6, 514.8, 472.2),
+        ])
+
+    def test_narrow_gap_right_fragment_absorbed(self):
+        blocks = self._established_table() + [self._right_fragment()]
+        result = _try_wrapped_partial_row(
+            blocks, 2, self.REF_COLS, self.COLUMN_XS, blocks[:2])
+        assert result is not None
+        assert result.advance_to == 3
+        assert result.multi_orphan is True
+        assert id(blocks[2]) in result.absorbed_ids
+
+    def test_left_margin_prose_rejected(self):
+        """A wrapped paragraph at the label column (index 0) is not a row."""
+        prose = _bbox_block([
+            _line("Some prose that wraps onto", 66.7, 500.0, 300.0, 512.0),
+            _line("a second physical line here", 66.7, 514.0, 300.0, 526.0),
+        ])
+        blocks = self._established_table() + [prose]
+        assert _try_wrapped_partial_row(
+            blocks, 2, self.REF_COLS, self.COLUMN_XS, blocks[:2]) is None
+
+    def test_columnar_block_rejected(self):
+        """A block whose gap exceeds the threshold is handled by Branches 1-3."""
+        columnar = _bbox_block([
+            _line("Yes", 294.2, 458.6, 307.1, 472.2),
+            _line("Hosted", 373.4, 458.6, 400.7, 472.2),
+        ])
+        blocks = self._established_table() + [columnar]
+        assert _try_wrapped_partial_row(
+            blocks, 2, self.REF_COLS, self.COLUMN_XS, blocks[:2]) is None
+
+    def test_monospace_fragment_rejected(self):
+        frag = _bbox_block([
+            _line("Yes", 438.8, 458.6, 451.6, 472.2),
+            _line("code", 480.0, 458.6, 514.8, 472.2),
+        ], monospace=True)
+        blocks = self._established_table() + [frag]
+        assert _try_wrapped_partial_row(
+            blocks, 2, self.REF_COLS, self.COLUMN_XS, blocks[:2]) is None
+
+    def test_unestablished_table_rejected(self):
+        """Need header + a data row before absorbing a fragment."""
+        blocks = self._established_table()[:1] + [self._right_fragment()]
+        assert _try_wrapped_partial_row(
+            blocks, 1, self.REF_COLS, self.COLUMN_XS, blocks[:1]) is None
+
+    def test_far_y_gap_rejected(self):
+        frag = _bbox_block([
+            _line("Yes", 438.8, 600.0, 451.6, 612.0),
+            _line("Partial to", 480.0, 600.0, 514.8, 612.0),
+        ])
+        blocks = self._established_table() + [frag]
+        assert _try_wrapped_partial_row(
+            blocks, 2, self.REF_COLS, self.COLUMN_XS, blocks[:2]) is None

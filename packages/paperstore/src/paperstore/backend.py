@@ -604,6 +604,10 @@ class StorageBackend(ABC):
         """Return all paper citations for ``paper_id``."""
 
     @abstractmethod
+    def get_incoming_citations(self, cited_paper_id: str) -> list[PaperCitationRow]:
+        """Return all rows that cite ``cited_paper_id`` (reverse direction)."""
+
+    @abstractmethod
     def get_external_citations(self, paper_id: str) -> list[ExternalCitationRow]:
         """Return all external citations for ``paper_id``."""
 

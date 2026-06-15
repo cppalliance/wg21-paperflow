@@ -1,7 +1,13 @@
 """Tests for lib.html.render."""
 
+import re
+
 from tomd.lib.html.extract import parse_html
-from tomd.lib.html.render import render_body
+from tomd.lib.html.render import (
+    render_body,
+    _fix_misnested_table_cells,
+    _LOSSY_TABLE_MARKER,
+)
 
 
 class TestHeading:
@@ -26,6 +32,26 @@ class TestHeading:
         md = render_body(soup, "mpark")
         assert "## Bold Heading" in md
         assert "**" not in md
+
+    def test_h1_rooted_body_shifted_to_h2(self):
+        # Body headings start at H2 (the front-matter title is the only H1).
+        soup = parse_html(
+            "<body><h1>Introduction</h1><h2>Background</h2>"
+            "<h3>Detail</h3></body>")
+        md = render_body(soup, "mpark")
+        assert "## Introduction" in md
+        assert "### Background" in md
+        assert "#### Detail" in md
+        assert not re.search(r"(?m)^# ", md)
+
+    def test_h2_rooted_body_unchanged(self):
+        # Already-correct papers must not be shifted (no blanket offset).
+        soup = parse_html(
+            "<body><h2>Introduction</h2><h3>Background</h3></body>")
+        md = render_body(soup, "mpark")
+        assert "## Introduction" in md
+        assert "### Background" in md
+        assert not re.search(r"(?m)^# ", md)
 
 
 class TestParagraph:
@@ -410,6 +436,87 @@ class TestTableExtended:
         assert "| 1 | 2 |" in md or "| 1 | 2 | |" in md
 
 
+class TestTbodyInCellUnwrap:
+    """Phase 0 of _fix_misnested_table_cells: <tbody> trapped in a cell.
+
+    WG21 papers (13/198 in the corpus, e.g. P2956R2) emit unclosed
+    <td> tags followed by <tbody>; html.parser then nests the whole
+    <tbody> inside the last open cell, hiding its rows from the
+    renderer.
+    """
+
+    def test_trapped_tbody_code_cells_not_lost(self):
+        # Models the P2956R2 construct. Without the unwrap, the second
+        # header cell and the second code cell are silently dropped.
+        html = """
+        <table>
+        <tr>
+        <td>Source
+        <td>Output
+        <tbody>
+        <tr>
+        <td><pre>codeA</pre>
+        <td><pre>codeB</pre>
+        </tbody>
+        </table>
+        """
+        md = render_body(parse_html(html), "mpark")
+        assert "Source" in md
+        assert "Output" in md
+        assert "codeA" in md
+        assert "codeB" in md
+
+    def test_trapped_tbody_avoids_lossy_path(self):
+        # Without the unwrap this table renders via the lossy flat
+        # reconstruction; with it, the regular pipe-table path applies.
+        html = """
+        <table>
+        <tr>
+        <td>Source
+        <td>Output
+        <tbody>
+        <tr><td>codeA</td><td>codeB</td></tr>
+        </tbody>
+        </table>
+        """
+        md = render_body(parse_html(html), "mpark")
+        assert _LOSSY_TABLE_MARKER not in md
+        assert "| codeA | codeB |" in md
+
+    def test_malformed_nested_table_repaired_locally(self):
+        # A nested table with its own trapped <tbody> is repaired
+        # within itself; its rows must not migrate into the outer
+        # table during the outer table's pass.
+        html = (
+            "<table><tr><td>Outer"
+            "<table><tr><td>InnerHdr"
+            "<tbody><tr><td>InnerData</td></tr></tbody>"
+            "</table>"
+            "</td></tr></table>"
+        )
+        soup = parse_html(html)
+        _fix_misnested_table_cells(soup)
+        inner = soup.find("table").find("table")
+        data_cell = soup.find(
+            lambda t: t.name == "td" and t.get_text(strip=True) == "InnerData"
+        )
+        assert data_cell.find_parent("table") is inner
+
+    def test_legit_nested_table_tbody_untouched(self):
+        # The nearest-table guard: a <tbody> belonging to a valid
+        # nested <table> inside a cell must keep its structure.
+        html = (
+            "<table><tr><td>"
+            "<table><tbody><tr><td>Inner</td></tr></tbody></table>"
+            "</td></tr></table>"
+        )
+        soup = parse_html(html)
+        _fix_misnested_table_cells(soup)
+        inner = soup.find("table").find("table")
+        assert inner is not None
+        assert inner.find("tbody") is not None
+
+
 class TestDenormalizedTable:
     """Tables with rowspan/colspan are denormalized into flat pipe tables."""
 
@@ -647,6 +754,58 @@ class TestLinksExtended:
         assert "nohref" in md
 
 
+class TestBlockquoteBareInline:
+    """Bare inline content directly under <blockquote> (P3104R5).
+
+    Papers emit <blockquote><b>ACTION</b>: text ... without a <p>
+    wrapper. Without normalization, the label and its text split into
+    separate paragraphs and the bold markers are lost.
+    """
+
+    def test_bare_label_and_text_stay_one_paragraph(self):
+        html = (
+            "<blockquote><b>ACTION</b>: Ask SG6 to look at the paper\n"
+            "and bring up issues back to LEWG if exists. "
+            "<p><b>POLL</b>: Forward the paper.</p></blockquote>"
+        )
+        md = render_body(parse_html(html), "bikeshed")
+        assert (
+            "> **ACTION**: Ask SG6 to look at the paper "
+            "and bring up issues back to LEWG if exists." in md
+        )
+        assert "> **POLL**: Forward the paper." in md
+
+    def test_block_children_end_the_run(self):
+        # Inline run, then a table, then another inline run: the table
+        # must stay a table and the runs must become two paragraphs.
+        html = (
+            "<blockquote>Before <i>table</i>"
+            "<table><tr><td>X</td></tr></table>"
+            "After text</blockquote>"
+        )
+        md = render_body(parse_html(html), "mpark")
+        assert "> Before *table*" in md
+        assert "| X |" in md
+        assert "> After text" in md
+
+    def test_br_ends_the_run(self):
+        # An explicit <br> between bare text lines (poll tallies) must
+        # keep the lines separate instead of collapsing them into one.
+        html = "<blockquote>SF F N A SA<br>3 4 5 1 0</blockquote>"
+        md = render_body(parse_html(html), "mpark")
+        assert "SF F N A SA 3 4 5 1 0" not in md
+        assert "> SF F N A SA" in md
+        assert "> 3 4 5 1 0" in md
+
+    def test_whitespace_only_nodes_no_empty_paragraph(self):
+        # The whitespace between <p> siblings must not become a <p>.
+        html = "<blockquote>\n  <p>One</p>\n  <p>Two</p>\n</blockquote>"
+        md = render_body(parse_html(html), "mpark")
+        assert md.count("One") == 1
+        assert "> One" in md
+        assert "> Two" in md
+
+
 class TestBlockquoteExtended:
     def test_nested_paragraphs(self):
         md = render_body(
@@ -654,7 +813,9 @@ class TestBlockquoteExtended:
             "mpark",
         )
         assert "> First" in md
-        assert "Second" in md
+        # The paragraphs stay separated by a blank quoted line; the
+        # bare-inline wrap pass must not merge them.
+        assert "> \n> Second" in md
 
     def test_empty_blockquote_omitted(self):
         md = render_body(parse_html("<blockquote></blockquote><p>x</p>"), "mpark")
@@ -967,3 +1128,106 @@ class TestCodeParagraphDetection:
         html = "<p>   </p>"
         md = render_body(parse_html(html), "dascandy/fiets")
         assert md.strip() == "" or "```" not in md
+
+
+class TestListChildDrop:
+    """Non-<li> direct children of a list are rendered, not silently dropped."""
+
+    def _md(self, html):
+        return render_body(parse_html(html), "mpark")
+
+    def test_renders_nested_list_direct_child(self):
+        # Outer <ol> has no <li> of its own, only a nested <ol>: the inner list
+        # is the content and renders standalone at top level (not indented).
+        md = self._md("<ol><ol><li>inner</li></ol></ol>")
+        assert "inner" in md
+        assert "1. inner" in md
+        assert "  1. inner" not in md  # standalone: no outer item to indent under
+
+    def test_ol_ol_wording_content_recovered(self):
+        # P4179R0's real shape: the synopsis <pre> sits inside a <blockquote>
+        # inside the <li>. Part 1 recovers the CONTENT (the list is no longer
+        # dropped). The <pre> stays flattened by _inline_text (the deferred
+        # <li>-internal flattening), so we assert presence, not a code fence.
+        md = self._md(
+            "<div><ol><ol>"
+            "<li><p>Add a feature-test macro</p>"
+            "<blockquote><pre>#define __cpp_lib_x</pre></blockquote></li>"
+            "<li><p>Modify</p>"
+            "<blockquote><pre>namespace std {}</pre></blockquote></li>"
+            "</ol></ol></div>"
+        )
+        assert "__cpp_lib_x" in md
+        assert "namespace std {}" in md
+
+    def test_renders_loose_paragraph_child_indented(self):
+        md = self._md("<ul><li>a</li><p>note</p></ul>")
+        assert "note" in md
+        assert "\n  note" in md  # indented under the preceding item
+
+    def test_renders_direct_child_pre_fenced(self):
+        # A <pre> that is a direct child of the list (not <li>-internal) renders
+        # as a fenced block via the normal element dispatch.
+        md = self._md("<ol><li>Add:</li><pre>code();</pre></ol>")
+        assert "code();" in md
+        assert "```" in md
+
+    def test_renders_direct_child_blockquote(self):
+        md = self._md("<ul><li>a</li><blockquote>quoted</blockquote></ul>")
+        assert "quoted" in md
+        assert ">" in md
+
+    def test_renders_loose_text_child(self):
+        md = self._md("<ul><li>a</li>loose text here</ul>")
+        assert "loose text here" in md
+
+    def test_non_li_child_before_first_item_standalone(self):
+        md = self._md("<ol><p>intro</p><li>a</li></ol>")
+        assert "intro" in md
+        assert "1. a" in md
+        assert "  intro" not in md  # no preceding item: standalone, not indented
+
+    def test_ordered_numbering_counts_only_li(self):
+        md = self._md("<ol><li>a</li><p>x</p><li>b</li></ol>")
+        assert "1. a" in md
+        assert "2. b" in md
+        assert "3." not in md  # the <p> does not advance the counter
+
+    def test_comment_child_produces_no_output(self):
+        md = self._md("<ul><li>a</li><!-- secret build note --></ul>")
+        assert "secret" not in md
+        assert "build note" not in md
+
+    def test_whitespace_text_between_items_no_spurious_item(self):
+        md = self._md("<ul><li>a</li>\n   \n<li>b</li></ul>")
+        assert md == "- a\n- b"
+
+    def test_nested_sublist_in_li_unchanged(self):
+        md = self._md("<ul><li>a<ul><li>b</li></ul></li></ul>")
+        assert md == "- a\n  - b"
+
+    def test_code_block_in_li_unchanged(self):
+        md = self._md("<ol><li>x<pre>code</pre></li></ol>")
+        assert "1. x" in md
+        assert "```" in md
+        assert "code" in md
+
+
+class TestDlChildDrop:
+    """Non-dt/dd direct children of a <dl> are rendered, not silently dropped."""
+
+    def _md(self, html):
+        return render_body(parse_html(html), "mpark")
+
+    def test_renders_non_dt_dd_child(self):
+        md = self._md("<dl><dt>term</dt><dd>def</dd><p>note</p></dl>")
+        assert "note" in md
+
+    def test_comment_child_produces_no_output(self):
+        md = self._md("<dl><dt>t</dt><dd>d</dd><!-- c --></dl>")
+        assert "c " not in md and "\nc" not in md
+
+    def test_dt_dd_unchanged(self):
+        md = self._md("<dl><dt>term</dt><dd>def</dd></dl>")
+        assert "**term**" in md
+        assert ": def" in md
