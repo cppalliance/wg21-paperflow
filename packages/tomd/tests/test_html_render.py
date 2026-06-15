@@ -548,6 +548,33 @@ fix2;</code></pre></td>
         assert "&#10;" in md
         assert "\n\n" not in md.split("<pre")[1].split("</pre>")[0]
 
+    def test_code_table_multiple_consecutive_blank_lines(self):
+        """2+ consecutive blank lines in <pre><code> must all be escaped."""
+        html = """
+        <table>
+        <tr><th>A</th><th>B</th></tr>
+        <tr>
+          <td><pre><code>line1;
+
+
+line3;</code></pre></td>
+          <td><pre><code>fix1;
+
+
+
+fix4;</code></pre></td>
+        </tr>
+        </table>
+        """
+        md = render_body(parse_html(html), "mpark")
+        assert "<table" in md
+        assert "&#10;" in md
+        for segment in md.split("<pre")[1:]:
+            inside = segment.split("</pre>")[0]
+            assert "\n\n" not in inside, (
+                f"raw blank line survived inside <pre>: {inside!r}"
+            )
+
     def test_pipe_in_cell_escaped(self):
         """Pipe characters in cell content must be escaped."""
         html = """
