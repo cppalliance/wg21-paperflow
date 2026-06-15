@@ -139,9 +139,11 @@ _DRAWING_GRID_MIN_HORIZONTALS = 5   # 5+ h-lines = header + 2 data rows minimum
 _DRAWING_GRID_MIN_WIDTH = 50.0      # reject tiny decorative boxes
 _DRAWING_GRID_VERT_TOL = 3.0        # tolerance for matching vertical borders
 _DRAWING_GRID_Y_DEDUP = 3.0         # merge near-identical y-values
+_DRAWING_GRID_MIN_UNIQUE_ROWS = 3  # deduped rules: header + 2 data rows minimum
 _DRAWING_GRID_MAX_HEIGHT_RATIO = 0.7  # reject grids taller than 70% of page
 _DRAWING_GRID_BAND_TOL = 4.0       # y-band grouping for multi-cell check
 _DRAWING_GRID_MIN_MULTI_BANDS = 2  # bands that must hold 2+ cells side by side
+_DRAWING_GRID_MIN_MULTI_BAND_FRACTION = 0.5  # multi-cell bands >= half of all bands
 _DRAWING_GRID_COVER_FRAC = 0.5     # find_tables overlap that counts as covered
 
 
@@ -227,7 +229,7 @@ def _detect_drawing_grids(
         for y in ys_sorted:
             if not unique_ys or abs(y - unique_ys[-1]) > _DRAWING_GRID_Y_DEDUP:
                 unique_ys.append(y)
-        if len(unique_ys) < 3:  # need at least 2 data rows
+        if len(unique_ys) < _DRAWING_GRID_MIN_UNIQUE_ROWS:
             continue
 
         grid_bbox = (x0, y_min, x1, y_max)
@@ -254,7 +256,7 @@ def _detect_drawing_grids(
         multi_bands = sum(1 for c in band_cells if c >= 2)
         if multi_bands < _DRAWING_GRID_MIN_MULTI_BANDS:
             continue
-        if multi_bands * 2 < len(band_cells):
+        if multi_bands < len(band_cells) * _DRAWING_GRID_MIN_MULTI_BAND_FRACTION:
             continue  # mostly single-cell rows: a box, not a table
 
         # Skip if already covered by find_tables
