@@ -3591,6 +3591,46 @@ class TestFilterSectionsInsideVectorImages:
         kept, _ = _filter_sections_inside_vector_images([raster], [caption])
         assert kept == []
 
+    def test_list_kind_sub_caption_captured_and_dropped(self):
+        """The structure pass classifies "(a) text" lines as LIST items.
+        LIST must be included in the kind check so sub-captions are
+        captured and re-emitted as italic paragraphs; without it they
+        leak into the body as plain text."""
+        img = _ext_img(page=6, bbox=(86, 0, 506, 284))
+        sub = Section(
+            kind=SectionKind.LIST,
+            text="(a) Upper sub-figure",
+            confidence=Confidence.HIGH, page_num=5,
+            lines=[Line(
+                spans=[Span(text="(a) Upper sub-figure",
+                            bbox=(86, 290, 506, 302))],
+                bbox=(86, 290, 506, 302),
+            )],
+        )
+        kept, captures = _filter_sections_inside_vector_images([img], [sub])
+        assert kept == []
+        assert captures == {id(img): [("a", "(a) Upper sub-figure")]}
+
+    def test_list_kind_outside_band_kept(self):
+        """A LIST section that matches _SUB_CAPTION_RE but sits outside
+        any image's caption region is kept verbatim - the geometry gate
+        prevents false captures of body enumerated lists."""
+        img = _ext_img(page=6, bbox=(86, 100, 506, 284))
+        # 200pt below cluster bottom (band ends at 284+100=384), outside band.
+        sub = Section(
+            kind=SectionKind.LIST,
+            text="(a) a regular list item in body prose",
+            confidence=Confidence.HIGH, page_num=5,
+            lines=[Line(
+                spans=[Span(text="(a) a regular list item in body prose",
+                            bbox=(86, 500, 506, 512))],
+                bbox=(86, 500, 506, 512),
+            )],
+        )
+        kept, captures = _filter_sections_inside_vector_images([img], [sub])
+        assert kept == [sub]
+        assert captures == {}
+
 
 class TestLineInCaptionBandPredicateEquality:
     """``_line_in_caption_band`` must fire on exactly the same set of

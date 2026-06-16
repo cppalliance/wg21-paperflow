@@ -1106,11 +1106,13 @@ def _filter_sections_inside_vector_images(
             kept.append(sec)
             continue
 
-        # 2/3. Caption-shaped section drops. Apply to PARAGRAPH and
-        #     HEADING; the regex is the content signal, the y-only
-        #     band match is the geometry signal. Skipped for sections
-        #     with no lines (no first-line bbox to test).
-        if sec.kind in (SectionKind.PARAGRAPH, SectionKind.HEADING) and sec.lines:
+        # 2/3. Caption-shaped section drops. Apply to PARAGRAPH,
+        #     HEADING, and LIST; the regex is the content signal, the
+        #     y-only band match is the geometry signal. LIST is included
+        #     because the structure pass classifies "(a) text" lines as
+        #     list items, which is the canonical sub-caption shape.
+        #     Skipped for sections with no lines (no first-line bbox to test).
+        if sec.kind in (SectionKind.PARAGRAPH, SectionKind.HEADING, SectionKind.LIST) and sec.lines:
             first_text = sec.lines[0].text.strip()
             first_bbox = sec.lines[0].bbox
 
