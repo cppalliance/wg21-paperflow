@@ -35,11 +35,12 @@ import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from tomd.lib.metadata_yaml.format import format_front_matter, sanitize_metadata
 from tomd.errors import UnsupportedSourceFormatError
 from tomd.lib import (
+    apply_strip_leading_h1,
+    format_front_matter,
+    sanitize_metadata,
     strip_freeform_metadata_lines,
-    strip_leading_h1,
     EMAIL_RE,
 )
 from tomd.lib.html import convert_html
@@ -531,15 +532,8 @@ def convert_paper_full(
     # Re-run H1 stripping: leaked metadata before the H1 may have
     # blocked strip_leading_h1 in the emit layer.
     title_m = re.search(r'^title:\s*"?(.+?)"?\s*$', md, re.MULTILINE)
-    if title_m and md.startswith("---"):
-        fm_close = md.find("\n---", 3)
-        if fm_close >= 0:
-            body_start = md.find("\n", fm_close + 1)
-            if body_start >= 0:
-                body_start += 1
-                body = md[body_start:]
-                body = strip_leading_h1(body, title_m.group(1))
-                md = md[:body_start] + body
+    if title_m:
+        md = apply_strip_leading_h1(md, title_m.group(1))
 
     md = _strip_toc(md)
 

@@ -101,6 +101,32 @@ def test_convert_html_metadata_only_empty_body(tmp_path):
     assert "Solo" in md or "solo" in md.lower()
 
 
+def test_convert_html_title_with_embedded_dashes(tmp_path):
+    html = """<!DOCTYPE html>
+<html><head><meta charset="utf-8"/></head><body>
+<header id="title-block-header">
+<h1 class="title">Before --- After</h1>
+<table>
+<tr><td>Document #:</td><td>P8888R0</td></tr>
+<tr><td>Date:</td><td>2026-04-01</td></tr>
+</table>
+</header>
+<p>Paragraph after title.</p>
+</body></html>"""
+    path = _write(tmp_path, "dashes.html", html)
+    md, prompts = convert_html(path)
+    assert prompts is None
+    assert "Before --- After" in md
+    assert "Paragraph after title." in md
+    body_start = md.find("---", 4)
+    assert body_start >= 0
+    body = md[body_start:]
+    closing = body.find("\n---", 1)
+    assert closing >= 0
+    body_text = body[closing + 4 :]
+    assert "# Before --- After" not in body_text
+
+
 def test_convert_html_front_matter_then_body_separator(tmp_path):
     path = _write(tmp_path, "sep.html", MPARK_WITH_BODY)
     md, _ = convert_html(path)
