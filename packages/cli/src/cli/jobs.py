@@ -26,6 +26,7 @@ import asyncio
 import logging
 import sys
 import time
+from collections.abc import Callable
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -160,9 +161,11 @@ async def run_mailing(
 
     if target_type == "all":
         all_years = discover_years()
-        years = [y for y in all_years if int(y) >= MAILING_EARLIEST_YEAR]
+        years = sorted(
+            y for y in all_years if int(y) >= MAILING_EARLIEST_YEAR
+        )
     else:
-        years = targets
+        years = sorted(targets)
 
     succeeded = []
     skipped = []
@@ -186,16 +189,30 @@ async def run_mailing(
 
         if not force and year < current_year and backend.has_year(year):
             skipped.append(year)
-            continue
-        try:
-            all_mailings = fetch_all_mailings_for_year(year)
-            for mailing_id, papers in sorted(all_mailings.items()):
-                backend.upsert_year(year, papers)
-            total = len(backend.list_papers_for_year(year))
-            succeeded.append({"year": year, "papers": total})
-        except Exception as exc:
-            logger.exception("Failed to fetch year %s", year)
-            failed.append({"year": year, "error": str(exc)})
+        else:
+            try:
+                all_mailings = await asyncio.to_thread(fetch_all_mailings_for_year, year)
+                for mailing_id, papers in sorted(all_mailings.items()):
+                    backend.upsert_year(year, papers)
+                total = len(backend.list_papers_for_year(year))
+                succeeded.append({"year": year, "papers": total})
+            except Exception as exc:
+                logger.exception("Failed to fetch year %s", year)
+                failed.append({"year": year, "error": str(exc)})
+
+        if on_progress is not None:
+            try:
+                on_progress(
+                    ProgressEvent(
+                        step=i + 1,
+                        total=total_years,
+                        name=f"Mailing {year}",
+                        pct=(i + 1) / total_years if total_years else 1.0,
+                    )
+                )
+            except Exception:
+                logger.warning("on_progress hook raised; disabling", exc_info=True)
+                on_progress = None
 
     if on_progress is not None:
         try:
@@ -736,6 +753,36 @@ def run_content_check(
 # ---------------------------------------------------------------------------
 
 
+def _labeled_progress(
+    label: str, callback: ProgressCallback | None,
+) -> ProgressCallback | None:
+    """Prefix progress events with a pipeline stage label (for ``run_full``)."""
+    if callback is None:
+        return None
+
+    prefix = f"{label} "
+
+    def handler(ev: ProgressEvent) -> None:
+        name = ev.name
+        if name == "done":
+            name = label
+        elif not name.startswith(prefix):
+            name = f"{prefix}{name}"
+        callback(
+            ProgressEvent(
+                step=ev.step,
+                total=ev.total,
+                name=name,
+                pct=ev.pct,
+            )
+        )
+
+    return handler
+
+
+StageCompleteCallback = Callable[[str, dict | None], None]
+
+
 async def run_full(
     targets: list[str],
     backend: StorageBackend,
@@ -743,7 +790,11 @@ async def run_full(
     force: bool = False,
     verify: bool = False,
     concurrency: int = DEFAULT_DOWNLOAD_CONCURRENCY,
+    extract_vector: bool = False,
+    whiteout_text: bool = False,
     current_year: str | None = None,
+    on_progress: ProgressCallback | None = None,
+    on_stage_complete: StageCompleteCallback | None = None,
 ) -> dict:
     """Chain mailing -> download -> convert for the given targets."""
     target_type = _validate_targets(targets)
@@ -761,15 +812,36 @@ async def run_full(
 
     if mailing_targets is not None:
         results["mailing"] = await run_mailing(
-            mailing_targets, backend, current_year=current_year, force=force
+            mailing_targets, backend,
+            current_year=current_year,
+            force=force,
+            on_progress=_labeled_progress("Mailing", on_progress),
         )
+        if on_stage_complete is not None:
+            on_stage_complete("mailing", results["mailing"])
+    elif on_stage_complete is not None:
+        on_stage_complete("mailing", None)
 
     results["download"] = await run_download(
-        targets, backend, force=force, verify=verify, concurrency=concurrency
+        targets, backend,
+        force=force,
+        verify=verify,
+        concurrency=concurrency,
+        on_progress=_labeled_progress("Downloading", on_progress),
     )
+    if on_stage_complete is not None:
+        on_stage_complete("download", results["download"])
+
     results["convert"] = await run_convert(
-        targets, backend, force=force, concurrency=(concurrency // 2) or 1
+        targets, backend,
+        force=force,
+        concurrency=(concurrency // 2) or 1,
+        extract_vector=extract_vector,
+        whiteout_text=whiteout_text,
+        on_progress=_labeled_progress("Converting", on_progress),
     )
+    if on_stage_complete is not None:
+        on_stage_complete("convert", results["convert"])
     # Citation extraction is an enrichment step over the converted markdown;
     # don't let a failure here mask convert success in the result aggregate.
     try:

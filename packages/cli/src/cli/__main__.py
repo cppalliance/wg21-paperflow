@@ -22,6 +22,7 @@ from pathlib import Path
 import cli.mailing as _mailing_mod
 import cli.download as _download_mod
 import cli.convert as _convert_mod
+import cli.full as _full_mod
 import cli.agora as _agora_mod
 import cli.assay as _assay_mod
 import cli.status as _status_mod
@@ -31,13 +32,14 @@ from cli.targets import MONTH_RE
 from paperstore import WORKSPACE_ENV_VAR, SqliteBackend
 
 _VERB_NAMES = {
-    "mailing", "download", "convert", "agora", "assay", "status",
+    "mailing", "download", "convert", "full", "agora", "assay", "status",
 }
 
 _VERB_HELP = {
     "mailing":   "Scrape all WG21 mailing indexes (2011-current). Idempotent.",
     "download":  "Download source files for TARGET papers.",
     "convert":   "Convert source files to markdown for TARGET papers. Downloads first if needed.",
+    "full":      "Run mailing, download, and convert for TARGET papers.",
     "agora":     "Plan discussion threads for TARGET papers. Runs all prior stages if needed.",
     "assay":     "Structural analysis of TARGET papers (two-pass, six lenses).",
     "status":    "Show processing status for papers.",
@@ -55,6 +57,10 @@ _VERB_DESCRIPTION = {
     "convert": (
         "Convert staged PDF/HTML sources to markdown using tomd. "
         "Hard-fails if the source is not yet staged."
+    ),
+    "full": (
+        "Chain mailing, download, and convert for the given targets. "
+        "Idempotent: skips already-complete work unless --force is given."
     ),
     "agora": (
         "Plan a fake r/wg21 Reddit thread for a paper. "
@@ -75,9 +81,10 @@ _VERB_DESCRIPTION = {
 }
 
 _VERB_TARGETS_HELP = {
-    "mailing":   "Not used (mailing discovers years automatically).",
+    "mailing":   "Year (2026), `all`, or omit for all years >= 2011.",
     "download":  "Year (2026), paper id(s) (P3642R4 ...), or year-month (2026-01).",
     "convert":   "Year (2026), paper id(s) (P3642R4 ...), or year-month (2026-01).",
+    "full":      "Year (2026), paper id(s) (P3642R4 ...), or `all`.",
     "agora":     "Paper ID (P4003R2) or year-month (2026-01) for batch planning.",
     "assay":     "Paper ID (P4003R2) or year-month (2026-01) for batch analysis.",
     "status":    "Paper ID, year, year-month, or omit for all incomplete papers.",
@@ -87,15 +94,17 @@ _COMMANDS = {
     "mailing":   _mailing_mod,
     "download":  _download_mod,
     "convert":   _convert_mod,
+    "full":      _full_mod,
     "agora":     _agora_mod,
     "assay":     _assay_mod,
     "status":    _status_mod,
 }
 
 _VERB_FLAGS: dict[str, set[str]] = {
-    "mailing":   set(),
+    "mailing":   {"force"},
     "download":  {"force", "concurrency"},
     "convert":   {"force", "concurrency", "check_content", "check_content_json", "keep_downstream", "yes", "extract_vector_images", "vector_whiteout_text"},
+    "full":      {"force", "verify", "concurrency", "extract_vector_images", "vector_whiteout_text"},
     "agora":     {"debug", "trace", "step", "provider", "force"},
     "assay":     {"debug", "trace", "step", "force", "rerender"},
     "status":    set(),
@@ -106,6 +115,9 @@ _FLAG_DEFS: list[dict] = [
          default=False, help="Redo stage even if already complete."),
     dict(name="concurrency", flags=["--concurrency"], type=int,
          default=None, metavar="N", help="Number of parallel workers."),
+    dict(name="verify", flags=["--verify"], action="store_true",
+         default=False,
+         help="HEAD-check staged files against Content-Length during download."),
     dict(name="check_content", flags=["--check-content"], action="store_true",
          default=False,
          help="Compare source text against converted markdown for content coverage."),
@@ -163,6 +175,7 @@ _PAPER_ID_RE = re.compile(r"^[PND]\d{3,5}(R\d+)?$", re.IGNORECASE)
 _EPILOG = """\
 Examples:
   paperflow mailing                scrape mailing index
+  paperflow full 2026              mailing + download + convert
   paperflow download P3642R4       download one paper
   paperflow convert 2026-01        convert papers from Jan 2026 onward
   paperflow agora P4003R2          plan a discussion thread
@@ -182,7 +195,9 @@ def _add_flags(p: argparse.ArgumentParser, verb: str) -> None:
 
 
 def _classify_target(t: str) -> str:
-    """Return 'paper', 'year', 'month', or raise :class:`InvalidTargetError`."""
+    """Return 'paper', 'year', 'month', 'all', or raise :class:`InvalidTargetError`."""
+    if t == "all":
+        return "all"
     if _PAPER_ID_RE.match(t):
         return "paper"
     if t.isdigit() and len(t) == 4:
@@ -226,7 +241,21 @@ def _validate_targets(verb: str, targets: list[str]) -> None:
             )
             sys.exit(1)
 
+    if "all" in kinds:
+        if len(targets) != 1:
+            print(
+                f"paperflow {verb}: `all` must be the only target.",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+
     if len(kinds) > 1:
+        if "all" in kinds:
+            print(
+                f"paperflow {verb}: cannot mix `all` with other targets.",
+                file=sys.stderr,
+            )
+            sys.exit(1)
         if "paper" in kinds and "year" in kinds:
             print(
                 f"paperflow {verb}: cannot mix paper IDs and years in the same invocation.",
@@ -262,7 +291,7 @@ def _backend_for(workspace_dir: Path | None) -> SqliteBackend:
 def main() -> int:
     argv = sys.argv[1:]
     if argv and argv[0] not in _VERB_NAMES and not argv[0].startswith("-"):
-        argv = ["agora"] + argv
+        argv = ["full"] + argv
 
     parser = argparse.ArgumentParser(
         prog="paperflow",
