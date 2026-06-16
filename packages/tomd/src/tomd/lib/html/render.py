@@ -5,7 +5,7 @@ import re
 import urllib.parse
 from collections import deque
 
-from bs4 import BeautifulSoup, Comment, Tag, NavigableString
+from bs4 import BeautifulSoup, CData, Comment, Tag, NavigableString
 
 from .. import strip_format_chars, ALLOWED_LINK_SCHEMES
 
@@ -255,9 +255,34 @@ def render_body(soup: BeautifulSoup, generator: str) -> str:
     _fix_misnested_table_cells(soup)
     _wrap_bare_blockquote_inline(soup)
     body = soup.find("body") or soup
+    _normalize_heading_levels(body)
     parts: list[str] = []
     _render_children(body, parts, generator)
     return "\n\n".join(p for p in parts if p.strip())
+
+
+def _normalize_heading_levels(body: Tag) -> None:
+    """Shift body headings so the shallowest renders at H2.
+
+    The front-matter contract reserves H1 for the document title, so body
+    headings start at H2. HTML papers arrive both <h1>-rooted and <h2>-rooted,
+    so shift every heading relative to the document's shallowest heading rather
+    than applying a blanket offset (which would corrupt already-H2-rooted
+    papers). Renaming the tags lets _render_heading pick up the shift through
+    its existing int(el.name[1]) read.
+    """
+    headings = [
+        el for el in body.find_all(list(_HEADING_TAGS))
+        if _inline_text(el, _HEADING_SKIP_CLASSES).strip()
+    ]
+    if not headings:
+        return
+    offset = max(0, 2 - min(int(el.name[1]) for el in headings))
+    if offset == 0:
+        return
+    for el in headings:
+        level = min(int(el.name[1]) + offset, 6)
+        el.name = f"h{level}"
 
 
 def _render_children(element, parts: list[str], generator: str):
@@ -573,27 +598,41 @@ def _render_eelis_block(el: Tag, generator: str) -> str | None:
 _CODE_BLOCK_TAGS = frozenset({"pre", "code-block"})
 
 
+def _indent(text: str) -> str:
+    """Indent every line by two spaces (list-continuation depth)."""
+    return "\n".join("  " + line for line in text.split("\n"))
+
+
 def _render_list(el: Tag, marker: str, generator: str) -> str | None:
-    """Render an ordered or unordered list."""
+    """Render an ordered or unordered list.
+
+    Direct ``<li>`` children become list items. Any other direct child (a
+    nested ``<ol>``/``<ul>`` with no wrapping ``<li>``, or a loose
+    ``<p>``/``<pre>``/``<blockquote>``/``<div>``/text) is rendered through the
+    normal element dispatch and indented under the preceding item rather than
+    silently dropped; if it precedes the first item it is emitted standalone.
+    Only ``<li>`` advances the item counter, so interspersed children do not
+    perturb ordered-list numbering.
+    """
     items: list[str] = []
-    li_index = 0
-    for child in el.children:
-        if isinstance(child, NavigableString):
-            continue
-        if child.name == "li":
-            prefix = f"{li_index + 1}." if marker == "1." else "-"
-            li_index += 1
-            # Detach nested sublists before capturing inline text so they
-            # are not walked into by _inline_text (duplicating contents).
+    item_index = 0
+    # Materialize: the <li> branch calls .extract() during iteration.
+    for child in list(el.children):
+        if isinstance(child, Tag) and child.name == "li":
+            item_index += 1
+            prefix = f"{item_index}." if marker == "1." else "-"
+            # Detach nested sublists before capturing inline text so they are not
+            # walked into by _inline_text (which would duplicate their contents).
             subs = [sub.extract()
                     for sub in child.find_all(_LIST_CONTAINER_TAGS, recursive=False)]
             nested_parts = []
             for sub in subs:
                 sub_rendered = _render_element(sub, generator)
                 if sub_rendered:
-                    indented = "\n".join("  " + line for line in sub_rendered.split("\n"))
-                    nested_parts.append(indented)
+                    nested_parts.append(_indent(sub_rendered))
 
+            # Extract code blocks before inlining so they are rendered as
+            # fenced blocks rather than flattened to inline text.
             code_parts = []
             for cb in child.find_all(_CODE_BLOCK_TAGS, recursive=False):
                 rendered = _render_element(cb.extract(), generator)
@@ -602,9 +641,6 @@ def _render_list(el: Tag, marker: str, generator: str) -> str | None:
 
             table_parts: list[str] = []
             for tbl in child.find_all("table"):
-                # A table nested inside another table is rendered as part
-                # of its outer table; extracting it here would duplicate
-                # its content.
                 if tbl.find_parent("table") is not None:
                     continue
                 rendered = _render_table(tbl.extract())
@@ -616,10 +652,6 @@ def _render_list(el: Tag, marker: str, generator: str) -> str | None:
                 items.append(f"{prefix} {text}")
             elif marker == "1." and (code_parts or table_parts
                                      or nested_parts):
-                # The item's only content was extracted above: keep a bare
-                # marker so ordered-list numbering stays continuous.
-                # Unordered lists carry no numbering, so a bare dash
-                # would be pure noise there.
                 items.append(prefix)
             for cp in code_parts:
                 items.append(cp)
@@ -627,31 +659,16 @@ def _render_list(el: Tag, marker: str, generator: str) -> str | None:
                 items.append("\n" + tp)
             for np in nested_parts:
                 items.append(np)
-        else:
-            # Non-<li> child (e.g. <blockquote> wrapping a <table>):
-            # render any tables at their natural DOM position.
-            if child.name == "table":
-                rendered = _render_table(child)
-                if rendered:
-                    items.append("\n" + rendered)
-                continue
-            extracted_table = False
-            for tbl in child.find_all("table"):
-                if tbl.find_parent("table") is not None:
-                    continue
-                rendered = _render_table(tbl.extract())
-                if rendered:
-                    items.append("\n" + rendered)
-                    extracted_table = True
-            # Keep text accompanying an extracted table (e.g. a caption
-            # in the wrapper).  Children without tables stay dropped:
-            # in practice they are navigation chrome, and rescuing them
-            # injects noise into the body.
-            if extracted_table:
-                text = _collapse_whitespace(_inline_text(child))
-                if text:
-                    items.append(text)
-
+        elif isinstance(child, Tag):
+            # Non-<li> direct child: render via the normal dispatch and indent
+            # under the preceding item (standalone if there is no item yet).
+            rendered = _render_element(child, generator)
+            if rendered:
+                items.append(_indent(rendered) if item_index else rendered)
+        elif isinstance(child, NavigableString) and not isinstance(child, (Comment, CData)):
+            text = _collapse_whitespace(str(child)).strip()
+            if text:
+                items.append(("  " + text) if item_index else text)
     return "\n".join(items) if items else None
 
 
@@ -662,6 +679,19 @@ def _has_spans(el: Tag) -> bool:
             return True
     return False
 
+
+
+_BR_MULTILINE_MIN_CELLS = 2
+
+def _has_br_multiline_cells(el: Tag) -> bool:
+    """True when enough cells contain direct-child <br>, making pipe-table lossy."""
+    count = 0
+    for cell in el.find_all(["td", "th"]):
+        if cell.find("br", recursive=False):
+            count += 1
+            if count >= _BR_MULTILINE_MIN_CELLS:
+                return True
+    return False
 
 
 def _needs_flat_reconstruction(el: Tag) -> bool:
@@ -927,6 +957,7 @@ def _render_mixed_code_table(el: Tag) -> str | None:
             if code_el:
                 code_text = code_el.get_text().strip()
                 escaped = _html.escape(code_text)
+                escaped = "\n".join(line or "&#10;" for line in escaped.split("\n"))
                 parts.append(
                     f'<{tag} style="{_S}">'
                     f'<pre style="margin: 0;"><code>{escaped}</code></pre>'
@@ -964,6 +995,9 @@ def _render_table(el: Tag) -> str | None:
 
     if _has_spans(el):
         return _render_denormalized_table(el)
+
+    if _has_br_multiline_cells(el):
+        return _render_mixed_code_table(el)
 
     rows: list[list[str]] = []
     containers = el.find_all(["thead", "tbody", "tfoot"], recursive=False)
@@ -1027,10 +1061,20 @@ def _render_blockquote(el: Tag, generator: str) -> str | None:
 
 
 def _render_dl(el: Tag, generator: str) -> str | None:
-    """Render a definition list."""
+    """Render a definition list.
+
+    ``<dt>``/``<dd>`` render as term/definition. Any other direct child is
+    rendered through the normal element dispatch rather than dropped; loose
+    text is kept (Comment/CData are not content).
+    """
     items = []
-    for child in el.children:
+    for child in list(el.children):
         if not isinstance(child, Tag):
+            if (isinstance(child, NavigableString)
+                    and not isinstance(child, (Comment, CData))):
+                text = _collapse_whitespace(str(child)).strip()
+                if text:
+                    items.append(text)
             continue
         if child.name == "dt":
             text = _inline_text(child).strip()
@@ -1046,6 +1090,10 @@ def _render_dl(el: Tag, generator: str) -> str | None:
             if text:
                 items.append(f": {text}")
             items.extend(code_parts)
+        else:
+            rendered = _render_element(child, generator)
+            if rendered:
+                items.append(rendered)
     return "\n".join(items) if items else None
 
 

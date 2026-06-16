@@ -1,10 +1,13 @@
 """Tests for lib.html.render."""
 
+import re
+
 from tomd.lib.html.extract import parse_html
 from tomd.lib.html.render import (
     render_body,
     _fix_misnested_table_cells,
     _LOSSY_TABLE_MARKER,
+    _MIXED_TABLE_MARKER,
 )
 
 
@@ -30,6 +33,26 @@ class TestHeading:
         md = render_body(soup, "mpark")
         assert "## Bold Heading" in md
         assert "**" not in md
+
+    def test_h1_rooted_body_shifted_to_h2(self):
+        # Body headings start at H2 (the front-matter title is the only H1).
+        soup = parse_html(
+            "<body><h1>Introduction</h1><h2>Background</h2>"
+            "<h3>Detail</h3></body>")
+        md = render_body(soup, "mpark")
+        assert "## Introduction" in md
+        assert "### Background" in md
+        assert "#### Detail" in md
+        assert not re.search(r"(?m)^# ", md)
+
+    def test_h2_rooted_body_unchanged(self):
+        # Already-correct papers must not be shifted (no blanket offset).
+        soup = parse_html(
+            "<body><h2>Introduction</h2><h3>Background</h3></body>")
+        md = render_body(soup, "mpark")
+        assert "## Introduction" in md
+        assert "### Background" in md
+        assert not re.search(r"(?m)^# ", md)
 
 
 class TestParagraph:
@@ -571,7 +594,7 @@ class TestDenormalizedTable:
         assert "| 1 | 2 |" in md
 
     def test_br_in_cell_becomes_space(self):
-        """Cells with <br> should collapse to single-line pipe table cells."""
+        """Single-cell <br> stays as pipe table (below threshold)."""
         html = """
         <table>
         <tr><th>Col</th></tr>
@@ -581,6 +604,84 @@ class TestDenormalizedTable:
         md = render_body(parse_html(html), "mpark")
         assert "<table>" not in md
         assert "Line1 Line2" in md
+
+    def test_br_multiline_cells_become_html_table(self):
+        """Tables with 2+ cells containing <br> route to HTML table."""
+        html = """
+        <table>
+        <thead><tr><th>Unary</th><th>Binary</th></tr></thead>
+        <tbody><tr>
+          <td>+q<br>-q<br>++q</td>
+          <td>q + kind<br>q - kind<br>q * q2</td>
+        </tr></tbody>
+        </table>
+        """
+        md = render_body(parse_html(html), "mpark")
+        assert "<table" in md
+        assert "<br" in md
+        assert _MIXED_TABLE_MARKER in md
+
+    def test_single_br_cell_stays_pipe(self):
+        """Only one cell with <br> stays as pipe table."""
+        html = """
+        <table>
+        <thead><tr><th>A</th><th>B</th></tr></thead>
+        <tbody><tr>
+          <td>Line1<br>Line2</td>
+          <td>No break here</td>
+        </tr></tbody>
+        </table>
+        """
+        md = render_body(parse_html(html), "mpark")
+        assert "<table>" not in md
+        assert "Line1 Line2" in md
+
+    def test_code_table_blank_lines_no_paragraph_break(self):
+        """Blank lines in <pre><code> must not break Markdown HTML block."""
+        html = """
+        <table>
+        <tr><th>A</th><th>B</th></tr>
+        <tr>
+          <td><pre><code>line1;
+
+line2;</code></pre></td>
+          <td><pre><code>fix1;
+
+fix2;</code></pre></td>
+        </tr>
+        </table>
+        """
+        md = render_body(parse_html(html), "mpark")
+        assert "<table" in md
+        assert "&#10;" in md
+        assert "\n\n" not in md.split("<pre")[1].split("</pre>")[0]
+
+    def test_code_table_multiple_consecutive_blank_lines(self):
+        """2+ consecutive blank lines in <pre><code> must all be escaped."""
+        html = """
+        <table>
+        <tr><th>A</th><th>B</th></tr>
+        <tr>
+          <td><pre><code>line1;
+
+
+line3;</code></pre></td>
+          <td><pre><code>fix1;
+
+
+
+fix4;</code></pre></td>
+        </tr>
+        </table>
+        """
+        md = render_body(parse_html(html), "mpark")
+        assert "<table" in md
+        assert "&#10;" in md
+        for segment in md.split("<pre")[1:]:
+            inside = segment.split("</pre>")[0]
+            assert "\n\n" not in inside, (
+                f"raw blank line survived inside <pre>: {inside!r}"
+            )
 
     def test_pipe_in_cell_escaped(self):
         """Pipe characters in cell content must be escaped."""
@@ -1231,3 +1332,106 @@ class TestCodeParagraphDetection:
         html = "<p>   </p>"
         md = render_body(parse_html(html), "dascandy/fiets")
         assert md.strip() == "" or "```" not in md
+
+
+class TestListChildDrop:
+    """Non-<li> direct children of a list are rendered, not silently dropped."""
+
+    def _md(self, html):
+        return render_body(parse_html(html), "mpark")
+
+    def test_renders_nested_list_direct_child(self):
+        # Outer <ol> has no <li> of its own, only a nested <ol>: the inner list
+        # is the content and renders standalone at top level (not indented).
+        md = self._md("<ol><ol><li>inner</li></ol></ol>")
+        assert "inner" in md
+        assert "1. inner" in md
+        assert "  1. inner" not in md  # standalone: no outer item to indent under
+
+    def test_ol_ol_wording_content_recovered(self):
+        # P4179R0's real shape: the synopsis <pre> sits inside a <blockquote>
+        # inside the <li>. Part 1 recovers the CONTENT (the list is no longer
+        # dropped). The <pre> stays flattened by _inline_text (the deferred
+        # <li>-internal flattening), so we assert presence, not a code fence.
+        md = self._md(
+            "<div><ol><ol>"
+            "<li><p>Add a feature-test macro</p>"
+            "<blockquote><pre>#define __cpp_lib_x</pre></blockquote></li>"
+            "<li><p>Modify</p>"
+            "<blockquote><pre>namespace std {}</pre></blockquote></li>"
+            "</ol></ol></div>"
+        )
+        assert "__cpp_lib_x" in md
+        assert "namespace std {}" in md
+
+    def test_renders_loose_paragraph_child_indented(self):
+        md = self._md("<ul><li>a</li><p>note</p></ul>")
+        assert "note" in md
+        assert "\n  note" in md  # indented under the preceding item
+
+    def test_renders_direct_child_pre_fenced(self):
+        # A <pre> that is a direct child of the list (not <li>-internal) renders
+        # as a fenced block via the normal element dispatch.
+        md = self._md("<ol><li>Add:</li><pre>code();</pre></ol>")
+        assert "code();" in md
+        assert "```" in md
+
+    def test_renders_direct_child_blockquote(self):
+        md = self._md("<ul><li>a</li><blockquote>quoted</blockquote></ul>")
+        assert "quoted" in md
+        assert ">" in md
+
+    def test_renders_loose_text_child(self):
+        md = self._md("<ul><li>a</li>loose text here</ul>")
+        assert "loose text here" in md
+
+    def test_non_li_child_before_first_item_standalone(self):
+        md = self._md("<ol><p>intro</p><li>a</li></ol>")
+        assert "intro" in md
+        assert "1. a" in md
+        assert "  intro" not in md  # no preceding item: standalone, not indented
+
+    def test_ordered_numbering_counts_only_li(self):
+        md = self._md("<ol><li>a</li><p>x</p><li>b</li></ol>")
+        assert "1. a" in md
+        assert "2. b" in md
+        assert "3." not in md  # the <p> does not advance the counter
+
+    def test_comment_child_produces_no_output(self):
+        md = self._md("<ul><li>a</li><!-- secret build note --></ul>")
+        assert "secret" not in md
+        assert "build note" not in md
+
+    def test_whitespace_text_between_items_no_spurious_item(self):
+        md = self._md("<ul><li>a</li>\n   \n<li>b</li></ul>")
+        assert md == "- a\n- b"
+
+    def test_nested_sublist_in_li_unchanged(self):
+        md = self._md("<ul><li>a<ul><li>b</li></ul></li></ul>")
+        assert md == "- a\n  - b"
+
+    def test_code_block_in_li_unchanged(self):
+        md = self._md("<ol><li>x<pre>code</pre></li></ol>")
+        assert "1. x" in md
+        assert "```" in md
+        assert "code" in md
+
+
+class TestDlChildDrop:
+    """Non-dt/dd direct children of a <dl> are rendered, not silently dropped."""
+
+    def _md(self, html):
+        return render_body(parse_html(html), "mpark")
+
+    def test_renders_non_dt_dd_child(self):
+        md = self._md("<dl><dt>term</dt><dd>def</dd><p>note</p></dl>")
+        assert "note" in md
+
+    def test_comment_child_produces_no_output(self):
+        md = self._md("<dl><dt>t</dt><dd>d</dd><!-- c --></dl>")
+        assert "c " not in md and "\nc" not in md
+
+    def test_dt_dd_unchanged(self):
+        md = self._md("<dl><dt>term</dt><dd>def</dd></dl>")
+        assert "**term**" in md
+        assert ": def" in md
