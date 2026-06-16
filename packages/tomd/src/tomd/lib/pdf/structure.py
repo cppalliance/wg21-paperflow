@@ -609,8 +609,9 @@ def drop_leaked_toc_headings(sections: list[Section]) -> list[Section]:
 
     # 4. group entries into contiguous runs (only non-heading trivial fragments
     #    bridge consecutive members), keep runs >= MIN_TOC_RUN that clear the
-    #    heading anchor, reject a strictly-deepening all-heading stack, and sweep
-    #    the run's in-span trivial fragments plus a preceding label.
+    #    heading anchor, reject runs whose headings strictly deepen (real
+    #    clause-container stacks), and sweep in-span trivial fragments plus a
+    #    preceding label.
     to_remove: set[int] = set()
 
     def _flush(run: list[int]) -> None:
@@ -621,11 +622,15 @@ def drop_leaked_toc_headings(sections: list[Section]) -> list[Section]:
         # confirmed heading-kind TOC block, never as a free-floating cluster.
         if not any(heading_entry[i] for i in run):
             return
-        # Strictly-deepening rejection applies only to an all-heading run (a
-        # 15/15.1/15.1.1 clause-container stack). A mixed run is never a pure
-        # ascent and is always a TOC.
-        if all(sections[i].kind == SectionKind.HEADING for i in run):
-            levels = [sections[i].heading_level for i in run]
+        # Strictly-deepening rejection: a run whose headings form a
+        # 15/15.1/15.1.1 ascending sequence is a real clause-container stack,
+        # not a leaked TOC. Apply to both all-heading runs and the heading
+        # subsequence of mixed runs: if the headings strictly deepen, the run
+        # is structural even if PARAGRAPH/LIST entries appear between them.
+        # Require at least two headings so the check is non-vacuous.
+        heading_run = [i for i in run if sections[i].kind == SectionKind.HEADING]
+        if len(heading_run) >= 2:
+            levels = [sections[i].heading_level for i in heading_run]
             if all(b > a for a, b in zip(levels, levels[1:])):
                 return
         for i in run:

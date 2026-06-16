@@ -457,6 +457,34 @@ class TestDropLeakedTocHeadings:
         # Body paragraphs are untouched.
         assert sum(1 for s in out if s.kind == SectionKind.PARAGRAPH) == 4
 
+    def test_mixed_run_deepening_headings_not_removed(self):
+        """Strictly-deepening rejection applies to the heading subsequence of a
+        mixed run, not only to all-heading runs.
+
+        A run containing PARAGRAPH/LIST entries between strictly-ascending
+        headings is a real clause-container structure (the non-heading entries
+        are preamble/body inside each clause), not a leaked TOC.
+        """
+        h, body = self._h, self._body
+
+        def lst(text):
+            return make_section(text, kind=SectionKind.LIST)
+        # Leaked TOC candidate: empty headings at levels 2/3/4, with a LIST
+        # entry (recurs as a later heading) between the first two headings.
+        # The heading subsequence [2, 3, 4] strictly deepens -> kept.
+        front = [h("Chapter", 2), lst("Section"), h("Section", 3), h("Subsection", 4)]
+        back = [
+            h("Chapter", 2), body(),
+            h("Section", 3), body(),
+            h("Subsection", 4), body(),
+        ]
+        out = drop_leaked_toc_headings(front + back)
+        # Front headings must survive (run rejected as a clause-container stack).
+        headings = [s.text for s in out if s.kind == SectionKind.HEADING]
+        assert headings.count("Chapter") == 2
+        assert headings.count("Section") == 2
+        assert headings.count("Subsection") == 2
+
     def test_entry_title_roman_numeral_not_folded(self):
         """_entry_title folds "1\\nOverview" but not "IV\\nOverview".
 
