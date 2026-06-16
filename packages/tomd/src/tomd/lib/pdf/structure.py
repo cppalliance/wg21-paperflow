@@ -427,8 +427,9 @@ def compare_extractions(mupdf_blocks: list[Block],
 # 2026 corpus. Coupling caveat: this threshold and `MIN_TOC_RUN` (toc.py) are
 # corpus-tuned. A future paper with a 2-entry leaked TOC, or a leaked entry
 # whose stray fragment exceeds 40 chars, under-removes silently (a cosmetic
-# duplicate heading remains). Body text is never at risk either way: only empty
-# headings are ever removed.
+# duplicate heading remains). Body text is safe: only sections whose text
+# exactly recurs as a later heading, within a run anchored by at least one
+# empty heading, are removed.
 _TOC_ENTRY_MAX_BODY_CHARS = 40
 
 # Kinds that are never trivial regardless of text length. IMAGE sections are
