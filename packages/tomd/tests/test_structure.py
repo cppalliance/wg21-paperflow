@@ -663,6 +663,26 @@ class TestDropLeakedTocMixedKind:
         assert texts.count("Abstract") == 1
         assert sum(1 for s in out if s.kind == SectionKind.PARAGRAPH) == 3
 
+    def test_image_inside_run_span_not_swept(self):
+        """An IMAGE section between leaked TOC entries must survive.
+
+        IMAGE sections have text="" so _section_is_trivial always returns True
+        for them. The in-span sweep must skip IMAGE (and TABLE/CODE) regardless
+        of text length, matching the guard already present in find_toc_indices.
+        """
+        h, body = self._h, self._body
+        image = make_section("", kind=SectionKind.IMAGE)
+        secs = [
+            h("Abstract"), h("Motivation"), image, h("Design"),  # leaked TOC
+            h("Abstract"), body(),
+            h("Motivation"), body(),
+            h("Design"), body(),
+        ]
+        out = drop_leaked_toc_headings(secs)
+        assert any(s.kind == SectionKind.IMAGE for s in out), (
+            "IMAGE section was silently swept from inside a TOC run"
+        )
+
 
 class TestParagraphMerging:
     def test_merges_continuation(self):

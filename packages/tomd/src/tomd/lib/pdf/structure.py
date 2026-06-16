@@ -431,6 +431,16 @@ def compare_extractions(mupdf_blocks: list[Block],
 # headings are ever removed.
 _TOC_ENTRY_MAX_BODY_CHARS = 40
 
+# Kinds that are never trivial regardless of text length. IMAGE sections are
+# built with text="" (the canonical alt text lives in image_ref, not sec.text),
+# so _section_is_trivial would always return True for them, silently sweeping
+# real figures. TABLE and CODE sections may also be short in text but represent
+# real structured content. Matches the kind guard already present in the sibling
+# find_toc_indices path in pipeline.py.
+_TOC_SWEEP_SKIP_KINDS = frozenset({
+    SectionKind.IMAGE, SectionKind.TABLE, SectionKind.CODE,
+})
+
 
 def _section_is_trivial(sec: Section) -> bool:
     """True if a non-heading section is too small to count as body.
@@ -581,7 +591,8 @@ def drop_leaked_toc_headings(sections: list[Section]) -> list[Section]:
         for j in range(i + 1, n):
             if sections[j].kind == SectionKind.HEADING:
                 break
-            if not (_section_is_trivial(sections[j]) or nonheading_entry[j]):
+            if (sections[j].kind in _TOC_SWEEP_SKIP_KINDS
+                    or not (_section_is_trivial(sections[j]) or nonheading_entry[j])):
                 empty = False
                 break
         if empty and _recurs_later(sec, i):
@@ -622,6 +633,7 @@ def drop_leaked_toc_headings(sections: list[Section]) -> list[Section]:
         for j in range(run[0] + 1, end):
             if (j not in to_remove
                     and sections[j].kind != SectionKind.HEADING
+                    and sections[j].kind not in _TOC_SWEEP_SKIP_KINDS
                     and _section_is_trivial(sections[j])):
                 to_remove.add(j)
         # A "Table of Contents" / "Contents" label immediately preceding the run,
