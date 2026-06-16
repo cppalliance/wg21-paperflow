@@ -13,7 +13,7 @@ from .. import (
 )
 # `drop_leaked_toc_headings` reuses toc.py's TOC-recognition helpers so the
 # two "what is a TOC" definitions stay a single source of truth (see #122).
-from ..toc import MIN_TOC_RUN, _is_toc_label, _normalize_toc_entry
+from ..toc import MIN_TOC_RUN, is_toc_label, normalize_toc_entry
 from .glyphs import GLYPH_FONT_SENTINEL, UNKNOWN_GLYPH
 from .types import (
     Block, Line, Span, Section, SectionKind, Confidence,
@@ -470,12 +470,12 @@ def drop_leaked_toc_headings(sections: list[Section]) -> list[Section]:
     title_indices: dict[str, list[int]] = {}
     for i, sec in enumerate(sections):
         if sec.kind == SectionKind.HEADING:
-            title_indices.setdefault(_normalize_toc_entry(sec.text), []).append(i)
+            title_indices.setdefault(normalize_toc_entry(sec.text), []).append(i)
 
     def _is_toc_neighbour(j: int) -> bool:
         """True if sections[j] is a non-heading that is itself a heading title
         recurring later — i.e. another leaked TOC entry, not body prose."""
-        norm_j = _normalize_toc_entry(sections[j].text)
+        norm_j = normalize_toc_entry(sections[j].text)
         return any(k > j for k in title_indices.get(norm_j, []))
 
     # 2. mark removable-eligible headings: empty (no substantial body before the
@@ -494,7 +494,7 @@ def drop_leaked_toc_headings(sections: list[Section]) -> list[Section]:
                 break
         if not empty:
             continue
-        norm = _normalize_toc_entry(sec.text)
+        norm = normalize_toc_entry(sec.text)
         if any(k > i for k in title_indices.get(norm, [])):
             eligible[i] = True
 
@@ -528,12 +528,12 @@ def drop_leaked_toc_headings(sections: list[Section]) -> list[Section]:
         while p >= 0:
             sec_p = sections[p]
             if sec_p.kind == SectionKind.HEADING:
-                if _is_toc_label(sec_p.text):
+                if is_toc_label(sec_p.text):
                     to_remove.add(p)
                 break
             if not _section_is_trivial(sec_p):
                 break
-            if _is_toc_label(sec_p.text):
+            if is_toc_label(sec_p.text):
                 to_remove.add(p)
             p -= 1
 

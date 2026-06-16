@@ -51,7 +51,7 @@ from .types import (
     is_readable,
 )
 from ..shared import override_revision_from_filename
-from ..toc import find_toc_indices, has_dot_leader, _is_toc_label
+from ..toc import find_toc_indices, has_dot_leader, is_toc_label
 from ..metadata_yaml.strip import (
     strip_metadata_headings as _strip_metadata_headings_new,
     strip_pre_heading_fragments as _strip_pre_heading_fragments,
@@ -1920,7 +1920,7 @@ def run_pipeline(
     if toc_indices:
         _has_dot = any(has_dot_leader(sections[i].text) for i in toc_indices)
         _has_label = any(
-            _is_toc_label(s.text.split("\n")[0].strip()) for s in sections
+            is_toc_label(s.text.split("\n")[0].strip()) for s in sections
         )
         if not _has_dot and not _has_label:
             _inside = set()
@@ -1947,7 +1947,7 @@ def run_pipeline(
             (ln.strip() for ln in sec.text.split("\n") if ln.strip()),
             "",
         )
-        if not _is_toc_label(fl):
+        if not is_toc_label(fl):
             continue
         candidate = {li}
         numbered = 0
@@ -2053,7 +2053,7 @@ def run_pipeline(
     sections[:] = [
         s for s in sections
         if not (s.kind == SectionKind.PARAGRAPH
-                and _is_toc_label(s.text.split("\n")[0].strip())
+                and is_toc_label(s.text.split("\n")[0].strip())
                 and len(s.text.split("\n")[0].strip().split()) <= _TOC_LABEL_MAX_WORDS)
     ]
 
