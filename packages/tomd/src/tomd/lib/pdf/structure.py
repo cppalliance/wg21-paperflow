@@ -526,8 +526,9 @@ def drop_leaked_toc_headings(sections: list[Section]) -> list[Section]:
     The single discriminator is **recurrence as a later heading**, shared by
     both entry kinds (`_is_toc_entry`). A run is a contiguous sequence of such
     entries (only trivial fragments or other entries may sit between members),
-    of length at least `MIN_TOC_RUN`, that is **not** a strictly-deepening
-    all-heading container stack (`15`/`15.1`/`15.1.1`).
+    of length at least `MIN_TOC_RUN`, that is **not** a run whose heading
+    subsequence strictly deepens (`15`/`15.1`/`15.1.1` clause-container
+    stack).
 
     Safety: pt2 removed only empty headings and so was body-safe by
     construction. This pass also removes PARAGRAPH/LIST sections, so that
@@ -615,6 +616,16 @@ def drop_leaked_toc_headings(sections: list[Section]) -> list[Section]:
     to_remove: set[int] = set()
 
     def _flush(run: list[int]) -> None:
+        # Known limitation (recall): a leaked TOC entry whose body counterpart
+        # is not a recurrence-matching heading carries no signal _recurs_later
+        # can use. Such entries return False from _recurs_later, are never
+        # placed in `entry`, and therefore never reach this function. They
+        # survive in the output. P4007R0's once-only objection-title headings
+        # (e.g. "8.1 C++ needs a standard task...") are the confirmed case: each
+        # appears only once in the document, so _recurs_later returns False for
+        # all of them. Catching once-only leaked entries requires a non-recurrence
+        # signal (front-region position, distance from the TOC label, etc.),
+        # which was deliberately deferred as too risky for body-safety.
         if len(run) < MIN_TOC_RUN:
             return
         # Heading anchor: a removable run must contain at least one empty-heading
