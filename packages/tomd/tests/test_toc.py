@@ -1,6 +1,8 @@
 """Tests for lib.toc."""
 
-from tomd.lib.toc import find_toc_indices
+import logging
+
+from tomd.lib.toc import find_toc_indices, _bridgeable
 from tomd.lib.pdf.types import Span, Line, Section, SectionKind
 
 
@@ -184,3 +186,138 @@ def test_large_toc_completes_quickly():
     find_toc_indices(texts, headings)
     elapsed = time.monotonic() - t0
     assert elapsed < 2.0, f"TOC detection took {elapsed:.1f}s, expected < 2s"
+
+
+# ---------------------------------------------------------------------------
+# Heading self-match exclusion (Change A) and gap-fill prose guard (Change B).
+# A short paper of alternating HEADING/PARAGRAPH sections used to have its
+# entire body deleted: every body heading matched itself in the heading set,
+# and the gap-fill swallowed the prose between them. See #122.
+# ---------------------------------------------------------------------------
+
+def test_heading_sections_do_not_self_match():
+    """Body headings excluded when is_heading is set; inert when it is not."""
+    texts = ["Introduction", "x", "Motivation", "y", "Design"]
+    headings = {"Introduction", "Motivation", "Design"}
+    is_heading = [True, False, True, False, True]
+    # With is_heading, the body headings are not eligible TOC matches.
+    assert find_toc_indices(texts, headings, None, is_heading=is_heading) == set()
+    # Without is_heading, the legacy self-match path is unchanged: the headings
+    # match themselves and the trivial gaps bridge into a phantom TOC run.
+    assert find_toc_indices(texts, headings) == {0, 1, 2, 3, 4}
+
+
+def test_genuine_toc_paragraph_entries_detected():
+    """Paragraph-kind TOC entries (is_heading all False) are still detected."""
+    texts = ["Introduction", "Motivation", "Design"]
+    headings = {"Introduction", "Motivation", "Design"}
+    is_heading = [False, False, False]
+    assert find_toc_indices(texts, headings, None, is_heading=is_heading) == {0, 1, 2}
+
+
+def test_heading_kind_toc_with_dot_leader_pagenum_still_stripped():
+    """A heading-kind TOC shaped like TOC lines (dot leader + page) is stripped."""
+    texts = ["2.1 Foo .......... 7",
+             "2.2 Bar .......... 8",
+             "2.3 Baz .......... 9"]
+    headings = {"Foo", "Bar", "Baz"}
+    is_heading = [True, True, True]
+    assert find_toc_indices(texts, headings, None, is_heading=is_heading) == {0, 1, 2}
+
+
+def test_heading_kind_toc_pagenum_only_not_stripped():
+    """Heading-kind entries with a bare page number but no dot leader leak.
+
+    This is the deliberate scope: a no-dot-leader heading-kind TOC is left in
+    the body (the acceptable direction) rather than risking the Step-1 deletion
+    class.
+    """
+    texts = ["2.1 Foo 7", "2.2 Bar 8", "2.3 Baz 9"]
+    headings = {"Foo", "Bar", "Baz"}
+    is_heading = [True, True, True]
+    assert find_toc_indices(texts, headings, None, is_heading=is_heading) == set()
+
+
+def test_body_heading_step_run_not_matched():
+    """`Step 1 / Step 2 / Step 3` headings are never TOC, separated or not."""
+    headings = {"Step 1", "Step 2", "Step 3"}
+    back_to_back = ["Step 1", "Step 2", "Step 3"]
+    assert find_toc_indices(
+        back_to_back, headings, None, is_heading=[True, True, True]) == set()
+    prose_separated = ["Step 1", "do something here",
+                       "Step 2", "do another thing", "Step 3"]
+    assert find_toc_indices(
+        prose_separated, headings, None,
+        is_heading=[True, False, True, False, True]) == set()
+
+
+def test_body_heading_without_structure_not_matched():
+    """Plain body headings (no number, no dots) are not matched (core bug fix)."""
+    texts = ["Introduction", "Motivation", "Design"]
+    headings = {"Introduction", "Motivation", "Design"}
+    is_heading = [True, True, True]
+    assert find_toc_indices(texts, headings, None, is_heading=is_heading) == set()
+
+
+def test_gap_fill_does_not_swallow_prose():
+    """A long prose paragraph in a gap breaks the run instead of being included."""
+    texts = ["Introduction", "Motivation", "Design",
+             "This is a long prose paragraph with many words indeed.",
+             "Conclusion"]
+    headings = {"Introduction", "Motivation", "Design", "Conclusion"}
+    is_heading = [False, False, False, False, False]
+    indices = find_toc_indices(texts, headings, None, is_heading=is_heading)
+    assert {0, 1, 2} <= indices
+    assert 3 not in indices
+
+
+def test_gap_fill_bridges_trivial_gap():
+    """A short/blank/numeric gap is still bridged (mirrors gap-bridging test)."""
+    texts = ["Introduction", "x", "Motivation", "Design"]
+    headings = {"Introduction", "Motivation", "Design"}
+    is_heading = [False, False, False, False]
+    assert 1 in find_toc_indices(texts, headings, None, is_heading=is_heading)
+
+
+def test_long_toc_entry_in_gap_breaks_run():
+    """Deliberate trade-off: a long unmatched TOC title in a gap breaks the run.
+
+    Change B under-strips a genuine TOC with a long unmatched entry rather than
+    risk swallowing prose. Per the repo fidelity rule, leaking a TOC line is
+    acceptable; deleting body is not.
+    """
+    texts = ["Introduction", "Motivation", "Design",
+             "A Very Long Section Title That Exceeds The Word Limit",
+             "Conclusion"]
+    headings = {"Introduction", "Motivation", "Design", "Conclusion"}
+    is_heading = [False, False, False, False, False]
+    indices = find_toc_indices(texts, headings, None, is_heading=is_heading)
+    assert {0, 1, 2} <= indices
+    assert 3 not in indices
+
+
+def test_bridgeable_predicate():
+    """_bridgeable: blank/number/short label bridge; a prose sentence does not."""
+    assert _bridgeable("") is True
+    assert _bridgeable("42") is True
+    assert _bridgeable("2.1") is True
+    assert _bridgeable("Short label here") is True
+    assert _bridgeable(
+        "This sentence is quite definitely much too long to bridge.") is False
+
+
+def test_is_heading_length_mismatch_safe():
+    """An is_heading shorter than texts does not raise (defensive index guard)."""
+    texts = ["Introduction", "Motivation", "Design"]
+    headings = {"Introduction", "Motivation", "Design"}
+    # Must not raise IndexError; indices past the list fall back to matching.
+    find_toc_indices(texts, headings, None, is_heading=[True])
+
+
+def test_missing_is_heading_logs_debug(caplog):
+    """Omitting is_heading with non-empty headings leaves a debug signal."""
+    caplog.set_level(logging.DEBUG)
+    find_toc_indices(["Introduction", "Motivation", "Design"],
+                     {"Introduction", "Motivation", "Design"})
+    assert any("is_heading" in r.message and r.levelno == logging.DEBUG
+               for r in caplog.records)

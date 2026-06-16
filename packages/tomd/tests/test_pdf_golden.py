@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from tomd.lib.pdf import convert_pdf
+from tomd.lib.pdf import run_pipeline
 
 _GOLDEN = Path(__file__).resolve().parent / "fixtures" / "golden"
 
@@ -19,6 +19,14 @@ _GOLDEN_STEMS = (
     "p2040r0",
     "p3714r0",
     "p1112r4",
+    # TOC-stripping regression guards (issue #122): p4174r0 = total-loss bug paper
+    # (body must survive), p4004r1 = partial-loss bug paper (sensitive mid-body
+    # guard). The "TOC stays stripped" direction is covered by the synthetic
+    # test_toc.py cases, not a golden: no corpus paper cleanly strips its
+    # visible (space-separated dot-leader) TOC, so a golden would only enshrine
+    # a pre-existing leak.
+    "p4174r0",
+    "p4004r1",
 )
 
 
@@ -36,12 +44,13 @@ def _diff_head(actual: str, golden: str, limit: int = 120) -> str:
 
 
 @pytest.mark.parametrize("stem", _GOLDEN_STEMS)
-def test_convert_pdf_matches_golden(stem: str):
+def test_run_pipeline_matches_golden(stem: str):
     pdf_path = _GOLDEN / f"{stem}.pdf"
     if not pdf_path.is_file():
         pytest.skip(f"missing PDF fixture: {pdf_path}")
 
-    md, prompts = convert_pdf(pdf_path)
+    result = run_pipeline(pdf_path)
+    md, prompts = result.md, result.prompts
     golden_md = _GOLDEN / f"{stem}.golden.md"
     assert golden_md.is_file(), f"missing golden: {golden_md}"
     expected_md = golden_md.read_text(encoding="utf-8")

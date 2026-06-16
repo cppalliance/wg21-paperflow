@@ -495,6 +495,17 @@ def test_store_and_get_paper_citations(store: SqliteBackend):
     assert rows[1].count == 2
 
 
+def test_get_incoming_citations(store: SqliteBackend):
+    store.store_paper_citations("P1", [_make_paper_citation("P9", 3)])
+    store.store_paper_citations("P2", [_make_paper_citation("P9", 1)])
+    store.store_paper_citations("P3", [_make_paper_citation("P8", 2)])
+
+    rows = store.get_incoming_citations("P9")
+    assert [(r.paper_id, r.count) for r in rows] == [("P1", 3), ("P2", 1)]
+
+    assert store.get_incoming_citations("P-missing") == []
+
+
 def test_store_replaces_previous(store: SqliteBackend):
     store.store_claims("P1", [_make_claim(text="old", uid=1)])
     assert len(store.get_claims("P1")) == 1

@@ -54,6 +54,10 @@ testpaths = [
     "packages/cpp-mcp/tests",
     "tests",
 ]
+markers = [
+    "network: tests that hit the live network; deselected by default (run with -m network)",
+]
+addopts = "-m 'not network'"
 
 [tool.pyright]
 pythonVersion = "3.12"

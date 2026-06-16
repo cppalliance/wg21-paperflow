@@ -356,11 +356,88 @@ class TestRightAlignedColumnMatch:
         line2 = _col_line("page", 290.0, 100)
         b1 = Block(lines=[line1, line2], bbox=(60, 100, 390, 112), page_num=0)
 
-        line1 = _col_line("section name B", 80.0, 120)
-        line1 = Line(spans=line1.spans, bbox=(80.0, 120, 158.0, 132), page_num=0)
-        line2 = _col_line("page", 290.0, 120)
-        b2 = Block(lines=[line1, line2], bbox=(80, 120, 390, 132), page_num=0)
+        line1 = _col_line("section name B", 80.0, 200)
+        line1 = Line(spans=line1.spans, bbox=(80.0, 200, 158.0, 212), page_num=0)
+        line2 = _col_line("page", 290.0, 200)
+        b2 = Block(lines=[line1, line2], bbox=(80, 200, 390, 212), page_num=0)
         # Col 1 starts diff = 20 > tolerance, ends diff = 6 >> 1.0 strict.
         # No match expected.
         tables, _remaining = detect_tables([b1, b2])
         assert len(tables) == 0
+
+
+class TestWrappedRowReunification:
+    """Regression for issue #158: a data row whose cells wrap to a second
+    physical line. MuPDF fragments it into blocks with sub-threshold column
+    gaps, which (before Branch 3b) broke the table in two and orphaned the
+    wrapped cells. Reconstructs the real P4182R1 "Table A" geometry (page 3):
+    x-positions and the two y-bands (458.6, 477.1) are from the source PDF.
+    """
+
+    XS = [66.7, 294.2, 339.1, 373.4, 438.8, 480.0]
+
+    def _blocks(self):
+        header = _col_block(
+            ["Category", "Coro", "TLS", "PMR", "Heap", "Hosted"],
+            self.XS, y_start=344.6)
+        desktop = _col_block(
+            ["Desktop (Linux, Windows, macOS)", "Yes", "Yes", "Yes", "Yes",
+             "Full"], self.XS, y_start=373.1)
+        mobile = _col_block(
+            ["Mobile (iOS, Android)", "Yes", "Yes", "Yes", "Yes", "Full"],
+            self.XS, y_start=401.6)
+        game = _col_block(
+            ["Game consoles (Xbox, PS5)", "Yes", "Yes", "Yes", "Yes", "Full"],
+            self.XS, y_start=430.1)
+        # Full RTOS row: cells wrap, so MuPDF delivers four fragments across
+        # two y-bands. full_right's Heap+Hosted cells are only 41pt apart
+        # (< _COLUMN_GAP_THRESHOLD), so it is not columnar on its own.
+        full_left = _col_block(
+            ["Full RTOS (QNX, Zephyr, VxWorks)", "Yes", "Yes", "Hosted"],
+            self.XS[:4], y_start=458.6)
+        full_right = _col_block(["Yes", "Partial to"], self.XS[4:],
+                                y_start=458.6)
+        full_pmr = _col_block(["PMR"], [self.XS[3]], y_start=477.1)
+        full_hosted = _col_block(["full"], [self.XS[5]], y_start=477.1)
+        light = _col_block(
+            ["Lightweight RTOS (FreeRTOS, Pico)", "Partial", "No", "No",
+             "Yes", "Freestanding"], self.XS, y_start=505.6)
+        bare = _col_block(
+            ["Bare metal (Cortex-M, RISC-V)", "Partial", "No", "No", "Rare",
+             "Freestanding"], self.XS, y_start=534.1)
+        gpu = _col_block(
+            ["GPU device code (CUDA, SYCL)", "No", "No", "No", "No", "N/A"],
+            self.XS, y_start=562.6)
+        return [header, desktop, mobile, game, full_left, full_right,
+                full_pmr, full_hosted, light, bare, gpu]
+
+    @staticmethod
+    def _cells(row):
+        return [" ".join("".join(s.text for s in cell).split())
+                for cell in row]
+
+    def test_wrapped_row_does_not_split_table(self):
+        tables, remaining = detect_tables(self._blocks())
+        assert len(tables) == 1
+        assert tables[0].kind == SectionKind.TABLE
+        assert len(tables[0].columns) == 8  # header + 7 data rows
+        assert remaining == []
+
+    def test_wrapped_row_cells_land_in_right_columns(self):
+        tables, _ = detect_tables(self._blocks())
+        rows = [self._cells(r) for r in tables[0].columns]
+        assert rows[0] == ["Category", "Coro", "TLS", "PMR", "Heap", "Hosted"]
+        full = next(r for r in rows if r[0].startswith("Full RTOS"))
+        assert full[1] == "Yes"                 # Coro
+        assert full[2] == "Yes"                 # TLS
+        assert full[4] == "Yes"                 # Heap (was empty before fix)
+        assert "Partial to full" in full[5]     # Hosted (was empty before fix)
+
+    def test_no_headerless_second_fragment(self):
+        # Before the fix, rows 6-8 formed a second, headerless table whose
+        # first row (a data row) was followed by a separator on emit.
+        tables, _ = detect_tables(self._blocks())
+        assert len(tables) == 1
+        labels = [self._cells(r)[0] for r in tables[0].columns]
+        assert "Lightweight RTOS (FreeRTOS, Pico)" in labels
+        assert "GPU device code (CUDA, SYCL)" in labels

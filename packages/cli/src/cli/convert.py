@@ -17,7 +17,6 @@ from paperstore.backend import StorageBackend
 
 
 _CONTENT_CHECK_WORKERS = 1
-_CONTENT_CHECK_TIMEOUT = 120
 
 
 def command(args: argparse.Namespace, backend: StorageBackend) -> int:
@@ -78,7 +77,7 @@ def _check_content_command(
     source and converted markdown, scores coverage, and emits a ranked
     report.
     """
-    from cli.jobs import run_content_check
+    from cli.jobs import _CONTENT_CHECK_TIMEOUT, run_content_check
 
     result = run_content_check(
         args.targets,

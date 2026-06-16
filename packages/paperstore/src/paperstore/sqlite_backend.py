@@ -1387,6 +1387,18 @@ class SqliteBackend(StorageBackend):
             count=r["count"],
         ) for r in rows]
 
+    def get_incoming_citations(self, cited_paper_id: str) -> list[PaperCitationRow]:
+        cited = cited_paper_id.strip().upper()
+        rows = self._conn.execute(
+            "SELECT * FROM paper_citations WHERE cited_paper_id = ? "
+            "ORDER BY count DESC, paper_id",
+            (cited,),
+        ).fetchall()
+        return [PaperCitationRow(
+            paper_id=r["paper_id"], cited_paper_id=r["cited_paper_id"],
+            count=r["count"],
+        ) for r in rows]
+
     def get_external_citations(self, paper_id: str) -> list[ExternalCitationRow]:
         pid = paper_id.strip().upper()
         rows = self._conn.execute(
