@@ -423,24 +423,21 @@ class TestDropLeakedTocHeadings:
         assert self._headings(out_c).count("Chapter") == 1  # front removed
 
     def test_non_trivial_toc_neighbour_paragraph_removed(self):
-        """A PARAGRAPH >= 40 chars that recurs as a later heading is transparent.
+        """A PARAGRAPH that recurs as a later heading is removed as a TOC entry.
 
-        This exercises the _is_toc_neighbour path: the non-trivial entry is
-        itself a leaked TOC entry (its text matches a body heading), so it must
-        be swept with the run rather than treated as body prose that blocks
-        eligibility.  Inverting _is_toc_neighbour would leave all three
-        headings and the long paragraph in place.
+        A non-trivial (multi-word) paragraph whose text matches a body heading
+        is treated as a non-heading TOC entry. It is swept with the run rather
+        than blocking the preceding heading's eligibility as body prose would.
         """
         h, body = self._h, self._body
         long_title = "Compatibility and Migration Concerns for Existing Code"
-        assert len(long_title) >= 40  # non-trivial by _section_is_trivial
         secs = [
             # Leaked TOC block: three headings, the middle one followed by
             # a non-trivial paragraph whose text is itself a later heading.
             h("Abstract"),
             h("Design"),
             h(long_title),
-            # The paragraph below is >= 40 chars and matches a later heading.
+            # The paragraph below matches a later heading -> nonheading_entry.
             self._frag(long_title),
             h("References"),
             # Real body sections that supply the forward recurrences.
@@ -459,6 +456,38 @@ class TestDropLeakedTocHeadings:
                        for s in out)
         # Body paragraphs are untouched.
         assert sum(1 for s in out if s.kind == SectionKind.PARAGRAPH) == 4
+
+    def test_entry_title_roman_numeral_not_folded(self):
+        """_entry_title folds "1\\nOverview" but not "IV\\nOverview".
+
+        The digit-only _BARE_DIGIT_NUM_RE guards _entry_title. The broader
+        module-level _BARE_SECTION_NUM_RE (roman numerals, single capital
+        letters) must not shadow it. When a two-line TOC candidate has a roman
+        numeral on its first line but the corresponding body heading is a
+        single-line "IV Overview", the wrong regex folds the candidate to
+        "IV Overview" -> match -> phantom removal. The correct regex leaves
+        the first line as "IV" -> no match against "IV Overview" -> no removal.
+        """
+        h, body = self._h, self._body
+        # TOC candidate: roman numeral on its own line (two-line format).
+        # Body heading: title on a single line (single-line format).
+        secs = [
+            h("IV\nOverview"), h("V\nProposal"), h("VI\nConclusion"),
+            h("IV Overview"), body(),
+            h("V Proposal"), body(),
+            h("VI Conclusion"), body(),
+        ]
+        out = drop_leaked_toc_headings(secs)
+        # With _BARE_DIGIT_NUM_RE: "IV\nOverview" -> entry_title "IV",
+        # normalized "iv". Body heading "IV Overview" -> "iv overview". No
+        # match -> front three headings survive -> 6 total.
+        # With _BARE_SECTION_NUM_RE: "IV\nOverview" -> "IV Overview" ->
+        # "iv overview" -> matches body heading -> front three removed -> 3.
+        headings = [s.text for s in out if s.kind == SectionKind.HEADING]
+        assert headings == [
+            "IV\nOverview", "V\nProposal", "VI\nConclusion",  # not removed
+            "IV Overview", "V Proposal", "VI Conclusion",      # real body headings
+        ]
 
 
 class TestDropLeakedTocMixedKind:

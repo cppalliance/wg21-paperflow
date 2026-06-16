@@ -455,8 +455,11 @@ def _section_is_trivial(sec: Section) -> bool:
 # A physical line that is *only* a section number ("8", "3.1", "15."). When a
 # heading or leaked TOC entry renders the number on its own line and wraps the
 # title to the next, the title (not the bare number) must drive recurrence
-# matching; see `_entry_title`.
-_BARE_SECTION_NUM_RE = re.compile(r"^\d+(?:\.\d+)*\.?$")
+# matching; see `_entry_title`. Digit-only: "1", "2.3", "3.1.2". Roman
+# numerals and single capital letters are handled by the module-level
+# _BARE_SECTION_NUM_RE below; that broader pattern must not be used here
+# because it also matches short prose tokens ("A", "I") and would over-fold.
+_BARE_DIGIT_NUM_RE = re.compile(r"^\d+(?:\.\d+)*\.?$")
 
 
 # Max physical lines a PARAGRAPH/LIST section may have to still count as a
@@ -490,7 +493,7 @@ def _entry_title(sec: Section) -> str:
     lines = [ln.strip() for ln in sec.text.split("\n") if ln.strip()]
     if not lines:
         return ""
-    if len(lines) > 1 and _BARE_SECTION_NUM_RE.match(lines[0]):
+    if len(lines) > 1 and _BARE_DIGIT_NUM_RE.match(lines[0]):
         return lines[0] + " " + lines[1]
     return lines[0]
 
