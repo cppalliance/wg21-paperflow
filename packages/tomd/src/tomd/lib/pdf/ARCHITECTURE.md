@@ -52,11 +52,13 @@ Enums:
 
 ### Layer 1: Extraction (8 techniques)
 
-**T0. Document-type early exits**
-- `__init__.py:_is_slide_deck`, `__init__.py:_is_standards_draft`
-- Slide-deck detection: landscape (width > height) AND small (width < 600pt) on 80%+ of pages. Catches presentation PDFs whose navigation sidebars confuse the dual-path extractor.
+**T0. Document-type and readability early exits**
+- `pipeline.py:_is_slide_deck`, `pipeline.py:_is_standards_draft`, `types.py:is_readable`
+- Four skip kinds, all via `PipelineResult.for_skip(SkipReason, ...)`: empty PDF (`page_count == 0`), slide deck, standards draft (page count >= 200), and unreadable extracted text.
+- Slide-deck detection: landscape (width > height) AND small (width < 600pt) on 80%+ of pages, or every page landscape. Catches presentation PDFs whose navigation sidebars confuse the dual-path extractor.
 - Standards-draft detection: page count >= 200. Catches C++ standard drafts (2000+ pages) that are not technical papers.
-- Both return `PipelineResult` with `skipped=True`, empty markdown, and a prompts message identifying the document type.
+- Unreadable gate: after hidden-text stripping, joined MuPDF text must pass `is_readable` (minimum length, alphanumeric ratio, slash density).
+- `_enforce_skip_contract` validates skip invariants on every `run_pipeline` return.
 - Named constants: `_SLIDE_DECK_MAX_WIDTH`, `_SLIDE_DECK_LANDSCAPE_FRACTION`, `_STANDARDS_DRAFT_MIN_PAGES`
 
 **T1. MuPDF dict-path extraction**
@@ -185,7 +187,7 @@ Enums:
 - Removes spatial blocks whose y-center falls within detected table y-ranges (5-unit margin)
 
 **T16. Table section insertion**
-- `__init__.py:convert_pdf`
+- `pipeline.py:run_pipeline`
 - Tables inserted into the section list by page number and y-position ordering
 
 ### Layer 5: Wording Detection (3 techniques)
@@ -284,7 +286,8 @@ Enums:
 - Normalizes entries: strips dot leaders, page numbers, section prefixes, collapses whitespace
 - Fast path: exact-match set lookup (`_exact_set`) against normalized headings. O(1) per section.
 - Fuzzy fallback: only when heading count is below `_MAX_FUZZY_HEADINGS` (200). Uses dual-algorithm OR-gate (SequenceMatcher >= 0.75 OR Jaccard >= 0.65). Without this guard, large documents (2000+ pages, 40k sections) hang on O(sections * headings) fuzzy comparisons.
-- Requires 3+ consecutive matches. Bridges gaps up to 3 non-matching entries.
+- Requires 3+ consecutive matches. Bridges gaps up to 3 non-matching entries, but only when each bridged entry is trivial (`_bridgeable`: blank, a bare/numeric label, or <= `_MAX_BRIDGE_ENTRY_WORDS` words with no terminal punctuation). A real prose paragraph breaks the run instead of being swallowed.
+- A section that is itself a body heading (`is_heading[i]`) is excluded from matching, *unless* its own text is shaped like a TOC line (`_TOC_LINE_RE`: a dot leader followed by a page number, e.g. `Foo .... 7`). Without this, every body heading matched itself in the reference set and the gap-fill deleted the prose between headings, destroying the body of short papers (#122). The shipped predicate keys on the dot-leader-then-page-number shape, not a bare trailing number, so body headings like `Step 1` / `Phase 2` are never eligible.
 - Stops on duplicate first-line (second occurrence = real heading, not TOC entry)
 - Includes preceding "Table of Contents" / "Contents" label
 
@@ -330,10 +333,10 @@ Enums:
 ### Layer 10: Pipeline Orchestration (1 technique)
 
 **T38. Pipeline execution**
-- `__init__.py:convert_pdf`
-- Strict ordering of all 13 steps. Early exit on empty PDF or unreadable text.
+- `pipeline.py:run_pipeline`
+- Strict ordering of all pipeline steps. Early exit via `SkipReason` on empty PDF, slide deck, standards draft, or unreadable text.
 - Metadata merging: `{**structure_metadata, **wg21_metadata}` - WG21 metadata takes precedence.
-- TOC heading collection: only HEADING sections used as the reference set for TOC matching.
+- TOC heading collection: only HEADING sections used as the reference set for TOC matching. The per-section `is_heading` flags are also passed to `find_toc_indices` so a body heading cannot match itself out of existence (#122).
 
 ### Layer 11: Quality Assurance (1 technique)
 
@@ -342,14 +345,15 @@ Enums:
 - Design constraint: takes ONLY a Markdown string. No page count, no file format, no pipeline internals. Every signal is derived from the text via mistune AST parsing. This keeps scoring format-agnostic and decoupled from the converter. Do not add parameters that leak converter state.
 - Signals: heading count, code block count, list/table count, front-matter field count, uncertain region markers (`<!-- tomd:uncertain -->`), unfenced code lines (C++ syntax patterns in paragraphs), paragraph count, structural variety
 - "Long document" threshold (`_LONG_DOC_PARAGRAPHS = 10`) gates penalties that only make sense for substantial documents (no-headings, low-variety)
-- `run_qa_report` handles batch execution with parallel workers and straggler timeout
+- `run_qa_batch` handles batch execution via `lib/batch.run_parallel_batch` with parallel workers and straggler timeout; `format_qa_report` formats stdout output (CLI-owned)
 
 ## Module Map
 
 | Module | Responsibility | Public API | Lines |
 |--------|---------------|------------|------:|
-| `__init__.py` | Pipeline orchestration, slide-deck detection | `convert_pdf`, `run_pipeline`, `PipelineResult`, `ExtractedImage` | ~295 |
-| `types.py` | Data model, enums, constants | Span, Line, Block, Section, SectionKind, Confidence, is_readable + shared constants | ~252 |
+| `pipeline.py` | Pipeline orchestration, skip contract, slide-deck detection | `run_pipeline`, `PipelineResult`, `ExtractedImage` | ~1100 |
+| `__init__.py` | Re-exports | `run_pipeline`, `PipelineResult`, `SkipReason`, `ExtractedImage` | ~25 |
+| `types.py` | Data model, enums, constants | Span, Line, Block, Section, SectionKind, Confidence, SkipReason, is_readable + shared constants | ~280 |
 | `extract.py` | Dual-path text extraction | `extract_mupdf`, `extract_spatial`, `collect_links`, `attach_links` | ~249 |
 | `images.py` | Resource-Dictionary path: embedded raster extraction | `ExtractedImage`, `ExtractionResult`, `extract_page_images`, `finalize_extraction` | ~250 |
 | `mono.py` | Monospace font detection | `classify_monospace`, `propagate_monospace` | ~222 |
@@ -360,7 +364,7 @@ Enums:
 | `structure.py` | Comparison, heading/list/code classification | `compare_extractions`, `structure_sections` | ~939 |
 | `emit.py` | Markdown and prompts generation | `emit_markdown`, `emit_prompts` | ~401 |
 | `wg21.py` | WG21 metadata extraction | `extract_metadata_from_blocks` | ~199 |
-| `qa.py` | Markdown QA scoring (mistune AST) | `compute_metrics`, `run_qa_report` | ~326 |
+| `qa.py` | Markdown QA scoring (mistune AST) | `compute_metrics`, `run_qa_batch`, `format_qa_report` | ~326 |
 | `similarity.py` | Fuzzy string comparison | `similar` | ~66 |
 | `toc.py` | TOC detection and removal | `find_toc_indices` | ~159 |
 | **Total** | | **24 public functions** | **~4132** |

@@ -11,6 +11,7 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import pytest
@@ -43,11 +44,10 @@ def _patch_html(monkeypatch, md: str, prompts: list[str] | None = None):
 def _patch_pdf(monkeypatch, md: str, prompts: list[str] | None = None):
     """Patch the PDF dispatch by stubbing ``run_pipeline``.
 
-    ``api._convert_with_tomd_full`` routes PDFs through ``run_pipeline``
-    (not the legacy ``convert_pdf`` wrapper), so the test fake returns
-    a synthetic :class:`PipelineResult` with zero images and the caller's
-    chosen md / prompts. Matches the current behavior of papers with no
-    embedded raster images.
+    ``api._convert_with_tomd_full`` routes PDFs through ``run_pipeline``,
+    so the test fake returns a synthetic :class:`PipelineResult` with
+    zero images and the caller's chosen md / prompts. Matches the
+    current behavior of papers with no embedded raster images.
     """
     from tomd.lib.pdf import PipelineResult
 
@@ -76,7 +76,7 @@ class TestDispatch:
         assert "text" in md
         assert store.get_paper_md("P1") == md
 
-    def test_pdf_path_calls_convert_pdf(self, tmp_path: Path, monkeypatch):
+    def test_pdf_path_calls_run_pipeline(self, tmp_path: Path, monkeypatch):
         store = SqliteBackend(tmp_path)
         _stage(store, "P1", suffix=".pdf", mailing_row={"title": "T"})
         _patch_html(monkeypatch, "HTML SHOULD NOT BE CALLED")
@@ -246,3 +246,143 @@ class TestErrors:
         _patch_pdf(monkeypatch, "# Body\n\ntext\n")
         markdown, _prompts, _intent = api.convert_paper("P1", source_path, meta)
         assert "text" in markdown
+
+
+_GOLDEN = Path(__file__).resolve().parent / "fixtures" / "golden"
+
+# Minimal wg21-generator HTML reproducing the failing shape end to end: an
+# empty `Contents` heading (its `div.toc` is stripped by `strip_boilerplate`)
+# directly before the first real section heading and its lead paragraph.
+_WG21_EMPTY_CONTENTS_HTML = """<!doctype html><html><head><title>T</title></head>
+<body><main>
+  <div class="wg21-head"><h1>Test Paper</h1></div>
+  <abstract-block>This paper proposes a thing.</abstract-block>
+  <h2>Contents</h2>
+  <div class="toc"><a href="#intro"><h2>1. Introduction</h2></a></div>
+  <h2>1. Introduction</h2>
+  <p>The lead paragraph of the introduction that must survive.</p>
+  <h3>Related work</h3>
+  <p>Subsection body.</p>
+  <h2>2. Design</h2>
+  <p>Design body.</p>
+</main></body></html>
+"""
+
+# Number-tolerant: whether the rendered Introduction heading keeps its `1.`
+# prefix depends on `render_body`, which differs between base branches.
+_INTRO_HEADING_RE = re.compile(r"(?m)^#{1,6} (?:\d+\.?\s+)?Introduction\s*$")
+
+
+class TestStripToc:
+    """`api._strip_toc` removes a Contents label and its TOC entries up to the
+    first real section heading, and never the first section itself (#bug:
+    HTML `_strip_toc` deletes the first section after the Table of Contents)."""
+
+    def test_empty_contents_before_heading_keeps_first_section(self):
+        # The bug: `## Contents` immediately before the first section heading,
+        # no entries between. Only the label is removed; the section survives.
+        md = (
+            "## Contents\n\n"
+            "## Introduction\n\n"
+            "The lead paragraph that must survive.\n\n"
+            "### Sub\n\nMore body.\n"
+        )
+        out = api._strip_toc(md)
+        assert "## Contents" not in out
+        assert "## Introduction" in out
+        assert "The lead paragraph that must survive." in out
+
+    def test_h4_section_after_contents_kept(self):
+        # Same class, deeper first heading: the boundary recognises any level.
+        md = (
+            "## Table of Contents\n\n"
+            "#### A.1 Foo\n\n"
+            "Body of the deep first section.\n"
+        )
+        out = api._strip_toc(md)
+        assert "Contents" not in out
+        assert "#### A.1 Foo" in out
+        assert "Body of the deep first section." in out
+
+    def test_real_toc_body_stripped(self):
+        # Must-not-regress: a real TOC body (bullet entries) is removed up to
+        # the first real heading, which survives.
+        md = (
+            "## Contents\n\n"
+            "- 1 Introduction 4\n"
+            "- 2 Design 5\n\n"
+            "## Introduction\n\nReal intro body.\n"
+        )
+        out = api._strip_toc(md)
+        assert "## Contents" not in out
+        assert "1 Introduction 4" not in out and "2 Design 5" not in out
+        assert "## Introduction" in out
+        assert "Real intro body." in out
+
+    def test_real_toc_body_then_deep_first_section(self):
+        # Must-not-regress with the level-agnostic boundary: entries removed,
+        # a deep first section kept.
+        md = (
+            "## Contents\n\n"
+            "- a 1\n- b 2\n\n"
+            "#### 1 First\n\nFirst body.\n"
+        )
+        out = api._strip_toc(md)
+        assert "- a 1" not in out and "- b 2" not in out
+        assert "#### 1 First" in out
+        assert "First body." in out
+
+    def test_contents_at_eof_removed(self):
+        # A lone Contents heading at end of input is still removed.
+        md = "Some prose.\n\n## Contents\n"
+        out = api._strip_toc(md)
+        assert "Contents" not in out
+        assert "Some prose." in out
+
+    def test_overlong_toc_left_in_place(self):
+        # The `_TOC_MAX_LINES` guard: an over-long match is returned unchanged.
+        entries = "\n".join(f"- entry {i} {i}" for i in range(api._TOC_MAX_LINES + 5))
+        md = f"## Contents\n\n{entries}\n\n## Introduction\n\nbody\n"
+        out = api._strip_toc(md)
+        assert out == md  # guard tripped: nothing removed
+
+    def test_plain_contents_word_not_a_heading_unaffected(self):
+        # "contents" mid-line in prose is not a `^Contents$` heading line.
+        md = "This section lists the contents of the package in detail.\n"
+        out = api._strip_toc(md)
+        assert out == md
+
+    def test_entries_survive_block_stripped_p3911r2(self):
+        # Real entries-survive specimen: the committed p3911r2 golden is
+        # pre-`_strip_toc` render output. Its ~60-line Contents-to-`## Abstract`
+        # block is removed and `## Abstract` plus its body survive. Pins that
+        # the entries-survive shape is left intact (the must-not-regress case).
+        golden = _GOLDEN / "p3911r2.golden.md"
+        if not golden.is_file():
+            pytest.skip("missing p3911r2 golden fixture")
+        md = golden.read_text(encoding="utf-8")
+        assert "## Contents" in md  # the fixture has an un-stripped Contents
+        out = api._strip_toc(md)
+        assert "## Contents" not in out
+        assert "## Abstract" in out
+        # the Abstract body (first words after the heading) survives
+        abstract_idx = out.index("## Abstract")
+        assert len(out[abstract_idx:].strip().splitlines()) > 1
+
+
+class TestStripTocEndToEnd:
+    """End-to-end guard through the real HTML converter + `_strip_toc`.
+
+    Red-before-green: on the unfixed regex this fails (the Introduction heading
+    and lead paragraph are deleted through `convert_paper`). If a future
+    `render_body` change stops emitting the `Contents`/first-heading adjacency,
+    the test passes vacuously: re-confirm it is red before trusting a green.
+    """
+
+    def test_wg21_empty_contents_keeps_first_section_end_to_end(self, tmp_path: Path):
+        html_path = tmp_path / "p9999r0.html"
+        html_path.write_text(_WG21_EMPTY_CONTENTS_HTML, encoding="utf-8")
+        markdown, _prompts, _intent = api.convert_paper("P9999R0", html_path, {})
+        assert _INTRO_HEADING_RE.search(markdown), markdown
+        assert "The lead paragraph of the introduction that must survive." in markdown
+        assert "## Contents" not in markdown

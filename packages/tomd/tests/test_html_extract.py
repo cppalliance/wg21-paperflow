@@ -465,6 +465,34 @@ class TestStripBoilerplate:
         assert soup.find("header", id="title-block-header") is None
         assert soup.get_text().strip() == "B"
 
+    def test_mpark_removes_view_controls_form(self):
+        html = """
+        <form class="view-controls">
+        <label for="no-syntax-highlighting-toggle">
+        <input id="no-syntax-highlighting-toggle" type="checkbox"></input>
+        <span>No syntax highlighting</span>
+        </label>
+        <label for="hide-deleted-text-toggle">
+        <input id="hide-deleted-text-toggle" type="checkbox"></input>
+        <span>Hide deleted text</span>
+        </label>
+        </form>
+        <p>Body</p>
+        """
+        soup = parse_html(html)
+        strip_boilerplate(soup, "mpark")
+        assert soup.find("form", class_="view-controls") is None
+        assert "No syntax highlighting" not in soup.get_text()
+        assert "Hide deleted text" not in soup.get_text()
+        assert soup.find("p").get_text() == "Body"
+
+    def test_view_controls_form_kept_for_other_generators(self):
+        """The view-controls strip is mpark-scoped; other generators are untouched."""
+        html = '<form class="view-controls"><span>No syntax highlighting</span></form>'
+        soup = parse_html(html)
+        strip_boilerplate(soup, "unknown")
+        assert soup.find("form", class_="view-controls") is not None
+
     def test_bikeshed_removes_chrome(self):
         html = """
         <div data-fill-with="metadata">M</div>

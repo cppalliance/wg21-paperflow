@@ -331,6 +331,116 @@ class TestCodeBlockUncertainMerge:
         assert len(code) == 2, "mixed uncertain should not be absorbed"
 
 
+class TestSplitMixedMonoSections:
+    """A PARAGRAPH mixing a long monospace run with prose lines is split
+    so the code joins the surrounding fence and the prose stays body text
+    (P4231R0: synopsis crossing a page boundary arrived merged with the
+    next prose paragraph)."""
+
+    def _line(self, text: str, mono: bool, page_num: int = 0) -> Line:
+        return Line(spans=[Span(text=text, monospace=mono)],
+                    page_num=page_num)
+
+    def _section(self, lines: list[Line], page_num: int = 0) -> Section:
+        text = "\n".join(ln.text for ln in lines)
+        return Section(kind=SectionKind.PARAGRAPH, text=text, lines=lines,
+                       confidence=Confidence.HIGH, page_num=page_num)
+
+    def test_prose_tail_split_out_of_code(self):
+        mixed = self._section([
+            self._line("struct rounded {", mono=True),
+            self._line("  // a comment line", mono=True),
+            self._line("  int member;", mono=True),
+            self._line("};", mono=True),
+            self._line(" ", mono=False),
+            self._line("currently we do not provide literals.", mono=False),
+        ])
+        _, sections, _ = structure_sections([mixed], has_title=False)
+        code = [s for s in sections if s.kind == SectionKind.CODE]
+        assert len(code) == 1
+        assert "struct rounded {" in code[0].text
+        assert "literals" not in code[0].text
+        paras = [s for s in sections if s.kind == SectionKind.PARAGRAPH]
+        assert any("literals" in s.text for s in paras)
+
+    def test_code_continuation_joins_previous_fence_across_pages(self):
+        page2 = self._section([
+            self._line("struct rounded {", mono=True),
+            self._line("  // digits. It is implementation-defined", mono=True),
+        ], page_num=2)
+        page3 = self._section([
+            self._line("  // constant strings representing", mono=True),
+            self._line("  int make(string_view s) const;", mono=True),
+            self._line("};", mono=True),
+            self._line("currently we do not provide literals.", mono=False),
+        ], page_num=3)
+        _, sections, _ = structure_sections([page2, page3], has_title=False)
+        code = [s for s in sections if s.kind == SectionKind.CODE]
+        assert len(code) == 1, "one synopsis must yield one fence"
+        assert "struct rounded {" in code[0].text
+        assert "};" in code[0].text
+        assert "literals" not in code[0].text
+
+    def test_short_inline_mono_runs_do_not_split(self):
+        mixed = self._section([
+            self._line("the call to make here forces rounding", mono=False),
+            self._line("cr_decimal_dig", mono=True),
+            self._line("which reduces the surprise factor and", mono=False),
+            self._line("round_toward_zero", mono=True),
+            self._line("rounds fully as expected here.", mono=False),
+        ])
+        _, sections, _ = structure_sections([mixed], has_title=False)
+        assert len(sections) == 1
+        assert sections[0].kind == SectionKind.PARAGRAPH
+
+    def test_interior_nonmono_lines_do_not_split_code(self):
+        """Mixed-font code (p0533r9: italic `// see [library.c]` comments
+        inside a declaration listing) must stay one section so the rescue
+        pass can fence it whole."""
+        mixed = self._section([
+            self._line("float log2f(float x);", mono=True),
+            self._line("long double log2l(long double x);", mono=True),
+            self._line("constexpr", mono=True),
+            self._line("float logb(float x); // see [library.c]", mono=False),
+            self._line("constexpr", mono=True),
+            self._line("double logb(double x);", mono=True),
+            self._line("float logbf(float x);", mono=True),
+        ])
+        _, sections, _ = structure_sections([mixed], has_title=False)
+        assert len(sections) == 1
+        assert sections[0].kind == SectionKind.CODE, (
+            "rescue pass should promote the whole listing")
+
+    def test_leading_nonmono_comment_stays_in_code(self):
+        """An italic/serif `// comment` line heading a code block
+        (p0533r9: `// [c.math.lerp], linear interpolation`) is code in a
+        different font, not prose, and must stay in the fence."""
+        mixed = self._section([
+            self._line("// [c.math.lerp], linear interpolation", mono=False),
+            self._line("constexpr float lerp(float a, float b);", mono=True),
+            self._line("constexpr double lerp(double a, double b);", mono=True),
+            self._line("constexpr long double lerp(long double a);", mono=True),
+        ])
+        _, sections, _ = structure_sections([mixed], has_title=False)
+        code = [s for s in sections if s.kind == SectionKind.CODE]
+        assert len(code) == 1
+        assert "[c.math.lerp]" in code[0].text
+
+    def test_prose_lead_in_split_off_code(self):
+        mixed = self._section([
+            self._line("to compute an upper bound we may write:", mono=False),
+            self._line("constexpr rounded round_up(x);", mono=True),
+            self._line("constexpr rounded round_down(y);", mono=True),
+            self._line("round_up.sub(round_down.add(x, y));", mono=True),
+        ])
+        _, sections, _ = structure_sections([mixed], has_title=False)
+        code = [s for s in sections if s.kind == SectionKind.CODE]
+        assert len(code) == 1
+        assert "upper bound" not in code[0].text
+        paras = [s for s in sections if s.kind == SectionKind.PARAGRAPH]
+        assert any("upper bound" in s.text for s in paras)
+
+
 class TestBlockFontSize:
     def test_line_count_voting(self):
         """Block.font_size uses line-count voting, not character weighting."""
