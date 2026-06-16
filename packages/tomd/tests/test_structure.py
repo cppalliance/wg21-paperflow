@@ -422,6 +422,44 @@ class TestDropLeakedTocHeadings:
         out_c = run_with_levels([2, 2, 3])
         assert self._headings(out_c).count("Chapter") == 1  # front removed
 
+    def test_non_trivial_toc_neighbour_paragraph_removed(self):
+        """A PARAGRAPH >= 40 chars that recurs as a later heading is transparent.
+
+        This exercises the _is_toc_neighbour path: the non-trivial entry is
+        itself a leaked TOC entry (its text matches a body heading), so it must
+        be swept with the run rather than treated as body prose that blocks
+        eligibility.  Inverting _is_toc_neighbour would leave all three
+        headings and the long paragraph in place.
+        """
+        h, body = self._h, self._body
+        long_title = "Compatibility and Migration Concerns for Existing Code"
+        assert len(long_title) >= 40  # non-trivial by _section_is_trivial
+        secs = [
+            # Leaked TOC block: three headings, the middle one followed by
+            # a non-trivial paragraph whose text is itself a later heading.
+            h("Abstract"),
+            h("Design"),
+            h(long_title),
+            # The paragraph below is >= 40 chars and matches a later heading.
+            self._frag(long_title),
+            h("References"),
+            # Real body sections that supply the forward recurrences.
+            h("Abstract"), body(),
+            h("Design"), body(),
+            h(long_title), body(),
+            h("References"), body(),
+        ]
+        out = drop_leaked_toc_headings(secs)
+        # The leaked run (first Abstract/Design/long_title/References) is removed.
+        assert self._headings(out) == [
+            "Abstract", "Design", long_title, "References"
+        ]
+        # The non-trivial neighbour paragraph is also swept.
+        assert not any(s.text == long_title and s.kind == SectionKind.PARAGRAPH
+                       for s in out)
+        # Body paragraphs are untouched.
+        assert sum(1 for s in out if s.kind == SectionKind.PARAGRAPH) == 4
+
 
 class TestParagraphMerging:
     def test_merges_continuation(self):
