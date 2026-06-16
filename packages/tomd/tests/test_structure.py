@@ -277,11 +277,11 @@ class TestDocumentPoolPromotion:
 
 
 class TestDropLeakedTocHeadings:
-    """The leaked heading-kind TOC remover (#122 pt2).
+    """Leaked TOC remover: empty recurring headings and title-like entries.
 
-    Removes only *empty* headings that form a contiguous recurring run (a
-    TOC block); never touches body, lone containers, short runs, or
-    strictly-deepening clause stacks.
+    Removes a contiguous recurring run (a TOC block); never touches body,
+    lone containers, short runs, or clause-container stacks whose headings
+    strictly deepen.
     """
 
     @staticmethod
@@ -719,7 +719,7 @@ class TestDropLeakedTocMixedKind:
 
     def test_heading_kind_toc_label_removed(self):
         """A `### Table of Contents` heading immediately preceding a removed run
-        is dropped (the P4003R1 gap: pt2 only walked back over non-headings)."""
+        is dropped (P4003R1: the label-walk-back handles heading-kind labels too)."""
         h, body = self._h, self._body
         secs = [
             h("Table of Contents", 3),

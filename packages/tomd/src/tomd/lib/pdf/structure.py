@@ -530,18 +530,18 @@ def drop_leaked_toc_headings(sections: list[Section]) -> list[Section]:
     subsequence strictly deepens (`15`/`15.1`/`15.1.1` clause-container
     stack).
 
-    Safety: pt2 removed only empty headings and so was body-safe by
-    construction. This pass also removes PARAGRAPH/LIST sections, so that
-    guarantee no longer holds outright. It is restored mostly by the **heading
-    anchor**: a run is removable only if it contains at least one empty-heading
-    entry, so paragraph/list entries are deleted only within the span of a
-    confirmed heading-kind TOC block, never as a free-floating cluster. Combined
-    with exact normalized match, the title-like line cap (`_TOC_ENTRY_MAX_LINES`),
-    and the run-length floor, removal is confined to a structurally-bounded
-    region. See the pt4 plan for the residual-risk analysis.
+    Safety: the earlier heading-only variant was body-safe by construction
+    because it removed only empty headings. This pass also removes
+    PARAGRAPH/LIST sections, so that guarantee no longer holds outright. It is
+    restored mostly by the **heading anchor**: a run is removable only if it
+    contains at least one empty-heading entry, so paragraph/list entries are
+    deleted only within the span of a confirmed heading-kind TOC block, never
+    as a free-floating cluster. Combined with exact normalized match, the
+    title-like line cap (`_TOC_ENTRY_MAX_LINES`), and the run-length floor,
+    removal is confined to a structurally-bounded region.
 
     "Empty" is interpreted loosely: non-trivial sections that are themselves
-    heading titles recurring later (neighbour TOC entries that `find_toc_indices`
+    heading titles recurring later (adjacent TOC entries that `find_toc_indices`
     did not strip, e.g. long chapter titles formatted as a list) are treated as
     transparent and do not block the preceding heading's eligibility.
 
