@@ -332,3 +332,118 @@ class TestSanitizeMetadata:
         original = {"title": "Good Title", "reply-to": ["Author <a@b.com>"]}
         result = _sanitize_metadata(original)
         assert result is not original
+
+
+# -- _render_paragraph_spans: sec.text fallback when lines is empty --
+# Used by the sub-caption insertion path in pipeline.py: inserted
+# PARAGRAPH sections carry pre-built ``text`` (``*<escaped>*``) and
+# ``lines=[]``; the fallback below renders the text verbatim,
+# bypassing _render_line_spans so the *...* wrapper survives.
+
+
+from tomd.lib.pdf.emit import _render_paragraph_spans, _escape_italic_text
+from tomd.lib.pdf.types import Section
+
+
+def test_render_paragraph_spans_falls_back_to_text_when_lines_empty():
+    sec = Section(
+        kind=SectionKind.PARAGRAPH,
+        text="*(a) The italic caption.*",
+        confidence=Confidence.MEDIUM,
+        page_num=5,
+        lines=[],
+    )
+    assert _render_paragraph_spans(sec) == "*(a) The italic caption.*"
+
+
+def test_render_paragraph_spans_uses_lines_when_present():
+    """Sanity guard: the fallback only fires when lines is empty.
+    Existing PARAGRAPH sections with non-empty lines still go through
+    the span-rendering path."""
+    sec = make_section("Hello world")
+    # make_section builds one line containing the text.
+    out = _render_paragraph_spans(sec)
+    assert "Hello world" in out
+
+
+def test_emit_markdown_renders_inserted_sub_caption_paragraph():
+    """End-to-end: an IMAGE section followed by a synthesised
+    sub-caption PARAGRAPH (lines=[], text=*...*) renders as the
+    image reference + a blank line + the italic paragraph."""
+    from tomd.lib.pdf.images import ExtractedImage
+    img = ExtractedImage(
+        page=6, index_on_page=1, ext="png", bytes=b"",
+        bbox=(86, 0, 506, 284),
+        suggested_alt="Figure 1: ...",
+        stored_filename="p3127r1-fig6-1.png",
+        xref=0, source="vector",
+        sub_captions=(("a", "(a) An undirected graph."),),
+    )
+    image_section = Section(
+        kind=SectionKind.IMAGE, text="",
+        confidence=Confidence.MEDIUM, page_num=5,
+        image_ref=img,
+    )
+    sub_section = Section(
+        kind=SectionKind.PARAGRAPH,
+        text="*(a) An undirected graph.*",
+        confidence=Confidence.MEDIUM,
+        page_num=5,
+        lines=[],
+    )
+    md = emit_markdown({}, [image_section, sub_section])
+    assert "![Figure 1: ...](p3127r1-fig6-1.png)" in md
+    assert "*(a) An undirected graph.*" in md
+    # The italic caption should appear AFTER the image reference.
+    assert md.index("](p3127r1-fig6-1.png)") < md.index("*(a)")
+
+
+# -- _escape_italic_text: markdown-escape correctness ---------------
+
+
+def test_escape_italic_text_escapes_asterisk():
+    assert _escape_italic_text("a * b") == r"a \* b"
+
+
+def test_escape_italic_text_escapes_underscore():
+    assert _escape_italic_text("foo_bar") == r"foo\_bar"
+
+
+def test_escape_italic_text_escapes_backtick():
+    assert _escape_italic_text("code `x` here") == r"code \`x\` here"
+
+
+def test_escape_italic_text_escapes_backslash():
+    assert _escape_italic_text("path\\to\\file") == r"path\\to\\file"
+
+
+def test_escape_italic_text_escapes_leading_list_marker():
+    assert _escape_italic_text("- a list looking line") == r"\- a list looking line"
+    # Asterisks are escaped first; the leading-block branch only adds
+    # a backslash for "-", "+", ">", "#". The escaped "*" is no longer
+    # parsed as a list marker.
+    assert _escape_italic_text("* asterisk first") == r"\* asterisk first"
+    assert _escape_italic_text("+ plus first") == r"\+ plus first"
+
+
+def test_escape_italic_text_escapes_leading_blockquote():
+    assert _escape_italic_text("> quoted thing") == r"\> quoted thing"
+
+
+def test_escape_italic_text_escapes_leading_heading():
+    assert _escape_italic_text("# heading-shaped") == r"\# heading-shaped"
+
+
+def test_escape_italic_text_escapes_leading_ordered_list():
+    """`1.` at the start would parse as an ordered list marker - the
+    period must be escaped so the paragraph stays a paragraph."""
+    assert _escape_italic_text("1. first item") == r"1\. first item"
+    assert _escape_italic_text("42. answer") == r"42\. answer"
+
+
+def test_escape_italic_text_passes_plain_text():
+    assert _escape_italic_text("plain caption text") == "plain caption text"
+
+
+def test_escape_italic_text_handles_empty():
+    assert _escape_italic_text("") == ""

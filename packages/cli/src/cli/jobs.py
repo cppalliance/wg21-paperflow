@@ -533,8 +533,11 @@ async def run_citations(
     cites its own exact paper_id) are dropped; revision self-references
     (e.g. P1234R3 citing P1234R1) are kept -- they're meaningful edges.
 
-    ``force=False`` skips papers that already have at least one stored
-    citation row, matching the idempotency convention used by ``run_convert``.
+    ``force=False`` skips papers where ``citations_extracted_at`` is already
+    set, matching the artifact-sentinel convention used by ``run_convert``
+    (which gates on ``markdown_path``). This correctly settles zero-citation
+    papers: extraction was attempted and produced no rows, but the stamp is
+    still written, so subsequent runs skip them without re-processing.
     """
     from paperstore.citations import extract_citations
 
@@ -547,7 +550,7 @@ async def run_citations(
         if not p.markdown_path:
             skipped.append({"paper_id": p.paper_id, "reason": "no_markdown"})
             continue
-        if not force and backend.get_paper_citations(p.paper_id):
+        if not force and p.citations_extracted_at:
             skipped.append({"paper_id": p.paper_id, "reason": "already_extracted"})
             continue
         to_process.append(p)

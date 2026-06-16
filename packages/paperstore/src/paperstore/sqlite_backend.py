@@ -68,11 +68,12 @@ CREATE TABLE IF NOT EXISTS papers (
     markdown_path    TEXT DEFAULT '',
     dissect_path     TEXT DEFAULT '',  -- deprecated, kept for migration safety
     advocatus_path   TEXT DEFAULT '',  -- deprecated, kept for migration safety
-    agora_path       TEXT DEFAULT '',
-    line_count       INTEGER DEFAULT 0,
-    status           INTEGER NOT NULL DEFAULT 0,
-    error            TEXT DEFAULT '',
-    updated_at       TEXT DEFAULT ''
+    agora_path             TEXT DEFAULT '',
+    citations_extracted_at TEXT DEFAULT '',
+    line_count             INTEGER DEFAULT 0,
+    status                 INTEGER NOT NULL DEFAULT 0,
+    error                  TEXT DEFAULT '',
+    updated_at             TEXT DEFAULT ''
 );
 
 CREATE TABLE IF NOT EXISTS settings (
@@ -481,6 +482,13 @@ def _migrate(conn: sqlite3.Connection) -> None:
             "ALTER TABLE assay_findings ADD COLUMN from_gap_ids TEXT DEFAULT ''"
         )
 
+    if "citations_extracted_at" not in {
+        r[1] for r in conn.execute("PRAGMA table_info(papers)").fetchall()
+    }:
+        conn.execute(
+            "ALTER TABLE papers ADD COLUMN citations_extracted_at TEXT DEFAULT ''"
+        )
+
     conn.executescript(_SCHEMA)
 
 
@@ -659,6 +667,7 @@ class SqliteBackend(StorageBackend):
             dissect_path=d.get("dissect_path", ""),
             agora_path=d.get("agora_path", ""),
             assay_path=d.get("assay_path", ""),
+            citations_extracted_at=d.get("citations_extracted_at", ""),
             line_count=d.get("line_count", 0),
             status=d.get("status", 0),
             error=d.get("error", ""),
@@ -1062,6 +1071,14 @@ class SqliteBackend(StorageBackend):
 
         agora_present = bool(meta.agora_path)
         assay_present = bool(meta.assay_path)
+        # Gate on stamp OR row presence: rows without a stamp can exist on
+        # databases migrated from before citations_extracted_at was added.
+        has_citation_rows = bool(
+            self._conn.execute(
+                "SELECT 1 FROM paper_citations WHERE paper_id = ? LIMIT 1", (pid,)
+            ).fetchone()
+        )
+        citations_present = bool(meta.citations_extracted_at) or has_citation_rows
 
         if agora_present:
             self.clear_agora(pid)
@@ -1069,10 +1086,20 @@ class SqliteBackend(StorageBackend):
             # clear_assay also wipes the 12 assay_* tables, whose loc_line
             # offsets would otherwise point at stale lines after re-convert.
             self.clear_assay(pid)
+        if citations_present:
+            with self._conn:
+                self._conn.execute(
+                    "DELETE FROM paper_citations WHERE paper_id = ?", (pid,)
+                )
+                self._conn.execute(
+                    "UPDATE papers SET citations_extracted_at = '' WHERE paper_id = ?",
+                    (pid,),
+                )
 
         return ClearedSet(
             agora=agora_present,
             assay=assay_present,
+            citations=citations_present,
         )
 
     # ---- reads ------------------------------------------------------------
@@ -1264,6 +1291,10 @@ class SqliteBackend(StorageBackend):
                 "INSERT INTO paper_citations (paper_id, cited_paper_id, count) "
                 "VALUES (?, ?, ?)",
                 rows,
+            )
+            self._conn.execute(
+                "UPDATE papers SET citations_extracted_at = ? WHERE paper_id = ?",
+                (_now_iso(), pid),
             )
 
     def store_external_citations(self, paper_id: str, externals) -> None:
