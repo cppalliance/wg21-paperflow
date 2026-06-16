@@ -24,6 +24,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import sys
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -34,9 +36,20 @@ from paperstore import parse_authors_raw
 from paperstore.backend import PaperRow, StorageBackend
 from paperstore.errors import (
     MissingMailingIndexError,
+    MissingPaperMdError,
     MissingSourceError,
 )
 from paperstore.progress import ProgressCallback, ProgressEvent
+from tomd.lib.batch import (
+    format_batch_finished,
+    format_batch_progress_line,
+    format_batch_timeout,
+)
+from tomd.lib.check_content import (
+    format_content_check_report,
+    run_content_check_batch,
+    write_content_check_json_atomic,
+)
 from tomd.lib.pdf import SkipReason
 
 logger = logging.getLogger(__name__)
@@ -503,8 +516,82 @@ async def run_convert(
 
 
 # ---------------------------------------------------------------------------
+# run_citations
+# ---------------------------------------------------------------------------
+
+async def run_citations(
+    targets: list[str],
+    backend: StorageBackend,
+    *,
+    force: bool = False,
+    on_progress: ProgressCallback | None = None,
+) -> dict:
+    """Extract WG21 paper-id citations from converted markdown.
+
+    Pure-Python: calls ``paperstore.citations.extract_citations`` per paper
+    and writes the resulting edges to ``paper_citations`` via
+    :meth:`StorageBackend.store_paper_citations`. Self-citations (paper
+    cites its own exact paper_id) are dropped; revision self-references
+    (e.g. P1234R3 citing P1234R1) are kept -- they're meaningful edges.
+
+    ``force=False`` skips papers that already have at least one stored
+    citation row, matching the idempotency convention used by ``run_convert``.
+    """
+    from paperstore.citations import extract_citations
+
+    target_type = _validate_targets(targets)
+    all_papers = _papers_from_scope(targets, target_type, backend)
+
+    to_process: list[PaperRow] = []
+    skipped: list[dict] = []
+    for p in all_papers:
+        if not p.markdown_path:
+            skipped.append({"paper_id": p.paper_id, "reason": "no_markdown"})
+            continue
+        if not force and backend.get_paper_citations(p.paper_id):
+            skipped.append({"paper_id": p.paper_id, "reason": "already_extracted"})
+            continue
+        to_process.append(p)
+
+    total = len(to_process)
+    succeeded: list[str] = []
+    failed: list[dict] = []
+
+    for i, paper in enumerate(to_process):
+        pid = paper.paper_id
+        try:
+            md = backend.get_paper_md(pid)
+            refs = extract_citations(md)
+            # Drop self-citations (exact paper_id match, case-insensitive).
+            # CitationRef.paper_id is already upper-cased by extract_citations.
+            pid_upper = pid.upper()
+            refs = [r for r in refs if r.paper_id != pid_upper]
+            backend.store_paper_citations(pid, refs)
+            succeeded.append(pid)
+        except MissingPaperMdError:
+            skipped.append({"paper_id": pid, "reason": "no_markdown"})
+        except Exception as exc:
+            logger.exception("Citation extraction failed for %s", pid)
+            failed.append({"paper_id": pid, "error": str(exc)})
+
+        if on_progress is not None:
+            try:
+                on_progress(ProgressEvent(
+                    step=i + 1, total=total, name=pid,
+                    pct=(i + 1) / total if total else 1.0,
+                ))
+            except Exception:
+                logger.warning("on_progress hook raised; disabling", exc_info=True)
+                on_progress = None
+
+    return {"succeeded": succeeded, "skipped": skipped, "failed": failed}
+
+
+# ---------------------------------------------------------------------------
 # run_content_check
 # ---------------------------------------------------------------------------
+
+_CONTENT_CHECK_TIMEOUT = 120
 
 
 def _rows_for_content_check_targets(
@@ -553,23 +640,35 @@ def _rows_for_content_check_targets(
     return rows
 
 
+def _make_stderr_progress() -> ProgressCallback:
+    """Build a progress handler that writes batch lines to stderr."""
+    t0 = time.monotonic()
+
+    def handler(event: ProgressEvent) -> None:
+        line = format_batch_progress_line(
+            event.step, event.total, event.name, t0,
+        )
+        print(line, end="", file=sys.stderr)
+        sys.stderr.flush()
+
+    return handler
+
+
 def run_content_check(
     targets: list[str],
     backend: StorageBackend,
     *,
     json_path: Path | None = None,
     workers: int = 1,
-    timeout: int = 120,
+    timeout: int = _CONTENT_CHECK_TIMEOUT,
 ) -> dict:
     """Compare source text against converted markdown for the given targets.
 
-    Synchronous. ``run_content_check_report`` does its own
+    Synchronous. ``run_content_check_batch`` does its own
     ``ProcessPoolExecutor`` parallelism; workers re-open the backend
     from the workspace path. Skips papers missing either source or
     markdown.
     """
-    from tomd.lib.check_content import run_content_check_report
-
     workers = max(1, workers)
     rows = _rows_for_content_check_targets(targets, backend)
 
@@ -589,16 +688,43 @@ def run_content_check(
     if not items:
         return {"succeeded": [], "skipped": skipped, "failed": []}
 
-    run_content_check_report(
+    batch = run_content_check_batch(
         items,
-        json_path=json_path,
         workers=workers,
         timeout=timeout,
+        on_progress=_make_stderr_progress(),
     )
+
+    if batch.timed_out:
+        print(
+            format_batch_timeout(batch.timed_out, timeout),
+            file=sys.stderr,
+        )
+    print(
+        format_batch_finished(batch.elapsed_sec, len(items)),
+        file=sys.stderr,
+    )
+    print(
+        format_content_check_report(
+            batch.results, batch.skipped, batch.errors,
+        ),
+        end="",
+    )
+    if json_path is not None:
+        write_content_check_json_atomic(json_path, batch.results)
+        print(f"\nDetailed metrics written to {json_path}")
+
+    failed = [
+        {"paper_id": pid, "reason": msg}
+        for pid, msg in batch.errors
+    ]
+
+    failed_ids = {entry["paper_id"] for entry in failed}
+
     return {
-        "succeeded": [pid for pid, _ in items],
+        "succeeded": [pid for pid, _ in items if pid not in failed_ids],
         "skipped": skipped,
-        "failed": [],
+        "failed": failed,
     }
 
 
@@ -641,5 +767,14 @@ async def run_full(
     results["convert"] = await run_convert(
         targets, backend, force=force, concurrency=(concurrency // 2) or 1
     )
+    # Citation extraction is an enrichment step over the converted markdown;
+    # don't let a failure here mask convert success in the result aggregate.
+    try:
+        results["citations"] = await run_citations(targets, backend, force=force)
+    except Exception as exc:
+        logger.exception("run_citations failed; convert results unaffected")
+        results["citations"] = {"succeeded": [], "skipped": [], "failed": [
+            {"paper_id": "*", "error": str(exc)}
+        ]}
 
     return results

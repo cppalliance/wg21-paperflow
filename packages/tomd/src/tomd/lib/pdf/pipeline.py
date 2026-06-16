@@ -315,6 +315,20 @@ def _make_image_section(img: ExtractedImage) -> Section:
 #   ~100% overlapping the CODE section the text path produces).
 _STRUCTURAL_OVERLAP_THRESHOLD = 0.5
 
+# Cross-page structural dedup: a vector image at the very top of a page
+# is treated as a possible overflow continuation of a table from the
+# prior page. Two guards work together:
+#
+# 1. The image's y0 must be within _NEAR_PAGE_TOP_PT of the page top --
+#    the confirmed cases all have y0 = 57 pt; 75 pt gives safe margin.
+# 2. The prior-page section's y1 must reach _CROSS_PAGE_STRUCTURAL_BOTTOM_MIN_PT
+#    -- only structural sections that actually extend to the bottom of the
+#    prior page can overflow. Applies to both TABLE and CODE sections.
+#    All confirmed cases have table y1 ≈ 759 pt; 650 pt is safe for both
+#    US Letter (792 pt) and A4 (842 pt) page heights.
+_NEAR_PAGE_TOP_PT = 75.0
+_CROSS_PAGE_STRUCTURAL_BOTTOM_MIN_PT = 650.0
+
 # Thresholds for the vector-image dedup filter (see
 # :func:`_filter_overlapping_vector_images`). A small vector image
 # whose bbox overlaps a larger vector image's bbox by at least this
@@ -396,6 +410,16 @@ def _filter_vector_images_against_structural(
       a comparison table).
     - improvements.md section 4.7 (vector PNGs duplicating code-block
       content on P4003R1 pages 67 and 69).
+    - P2583R2 figs 6-1, 21-1, 21-2, 21-3 and P4007R0 fig 24-1 (table
+      overflow to the top of the next page; see cross-page check below).
+
+    When a vector image is near the top of its page
+    (``y0 <= _NEAR_PAGE_TOP_PT``), the filter also checks TABLE and CODE
+    sections from the prior page whose bottom edge reaches
+    ``_CROSS_PAGE_STRUCTURAL_BOTTOM_MIN_PT``. These are overflow
+    continuations of a structural section, not independent figures: a
+    table that spans most of page N-1 renders its tail at the very top
+    of page N as a vector cluster with the same x-range and near-zero y.
 
     Raster images are not filtered; an embedded raster image that
     overlaps a code block or table is presumed intentional (annotated
@@ -453,6 +477,12 @@ def _filter_vector_images_against_structural(
             kept_images.append(im)
             continue
         page_bboxes = structural_bboxes_by_page.get(im.page, ())
+        if im.bbox[1] <= _NEAR_PAGE_TOP_PT:
+            prior_bboxes = [
+                b for b in structural_bboxes_by_page.get(im.page - 1, ())
+                if b[3] >= _CROSS_PAGE_STRUCTURAL_BOTTOM_MIN_PT
+            ]
+            page_bboxes = (*page_bboxes, *prior_bboxes)
         if any(
             _bbox_overlap_fraction(im.bbox, b) >= threshold
             for b in page_bboxes
@@ -1203,8 +1233,11 @@ def run_pipeline(
     heading_texts = {sec.text.split("\n")[0].strip()
                      for sec in sections if sec.kind == SectionKind.HEADING}
     structural_hints = _toc_structural_hints(sections) if not heading_texts else None
+    # A body heading matches itself in heading_texts; pass per-section heading
+    # flags so find_toc_indices excludes them and does not delete the body.
+    is_heading = [sec.kind == SectionKind.HEADING for sec in sections]
     toc_indices = find_toc_indices(texts, heading_texts, structural_hints,
-                                   full_texts=full_texts)
+                                   full_texts=full_texts, is_heading=is_heading)
 
     # Plausibility guard: reject phantom TOC detection.
     # A valid TOC must have at least one confirming signal:
