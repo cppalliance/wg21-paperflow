@@ -4,8 +4,14 @@ import html as _html
 import logging
 import re
 
-from ..metadata_yaml.format import format_front_matter
-from .. import dedup_paragraphs, strip_redundant_body_meta, strip_orphan_toc_list, strip_leading_h1, DEFAULT_FENCE_LANG
+from .. import (
+    DEFAULT_FENCE_LANG,
+    apply_strip_leading_h1,
+    dedup_paragraphs,
+    format_front_matter,
+    strip_redundant_body_meta,
+    strip_orphan_toc_list,
+)
 from ..shared import _find_front_matter_end
 from .cleanup import normalize_whitespace
 from .glyphs import (
@@ -1253,17 +1259,6 @@ def emit_markdown(
 
     md = "\n\n".join(parts)
     md = dedup_paragraphs(md)
-
-    if fm:
-        title = metadata.get("title", "")
-        fm_end = _find_front_matter_end(md)
-        if fm_end is not None:
-            line_end = md.find("\n", fm_end)
-            if line_end >= 0:
-                body = md[line_end + 1:]
-                body = strip_leading_h1(body, title)
-                md = md[:line_end + 1] + body
-
     md = strip_redundant_body_meta(md)
     md = strip_orphan_toc_list(md)
 
@@ -1291,13 +1286,7 @@ def emit_markdown(
             md = _TABLE_CSS + "\n\n" + md
 
     if fm:
-        fm_end = _find_front_matter_end(md)
-        if fm_end is not None:
-            line_end = md.find("\n", fm_end)
-            if line_end >= 0:
-                body = md[line_end + 1:]
-                body = strip_leading_h1(body, title)
-                md = md[:line_end + 1] + body
+        md = apply_strip_leading_h1(md, metadata.get("title", ""))
 
     # Glyph-placeholder marker, appended last so its ``placeholders``
     # count reflects the U+FFFD actually present in the finished body

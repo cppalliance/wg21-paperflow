@@ -3,6 +3,7 @@
 import logging as _logging
 import re
 import unicodedata
+from pathlib import Path
 from collections import Counter
 
 from tomd.lib.metadata_yaml.format import FRONT_MATTER_RE
@@ -175,6 +176,18 @@ def _titles_match(h1: str, title: str) -> bool:
         return re.sub(r"\s+", " ", s).strip()
     h1_n, title_n = normalize(h1), normalize(title)
     return h1_n == title_n or title_n.startswith(h1_n)
+
+
+def apply_strip_leading_h1(md: str, title: str, max_level: int = 1) -> str:
+    """Strip a leading title heading from the body after YAML front matter."""
+    fm_end = _find_front_matter_end(md)
+    if fm_end is None:
+        return md
+    line_end = md.find("\n", fm_end)
+    if line_end < 0:
+        return md
+    body = strip_leading_h1(md[line_end + 1:], title, max_level)
+    return md[: line_end + 1] + body
 
 
 _REDUNDANT_META_RE = re.compile(
@@ -604,7 +617,23 @@ def _strip_metadata_table(md: str) -> str:
     if body_start < 0:
         return md
     body_start += 1
-    body = md[body_start:].lstrip("\n")
+    body_raw = md[body_start:]
+    # Title-matched skip: peel one leading H1/H2 title heading so we still
+    # recognize a metadata pipe table that follows a duplicate title heading.
+    # Enables single-pass cleanup together with apply_strip_leading_h1.
+    title_m = re.search(r'^title:\s*"?(.+?)"?\s*$', md[:fm_end], re.MULTILINE)
+    title_clean = title_m.group(1).strip().strip('"').strip() if title_m else ""
+    skip = 0
+    if title_clean:
+        stripped = body_raw.lstrip("\n")
+        nl = stripped.find("\n")
+        first_line = stripped if nl < 0 else stripped[:nl]
+        hm = re.match(r"(#{1,2})\s+(.+)", first_line.strip())
+        if hm and _titles_match(hm.group(2).strip(), title_clean):
+            skip = (len(body_raw) - len(stripped)) + (
+                nl + 1 if nl >= 0 else len(stripped)
+            )
+    body = body_raw[skip:].lstrip("\n")
 
     if not body.startswith("|"):
         return md
@@ -944,6 +973,39 @@ def normalize_date(text: str) -> str | None:
         )
         return f"{year:04d}-{month_num:02d}-{day:02d}"
     return None
+
+# Capture-group split (prefix / number / optional revision) for filename
+# override; broader document shapes live in DOC_NUM_PATTERN / DOC_NUM_RE.
+_PID_BASE_RE = re.compile(r"([DPN])(\d{3,5})(?:R(\d+))?", re.IGNORECASE)
+
+_revision_log = _logging.getLogger(__name__)
+
+
+def override_revision_from_filename(metadata: dict, path: Path) -> None:
+    """Override document revision from filename when the base paper number
+    matches but revisions differ. Skip when the extracted document has a
+    D-prefix (draft), since D/P mismatches are expected WG21 workflow."""
+    if "document" not in metadata:
+        return
+    doc_m = _PID_BASE_RE.search(metadata["document"])
+    stem_m = _PID_BASE_RE.search(path.stem)
+    if not doc_m or not stem_m:
+        return
+    if doc_m.group(1).upper() == "D":
+        return
+    if doc_m.group(2) != stem_m.group(2):
+        return
+    stem_rev = stem_m.group(3)
+    doc_rev = doc_m.group(3)
+    if stem_rev is not None and stem_rev != doc_rev:
+        prefix = stem_m.group(1).upper()
+        number = stem_m.group(2)
+        metadata["document"] = f"{prefix}{number}R{stem_rev}"
+        _revision_log.debug(
+            "Overrode document revision from filename: %s -> %s",
+            f"{doc_m.group(0)}", metadata["document"],
+        )
+
 
 # Core pattern shapes (no anchors, no label context) reused across modules
 # so every document- and section-number pattern has a single source of truth.

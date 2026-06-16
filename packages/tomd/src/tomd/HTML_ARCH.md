@@ -21,8 +21,8 @@ Deep technique numbering lives in [`lib/html/ARCHITECTURE.md`](lib/html/ARCHITEC
 
 - **Single DOM truth:** Unlike PDF, there is no dual extraction or per-page uncertainty routing; structure comes from the parsed tree ([`ARCHITECTURE.md`](lib/html/ARCHITECTURE.md)).
 - **Forgiving parse:** BeautifulSoup uses the stdlib **`html.parser`**, which tolerates malformed HTML but can mis-nest tags; the renderer applies explicit repairs ([`extract.py`](lib/html/extract.py), [`render.py`](lib/html/render.py)).
-- **Problems become prompts:** Unknown generators and other issues are recorded as strings and wrapped into LLM-ready prompts ([`convert_html`](lib/html/convert.py)).
-- **Shared emit helpers:** PDF and HTML both call `format_front_matter` from [`lib/metadata_yaml/format.py`](lib/metadata_yaml/format.py) (re-exported via [`lib/__init__.py`](lib/__init__.py)), plus `dedup_paragraphs`, `strip_redundant_body_meta`, `strip_orphan_toc_list`, and `strip_leading_h1` after assembly.
+- **Problems become prompts:** Unknown generators and other issues are recorded as strings and wrapped into LLM-ready prompts ([`convert_html`](lib/html/__init__.py)).
+- **Shared emit helpers:** PDF and HTML both call `format_front_matter` from [`lib/metadata_yaml/format.py`](lib/metadata_yaml/format.py) (re-exported via [`lib/__init__.py`](lib/__init__.py)), plus `dedup_paragraphs`, `strip_redundant_body_meta`, `strip_orphan_toc_list`, and `apply_strip_leading_h1` after assembly.
 
 ## Before changing behavior
 
@@ -113,10 +113,10 @@ Unknown generator prompt suppression when generic metadata still succeeded; loss
 
 ### Filename fallbacks
 
-- If metadata lacks **document**, parse paper id from filename stem with [`DOC_NUM_RE`](lib/__init__.py) ([`convert_html`](lib/html/convert.py)).
-- **`_override_revision_from_filename`:** Same rules as PDF: align revision from stem when base number matches and embedded id is **not** a **D** draft. Duplicated from `metadata_yaml/extract.py` to avoid a circular import chain through `pdf.__init__` ([`lib/html/convert.py`](lib/html/convert.py)).
+- If metadata lacks **document**, parse paper id from filename stem with [`DOC_NUM_RE`](lib/__init__.py) ([`convert_html`](lib/html/__init__.py)).
+- **`override_revision_from_filename`:** Same rules as PDF: align revision from stem when base number matches and embedded id is **not** a **D** draft ([`lib/shared.py`](lib/shared.py)).
 
-**Sources:** `convert_html`, `_override_revision_from_filename`, [`lib/html/convert.py`](lib/html/convert.py).
+**Sources:** `convert_html`, `override_revision_from_filename`, [`lib/shared.py`](lib/shared.py).
 
 ---
 
@@ -331,10 +331,9 @@ Unknown generator prompt suppression when generic metadata still succeeded; loss
 ### Post-pass cleanup
 
 - **`dedup_paragraphs`** on full markdown string.
-- **`strip_leading_h1`** on body when front matter present (slice after first closing front matter newline). Uses prefix matching: a truncated H1 is still stripped if the full title starts with the H1 text after normalization.
 - **`strip_redundant_body_meta`** removes redundant metadata lines or tables.
+- **`apply_strip_leading_h1`** on body when front matter present (via [`lib/shared.py`](lib/shared.py) `_find_front_matter_end`). Uses prefix matching: a truncated H1 is still stripped if the full title starts with the H1 text after normalization ([`convert_html`](lib/html/__init__.py)).
 - **`strip_orphan_toc_list`** removes bullet-list TOCs orphaned between front matter and first heading when at least 3 bullets exist and the majority match actual document headings ([`shared.py`](lib/shared.py)).
-- **`strip_leading_h1`** again after redundant strip ([`convert_html`](lib/html/convert.py)).
 
 **Why:** Same finishing sequence as PDF emit keeps HTML and PDF outputs consistent ([`lib/pdf/emit.py`](lib/pdf/emit.py)).
 

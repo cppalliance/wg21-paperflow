@@ -33,19 +33,22 @@ from .spans import normalize_spans
 from .structure import (compare_extractions, structure_body,
                         _is_known_section, _TITLE_PID_PREFIX_RE)
 from ..metadata_yaml.extract import (
-    extract_metadata as _extract_metadata_yaml,
     apply_pdf_metadata_fallbacks as _apply_pdf_metadata_fallbacks,
+    enrich_pdf_reply_to as _enrich_pdf_reply_to,
+    extract_metadata as _extract_metadata_yaml,
 )
 from .table import detect_tables, exclude_table_regions
 from .wg21 import extract_metadata_from_blocks
 from .emit import emit_markdown, emit_prompts
 from .types import (
     Confidence,
+    KNOWN_SECTIONS,
     Section,
     SectionKind,
     SkipReason,
     is_readable,
 )
+from ..shared import override_revision_from_filename
 from ..toc import find_toc_indices, has_dot_leader, _is_toc_label
 from ..metadata_yaml.strip import (
     strip_metadata_headings as _strip_metadata_headings_new,
@@ -315,6 +318,20 @@ def _make_image_section(img: ExtractedImage) -> Section:
 #   ~100% overlapping the CODE section the text path produces).
 _STRUCTURAL_OVERLAP_THRESHOLD = 0.5
 
+# Cross-page structural dedup: a vector image at the very top of a page
+# is treated as a possible overflow continuation of a table from the
+# prior page. Two guards work together:
+#
+# 1. The image's y0 must be within _NEAR_PAGE_TOP_PT of the page top --
+#    the confirmed cases all have y0 = 57 pt; 75 pt gives safe margin.
+# 2. The prior-page section's y1 must reach _CROSS_PAGE_STRUCTURAL_BOTTOM_MIN_PT
+#    -- only structural sections that actually extend to the bottom of the
+#    prior page can overflow. Applies to both TABLE and CODE sections.
+#    All confirmed cases have table y1 ≈ 759 pt; 650 pt is safe for both
+#    US Letter (792 pt) and A4 (842 pt) page heights.
+_NEAR_PAGE_TOP_PT = 75.0
+_CROSS_PAGE_STRUCTURAL_BOTTOM_MIN_PT = 650.0
+
 # Thresholds for the vector-image dedup filter (see
 # :func:`_filter_overlapping_vector_images`). A small vector image
 # whose bbox overlaps a larger vector image's bbox by at least this
@@ -396,6 +413,16 @@ def _filter_vector_images_against_structural(
       a comparison table).
     - improvements.md section 4.7 (vector PNGs duplicating code-block
       content on P4003R1 pages 67 and 69).
+    - P2583R2 figs 6-1, 21-1, 21-2, 21-3 and P4007R0 fig 24-1 (table
+      overflow to the top of the next page; see cross-page check below).
+
+    When a vector image is near the top of its page
+    (``y0 <= _NEAR_PAGE_TOP_PT``), the filter also checks TABLE and CODE
+    sections from the prior page whose bottom edge reaches
+    ``_CROSS_PAGE_STRUCTURAL_BOTTOM_MIN_PT``. These are overflow
+    continuations of a structural section, not independent figures: a
+    table that spans most of page N-1 renders its tail at the very top
+    of page N as a vector cluster with the same x-range and near-zero y.
 
     Raster images are not filtered; an embedded raster image that
     overlaps a code block or table is presumed intentional (annotated
@@ -453,6 +480,12 @@ def _filter_vector_images_against_structural(
             kept_images.append(im)
             continue
         page_bboxes = structural_bboxes_by_page.get(im.page, ())
+        if im.bbox[1] <= _NEAR_PAGE_TOP_PT:
+            prior_bboxes = [
+                b for b in structural_bboxes_by_page.get(im.page - 1, ())
+                if b[3] >= _CROSS_PAGE_STRUCTURAL_BOTTOM_MIN_PT
+            ]
+            page_bboxes = (*page_bboxes, *prior_bboxes)
         if any(
             _bbox_overlap_fraction(im.bbox, b) >= threshold
             for b in page_bboxes
@@ -1174,6 +1207,51 @@ def run_pipeline(
         if stem_match:
             metadata["document"] = stem_match.group(1).upper()
 
+    if "date" not in metadata and pdf_info_date:
+        metadata["date"] = pdf_info_date
+
+    override_revision_from_filename(metadata, path)
+
+    if not metadata.get("title"):
+        for sec in sections:
+            if sec.kind == SectionKind.HEADING:
+                first_line = sec.text.split("\n")[0].strip().lstrip("# ").strip()
+                if (first_line
+                        and first_line.lower().rstrip(":") not in KNOWN_SECTIONS):
+                    metadata["title"] = first_line
+                    break
+
+    if not metadata.get("title") and pdf_info_title:
+        _TITLE_BOILERPLATE_RE = re.compile(
+            r"^(?:Microsoft\s+Word|Document\d|Untitled|"
+            r"[DPN]\d{3,5}(?:R\d+)?|Presentation\d?)$",
+            re.IGNORECASE,
+        )
+        if not _TITLE_BOILERPLATE_RE.match(pdf_info_title):
+            metadata["title"] = pdf_info_title
+
+    # Strip leading paper-ID prefix from titles regardless of extraction
+    # pathway (wg21, structure, heading fallback, PDF info). Import from
+    # structure where the regex is defined to keep a single source of truth.
+    if metadata.get("title"):
+        stripped = _TITLE_PID_PREFIX_RE.sub("", metadata["title"]).strip()
+        if stripped:
+            metadata["title"] = stripped
+
+    if "reply-to" not in metadata:
+        pdf_info_author = (doc_metadata.get("author") or "").strip()
+        if pdf_info_author and len(pdf_info_author) >= 4:
+            _AUTHOR_BOILERPLATE_RE = re.compile(
+                r"^(?:Admin|Scanner|Unknown|Default|User|Owner|"
+                r"Microsoft|Adobe|LaTeX|TeX|MiKTeX|pdfTeX|dvips|"
+                r"Acrobat|LibreOffice|OpenOffice|Google|Apple|"
+                r"[a-z0-9._-]+\.(?:pdf|doc|docx|tex))$",
+                re.IGNORECASE,
+            )
+            if not _AUTHOR_BOILERPLATE_RE.match(pdf_info_author):
+                metadata["reply-to"] = [pdf_info_author]
+
+    _enrich_pdf_reply_to(metadata, all_mupdf_blocks)
     # --- Phase 1c: Metadata fallbacks & enrichment (metadata_yaml) ---
     _apply_pdf_metadata_fallbacks(
         metadata, path, pdf_info_date, pdf_info_title,
@@ -1203,8 +1281,11 @@ def run_pipeline(
     heading_texts = {sec.text.split("\n")[0].strip()
                      for sec in sections if sec.kind == SectionKind.HEADING}
     structural_hints = _toc_structural_hints(sections) if not heading_texts else None
+    # A body heading matches itself in heading_texts; pass per-section heading
+    # flags so find_toc_indices excludes them and does not delete the body.
+    is_heading = [sec.kind == SectionKind.HEADING for sec in sections]
     toc_indices = find_toc_indices(texts, heading_texts, structural_hints,
-                                   full_texts=full_texts)
+                                   full_texts=full_texts, is_heading=is_heading)
 
     # Plausibility guard: reject phantom TOC detection.
     # A valid TOC must have at least one confirming signal:

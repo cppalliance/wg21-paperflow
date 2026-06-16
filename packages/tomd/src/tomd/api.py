@@ -44,8 +44,8 @@ from tomd.lib.metadata_yaml.format import (
 )
 from tomd.errors import UnsupportedSourceFormatError
 from tomd.lib import (
+    apply_strip_leading_h1,
     strip_freeform_metadata_lines,
-    strip_leading_h1,
     EMAIL_RE,
 )
 from tomd.lib.html import convert_html
@@ -101,10 +101,20 @@ class ConvertedPaper:
 logger = logging.getLogger(__name__)
 
 _TOC_MAX_LINES = 300
+# Matches a `Contents` (or `Table of Contents`) heading and the TOC entries
+# beneath it, up to the first real section heading of any level. The heading
+# line consumes only horizontal whitespace (`[ \t]*`), never the blank line
+# after it: if `\s*` ate that newline, the body `(.*?)` would start at the next
+# heading's `#` and the boundary lookahead (which needs a leading newline) could
+# not fire on an immediately-adjacent heading, so the strip would swallow the
+# first real section too (e.g. wg21 HTML, where `strip_boilerplate` removes the
+# `div.toc` but leaves an empty `## Contents` directly before the first section).
+# The boundary recognises any heading level (`#{1,6}`) so a deeper first section
+# also terminates the strip.
 _TOC_RE = re.compile(
-    r"(?m)^(?:#{1,3}\s*)?(?:Table of )?Contents\s*$\r?\n?"
+    r"(?m)^(?:#{1,6}\s*)?(?:Table of )?Contents[ \t]*$\r?\n?"
     r"(.*?)"
-    r"(?=\r?\n#{1,3}\s|\Z)",
+    r"(?=\r?\n#{1,6}\s|\Z)",
     re.DOTALL | re.IGNORECASE,
 )
 
@@ -131,7 +141,17 @@ def _strip_toc_replace(m: re.Match[str]) -> str:
 
 
 def _strip_toc(text: str) -> str:
-    """Remove Table of Contents sections that produce phantom findings."""
+    """Remove a Table of Contents block from the converted Markdown.
+
+    Removes a `Contents` label and the TOC entries beneath it, up to the first
+    real section heading of any level, and never the first section itself. This
+    is the output-level (Markdown string) TOC remover, run on all output in
+    `convert_paper_full`; for HTML it is the only TOC remover. The sibling
+    structure-level remover for the PDF path is
+    `lib/pdf/structure.py:drop_leaked_toc_entries` (operates on the Section list
+    before Markdown is emitted). An over-long match is left in place by
+    `_strip_toc_replace` (the `_TOC_MAX_LINES` guard).
+    """
     return _TOC_RE.sub(_strip_toc_replace, text)
 
 
@@ -422,12 +442,9 @@ def convert_paper_full(
 
     # Re-run H1 stripping: leaked metadata before the H1 may have
     # blocked strip_leading_h1 in the emit layer.
-    match = FRONT_MATTER_RE.match(md)
-    if match:
-        title = parse_front_matter(md).get("title")
-        if isinstance(title, str) and title:
-            body = strip_leading_h1(strip_front_matter(md), title)
-            md = md[: match.end()] + body
+    title = parse_front_matter(md).get("title")
+    if isinstance(title, str) and title:
+        md = apply_strip_leading_h1(md, title)
 
     md = _strip_toc(md)
 

@@ -6,7 +6,6 @@ from tomd.errors import (
     TomdError,
     UnsupportedSourceFormatError,
 )
-from tomd.lib.pdf import ExtractedImage, PipelineResult, run_pipeline
 
 __all__ = [
     "CheckContentArgError",
@@ -15,7 +14,4 @@ __all__ = [
     "convert_paper",
     "convert_paper_full",
     "ConvertedPaper",
-    "run_pipeline",
-    "ExtractedImage",
-    "PipelineResult",
 ]
