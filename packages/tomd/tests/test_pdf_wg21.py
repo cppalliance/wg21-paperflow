@@ -87,55 +87,55 @@ class TestEnrichPdfReplyTo:
     """_enrich_pdf_reply_to post-pass picks up emails missed by label extractors."""
 
     def test_bare_name_gets_email_from_page0(self):
-        from tomd.lib.pdf import _enrich_pdf_reply_to
+        from tomd.lib.metadata_yaml.extract import enrich_pdf_reply_to
 
         metadata = {"reply-to": ["Hans Boehm"]}
         blocks = [_block(["Hans Boehm <hboehm@google.com>"])]
-        _enrich_pdf_reply_to(metadata, blocks)
+        enrich_pdf_reply_to(metadata, blocks)
         assert metadata["reply-to"] == ["Hans Boehm <hboehm@google.com>"]
 
     def test_adds_missing_emails_when_some_exist(self):
-        from tomd.lib.pdf import _enrich_pdf_reply_to
+        from tomd.lib.metadata_yaml.extract import enrich_pdf_reply_to
 
         metadata = {"reply-to": ["Alice <alice@example.com>"]}
         blocks = [_block(["Bob <bob@example.com>"])]
-        _enrich_pdf_reply_to(metadata, blocks)
+        enrich_pdf_reply_to(metadata, blocks)
         assert len(metadata["reply-to"]) == 2
         assert "Alice <alice@example.com>" in metadata["reply-to"]
         assert "Bob <bob@example.com>" in metadata["reply-to"]
 
     def test_skips_duplicate_emails(self):
-        from tomd.lib.pdf import _enrich_pdf_reply_to
+        from tomd.lib.metadata_yaml.extract import enrich_pdf_reply_to
 
         metadata = {"reply-to": ["Alice <alice@example.com>"]}
         blocks = [_block(["Alice <alice@example.com>"])]
-        _enrich_pdf_reply_to(metadata, blocks)
+        enrich_pdf_reply_to(metadata, blocks)
         assert len(metadata["reply-to"]) == 1
         assert "Alice <alice@example.com>" in metadata["reply-to"]
 
     def test_missing_email_appended_with_name(self):
-        from tomd.lib.pdf import _enrich_pdf_reply_to
+        from tomd.lib.metadata_yaml.extract import enrich_pdf_reply_to
 
         metadata = {"reply-to": []}
         blocks = [_block(["Daveed Vandevoorde <daveed@vandevoorde.com>"])]
-        _enrich_pdf_reply_to(metadata, blocks)
+        enrich_pdf_reply_to(metadata, blocks)
         assert metadata["reply-to"] == [
             "Daveed Vandevoorde <daveed@vandevoorde.com>"
         ]
 
     def test_no_emails_on_page0_noop(self):
-        from tomd.lib.pdf import _enrich_pdf_reply_to
+        from tomd.lib.metadata_yaml.extract import enrich_pdf_reply_to
 
         metadata = {"reply-to": ["Alice"]}
         blocks = [_block(["Some text without emails"])]
-        _enrich_pdf_reply_to(metadata, blocks)
+        enrich_pdf_reply_to(metadata, blocks)
         assert metadata["reply-to"] == ["Alice"]
 
     def test_page1_emails_ignored(self):
-        from tomd.lib.pdf import _enrich_pdf_reply_to
+        from tomd.lib.metadata_yaml.extract import enrich_pdf_reply_to
 
         metadata = {"reply-to": []}
         blocks = [_block(["No emails here"], page_num=0),
                   _block(["hidden@example.com"], page_num=1)]
-        _enrich_pdf_reply_to(metadata, blocks)
+        enrich_pdf_reply_to(metadata, blocks)
         assert metadata["reply-to"] == []

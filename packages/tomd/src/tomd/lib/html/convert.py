@@ -7,48 +7,19 @@ from pathlib import Path
 
 from .. import (
     DOC_NUM_RE,
+    apply_strip_leading_h1,
     dedup_paragraphs,
-    strip_leading_h1,
-    strip_redundant_body_meta,
+    format_front_matter,
+    override_revision_from_filename,
     strip_orphan_toc_list,
+    strip_redundant_body_meta,
 )
-from ..metadata_yaml.format import format_front_matter
 from . import extract as _extract
 from . import render as _render
 from .images import HtmlImagesResult
 from ..pdf.images import TRUNCATION_MARKER_TEMPLATE
 
 _log = logging.getLogger(__name__)
-
-_PID_BASE_RE = re.compile(r"([DPN])(\d{3,5})(?:R(\d+))?", re.IGNORECASE)
-
-
-def _override_revision_from_filename(metadata: dict, path: Path) -> None:
-    """Override document revision from filename when the base paper number
-    matches but revisions differ. Skip when the extracted document has a
-    D-prefix (draft), since D/P mismatches are expected WG21 workflow.
-
-    Identical to metadata_yaml.extract.override_revision_from_filename;
-    duplicated here to avoid a circular import chain through pdf.__init__.
-    """
-    if "document" not in metadata:
-        return
-    doc_m = _PID_BASE_RE.search(metadata["document"])
-    stem_m = _PID_BASE_RE.search(path.stem)
-    if not doc_m or not stem_m:
-        return
-    if doc_m.group(1).upper() == "D":
-        return
-    if doc_m.group(2) != stem_m.group(2):
-        return
-    stem_rev = stem_m.group(3)
-    doc_rev = doc_m.group(3)
-    if stem_rev is not None and stem_rev != doc_rev:
-        prefix = stem_m.group(1).upper()
-        number = stem_m.group(2)
-        metadata["document"] = f"{prefix}{number}R{stem_rev}"
-        _log.debug("Overrode document revision from filename: %s -> %s",
-                   f"{doc_m.group(0)}", metadata["document"])
 
 
 def convert_html(
@@ -82,7 +53,7 @@ def convert_html(
         if stem_match:
             metadata["document"] = stem_match.group(1).upper()
     if metadata and "document" in metadata:
-        _override_revision_from_filename(metadata, path)
+        override_revision_from_filename(metadata, path)
 
     problems = _extract.strip_boilerplate(soup, generator)
     # Suppress the "unknown generator" warning when extraction produced usable
@@ -92,7 +63,8 @@ def convert_html(
 
     if html_images_result is not None:
         _render.rewrite_imgs_via_manifest(
-            soup, html_images_result.src_to_entry,
+            soup,
+            html_images_result.src_to_entry,
         )
 
     body_md = _render.render_body(soup, generator)
@@ -100,8 +72,14 @@ def convert_html(
     if html_images_result is not None and html_images_result.images_truncated:
         kept = len(html_images_result.images)
         total = html_images_result.source_image_count
-        body_md = body_md.rstrip() + "\n\n" + TRUNCATION_MARKER_TEMPLATE.format(
-            kept=kept, total=total, dropped=total - kept,
+        body_md = (
+            body_md.rstrip()
+            + "\n\n"
+            + TRUNCATION_MARKER_TEMPLATE.format(
+                kept=kept,
+                total=total,
+                dropped=total - kept,
+            )
         )
 
     if metadata and "title" not in metadata:
@@ -123,29 +101,10 @@ def convert_html(
 
     md = "\n\n".join(parts)
     md = dedup_paragraphs(md)
-
-    title = metadata.get("title", "") if metadata else ""
-    if metadata:
-        fm_end = md.find("---", 4)
-        if fm_end >= 0:
-            fm_end = md.find("\n", fm_end)
-            if fm_end >= 0:
-                body = md[fm_end + 1:]
-                body = strip_leading_h1(body, title, max_level=2)
-                md = md[:fm_end + 1] + body
-
     md = strip_redundant_body_meta(md)
     md = strip_orphan_toc_list(md)
-
     if metadata:
-        fm_end = md.find("---", 4)
-        if fm_end >= 0:
-            fm_end = md.find("\n", fm_end)
-            if fm_end >= 0:
-                body = md[fm_end + 1:]
-                body = strip_leading_h1(body, title, max_level=2)
-                md = md[:fm_end + 1] + body
-
+        md = apply_strip_leading_h1(md, metadata.get("title", ""), 2)
     md = md.rstrip() + "\n"
 
     prompts: list[str] | None = None

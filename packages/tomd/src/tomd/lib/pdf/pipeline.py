@@ -33,20 +33,23 @@ from .spans import normalize_spans
 from .structure import (compare_extractions, structure_body,
                         _is_known_section, _TITLE_PID_PREFIX_RE)
 from ..metadata_yaml.extract import (
-    extract_metadata as _extract_metadata_yaml,
     apply_pdf_metadata_fallbacks as _apply_pdf_metadata_fallbacks,
+    enrich_pdf_reply_to as _enrich_pdf_reply_to,
+    extract_metadata as _extract_metadata_yaml,
 )
 from .table import detect_tables, exclude_table_regions
 from .wg21 import extract_metadata_from_blocks
 from .emit import emit_markdown, emit_prompts
 from .types import (
     Confidence,
+    KNOWN_SECTIONS,
     Section,
     SectionKind,
     SkipReason,
     is_readable,
 )
 from .. import DOC_NUM_RE
+from ..shared import override_revision_from_filename
 from ..toc import find_toc_indices, has_dot_leader, _is_toc_label
 from ..metadata_yaml.strip import (
     strip_metadata_headings as _strip_metadata_headings_new,
@@ -1202,6 +1205,51 @@ def run_pipeline(
         if stem_match:
             metadata["document"] = stem_match.group(1).upper()
 
+    if "date" not in metadata and pdf_info_date:
+        metadata["date"] = pdf_info_date
+
+    override_revision_from_filename(metadata, path)
+
+    if not metadata.get("title"):
+        for sec in sections:
+            if sec.kind == SectionKind.HEADING:
+                first_line = sec.text.split("\n")[0].strip().lstrip("# ").strip()
+                if (first_line
+                        and first_line.lower().rstrip(":") not in KNOWN_SECTIONS):
+                    metadata["title"] = first_line
+                    break
+
+    if not metadata.get("title") and pdf_info_title:
+        _TITLE_BOILERPLATE_RE = re.compile(
+            r"^(?:Microsoft\s+Word|Document\d|Untitled|"
+            r"[DPN]\d{3,5}(?:R\d+)?|Presentation\d?)$",
+            re.IGNORECASE,
+        )
+        if not _TITLE_BOILERPLATE_RE.match(pdf_info_title):
+            metadata["title"] = pdf_info_title
+
+    # Strip leading paper-ID prefix from titles regardless of extraction
+    # pathway (wg21, structure, heading fallback, PDF info). Import from
+    # structure where the regex is defined to keep a single source of truth.
+    if metadata.get("title"):
+        stripped = _TITLE_PID_PREFIX_RE.sub("", metadata["title"]).strip()
+        if stripped:
+            metadata["title"] = stripped
+
+    if "reply-to" not in metadata:
+        pdf_info_author = (doc_metadata.get("author") or "").strip()
+        if pdf_info_author and len(pdf_info_author) >= 4:
+            _AUTHOR_BOILERPLATE_RE = re.compile(
+                r"^(?:Admin|Scanner|Unknown|Default|User|Owner|"
+                r"Microsoft|Adobe|LaTeX|TeX|MiKTeX|pdfTeX|dvips|"
+                r"Acrobat|LibreOffice|OpenOffice|Google|Apple|"
+                r"[a-z0-9._-]+\.(?:pdf|doc|docx|tex))$",
+                re.IGNORECASE,
+            )
+            if not _AUTHOR_BOILERPLATE_RE.match(pdf_info_author):
+                metadata["reply-to"] = [pdf_info_author]
+
+    _enrich_pdf_reply_to(metadata, all_mupdf_blocks)
     # --- Phase 1c: Metadata fallbacks & enrichment (metadata_yaml) ---
     _apply_pdf_metadata_fallbacks(
         metadata, path, pdf_info_date, pdf_info_title,
