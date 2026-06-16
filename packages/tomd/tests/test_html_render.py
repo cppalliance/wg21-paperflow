@@ -7,6 +7,7 @@ from tomd.lib.html.render import (
     render_body,
     _fix_misnested_table_cells,
     _LOSSY_TABLE_MARKER,
+    _MIXED_TABLE_MARKER,
 )
 
 
@@ -593,7 +594,7 @@ class TestDenormalizedTable:
         assert "| 1 | 2 |" in md
 
     def test_br_in_cell_becomes_space(self):
-        """Cells with <br> should collapse to single-line pipe table cells."""
+        """Single-cell <br> stays as pipe table (below threshold)."""
         html = """
         <table>
         <tr><th>Col</th></tr>
@@ -603,6 +604,84 @@ class TestDenormalizedTable:
         md = render_body(parse_html(html), "mpark")
         assert "<table>" not in md
         assert "Line1 Line2" in md
+
+    def test_br_multiline_cells_become_html_table(self):
+        """Tables with 2+ cells containing <br> route to HTML table."""
+        html = """
+        <table>
+        <thead><tr><th>Unary</th><th>Binary</th></tr></thead>
+        <tbody><tr>
+          <td>+q<br>-q<br>++q</td>
+          <td>q + kind<br>q - kind<br>q * q2</td>
+        </tr></tbody>
+        </table>
+        """
+        md = render_body(parse_html(html), "mpark")
+        assert "<table" in md
+        assert "<br" in md
+        assert _MIXED_TABLE_MARKER in md
+
+    def test_single_br_cell_stays_pipe(self):
+        """Only one cell with <br> stays as pipe table."""
+        html = """
+        <table>
+        <thead><tr><th>A</th><th>B</th></tr></thead>
+        <tbody><tr>
+          <td>Line1<br>Line2</td>
+          <td>No break here</td>
+        </tr></tbody>
+        </table>
+        """
+        md = render_body(parse_html(html), "mpark")
+        assert "<table>" not in md
+        assert "Line1 Line2" in md
+
+    def test_code_table_blank_lines_no_paragraph_break(self):
+        """Blank lines in <pre><code> must not break Markdown HTML block."""
+        html = """
+        <table>
+        <tr><th>A</th><th>B</th></tr>
+        <tr>
+          <td><pre><code>line1;
+
+line2;</code></pre></td>
+          <td><pre><code>fix1;
+
+fix2;</code></pre></td>
+        </tr>
+        </table>
+        """
+        md = render_body(parse_html(html), "mpark")
+        assert "<table" in md
+        assert "&#10;" in md
+        assert "\n\n" not in md.split("<pre")[1].split("</pre>")[0]
+
+    def test_code_table_multiple_consecutive_blank_lines(self):
+        """2+ consecutive blank lines in <pre><code> must all be escaped."""
+        html = """
+        <table>
+        <tr><th>A</th><th>B</th></tr>
+        <tr>
+          <td><pre><code>line1;
+
+
+line3;</code></pre></td>
+          <td><pre><code>fix1;
+
+
+
+fix4;</code></pre></td>
+        </tr>
+        </table>
+        """
+        md = render_body(parse_html(html), "mpark")
+        assert "<table" in md
+        assert "&#10;" in md
+        for segment in md.split("<pre")[1:]:
+            inside = segment.split("</pre>")[0]
+            assert "\n\n" not in inside, (
+                f"raw blank line survived inside <pre>: {inside!r}"
+            )
 
     def test_pipe_in_cell_escaped(self):
         """Pipe characters in cell content must be escaped."""
