@@ -524,7 +524,7 @@ def drop_leaked_toc_headings(sections: list[Section]) -> list[Section]:
     Rationale for Unification"). This pass removes the whole block.
 
     The single discriminator is **recurrence as a later heading**, shared by
-    both entry kinds (`_is_toc_entry`). A run is a contiguous sequence of such
+    both entry kinds (the `entry` array). A run is a contiguous sequence of such
     entries (only trivial fragments or other entries may sit between members),
     of length at least `MIN_TOC_RUN`, that is **not** a run whose heading
     subsequence strictly deepens (`15`/`15.1`/`15.1.1` clause-container
