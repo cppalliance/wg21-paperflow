@@ -639,11 +639,26 @@ def _render_list(el: Tag, marker: str, generator: str) -> str | None:
                 if rendered:
                     code_parts.append(rendered)
 
+            table_parts: list[str] = []
+            for tbl in child.find_all("table"):
+                if tbl.find_parent("table") is not None:
+                    continue
+                rendered = _render_table(tbl.extract())
+                if rendered:
+                    table_parts.append(rendered)
+
             text = _collapse_whitespace(_inline_text(child))
             if text:
                 items.append(f"{prefix} {text}")
-            items.extend(code_parts)
-            items.extend(nested_parts)
+            elif marker == "1." and (code_parts or table_parts
+                                     or nested_parts):
+                items.append(prefix)
+            for cp in code_parts:
+                items.append(cp)
+            for tp in table_parts:
+                items.append("\n" + tp)
+            for np in nested_parts:
+                items.append(np)
         elif isinstance(child, Tag):
             # Non-<li> direct child: render via the normal dispatch and indent
             # under the preceding item (standalone if there is no item yet).
@@ -651,7 +666,6 @@ def _render_list(el: Tag, marker: str, generator: str) -> str | None:
             if rendered:
                 items.append(_indent(rendered) if item_index else rendered)
         elif isinstance(child, NavigableString) and not isinstance(child, (Comment, CData)):
-            # Loose text directly in the list (Comment/CData are not content).
             text = _collapse_whitespace(str(child)).strip()
             if text:
                 items.append(("  " + text) if item_index else text)
