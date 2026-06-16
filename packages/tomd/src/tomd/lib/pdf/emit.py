@@ -105,10 +105,13 @@ _EMDASH_BULLET_RE = re.compile(r"^[\u2013\u2014]\s")
 def _render_paragraph_spans(sec: Section) -> str:
     """Render a paragraph section using span-level formatting, then unwrap.
 
+    Falls back to ``sec.text`` when ``sec.lines`` is empty, bypassing
+    ``_render_line_spans`` so pre-escaped text (e.g. sub-caption sections
+    with ``*...*`` wrappers) is not double-processed. PDF line breaks in
+    the text are still flattened to spaces.
+
     Preserves line breaks when every non-empty line starts with an
-    em-dash or en-dash bullet marker so that bullet lists extracted
-    as PARAGRAPH sections render as separate items instead of being
-    collapsed into a single prose line.
+    em-dash or en-dash bullet marker.
     """
     if not sec.lines:
         return " ".join(ln.strip() for ln in sec.text.split("\n") if ln.strip())
@@ -120,18 +123,12 @@ def _render_paragraph_spans(sec: Section) -> str:
     lines = text.split("\n")
     non_empty = [ln.strip() for ln in lines if ln.strip()]
     if non_empty and all(_EMDASH_BULLET_RE.match(ln) for ln in non_empty):
-        # Rewrite em/en-dash bullets as markdown list items so that
-        # renderers display them as a proper list instead of joining
-        # consecutive lines into a single paragraph.
-        # indent_level > 0 indicates a nested sub-list (set by
-        # _assign_emdash_nesting in the emit pre-pass).
         prefix = "  " * sec.indent_level
         return "\n".join(
             prefix + _EMDASH_BULLET_RE.sub("- ", ln, count=1)
             for ln in non_empty
         )
     return " ".join(ln.strip() for ln in lines if ln.strip())
-
 
 _BARE_HEADING_NUM_RE = re.compile(
     r"^\s*(?:\d+(?:\.\d+)*|[A-Z]+)\.?\s*$"
@@ -1024,6 +1021,44 @@ def _escape_alt_text(text: str) -> str:
     the literal ``]``.
     """
     return _ALT_TEXT_ESCAPE_RE.sub(r"\\\1", text)
+
+
+_ITALIC_INLINE_ESCAPE_RE = re.compile(r"([\\*_`])")
+# Leading characters that would otherwise be parsed as a list marker,
+# blockquote, ATX heading, or ordered-list start. The synthesised
+# sub-caption paragraph (text == "*...*") would be misclassified if any
+# of these appears at column 0 inside the italics wrapper.
+_LEADING_BLOCK_CHARS = ("-", "*", "+", ">", "#")
+_LEADING_ORDERED_RE = re.compile(r"^(\d+)\.")
+
+
+def _escape_italic_text(text: str) -> str:
+    """Escape characters that would break a ``*...*`` italic wrapper.
+
+    Used by the sub-caption insertion path in the pipeline (sub-caption
+    PARAGRAPH sections are emitted as ``*<escaped>*``). Escapes:
+
+    - ``\\`` so a trailing backslash doesn't eat the closing ``*``.
+    - ``*``, ``_``, and backticks so they don't terminate the wrapper
+      or open a code span.
+    - A leading list/quote/heading character so the paragraph doesn't
+      render as a list item, blockquote, or heading once the italics
+      wrapper is in place.
+    """
+    escaped = _ITALIC_INLINE_ESCAPE_RE.sub(r"\\\1", text)
+    if not escaped:
+        return escaped
+    if escaped[0] in _LEADING_BLOCK_CHARS:
+        # The first character has already been backslash-escaped if it
+        # was ``*``; the other leading-block characters need their own
+        # leading backslash.
+        if escaped[0] != "\\":
+            escaped = "\\" + escaped
+    else:
+        m = _LEADING_ORDERED_RE.match(escaped)
+        if m:
+            escaped = escaped[:m.end() - 1] + "\\." + escaped[m.end():]
+    return escaped
 
 
 def _render_image(sec: Section) -> str:

@@ -104,10 +104,16 @@ def _run_with_vector_extract(pdf: Path):
     """Run the full pipeline with the page-scan floor lifted so our small
     synthetic fixtures pass ``_MIN_PAGE_DRAWING_ITEMS`` even though they
     have only dozens of drawing items rather than the 250+ that a real
-    WG21 page produces. The threshold itself is unit-tested separately."""
+    WG21 page produces.
+
+    Also lifts ``_LOW_OVERLAP_ADMIT_MIN_ITEMS`` so the minimal synthetic
+    diagrams (intentionally < 30 items) admit via the low-overlap path
+    without needing items count typical of real WG21 figures. Both
+    thresholds are unit-tested separately."""
     from unittest.mock import patch
 
-    with patch.object(vector_images, "_MIN_PAGE_DRAWING_ITEMS", 1):
+    with patch.object(vector_images, "_MIN_PAGE_DRAWING_ITEMS", 1), \
+         patch.object(vector_images, "_LOW_OVERLAP_ADMIT_MIN_ITEMS", 1):
         return run_pipeline(pdf, extract_vector=True)
 
 

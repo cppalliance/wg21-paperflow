@@ -13,6 +13,8 @@ from .extract import extract_mupdf, extract_spatial, collect_links, attach_links
 from .images import (
     ExtractedImage,
     VectorUncertaintyStats,
+    _CAPTION_LABEL_RE,
+    _CAPTION_SEARCH_RADIUS_BELOW_PT,
     _VectorExtractionStats,
     extract_page_images,
     finalize_extraction,
@@ -39,7 +41,7 @@ from ..metadata_yaml.extract import (
 )
 from .table import detect_tables, exclude_table_regions, _rot_bbox, _rot_midpoint
 from .wg21 import extract_metadata_from_blocks
-from .emit import emit_markdown, emit_prompts
+from .emit import emit_markdown, emit_prompts, _escape_italic_text
 from .types import (
     Confidence,
     KNOWN_SECTIONS,
@@ -531,6 +533,106 @@ _OVERLAPPING_VECTOR_AREA_RATIO = 0.20
 # - they are structural representations that stay regardless.
 _SECTION_INSIDE_VECTOR_THRESHOLD = 0.5
 
+# Threshold for the section-level CODE / TABLE drop inside the
+# unextended vector cluster bbox. When a section's bbox is at least
+# this fraction inside a vector's ``im.bbox`` (UNEXTENDED, no caption
+# band), the whole section is dropped. The 0.5 vs 0.8 split is
+# deliberate: the per-line filter uses the lower threshold because a
+# line that is half inside a cluster is most likely the cluster's own
+# baked-in label; a structural CODE / TABLE block that genuinely
+# belongs to body content rarely overlaps a figure by more than 50%
+# without being a real duplicate. Calibrated against P3127R1 page 6's
+# set-description ``cpp`` block (overlap fraction 1.0 against the
+# cluster bbox).
+_STRUCTURAL_INSIDE_VECTOR_THRESHOLD = 0.8
+
+# Depth of the caption band below a vector cluster, used for the
+# section-level caption-shaped drop and sub-caption capture (NOT for
+# rasterisation, NOT for the per-line PARAGRAPH filter, NOT for the
+# CODE/TABLE drop above). Defined by reference to
+# ``_CAPTION_SEARCH_RADIUS_BELOW_PT`` so the body-drop predicate covers
+# everything the alt-text attribution predicate can attribute. A
+# shallower band would let ``_caption_for`` mark a caption as alt-text
+# while the body-drop refused to fire, duplicating the caption as both
+# alt-text and body. A future change that wants the constants to
+# diverge must also change ``_line_in_caption_band`` (and
+# ``_caption_for``) in the same commit.
+_FIGURE_CAPTION_BAND_BELOW_PT = _CAPTION_SEARCH_RADIUS_BELOW_PT
+
+# Sub-caption line shape: ``(a) text...`` / ``(b) text...``. The
+# captured letter is used for stable alphabetical ordering of the
+# rendered sub-caption paragraphs. Only matches a single lowercase
+# letter, matching the WG21 convention; uppercase letters would
+# misfire on body prose like ``(A) test case`` and are intentionally
+# excluded.
+_SUB_CAPTION_RE = re.compile(r"^\s*\(([a-z])\)\s+(.+)$")
+
+
+def _line_in_caption_band(
+    line_bbox: tuple[float, float, float, float],
+    im_bbox: tuple[float, float, float, float],
+) -> bool:
+    """Return True if ``line_bbox.y0`` lies in the caption band of ``im_bbox``.
+
+    The band runs from ``im_bbox.y1`` (exclusive lower edge of the
+    image) to ``im_bbox.y1 + _FIGURE_CAPTION_BAND_BELOW_PT`` and is
+    **y-only**, with no horizontal gate. This is identical to the
+    predicate :func:`images._caption_for` uses to attribute alt-text
+    to an image; both use the same numeric depth
+    (``_FIGURE_CAPTION_BAND_BELOW_PT == _CAPTION_SEARCH_RADIUS_BELOW_PT``)
+    and the same y-only shape so the body-drop and alt-text attribution
+    always fire on the same set of caption lines.
+
+    **Predicate-equality invariant**: this helper drives the
+    **overall-caption section drop** (the ``_CAPTION_LABEL_RE`` path),
+    which must fire on exactly the same set of lines
+    :func:`images._caption_for` attributes - otherwise a caption can
+    become both alt-text AND a leaked body paragraph. Any refactor
+    that adds a horizontal multi-column gate must add it to BOTH
+    this helper and :func:`images._caption_for` in the same commit.
+
+    The sub-caption capture path uses the wider
+    :func:`_line_in_caption_region` (cluster bbox + band) so that a
+    sub-caption between stacked sub-figures (P3127R1 Figure 1's
+    ``(a)`` caption is the canonical case) is captured + re-emitted
+    as italic alongside the below-cluster ``(b)``. Sub-captions are
+    never alt-text'd by ``_caption_for``, so the wider predicate
+    does not reopen any duplication invariant.
+
+    The boundary semantics match :func:`images._caption_for` exactly:
+    ``im_y1 <= line.y0 <= im_y1 + radius`` (inclusive on both ends).
+    """
+    return im_bbox[3] <= line_bbox[1] <= im_bbox[3] + _FIGURE_CAPTION_BAND_BELOW_PT
+
+
+def _line_in_caption_region(
+    line_bbox: tuple[float, float, float, float],
+    im_bbox: tuple[float, float, float, float],
+) -> bool:
+    """Sub-caption containment: cluster bbox UNION caption band below.
+
+    Wider than :func:`_line_in_caption_band`: this returns True when
+    ``line_bbox.y0`` is anywhere in
+    ``[im_bbox.y0, im_bbox.y1 + _FIGURE_CAPTION_BAND_BELOW_PT]``,
+    covering both "between stacked sub-figures, inside the cluster"
+    and "below the cluster, in the caption band".
+
+    Why a separate predicate: WG21 multi-sub-figure layouts (P3127R1
+    Figure 1 is the canonical case) place one sub-caption between
+    the sub-figures (PDF y inside the cluster bbox) and another
+    below both sub-figures (in the caption band). For visual
+    symmetry, both should be captured and re-emitted as italic
+    paragraphs after the IMAGE; the alternative is asymmetric
+    markdown where ``(a)`` lives inside the PNG and ``(b)`` lives
+    in italic text.
+
+    This helper is used **only** by the sub-caption capture path.
+    The overall-caption drop (the ``_CAPTION_LABEL_RE`` path) must
+    stay on :func:`_line_in_caption_band` so it remains
+    predicate-equal to :func:`images._caption_for`.
+    """
+    return im_bbox[1] <= line_bbox[1] <= im_bbox[3] + _FIGURE_CAPTION_BAND_BELOW_PT
+
 
 def _section_bbox(
     sec: Section,
@@ -553,10 +655,24 @@ def _bbox_overlap_fraction(
     image_bbox: tuple[float, float, float, float],
     section_bbox: tuple[float, float, float, float],
 ) -> float:
-    """Intersection area divided by ``image_bbox`` area.
+    """Intersection area divided by the *first* argument's area.
 
-    Returns 0.0 when image_bbox has non-positive area. Used to decide
-    whether a vector image is "mostly inside" a structural section.
+    The math is symmetric: ``intersection / area(first_arg)``. Both
+    inverted call patterns are used in this module:
+
+    - ``_bbox_overlap_fraction(image_bbox, section_bbox)`` -
+      "fraction of the *image* inside the section." Used by the
+      structural-overlap filter
+      (``_filter_vector_images_against_structural``) to drop a vector
+      whose drawing region is mostly covered by a TABLE or CODE
+      section.
+    - ``_bbox_overlap_fraction(section_bbox, image_bbox)`` - "fraction
+      of the *section* inside the image." Used by the structural
+      CODE / TABLE drop inside
+      ``_filter_sections_inside_vector_images`` and by the per-line
+      filter.
+
+    Returns 0.0 when the first argument has non-positive area.
     """
     ix0, iy0, ix1, iy1 = image_bbox
     sx0, sy0, sx1, sy1 = section_bbox
@@ -773,65 +889,174 @@ def _filter_sections_inside_vector_images(
     sections: list[Section],
     *,
     threshold: float = _SECTION_INSIDE_VECTOR_THRESHOLD,
-) -> list[Section]:
-    """Drop lines inside surviving vector image bboxes from non-structural sections.
+    structural_threshold: float = _STRUCTURAL_INSIDE_VECTOR_THRESHOLD,
+) -> tuple[list[Section], dict[int, list[tuple[str, str]]]]:
+    """Drop text duplicated by a surviving vector image; capture sub-captions.
 
     The vector image already shows the line's text content as
     rasterised pixels (a label rendered inside a diagram is baked
     into the PNG by ``page.get_pixmap``), so re-emitting the same
-    line as body markdown produces visible duplication. P4003R1
-    page 13's diagram labels ("I/O operation child task parent task
-    run_async / handle() / set_environment(env) / ...") are the
-    calibrated case.
+    line as body markdown produces visible duplication. The filter
+    handles four cases:
 
-    Operates line-by-line rather than section-by-section because the
-    structure pipeline often joins a diagram's leaked labels with
-    surrounding prose into one PARAGRAPH section. A whole-section
-    filter would over-drop the prose too. Per-line filtering keeps
-    bullet text adjacent to a figure while dropping the figure's own
-    labels.
+    1. **CODE / TABLE sections wholly inside a vector** (Fix A):
+       when a section's bbox is at least ``structural_threshold``
+       inside the *unextended* ``im.bbox``, the whole section is
+       dropped. Calibrated against P3127R1 page 6's set-description
+       ``cpp`` block (entirely inside the cluster). The check uses
+       ``im.bbox`` (not the extended caption band) so a real CODE
+       listing immediately below a figure - the figure-then-example
+       pattern common in WG21 papers - is not dropped.
+    2. **Sub-caption sections** (``(a) ... / (b) ...``): when a
+       PARAGRAPH section's first line matches ``_SUB_CAPTION_RE`` AND
+       ``_line_in_caption_band(first_line.bbox, im.bbox)`` is True for
+       some vector, the section is captured against the owning vector
+       and dropped. Captures are returned in the second tuple element
+       so the caller can rebuild the affected
+       :class:`ExtractedImage` records via ``dataclasses.replace``
+       and insert italicised PARAGRAPH sections immediately after
+       the IMAGE section.
+    3. **Overall-caption sections** (``Figure N: ...``): when a
+       PARAGRAPH *or* HEADING section's first line matches
+       ``_CAPTION_LABEL_RE`` AND ``_line_in_caption_band(...)`` is
+       True for some vector, the whole section is dropped. The
+       caption text already lives on the image's ``suggested_alt``
+       via :func:`images._caption_for`; dropping the body
+       duplicate is the structural fix that keeps the markdown
+       from referencing the same caption twice. HEADING is included
+       because WG21 figure captions are sometimes bold or
+       distinct-font and trip the heading heuristic.
+    4. **Other PARAGRAPH sections**: existing per-line filter against
+       the *unextended* ``im.bbox`` only. A line whose bbox is at
+       least ``threshold`` inside any vector's drawing region is
+       dropped; the section is rebuilt from surviving lines (or
+       removed entirely when no lines survive). Body lines that fall
+       in the caption band but outside the unextended cluster bbox
+       are KEPT - the band is reserved for the caption-shaped
+       section drops above.
 
-    Sections whose lines are ALL filtered out are removed entirely.
-    Sections that lose SOME lines get a rebuilt ``text`` (simple
-    newline-join of surviving lines' text); if every line in the
-    section survives, the section is returned unchanged.
+    IMAGE sections are always kept verbatim.
 
-    TABLE, CODE, and IMAGE sections are always kept verbatim - they
-    are structural representations that should stay regardless of
-    overlap (and the structural-overlap filter at
-    :func:`_filter_vector_images_against_structural` has already
-    handled the reverse case of dropping vectors that duplicate
-    structural sections).
+    Returns ``(filtered_sections, captures_by_image_id)``. The
+    captures dict maps ``id(image)`` to a list of
+    ``(letter, full_section_text)`` tuples; the caller is responsible
+    for threading these into the matching :class:`ExtractedImage`
+    records (and into each IMAGE section's ``image_ref``).
     """
-    image_bboxes_by_page: dict[int, list[tuple[float, float, float, float]]] = {}
+    # Index vector images by 1-based page for the structural drops
+    # and the per-line filter; the caption-shaped drops also need the
+    # ``ExtractedImage`` instance itself so they can record captures
+    # against ``id(image)``. Sort by ``(page, im.bbox.y0, im.bbox.x0)``
+    # so that, when two vectors' extended caption bands overlap on
+    # the same page, the upper one (smaller ``y0``) wins attribution.
+    # The y0 tiebreak matches the WG21 convention that a caption sits
+    # below the figure it captions.
+    vector_images_by_page: dict[int, list[ExtractedImage]] = {}
     for im in images:
         if im.source != "vector":
             continue
-        image_bboxes_by_page.setdefault(im.page, []).append(im.bbox)
-    if not image_bboxes_by_page:
-        return sections
+        vector_images_by_page.setdefault(im.page, []).append(im)
+    for page in vector_images_by_page:
+        vector_images_by_page[page].sort(
+            key=lambda im: (im.bbox[1], im.bbox[0]),
+        )
+
+    if not vector_images_by_page:
+        return sections, {}
 
     from dataclasses import replace
-    structural_kinds = {SectionKind.TABLE, SectionKind.CODE, SectionKind.IMAGE}
+    captures_by_id: dict[int, list[tuple[str, str]]] = {}
     kept: list[Section] = []
+
     for sec in sections:
-        if sec.kind in structural_kinds:
+        # IMAGE always kept.
+        if sec.kind == SectionKind.IMAGE:
+            kept.append(sec)
+            continue
+
+        page = sec.page_num + 1
+        page_vectors = vector_images_by_page.get(page, ())
+        if not page_vectors:
+            kept.append(sec)
+            continue
+
+        # 1. CODE / TABLE: drop if mostly inside the unextended
+        #    cluster bbox. Lineless sections (``_section_bbox``
+        #    returns None) are kept verbatim - we never crash on a
+        #    section with no geometry.
+        if sec.kind in (SectionKind.CODE, SectionKind.TABLE):
+            sec_bbox = _section_bbox(sec)
+            if sec_bbox is None:
+                kept.append(sec)
+                continue
+            mostly_inside = any(
+                _bbox_overlap_fraction(sec_bbox, im.bbox)
+                >= structural_threshold
+                for im in page_vectors
+            )
+            if mostly_inside:
+                continue
+            kept.append(sec)
+            continue
+
+        # 2/3. Caption-shaped section drops. Apply to PARAGRAPH and
+        #     HEADING; the regex is the content signal, the y-only
+        #     band match is the geometry signal. Skipped for sections
+        #     with no lines (no first-line bbox to test).
+        if sec.kind in (SectionKind.PARAGRAPH, SectionKind.HEADING) and sec.lines:
+            first_text = sec.lines[0].text.strip()
+            first_bbox = sec.lines[0].bbox
+
+            # 2. Sub-caption: capture + drop. Uses the wider
+            #    _line_in_caption_region (cluster bbox + band below)
+            #    so that a sub-caption sitting between stacked
+            #    sub-figures (P3127R1 Figure 1's "(a)" caption) is
+            #    captured + re-emitted as italic alongside any
+            #    below-cluster sub-captions. Without this widening,
+            #    the per-line filter below would drop the inside-
+            #    cluster sub-caption silently, producing asymmetric
+            #    output (one caption inside the PNG, others italic).
+            sub_match = _SUB_CAPTION_RE.match(first_text)
+            if sub_match and first_bbox != (0, 0, 0, 0):
+                letter = sub_match.group(1)
+                owner = next(
+                    (im for im in page_vectors
+                     if _line_in_caption_region(first_bbox, im.bbox)),
+                    None,
+                )
+                if owner is not None:
+                    captures_by_id.setdefault(id(owner), []).append(
+                        (letter, sec.text),
+                    )
+                    continue
+
+            # 3. Overall caption: drop. Same y-only band predicate.
+            if (_CAPTION_LABEL_RE.match(first_text)
+                    and first_bbox != (0, 0, 0, 0)):
+                in_band = any(
+                    _line_in_caption_band(first_bbox, im.bbox)
+                    for im in page_vectors
+                )
+                if in_band:
+                    continue
+
+        # 4. PARAGRAPH / UNCERTAIN: per-line filter against unextended bbox.
+        # UNCERTAIN is included because dual-path disagreement on a region
+        # inside a vector cluster (e.g. P3127R1 page 6's set-description
+        # block) produces an UNCERTAIN section whose lines are still
+        # geometrically inside the cluster and must be filtered.
+        if sec.kind not in (SectionKind.PARAGRAPH, SectionKind.UNCERTAIN):
             kept.append(sec)
             continue
         if not sec.lines:
             kept.append(sec)
             continue
-        page = sec.page_num + 1  # 1-based to match ExtractedImage.page
-        page_bboxes = image_bboxes_by_page.get(page, ())
-        if not page_bboxes:
-            kept.append(sec)
-            continue
 
+        page_bboxes = [im.bbox for im in page_vectors]
         kept_lines = []
         for line in sec.lines:
             line_bbox = line.bbox
             if line_bbox == (0, 0, 0, 0):
-                # No bbox info - can't decide, keep.
                 kept_lines.append(line)
                 continue
             if any(
@@ -845,10 +1070,11 @@ def _filter_sections_inside_vector_images(
             kept.append(sec)
             continue
         if not kept_lines:
-            continue  # all lines dropped - section gone
+            continue  # all lines dropped
         new_text = "\n".join(line.text for line in kept_lines)
         kept.append(replace(sec, lines=kept_lines, text=new_text))
-    return kept
+
+    return kept, captures_by_id
 
 
 def _insert_image_sections(
@@ -1403,9 +1629,65 @@ def run_pipeline(
             _filter_overlapping_vector_images(result.images, sections)
         )
         total_dropped += dropped_b
-        sections = _filter_sections_inside_vector_images(
+        sections, captures_by_id = _filter_sections_inside_vector_images(
             result.images, sections,
         )
+        if captures_by_id:
+            from dataclasses import replace as _replace
+            # Thread the captures into BOTH ``result.images`` AND every
+            # IMAGE section's ``image_ref``. Both containers share the
+            # same ``ExtractedImage`` instances (placed by
+            # ``_insert_image_sections``), so ``id()`` lookup is valid
+            # against the keys in ``captures_by_id`` (which were taken
+            # from the same instances inside the filter). ``Section`` is
+            # a mutable dataclass (types.py:103) so direct rebind of
+            # ``image_ref`` is allowed.
+            #
+            # Ordering matters: insert PARAGRAPHs FIRST (while
+            # ``sec.image_ref`` still points at the pre-replace
+            # objects whose ids match ``captures_by_id`` keys), THEN
+            # rebind. Doing the rebind first would change
+            # ``id(sec.image_ref)`` to the new object's id, breaking
+            # the insertion loop's lookup.
+            new_sections: list[Section] = []
+            for sec in sections:
+                new_sections.append(sec)
+                if (sec.kind == SectionKind.IMAGE
+                        and sec.image_ref is not None
+                        and id(sec.image_ref) in captures_by_id):
+                    for letter, caption_text in sorted(
+                            captures_by_id[id(sec.image_ref)]):
+                        # Collapse internal whitespace (incl. newlines
+                        # from the structure pass's wrap-join) to single
+                        # spaces so the italic wrapper renders as one
+                        # unwrapped paragraph, matching the existing
+                        # PARAGRAPH emit path's behaviour.
+                        unwrapped = " ".join(caption_text.split())
+                        new_sections.append(Section(
+                            kind=SectionKind.PARAGRAPH,
+                            text=(
+                                "*"
+                                + _escape_italic_text(unwrapped)
+                                + "*"
+                            ),
+                            confidence=Confidence.MEDIUM,
+                            page_num=sec.page_num,
+                        ))
+            sections = new_sections
+
+            replaced: dict[int, ExtractedImage] = {
+                id(im): _replace(
+                    im, sub_captions=tuple(sorted(captures_by_id[id(im)])),
+                )
+                for im in result.images
+                if id(im) in captures_by_id
+            }
+            for sec in sections:
+                if (sec.kind == SectionKind.IMAGE
+                        and sec.image_ref is not None
+                        and id(sec.image_ref) in replaced):
+                    sec.image_ref = replaced[id(sec.image_ref)]
+            result.images = [replaced.get(id(im), im) for im in result.images]
         if total_dropped and result.vector_uncertainty is not None:
             from dataclasses import replace
             new_kept = sum(1 for im in result.images if im.source == "vector")
