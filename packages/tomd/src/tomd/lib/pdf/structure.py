@@ -847,6 +847,7 @@ def drop_leaked_toc_entries(sections: list[Section]) -> list[Section]:
         if entry[i]:
             entries.append(i)
         elif (entries and sections[i].kind != SectionKind.HEADING
+                and sections[i].kind not in _TOC_SWEEP_SKIP_KINDS
                 and _section_is_trivial(sections[i])):
             # Non-heading trivial filler (a split page number) bridges
             # consecutive entries; it neither opens nor closes a run.
