@@ -395,6 +395,9 @@ def _render_wording_section(sec: Section) -> str:
     return f":::{div_class}\n\n{inner}\n\n:::"
 
 
+# Intentionally limited to the two ZapfDingbats glyphs observed in the
+# corpus (checkmark and cross).  Unmapped dingbats pass through as-is;
+# extend this map when new glyphs are encountered in real papers.
 _DINGBATS_MAP: dict[int, str] = {
     0x14: "✓",
     0x18: "✗",
