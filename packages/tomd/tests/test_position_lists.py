@@ -173,6 +173,22 @@ def test_assign_list_nesting_three_levels():
     assert [a.indent_level, b.indent_level, c.indent_level] == [0, 1, 2]
 
 
+def test_assign_list_nesting_splits_by_page():
+    """A list continuing on a new page at a shifted margin is not false-nested.
+
+    Page 2's bullet sits further right than page 1's, but depth is computed
+    per page, so both pages' leftmost bullets are depth 0 (issue #175
+    review): a margin shift across a page break must not read as nesting.
+    """
+    page1 = _list_item("● first page item", x0=54.0)
+    page1.page_num = 0
+    page2 = _list_item("● second page item", x0=90.0)
+    page2.page_num = 1
+    _assign_list_nesting([page1, page2])
+    assert page1.indent_level == 0
+    assert page2.indent_level == 0
+
+
 # ---- _join_bullet_marker_lines -------------------------------------------
 
 def test_join_bullet_marker_merges_bullet_and_text_lines():

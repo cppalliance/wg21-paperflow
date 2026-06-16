@@ -259,14 +259,40 @@ def _normalize_bullets(text: str) -> str:
 _LIST_INDENT_UNIT = "  "
 
 
-def _is_list_item_start(text: str) -> bool:
-    """Whether a rendered line begins a new list item (vs. a wrapped continuation)."""
+_ITEM_TERMINAL_PUNCT = frozenset(".:;?!")
+
+
+def _is_numbered_item(text: str) -> bool:
+    """Whether a line opens an item with an explicit ordinal marker (``1.``, ``b)``)."""
+    return bool(NUMBERED_LIST_RE.match(text.lstrip()))
+
+
+def _reads_unfinished(text: str) -> bool:
+    """Whether an item's accumulated text looks cut off mid-sentence."""
+    stripped = text.rstrip().rstrip('"”’\'')
+    return bool(stripped) and stripped[-1] not in _ITEM_TERMINAL_PUNCT
+
+
+def _is_list_item_start(text: str, current_item: str) -> bool:
+    """Whether a rendered line begins a new list item (vs. a wrapped continuation).
+
+    A bullet glyph or literal ``-``/``*`` marker always opens an item. An
+    ordinal marker (``1.``, ``b)``) is treated as a wrapped continuation,
+    not a new item, only when the current item is itself unnumbered AND
+    reads as cut off mid-sentence: e.g. a bullet ``...meeting in`` wrapping
+    to ``2017. The...``. A current item that is already numbered, or that
+    ends in terminal punctuation, takes the ordinal as a genuine new item,
+    so ``2.`` after ``1.`` and a ``d)`` label after a finished bullet both
+    stay separate (issue #175 review).
+    """
     stripped = text.lstrip()
     if not stripped:
         return False
-    if stripped[0] in BULLET_CHARS:
+    if stripped[0] in BULLET_CHARS or BULLET_RE.match(stripped):
         return True
-    return bool(BULLET_RE.match(stripped) or NUMBERED_LIST_RE.match(stripped))
+    if NUMBERED_LIST_RE.match(stripped):
+        return _is_numbered_item(current_item) or not _reads_unfinished(current_item)
+    return False
 
 
 def _format_list_item(text: str, depth: int) -> str:
@@ -303,7 +329,8 @@ def _render_list_spans(sec: Section) -> str:
         rendered = _render_line_spans(line).strip()
         if not rendered:
             continue
-        if _is_list_item_start(rendered) or not items:
+        current_item = " ".join(items[-1]) if items else ""
+        if not items or _is_list_item_start(rendered, current_item):
             items.append([rendered])
         else:
             items[-1].append(rendered)

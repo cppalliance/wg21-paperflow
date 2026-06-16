@@ -1210,12 +1210,18 @@ def _assign_list_nesting(sections: list[Section]) -> None:
     """Set ``indent_level`` on LIST sections from their relative x-position.
 
     Mutates the sections in place. Nesting depth is relative within each
-    run of consecutive LIST sections, not absolute from the body margin:
-    the leftmost bullets in a run are depth 0, the next x-stop is depth 1,
-    and so on. This is the only place depth is computed (the position
-    splitter just finds item boundaries) because a parent list and its
-    nested children can arrive as separate sections, so a child's depth
-    is only knowable relative to its siblings across the whole run.
+    run of consecutive LIST sections on a single page, not absolute from
+    the body margin: the leftmost bullets in a run are depth 0, the next
+    x-stop is depth 1, and so on. This is the only place depth is computed
+    (the position splitter just finds item boundaries) because a parent
+    list and its nested children can arrive as separate sections, so a
+    child's depth is only knowable relative to its siblings across the run.
+
+    A run is split at page boundaries before depth is computed. Because
+    depth is purely x-relative, a list that continues onto the next page
+    (or into a second column) can resume at a different left margin, which
+    a whole-run clustering would misread as a new nesting level. Clustering
+    each page independently keeps that margin shift from inventing depth.
     """
     i = 0
     while i < len(sections):
@@ -1225,7 +1231,12 @@ def _assign_list_nesting(sections: list[Section]) -> None:
         j = i
         while j < len(sections) and sections[j].kind == SectionKind.LIST:
             j += 1
-        _set_run_depths(sections[i:j])
+        run = sections[i:j]
+        start = 0
+        for k in range(1, len(run) + 1):
+            if k == len(run) or run[k].page_num != run[start].page_num:
+                _set_run_depths(run[start:k])
+                start = k
         i = j
 
 
@@ -1236,6 +1247,13 @@ def _set_run_depths(run: list[Section]) -> None:
     ``_INDENT_TOLERANCE`` open a new stop); an item's depth is the number
     of stops it sits clear to the right of, using the same tolerance as
     the clustering so the two never disagree.
+
+    Clustering is greedy against the last stop, so a chain of bullets each
+    within tolerance of the previous but spanning more than tolerance
+    end-to-end (e.g. 50, 54, 58 at tolerance 5 -> stops 50, 58) can place
+    near-neighbours at different depths. This is acceptable: real PDFs keep
+    same-level bullets at a consistent x well inside the tolerance, so the
+    evenly-bridged spread does not occur in practice.
     """
     positioned = [(x, sec) for sec in run if (x := _bullet_x(sec)) is not None]
     if not positioned:
