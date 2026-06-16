@@ -523,8 +523,7 @@ class TestDropLeakedTocMixedKind:
 
     @staticmethod
     def _multiline(first, n_lines):
-        """A PARAGRAPH whose first line is `first` but spans `n_lines` physical
-        lines (so len(sec.lines) drives the title-like cap, not the text)."""
+        """A PARAGRAPH whose first line is `first` but spans `n_lines` text lines."""
         lines = [make_line([first])] + [make_line([f"continuation {i}"])
                                         for i in range(1, n_lines)]
         text = "\n".join([first] + [f"continuation {i}" for i in range(1, n_lines)])
@@ -578,9 +577,9 @@ class TestDropLeakedTocMixedKind:
         """Body-safety: the load-bearing title-like / anchor gates."""
         h, lst, body = self._h, self._list, self._body
 
-        # (a) a 3-physical-line body block whose first line matches a later
-        #     heading is NOT an entry (pins the _TOC_ENTRY_MAX_LINES boundary):
-        #     with the cap at 2, the block breaks the run and nothing is removed.
+        # (a) a 3-text-line body block whose first line matches a later heading
+        #     is NOT an entry (pins the _TOC_ENTRY_MAX_LINES boundary): with the
+        #     cap at 2, the block breaks the run and nothing is removed.
         secs_a = [
             h("Abstract"),
             self._multiline("Motivation", 3),   # 3 lines -> not title-like
@@ -591,7 +590,7 @@ class TestDropLeakedTocMixedKind:
         ]
         out_a = drop_leaked_toc_headings(secs_a)
         assert len(out_a) == len(secs_a)
-        assert any(s.text.startswith("Motivation") and len(s.lines) == 3
+        assert any(s.text.startswith("Motivation") and len(s.text.split("\n")) == 3
                    for s in out_a)
 
         # (b) a lone single-line matching paragraph (run length 1) is not removed.
@@ -612,6 +611,21 @@ class TestDropLeakedTocMixedKind:
         ]
         out_c = drop_leaked_toc_headings(secs_c)
         assert len(out_c) == len(secs_c)
+
+        # (d) a 3-line body block with an EMPTY sec.lines list (as produced by
+        #     HTML or synthetic sections) whose first line matches a later heading
+        #     is NOT an entry. Before the fix, len(sec.lines)==0 always passed
+        #     the cap and such blocks were wrongly swept.
+        multi_text = "Motivation\ncontinuation 1\ncontinuation 2"
+        prose = make_section(multi_text, kind=SectionKind.PARAGRAPH, lines=[])
+        secs_d = [
+            h("Abstract"), prose, h("Design"),
+            h("Abstract"), body(),
+            h("Motivation"), body(),
+            h("Design"), body(),
+        ]
+        out_d = drop_leaked_toc_headings(secs_d)
+        assert len(out_d) == len(secs_d)
 
     def test_pure_paragraph_run_not_removed(self):
         """A contiguous run of >= MIN_TOC_RUN recurring title-like list entries

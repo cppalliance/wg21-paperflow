@@ -462,14 +462,16 @@ def _section_is_trivial(sec: Section) -> bool:
 _BARE_DIGIT_NUM_RE = re.compile(r"^\d+(?:\.\d+)*\.?$")
 
 
-# Max physical lines a PARAGRAPH/LIST section may have to still count as a
-# leaked TOC entry. A leaked entry the heading classifier left as body text
-# (a title line such as "3. The Rationale for Unification") is at most a title
-# that wrapped once; three or more physical lines is real prose and is never an
-# entry, whatever its first line matches. This is the load-bearing protection
-# against absorbing real single-line-ish content through the emptiness bridging
-# below. Coupling caveat: corpus-tuned alongside `_TOC_ENTRY_MAX_BODY_CHARS`
-# and `MIN_TOC_RUN` (toc.py); a paper needing a different bound changes the
+# Max text lines a PARAGRAPH/LIST section may have to still count as a leaked
+# TOC entry. A leaked entry the heading classifier left as body text (a title
+# line such as "3. The Rationale for Unification") is at most a title that
+# wrapped once; three or more lines is real prose and is never an entry,
+# whatever its first line matches. This is the load-bearing protection against
+# absorbing real single-line-ish content through the emptiness bridging below.
+# Line count is derived from sec.text (the canonical text field) not sec.lines
+# (raw PDF Line objects, which may be empty for HTML or synthetic sections).
+# Coupling caveat: corpus-tuned alongside `_TOC_ENTRY_MAX_BODY_CHARS` and
+# `MIN_TOC_RUN` (toc.py); a paper needing a different bound changes the
 # constant, not the call sites.
 _TOC_ENTRY_MAX_LINES = 2
 
@@ -570,13 +572,13 @@ def drop_leaked_toc_headings(sections: list[Section]) -> list[Section]:
     # 2. non-heading entry-ness (PARAGRAPH/LIST): title-like AND recurs as a
     #    later heading. Computed FIRST because heading-emptiness (step 3)
     #    consumes it, while it does not itself depend on heading-emptiness.
-    #    Title-like = at most `_TOC_ENTRY_MAX_LINES` physical lines; this is the
-    #    load-bearing guard that keeps a multi-line body block from being an
-    #    entry just because its first line echoes a heading.
+    #    Title-like = at most `_TOC_ENTRY_MAX_LINES` text lines (from sec.text);
+    #    this is the load-bearing guard that keeps a multi-line body block from
+    #    being an entry just because its first line echoes a heading.
     nonheading_entry = [False] * n
     for i, sec in enumerate(sections):
         if (_is_paragraphish(sec)
-                and len(sec.lines) <= _TOC_ENTRY_MAX_LINES
+                and len(sec.text.split("\n")) <= _TOC_ENTRY_MAX_LINES
                 and _recurs_later(sec, i)):
             nonheading_entry[i] = True
 
