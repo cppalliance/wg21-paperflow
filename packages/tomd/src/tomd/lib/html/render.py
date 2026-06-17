@@ -9,10 +9,10 @@ from bs4 import BeautifulSoup, CData, Comment, Tag, NavigableString
 
 from .. import strip_format_chars, ALLOWED_LINK_SCHEMES
 from ..wording_markup import WORDING_FENCE_CLOSE, wording_fence_open, wording_tag_open
+from .. import tables as _tables
 
 _BOLD_WRAP_RE = re.compile(r"^\*\*(.+)\*\*$")
 _LOSSY_TABLE_MARKER = "<!-- tomd:lossy-table -->"
-_MIXED_TABLE_MARKER = "<!-- tomd:mixed-table -->"
 _COLLAPSE_WS_RE = re.compile(r"\s+")
 
 _HEADING_TAGS = frozenset({"h1", "h2", "h3", "h4", "h5", "h6"})
@@ -1196,14 +1196,10 @@ def _render_mixed_code_table(el: Tag) -> str | None:
     if num_cols == 0:
         return None
 
-    col_w = f"{100 // num_cols}%"
-    _S = (f"border: 1px solid #999; padding: 6px 10px; "
-          f"vertical-align: top; width: {col_w};")
-    parts: list[str] = [
-        _MIXED_TABLE_MARKER,
-        '<table border="1" rules="all" cellpadding="6" cellspacing="0"'
-        ' style="border-collapse: collapse; width: 100%;">',
-    ]
+    # Shared markup (table tag, cell style, <pre><code> wrapping) lives in
+    # lib/tables.py so HTML and PDF comparison tables render identically.
+    style = _tables.cell_style(num_cols)
+    parts: list[str] = [_tables.MIXED_TABLE_MARKER, _tables.TABLE_OPEN]
 
     for tr in trs:
         parts.append("<tr>")
@@ -1212,19 +1208,14 @@ def _render_mixed_code_table(el: Tag) -> str | None:
             tag = cell.name
             code_el = cell.find(list(_CODE_BLOCK_TAGS))
             if code_el:
-                code_text = code_el.get_text().strip()
-                escaped = _html.escape(code_text)
-                escaped = "\n".join(line or "&#10;" for line in escaped.split("\n"))
                 parts.append(
-                    f'<{tag} style="{_S}">'
-                    f'<pre style="margin: 0;"><code>{escaped}</code></pre>'
-                    f'</{tag}>')
+                    _tables.code_cell(tag, code_el.get_text().strip(), style))
             else:
-                inner = _cell_inner_html(cell)
-                parts.append(f'<{tag} style="{_S}">{inner}</{tag}>')
+                parts.append(
+                    _tables.text_cell(tag, _cell_inner_html(cell), style))
         parts.append("</tr>")
 
-    parts.append("</table>")
+    parts.append(_tables.TABLE_CLOSE)
     return "\n".join(parts)
 
 
@@ -1293,9 +1284,11 @@ def _render_table(el: Tag) -> str | None:
 def _render_code_table(el: Tag) -> str | None:
     """Extract fenced code blocks from a table containing <pre> or <code-block>.
 
-    Some generators (dascandy/fiets, Bikeshed, Schultke) wrap code inside
-    table cells. Emit every non-empty block as its own fenced block so
-    before/after comparisons and multi-snippet tables are preserved.
+    Only reached for headerless pure-code tables (``_is_pure_code_table``);
+    headered comparison tables go to ``_render_mixed_code_table``, which
+    preserves the column labels and row structure. Here every non-empty block
+    is emitted as its own fenced block behind a <!-- tomd:lossy-table -->
+    marker.
     """
     blocks: list[str] = []
     for cb in el.find_all(_CODE_BLOCK_TAGS):

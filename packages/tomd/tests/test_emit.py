@@ -285,6 +285,50 @@ def test_emit_table():
     assert "Cell 1" in md
 
 
+def test_emit_code_comparison_html_table():
+    """A CODE_COMPARISON table renders via the shared comparison markup:
+    the mixed-table marker, <th> headers, and <pre><code> code cells. This is
+    byte-identical to what the HTML converter emits (see lib/tables.py)."""
+    from tomd.lib.pdf.types import Section
+    sec = Section(
+        kind=SectionKind.TABLE,
+        text="",
+        table_strategy="html_table",
+        table_kind="code_comparison",
+        columns=[
+            [[make_span("Before")], [make_span("After")]],
+            [[make_span("int verbose();")], [make_span("int proposed();")]],
+        ],
+    )
+    md = emit_markdown({}, [sec])
+    assert "<!-- tomd:mixed-table -->" in md
+    assert ">Before</th>" in md
+    assert ">After</th>" in md
+    assert '<pre style="margin: 0;"><code>int verbose();</code></pre>' in md
+    assert '<pre style="margin: 0;"><code>int proposed();</code></pre>' in md
+
+
+def test_emit_spec_table_html_no_mixed_marker():
+    """Other html_table kinds (here SPEC_TABLE) render as an HTML table with
+    the shared <pre><code> cells but carry no mixed-table marker: only code
+    comparisons are marked, matching the HTML side."""
+    from tomd.lib.pdf.types import Section
+    sec = Section(
+        kind=SectionKind.TABLE,
+        text="",
+        table_strategy="html_table",
+        table_kind="spec_table",
+        columns=[
+            [[make_span("Expression")], [make_span("Return type")]],
+            [[make_span("a.foo()")], [make_span("int")]],
+        ],
+    )
+    md = emit_markdown({}, [sec])
+    assert "<!-- tomd:mixed-table -->" not in md
+    assert "<table" in md
+    assert '<pre style="margin: 0;"><code>' in md
+
+
 def test_emit_wording_section():
     from tomd.lib.pdf.types import Section
     span = make_span("added text")
