@@ -574,6 +574,8 @@ def _is_empty_heading(sections: list[Section], i: int) -> bool:
     for j in range(i + 1, len(sections)):
         if sections[j].kind == SectionKind.HEADING:
             break
+        if sections[j].kind in _TOC_SWEEP_SKIP_KINDS:
+            return False
         if not (_section_is_trivial(sections[j])
                 or _is_title_like_straggler(sections[j])):
             return False
