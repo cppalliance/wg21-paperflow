@@ -626,12 +626,41 @@ def _line_in_caption_region(
     markdown where ``(a)`` lives inside the PNG and ``(b)`` lives
     in italic text.
 
-    This helper is used **only** by the sub-caption capture path.
-    The overall-caption drop (the ``_CAPTION_LABEL_RE`` path) must
-    stay on :func:`_line_in_caption_band` so it remains
-    predicate-equal to :func:`images._caption_for`.
+    This helper is used **only** by the vector branch of the
+    sub-caption capture path (via :func:`_sub_caption_owns`). The
+    overall-caption drop (the ``_CAPTION_LABEL_RE`` path) must stay
+    on :func:`_line_in_caption_band` so it remains predicate-equal to
+    :func:`images._caption_for`.
     """
     return im_bbox[1] <= line_bbox[1] <= im_bbox[3] + _FIGURE_CAPTION_BAND_BELOW_PT
+
+
+def _sub_caption_owns(
+    line_bbox: tuple[float, float, float, float],
+    im: ExtractedImage,
+) -> bool:
+    """Does image ``im`` own the sub-caption line at ``line_bbox``?
+
+    The owning predicate depends on the image source:
+
+    - **Vector** clusters use the wider :func:`_line_in_caption_region`
+      (cluster interior UNION band below). A stacked-sub-figure layout
+      (P3127R1 Figure 1) places one sub-caption *between* the
+      sub-figures, inside the cluster bbox, so the interior must be in
+      scope to capture it.
+    - **Raster** images use the narrow :func:`_line_in_caption_band`
+      (band below only). A raster bbox is a resource-dictionary
+      rectangle that can be hundreds of points tall, and each raster is
+      its own :class:`ExtractedImage` - there is never an interior
+      sub-caption to rescue, only the band-below caption. Using the
+      wide region for raster would capture any ``(a)``-shaped body
+      paragraph anywhere in the raster's vertical span and relocate it
+      as italic text after the image; ``(a)``/``(b)`` enumerations are
+      common in WG21 prose, so the interior must stay out of scope.
+    """
+    if im.source == "vector":
+        return _line_in_caption_region(line_bbox, im.bbox)
+    return _line_in_caption_band(line_bbox, im.bbox)
 
 
 def _normalize_caption(text: str) -> str:
@@ -1086,21 +1115,23 @@ def _filter_sections_inside_vector_images(
 
             # 2. Sub-caption: capture + drop. Walks raster and
             #    vector together via ``page_caption_eligible`` -
-            #    sub-captions sit in the y-only caption band of any
-            #    image, raster or vector, and the attribution is the
-            #    upper image (smaller ``y1``) by the sort order built
-            #    at indexing time. Uses the wider
-            #    ``_line_in_caption_region`` (cluster bbox + band
-            #    below) so a sub-caption sitting between stacked
-            #    sub-figures (P3127R1 Figure 1's "(a)" caption) is
-            #    captured + re-emitted as italic alongside any
-            #    below-cluster sub-captions.
+            #    sub-captions sit in the caption band of any image,
+            #    raster or vector, and the attribution is the upper
+            #    image (smaller ``y0``) by the sort order built at
+            #    indexing time. The owning predicate is source-aware
+            #    (``_sub_caption_owns``): vector clusters use the wide
+            #    cluster-interior-plus-band region so a sub-caption
+            #    between stacked sub-figures (P3127R1 Figure 1's
+            #    "(a)") is captured, while raster images use the
+            #    narrow band-below-only region so an ``(a)``-shaped
+            #    body paragraph inside a tall raster bbox is not
+            #    relocated.
             sub_match = _SUB_CAPTION_RE.match(first_text)
             if sub_match and first_bbox != (0, 0, 0, 0):
                 letter = sub_match.group(1)
                 owner = next(
                     (im for im in page_caption_eligible
-                     if _line_in_caption_region(first_bbox, im.bbox)),
+                     if _sub_caption_owns(first_bbox, im)),
                     None,
                 )
                 if owner is not None:

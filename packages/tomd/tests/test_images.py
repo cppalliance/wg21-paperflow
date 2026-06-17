@@ -3210,6 +3210,60 @@ class TestFilterSectionsInsideVectorImages:
         assert kept == []
         assert captures == {id(img): [("a", "(a) the left panel")]}
 
+    def test_raster_interior_sub_caption_prose_kept(self):
+        """An ``(a)``-shaped body paragraph inside a raster bbox's
+        vertical interior (above the band below) is KEPT, not
+        relocated. A raster bbox is a tall resource-dictionary
+        rectangle and each raster is its own image, so the owning
+        predicate is the narrow band-below region, not the wide
+        cluster interior used for stacked vector sub-figures.
+        ``(a)``/``(b)`` enumerations are common in WG21 prose."""
+        img = _ext_img(
+            page=3, bbox=(86, 100, 506, 500), source="raster",
+            suggested_alt="Figure 1: a tall raster",
+        )
+        # y=300 sits inside the bbox interior (100..500) but well
+        # above the band below (starts at y1=500). The wide
+        # cluster-interior predicate would capture it; the narrow
+        # band-below predicate must not.
+        prose = Section(
+            kind=SectionKind.PARAGRAPH,
+            text="(a) the first list item of body prose",
+            confidence=Confidence.HIGH, page_num=2,
+            lines=[Line(
+                spans=[Span(text="(a) the first list item of body prose",
+                            bbox=(86, 300, 506, 312))],
+                bbox=(86, 300, 506, 312),
+            )],
+        )
+        kept, captures = _filter_sections_inside_vector_images([img], [prose])
+        assert kept == [prose]
+        assert captures == {}
+
+    def test_vector_interior_sub_caption_still_captured(self):
+        """The vector branch keeps the wide cluster-interior region:
+        an ``(a)`` sub-caption between stacked sub-figures (inside the
+        cluster bbox, above the band below) is still captured. This
+        is the P3127R1 behaviour the source-aware predicate
+        preserves."""
+        img = _ext_img(
+            page=3, bbox=(86, 100, 506, 500), source="vector",
+            suggested_alt="Figure 1: stacked sub-figures",
+        )
+        sub = Section(
+            kind=SectionKind.PARAGRAPH,
+            text="(a) the upper sub-figure",
+            confidence=Confidence.HIGH, page_num=2,
+            lines=[Line(
+                spans=[Span(text="(a) the upper sub-figure",
+                            bbox=(86, 300, 506, 312))],
+                bbox=(86, 300, 506, 312),
+            )],
+        )
+        kept, captures = _filter_sections_inside_vector_images([img], [sub])
+        assert kept == []
+        assert captures == {id(img): [("a", "(a) the upper sub-figure")]}
+
     def test_raster_plus_vector_mixed_page_attribution(self):
         """Sub-caption between a raster (upper) and a vector (lower)
         attributes to the raster - the upper image (smaller y1) wins
