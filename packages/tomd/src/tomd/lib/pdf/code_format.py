@@ -64,11 +64,15 @@ _KEYWORDS_BEFORE_PAREN = frozenset(
     }
 )
 
-# Identifiers that idiomatically keep a space before `<`. ``template <T>``
-# is the canonical example; tightening to ``template<T>`` is jarring even
-# though it parses. Other ``foo <T>`` cases (``vector``, ``static_cast``,
-# user types) are the ones we actively want to tighten.
-_KEYWORDS_BEFORE_ANGLE = frozenset({"template"})
+# Keywords that introduce a template / constrained construct and so keep
+# a space before `<`. ``template <T>`` is the canonical example;
+# tightening to ``template<T>`` is jarring even though it parses.
+# ``concept`` is its sibling: should the bare keyword ever land before
+# `<` in a paper, keeping the space is the faithful rendering. Both are
+# reserved words, so a skip here can never suppress tightening of a
+# user-named type or concept-id (``vector <T>``, ``convertible_to <T>``),
+# which is exactly what we still want to tighten.
+_KEYWORDS_BEFORE_ANGLE = frozenset({"template", "concept"})
 
 # `ident <` where ident is a template-class-like name. The lookahead
 # rejects `<<` (stream insertion) and whitespace (`a < b` comparison),

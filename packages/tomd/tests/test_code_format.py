@@ -52,6 +52,22 @@ class TestTemplateAngles:
             == "tuple<int, double, char>"
         )
 
+    def test_keep_space_after_template_keyword(self):
+        assert normalize_code_line("template <T>") == "template <T>"
+
+    def test_keep_space_after_concept_keyword(self):
+        # 'concept' is a reserved keyword introducing a constrained
+        # construct, the sibling of 'template'; keep its space before '<'.
+        assert normalize_code_line("concept <T>") == "concept <T>"
+
+    def test_concept_id_usage_still_tightened(self):
+        # A concept *name* used as a constraint is a template-id, not the
+        # keyword, and is still tightened (the keyword skip is token-exact).
+        assert (
+            normalize_code_line("convertible_to <From, To>")
+            == "convertible_to<From, To>"
+        )
+
     def test_do_not_touch_less_than_comparison(self):
         # `a < b` has `a` and `b` as identifiers but the next token after
         # `<` is whitespace+identifier — but only `<` (identifier+<+space+identifier).
