@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2026 Luan Fonseca de Farias (luan.farias@lincolnloop.com)
+# Copyright (c) 2026 Luan Fonseca (luan@lincolnloop.com)
 #
 # Distributed under the Boost Software License, Version 1.0. (See accompanying
 # file LICENSE_1_0.txt or copy at http://www.boost.org/LICENSE_1_0.txt)
