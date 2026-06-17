@@ -3266,8 +3266,8 @@ class TestFilterSectionsInsideVectorImages:
 
     def test_raster_plus_vector_mixed_page_attribution(self):
         """Sub-caption between a raster (upper) and a vector (lower)
-        attributes to the raster - the upper image (smaller y1) wins
-        by the y1-sort built at indexing time."""
+        attributes to the raster - the upper image (smaller y0) wins
+        by the y0-sort built at indexing time."""
         raster = _ext_img(
             page=3, bbox=(86, 100, 506, 200), source="raster",
             fn="raster.png",

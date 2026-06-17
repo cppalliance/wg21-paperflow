@@ -986,7 +986,7 @@ def _filter_sections_inside_vector_images(
        PARAGRAPH section's first line matches ``_SUB_CAPTION_RE`` AND
        ``_line_in_caption_region(first_line.bbox, im.bbox)`` is True
        for some image, the section is captured against the owning
-       image (upper-image wins by the y1-sorted iteration order) and
+       image (upper-image wins by the y0-sorted iteration order) and
        dropped. Captures are returned in the second tuple element
        so the caller can rebuild the affected
        :class:`ExtractedImage` records via ``dataclasses.replace``
@@ -1044,8 +1044,8 @@ def _filter_sections_inside_vector_images(
     # cover unrelated columns or a watermark backdrop), so Fix A and
     # the per-line filter remain vector-only.
     #
-    # Sort by ``(page, im.bbox.y1, im.bbox.x0)`` so that when two
-    # images' caption bands overlap, the upper one (smaller ``y1``)
+    # Sort by ``(page, im.bbox.y0, im.bbox.x0)`` so that when two
+    # images' caption bands overlap, the upper one (smaller ``y0``)
     # wins attribution. HTML images carry the sentinel
     # ``(0, 0, 0, 0)`` bbox and would false-fire the y-only band
     # predicate, so they are skipped at indexing time.
