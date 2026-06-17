@@ -177,54 +177,6 @@ def test_exact_match_skips_fuzzy_on_large_heading_set():
     assert 3 in result
 
 
-def test_non_toc_indices_blocks_heading_anchor():
-    """A HEADING that matches itself cannot anchor a TOC run.
-
-    On a wording page with several "modify [X]" headings, those
-    headings exact-match themselves in the headings set. Without
-    excluding HEADING indices, the run anchored on the title (fuzzy
-    matching a later 'In [...], insert:' heading) sweeps up adjacent
-    body sections via the gap-fill, dropping real content.
-    """
-    texts = [
-        "P4012R0 | 10 Wording for consteval broadcast",
-        "In [simd.expos], insert:",
-        "[simd.expos] template<class From, class To>",
-        "10.3",
-        "In [simd.expos.defn], insert:",
-        "[simd.expos.defn] template<class From, class To> concept ...",
-    ]
-    headings = {"10.3", "In [simd.expos.defn], insert:"}
-    heading_indices = {3, 4}
-    indices = find_toc_indices(
-        texts, headings, non_toc_indices=heading_indices,
-    )
-    assert indices == set()
-
-
-def test_non_toc_indices_still_allows_real_toc():
-    """Non-heading TOC entries still detect even when headings overlap."""
-    texts = [
-        "Table of Contents",
-        "Introduction",
-        "Motivation",
-        "Design",
-        "Body text",
-        "Introduction",
-        "Motivation",
-        "Design",
-    ]
-    headings = {"Introduction", "Motivation", "Design"}
-    heading_indices = {5, 6, 7}
-    indices = find_toc_indices(
-        texts, headings, non_toc_indices=heading_indices,
-    )
-    assert {0, 1, 2, 3} <= indices
-    assert 5 not in indices
-    assert 6 not in indices
-    assert 7 not in indices
-
-
 def test_large_toc_completes_quickly():
     """Performance guard: 1000 sections x 500 headings must finish in < 2s."""
     import time

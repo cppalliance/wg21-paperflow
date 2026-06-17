@@ -121,7 +121,6 @@ def find_toc_indices(
     structural_hints: list[bool] | None = None,
     full_texts: list[str] | None = None,
     is_heading: list[bool] | None = None,
-    non_toc_indices: set[int] | None = None,
 ) -> set[int]:
     """Return indices of entries that form a Table of Contents.
 
@@ -141,18 +140,11 @@ def find_toc_indices(
         the body of short papers) UNLESS its own text is shaped like a TOC
         line (see _toc_structured), which preserves stripping of a genuine
         numbered TOC entry that section numbering classified as a heading.
-        This is the refined guard the pipeline passes in production.
 
     Production contract: any caller that passes a non-empty `headings` set
     derived from the document's own headings MUST also pass `is_heading`.
     Omitting it resurrects the body-deletion bug (every heading self-matches).
     A debug line is logged when the likely-misuse shape is seen.
-    non_toc_indices: indices that cannot themselves be TOC entries (a
-        heading is part of the document structure, not a forward pointer
-        into it). They neither match a heading nor anchor a run, but the
-        algorithm still walks past them as ordinary non-matches subject
-        to the usual gap budget. This is a coarser alternative to
-        is_heading (no _toc_structured exception); both guards coexist.
 
     Both texts and headings are normalized before comparison. Detects runs
     of MIN_TOC_RUN+ consecutive matches, bridging only trivial gap sections
@@ -174,8 +166,6 @@ def find_toc_indices(
     if headings and is_heading is None:
         _log.debug("no is_heading supplied; heading self-match guard inactive "
                    "(%d headings)", len(headings))
-
-    skip = non_toc_indices or set()
 
     norm_headings = {normalize_toc_entry(h) for h in headings}
     norm_headings.discard("")
@@ -216,9 +206,6 @@ def find_toc_indices(
 
     matches = []
     for i, text in enumerate(texts):
-        if i in skip:
-            matches.append(False)
-            continue
         ft = full_texts[i] if full_texts else text
         # Check dot-leaders per line to avoid false positives on body
         # paragraphs that happen to contain 5+ dots (ASCII art, code).
