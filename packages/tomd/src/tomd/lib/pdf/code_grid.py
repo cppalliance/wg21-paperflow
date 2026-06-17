@@ -123,11 +123,19 @@ class CodeGrid:
 
     @classmethod
     def for_code_section(cls, sec: Section) -> "CodeGrid":
-        """Grid with origin at the block left margin, width from any span."""
+        """Grid with origin at the block left margin, width from any span.
+
+        The origin samples each line's first *content* span (the same
+        accessor :meth:`indent` uses), not ``spans[0]``: a line whose
+        leading span is whitespace-only would otherwise be dropped from
+        the origin computation, and if every line started that way the
+        origin fell back to ``0.0`` and inflated every reconstructed
+        indent.
+        """
         char_w = _estimate_char_width(sec.lines)
         content_x = [
-            ln.spans[0].bbox[0] for ln in sec.lines
-            if ln.spans and ln.spans[0].text.strip()
+            span.bbox[0] for ln in sec.lines
+            if (span := ln.first_content_span()) is not None
         ]
         base_x = min(content_x) if content_x else 0.0
         return cls(origin_x=base_x, char_w=char_w)

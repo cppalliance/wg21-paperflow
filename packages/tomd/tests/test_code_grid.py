@@ -145,6 +145,19 @@ class TestForCodeSection:
         grid = CodeGrid.for_code_section(sec)
         assert grid.origin_x == 100.0
 
+    def test_whitespace_leading_span_does_not_drop_line_from_origin(self):
+        # A line whose spans[0] is whitespace-only still contributes its
+        # content glyph to the origin via first_content_span(); selecting
+        # spans[0] instead would skip this line and lift the origin to the
+        # other line's larger x, inflating every reconstructed indent.
+        ws = make_span("  ", monospace=True, bbox=(80.0, 0.0, 92.0, 10.0))
+        content = make_span("ab", monospace=True,
+                            bbox=(92.0, 0.0, 104.0, 10.0))
+        leading_ws_line = _multi_span_line([ws, content])
+        sec = _code_section([leading_ws_line, _line("cd", x0=100.0)])
+        grid = CodeGrid.for_code_section(sec)
+        assert grid.origin_x == 92.0
+
     def test_empty_section_uses_zero_origin_and_default_width(self):
         sec = _code_section([])
         grid = CodeGrid.for_code_section(sec)
