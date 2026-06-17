@@ -170,17 +170,21 @@ def _render_wording_code_block(sec: Section, lang: str) -> str:
 
     Preserves the per-line structure (unlike the prose path which
     collapses lines) and runs every emitted line through
-    ``normalize_code_line``. Whitespace x-position math is skipped
-    here: wording C++ in WG21 PDFs rarely uses meaningful leading
-    indent (declarations sit at column zero), and span-color drift
-    makes the bbox math less reliable than for native CODE sections.
+    ``normalize_code_line``. Leading indentation is reconstructed from
+    glyph x-positions via ``CodeGrid``, the same machinery the
+    code-diff sibling (:func:`_render_wording_code_diff`) uses, with an
+    implausibly deep indent (a right-margin element split onto its own
+    line) pinned to column zero via ``_MAX_CODE_DIFF_INDENT``. The cap
+    stays appropriate here because wording C++ nests shallowly.
     """
+    grid = CodeGrid.for_code_section(sec)
     code_lines: list[str] = []
     for line in sec.lines:
         text = "".join(span.text for span in line.spans).rstrip()
         if not text:
             continue
-        code_lines.append(normalize_code_line(text.lstrip()))
+        indent = grid.indent(line, max_indent=_MAX_CODE_DIFF_INDENT)
+        code_lines.append(" " * indent + normalize_code_line(text.lstrip()))
     if not code_lines:
         return ""
     return f"```{lang}\n" + "\n".join(code_lines) + "\n```"

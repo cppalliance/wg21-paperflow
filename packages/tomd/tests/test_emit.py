@@ -525,6 +525,22 @@ class TestRenderWordingSection:
         # Code-promoted divs carry no inline role tags by construction.
         assert "<ins>" not in out
 
+    def test_uniform_code_fence_preserves_indentation(self):
+        # A uniform-ins monospace block whose second line sits a few
+        # columns to the right (a hanging-indent continuation): the fence
+        # must reconstruct that indent from glyph x-positions via CodeGrid
+        # instead of flushing every line to column zero.
+        s1 = Span(text="ab", monospace=True, bbox=(100.0, 0.0, 112.0, 10.0))
+        s1.wording_role = "ins"
+        s2 = Span(text="cd", monospace=True, bbox=(118.0, 12.0, 130.0, 22.0))
+        s2.wording_role = "ins"
+        sec = _make_wording_section(
+            SectionKind.WORDING_ADD, [Line(spans=[s1]), Line(spans=[s2])])
+        out = _render_wording_section(sec)
+        assert "```cpp" in out
+        assert "\nab\n" in out
+        assert "\n   cd\n" in out
+
     def test_multiline_mono_mixed_emits_br_code_diff(self):
         # Monospace, multi-line, but NOT uniform role: a partial edit
         # inside a code listing. Keep line structure (<br>) and the inline
