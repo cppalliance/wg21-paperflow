@@ -645,7 +645,7 @@ def _compute_body_start(sections: list[Section], recurs: list[bool]) -> int:
         if (sec.kind == SectionKind.PARAGRAPH
                 and not _section_is_trivial(sec)
                 and not recurs[i]
-                and len(sec.lines) >= 2):
+                and len(sec.lines) >= 2):  # sec.lines counts physical PDF lines, not \n splits; reliable here because _compute_body_start is PDF-only
             return i
     return len(sections)
 
