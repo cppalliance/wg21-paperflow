@@ -158,6 +158,21 @@ class TestStringLiteralSafety:
         line = 'auto s = R"(template <T>)";'
         assert normalize_code_line(line) == line
 
+    def test_quote_only_in_comment_does_not_block_code(self):
+        # A quote (here an apostrophe) living in the trailing comment must
+        # not disable tightening of the code portion before the `//`.
+        assert (
+            normalize_code_line("vector <From> result; // don't")
+            == "vector<From> result; // don't"
+        )
+
+    def test_slashes_inside_string_still_bail(self):
+        # When `//` sits inside a string literal, the split leaves the
+        # opening quote in the code portion, so the literal guard still
+        # trips and the whole line is returned untouched.
+        line = 'auto url = "http://x"; vector <T> v;'
+        assert normalize_code_line(line) == line
+
 
 class TestIndentationPreserved:
     def test_leading_whitespace_kept(self):

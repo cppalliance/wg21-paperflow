@@ -168,14 +168,24 @@ def normalize_code_line(line: str) -> str:
 
     * lines containing string/character literal delimiters (``"`` / ``'``),
     * preprocessor directives (``#include <hdr>`` must keep its space),
+    * lines whose *code* portion (everything before the first ``//``)
 
-    and applies all rules only to the pre-``//`` portion of the line,
-    so identifiers appearing in trailing comments (``// also in <proxy>``)
-    are not mistaken for template names.
+    The literal check runs on the code portion only, so a quote that
+    lives in a trailing comment (``vector <From> result; // don't``)
+    no longer disables tightening of the code. This stays safe even
+    when a ``//`` sits inside a string literal: the split leaves the
+    opening quote in the code portion, so the literal check still trips
+    and the line is returned untouched.
+
+    All tightening rules then apply only to the pre-``//`` portion, so
+    identifiers in trailing comments (``// also in <proxy>``) are never
+    mistaken for template names.
     """
-    if _has_string_literal(line) or _is_preprocessor_directive(line):
+    if _is_preprocessor_directive(line):
         return line
     code, comment = _split_at_line_comment(line)
+    if _has_string_literal(code):
+        return line
     out = code
     out = _tighten_ident_open_angle(out)
     out = _SPACE_BEFORE_CLOSE_ANGLE_RE.sub(r"\1>", out)
