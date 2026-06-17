@@ -54,12 +54,16 @@ def test_check_content_writes_json(store, tmp_path: Path):
     assert result.returncode == 0, (result.stdout, result.stderr)
     assert json_path.exists()
     payload = json.loads(json_path.read_text())
-    assert payload["schema_version"] == 1
+    assert payload["schema_version"] == 2
     assert "constants" in payload
     assert payload["constants"]["shingle_width"] == 5
     assert len(payload["papers"]) == 1
-    assert payload["papers"][0]["paper_id"] == "P1000R0"
-    assert payload["papers"][0]["coverage"] > 0.9
+    paper = payload["papers"][0]
+    assert paper["paper_id"] == "P1000R0"
+    assert paper["coverage"] > 0.9
+    # schema 2 adds the complementary word-level signal
+    assert "unigram_coverage" in paper
+    assert "unigram_drift" in paper
 
 
 def test_check_content_report_structure(store, tmp_path: Path):

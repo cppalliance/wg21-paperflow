@@ -8,6 +8,7 @@ from collections import deque
 from bs4 import BeautifulSoup, CData, Comment, Tag, NavigableString
 
 from .. import strip_format_chars, ALLOWED_LINK_SCHEMES
+from ..wording_markup import WORDING_FENCE_CLOSE, wording_fence_open, wording_tag_open
 
 _BOLD_WRAP_RE = re.compile(r"^\*\*(.+)\*\*$")
 _LOSSY_TABLE_MARKER = "<!-- tomd:lossy-table -->"
@@ -753,16 +754,18 @@ def _render_div(el: Tag, generator: str) -> str | None:
 def _render_wording_div(el: Tag, generator: str) -> str:
     """Render a wording section with Pandoc fenced div markers."""
     classes = el.get("class", [])
+    # Class-selection precedence stays local; only the fence-string
+    # construction is shared (lib.wording_markup). Do not reorder these.
     if "wording-add" in classes:
-        fence = ":::wording-add"
+        fence = wording_fence_open("wording-add")
     elif "wording-remove" in classes:
-        fence = ":::wording-remove"
+        fence = wording_fence_open("wording-remove")
     else:
-        fence = ":::wording"
+        fence = wording_fence_open("wording")
     parts = []
     _render_children(el, parts, generator)
     inner = "\n\n".join(p for p in parts if p.strip())
-    return f"{fence}\n\n{inner}\n\n:::"
+    return f"{fence}\n\n{inner}\n\n{WORDING_FENCE_CLOSE}"
 
 
 def _render_eelis_block(el: Tag, generator: str) -> str | None:
@@ -1373,11 +1376,11 @@ def _inline_text(el: Tag, skip_classes: frozenset[str] = frozenset()) -> str:
                 continue
 
             if tag == "ins":
-                parts.append(f"<ins>{inner}</ins>")
+                parts.append(wording_tag_open("ins", inner))
                 continue
 
             if tag == "del":
-                parts.append(f"<del>{inner}</del>")
+                parts.append(wording_tag_open("del", inner))
                 continue
 
             if tag == "sub":
