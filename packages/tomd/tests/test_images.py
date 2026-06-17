@@ -2968,6 +2968,57 @@ class TestFilterSectionsInsideVectorImages:
         kept, captures = _filter_sections_inside_vector_images([img], [caption])
         assert kept == [caption]
 
+    def test_empty_alt_caption_kept(self):
+        """A ``Figure N:`` paragraph in the caption band of an image
+        whose ``suggested_alt`` is empty is KEPT. The overall-caption
+        drop requires the section text to equal the alt-text after
+        normalization; ``_normalize_caption("") == ""`` never equals a
+        non-empty section, so an image that failed alt-text attribution
+        cannot silently swallow a real caption paragraph."""
+        img = _ext_img(
+            page=6, bbox=(86, 100, 506, 300),
+            suggested_alt="",
+        )
+        caption = Section(
+            kind=SectionKind.PARAGRAPH,
+            text="Figure 1: A graph model.",
+            confidence=Confidence.HIGH, page_num=5,
+            lines=[Line(
+                spans=[Span(text="Figure 1: A graph model.",
+                            bbox=(86, 345, 506, 357))],
+                bbox=(86, 345, 506, 357),
+            )],
+        )
+        kept, captures = _filter_sections_inside_vector_images([img], [caption])
+        assert kept == [caption]
+        assert captures == {}
+
+    def test_different_caption_text_kept(self):
+        """A ``Figure N:`` paragraph in the caption band is KEPT when
+        its text differs from the image's ``suggested_alt``. The gate
+        is exact equality after whitespace normalization, not substring
+        or prefix matching: ``Figure 1: Alpha`` must survive when the
+        alt-text is ``Figure 1: Beta``. Pins the gate against a future
+        weakening to substring matching that would pass the rest of the
+        suite silently."""
+        img = _ext_img(
+            page=6, bbox=(86, 100, 506, 300),
+            suggested_alt="Figure 1: Beta",
+        )
+        caption = Section(
+            kind=SectionKind.PARAGRAPH,
+            text="Figure 1: Alpha",
+            confidence=Confidence.HIGH, page_num=5,
+            lines=[Line(
+                spans=[Span(text="Figure 1: Alpha",
+                            bbox=(86, 345, 506, 357))],
+                bbox=(86, 345, 506, 357),
+            )],
+        )
+        kept, captures = _filter_sections_inside_vector_images([img], [caption])
+        assert kept == [caption]
+        assert captures == {}
+
     def test_sub_caption_single_line_captured_and_dropped(self):
         img = _ext_img(page=6, bbox=(86, 0, 506, 284))
         sub = Section(
