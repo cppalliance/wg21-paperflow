@@ -228,6 +228,54 @@ class TestPromotionConfidentNeighbour:
             )
 
 
+class TestDocumentPoolPromotion:
+    """Stage-4 bulk-pool promotion rescues uncertain pages that pairwise misses.
+
+    Pairwise (stage 3) only considers pg and pg+1.  Non-adjacent uncertain
+    pages whose next_pg is absent from the document are never paired, so they
+    survive into stage 4.  Stage 4 pools ALL still-uncertain pages and checks
+    document-wide similarity.
+
+    Construction: three non-adjacent pages (1, 3, 5) using a three-way
+    round-robin swap of word sets A, B, C:
+      page 1: mupdf=A  spatial=B
+      page 3: mupdf=B  spatial=C
+      page 5: mupdf=C  spatial=A
+    Per-page similarity = 0.0 (sets are disjoint) -> all three uncertain.
+    Pages 2, 4, 6 are absent, so pairwise is skipped for all three.
+    Pooled Counter(A+B+C) == Counter(B+C+A) -> similarity = 1.0 -> promotes.
+    """
+
+    def test_non_adjacent_uncertain_pages_promoted_by_document_pool(self):
+        def words(prefix, n=12):
+            return " ".join(f"{prefix}{i}" for i in range(n))
+
+        a, b, c = words("alpha"), words("beta"), words("gamma")
+
+        p1_m = [make_block([a], page_num=1)]
+        p1_s = [make_block([b], page_num=1)]
+
+        p3_m = [make_block([b], page_num=3)]
+        p3_s = [make_block([c], page_num=3)]
+
+        p5_m = [make_block([c], page_num=5)]
+        p5_s = [make_block([a], page_num=5)]
+
+        sections = compare_extractions(p1_m + p3_m + p5_m, p1_s + p3_s + p5_s)
+
+        # Stage-4 fired: no UNCERTAIN sections remain.
+        assert not any(s.kind == SectionKind.UNCERTAIN for s in sections), (
+            "document-pool promotion should have resolved all uncertain pages"
+        )
+        # Each page emitted exactly once as PARAGRAPH.
+        for pg in (1, 3, 5):
+            rescued = [s for s in sections
+                       if s.page_num == pg and s.kind == SectionKind.PARAGRAPH]
+            assert len(rescued) == 1, (
+                f"page {pg} emitted {len(rescued)} times after pool promotion, expected 1"
+            )
+
+
 class TestParagraphMerging:
     def test_merges_continuation(self):
         sections = [
