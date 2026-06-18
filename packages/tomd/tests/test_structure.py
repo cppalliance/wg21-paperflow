@@ -154,6 +154,128 @@ class TestCompareExtractionsOrdering:
         )
 
 
+class TestPromotionConfidentNeighbour:
+    """A confident page paired into a promotion must not be emitted twice.
+
+    The pairwise promotion loop adds both the uncertain page and its
+    forward neighbour to the promoted set. The re-insertion only re-emits
+    pages that actually carried an UNCERTAIN section, so a confident
+    neighbour (whose PARAGRAPH sections already exist from the first pass)
+    keeps its single copy.
+    """
+
+    def test_confident_neighbour_not_duplicated_on_promotion(self):
+        # Page 0: confident anchor (identical paths).
+        p0 = " ".join(f"anchor{i}" for i in range(12))
+        p0_m = [make_block([p0], page_num=0)]
+        p0_s = [make_block([p0], page_num=0)]
+
+        # Page 1: uncertain alone (paths fully disjoint, each >= 10 words).
+        p1_m = [make_block([" ".join(f"alpha{i}" for i in range(12))], page_num=1)]
+        p1_s = [make_block([" ".join(f"beta{i}" for i in range(12))], page_num=1)]
+
+        # Page 2: confident (identical paths) and large enough that the
+        # combined (page1 + page2) similarity clears SIMILARITY_THRESHOLD:
+        # 80 / (12 + 80) = 0.87 >= 0.82, so the pair promotes.
+        p2 = " ".join(f"gamma{i}" for i in range(80))
+        p2_m = [make_block([p2], page_num=2)]
+        p2_s = [make_block([p2], page_num=2)]
+
+        mupdf = p0_m + p1_m + p2_m
+        spatial = p0_s + p1_s + p2_s
+
+        sections = compare_extractions(mupdf, spatial)
+
+        # Promotion actually fired: page 1's UNCERTAIN section is gone and its
+        # content is emitted as PARAGRAPH. Without this assertion a future
+        # SIMILARITY_THRESHOLD retune that stops the pair promoting would make
+        # the no-duplication check below pass trivially (green while testing
+        # nothing).
+        assert not any(s.kind == SectionKind.UNCERTAIN for s in sections)
+        page1 = [s for s in sections if s.page_num == 1]
+        assert page1 and all(s.kind == SectionKind.PARAGRAPH for s in page1), (
+            "page 1 should have been rescued to PARAGRAPH by promotion"
+        )
+
+        # The confident neighbour (page 2) appears exactly once.
+        page2 = [s for s in sections
+                 if s.page_num == 2 and s.kind == SectionKind.PARAGRAPH]
+        assert len(page2) == 1, (
+            f"confident neighbour emitted {len(page2)} times, expected 1"
+        )
+
+    def test_both_neighbours_uncertain_each_emitted_once(self):
+        """The genuine cross-page-split case: both pages uncertain alone but
+        agreeing combined are each rescued exactly once (no under-rescue)."""
+        first = " ".join(f"aaa{i}" for i in range(10))
+        second = " ".join(f"bbb{i}" for i in range(10))
+
+        # Page 1 and page 2 each disagree per-page (swapped halves) but agree
+        # combined, so both are uncertain alone and both promote.
+        p1_m = [make_block([first], page_num=1)]
+        p1_s = [make_block([second], page_num=1)]
+        p2_m = [make_block([second], page_num=2)]
+        p2_s = [make_block([first], page_num=2)]
+
+        sections = compare_extractions(p1_m + p2_m, p1_s + p2_s)
+
+        assert not any(s.kind == SectionKind.UNCERTAIN for s in sections)
+        for pg in (1, 2):
+            rescued = [s for s in sections
+                       if s.page_num == pg and s.kind == SectionKind.PARAGRAPH]
+            assert len(rescued) == 1, (
+                f"page {pg} emitted {len(rescued)} times, expected 1"
+            )
+
+
+class TestDocumentPoolPromotion:
+    """Stage-4 bulk-pool promotion rescues uncertain pages that pairwise misses.
+
+    Pairwise (stage 3) only considers pg and pg+1.  Non-adjacent uncertain
+    pages whose next_pg is absent from the document are never paired, so they
+    survive into stage 4.  Stage 4 pools ALL still-uncertain pages and checks
+    document-wide similarity.
+
+    Construction: three non-adjacent pages (1, 3, 5) using a three-way
+    round-robin swap of word sets A, B, C:
+      page 1: mupdf=A  spatial=B
+      page 3: mupdf=B  spatial=C
+      page 5: mupdf=C  spatial=A
+    Per-page similarity = 0.0 (sets are disjoint) -> all three uncertain.
+    Pages 2, 4, 6 are absent, so pairwise is skipped for all three.
+    Pooled Counter(A+B+C) == Counter(B+C+A) -> similarity = 1.0 -> promotes.
+    """
+
+    def test_non_adjacent_uncertain_pages_promoted_by_document_pool(self):
+        def words(prefix, n=12):
+            return " ".join(f"{prefix}{i}" for i in range(n))
+
+        a, b, c = words("alpha"), words("beta"), words("gamma")
+
+        p1_m = [make_block([a], page_num=1)]
+        p1_s = [make_block([b], page_num=1)]
+
+        p3_m = [make_block([b], page_num=3)]
+        p3_s = [make_block([c], page_num=3)]
+
+        p5_m = [make_block([c], page_num=5)]
+        p5_s = [make_block([a], page_num=5)]
+
+        sections = compare_extractions(p1_m + p3_m + p5_m, p1_s + p3_s + p5_s)
+
+        # Stage-4 fired: no UNCERTAIN sections remain.
+        assert not any(s.kind == SectionKind.UNCERTAIN for s in sections), (
+            "document-pool promotion should have resolved all uncertain pages"
+        )
+        # Each page emitted exactly once as PARAGRAPH.
+        for pg in (1, 3, 5):
+            rescued = [s for s in sections
+                       if s.page_num == pg and s.kind == SectionKind.PARAGRAPH]
+            assert len(rescued) == 1, (
+                f"page {pg} emitted {len(rescued)} times after pool promotion, expected 1"
+            )
+
+
 class TestParagraphMerging:
     def test_merges_continuation(self):
         sections = [
