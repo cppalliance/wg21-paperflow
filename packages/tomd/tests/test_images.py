@@ -3659,6 +3659,32 @@ class TestFilterSectionsInsideVectorImages:
         assert kept == [sub]
         assert captures == {}
 
+    def test_list_kind_multi_line_not_captured(self):
+        """A multi-line LIST section whose first line matches _SUB_CAPTION_RE
+        must NOT be captured as a sub-caption. Only single-line LIST sections
+        qualify; multi-line lists are real enumerated content."""
+        img = _ext_img(page=6, bbox=(86, 0, 506, 284))
+        sub = Section(
+            kind=SectionKind.LIST,
+            text="(a) first item\n(b) second item",
+            confidence=Confidence.HIGH, page_num=5,
+            lines=[
+                Line(
+                    spans=[Span(text="(a) first item",
+                                bbox=(86, 290, 506, 302))],
+                    bbox=(86, 290, 506, 302),
+                ),
+                Line(
+                    spans=[Span(text="(b) second item",
+                                bbox=(86, 304, 506, 316))],
+                    bbox=(86, 304, 506, 316),
+                ),
+            ],
+        )
+        kept, captures = _filter_sections_inside_vector_images([img], [sub])
+        assert kept == [sub], "multi-line LIST must not be captured as sub-caption"
+        assert captures == {}
+
 
 class TestLineInCaptionBandPredicateEquality:
     """``_line_in_caption_band`` must fire on exactly the same set of

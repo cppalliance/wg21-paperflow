@@ -1130,7 +1130,8 @@ def _filter_sections_inside_vector_images(
             #    body paragraph inside a tall raster bbox is not
             #    relocated.
             sub_match = _SUB_CAPTION_RE.match(first_text)
-            if sub_match and first_bbox != (0, 0, 0, 0):
+            if (sub_match and first_bbox != (0, 0, 0, 0)
+                    and (sec.kind is not SectionKind.LIST or len(sec.lines) == 1)):
                 letter = sub_match.group(1)
                 owner = next(
                     (im for im in page_caption_eligible
