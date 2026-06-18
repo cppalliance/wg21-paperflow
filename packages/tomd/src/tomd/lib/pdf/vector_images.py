@@ -1415,14 +1415,25 @@ def extract_page_vector_images(
         aspect_bypassed = False
         if max(width / height, height / width) >= _MAX_CLUSTER_ASPECT_RATIO:
             # Strip-shaped cluster: code-block background fill or shaded
-            # callout spanning the page width. Code-block backgrounds
-            # carry 1-10 drawing items. Real diagram clusters -- merged
-            # sub-panel rows or populated frame containers -- carry >=
-            # _VIRTUAL_MIN_ITEM_COUNT items and bypass this check.
-            # aspect_bypassed also suppresses the is_diagram gate below:
-            # merging sub-panels into one wide bbox dilutes cov_sum and
-            # inflates overlap, making is_diagram unreliable for these
-            # clusters. The item count is the reliable signal here.
+            # callout spanning the page width.
+            #
+            # Safety floor: ``item_count >= _VIRTUAL_MIN_ITEM_COUNT`` (50)
+            # is the LOAD-BEARING threshold. Corpus calibration:
+            #   - Code-block backgrounds and shaded callouts: 1-10 items.
+            #   - Real diagram clusters (merged sub-panel rows produced by
+            #     _merge_row_clusters, populated frame containers from
+            #     container detection): >=50 items.
+            # The 50-item floor applies to ALL extreme-aspect clusters,
+            # not only virtual ones from container detection.
+            #
+            # ``aspect_bypassed`` suppresses TWO gates at line ~1473:
+            #   1. The overlap check (_MAX_TEXT_OVERLAP_FRACTION): merging
+            #      sub-panels into one wide bbox inflates overlap because
+            #      internal labels now lie inside the combined bbox,
+            #      making is_diagram unreliable. The item count is the
+            #      reliable structural signal for these clusters.
+            #   2. The low-overlap item floor (_LOW_OVERLAP_ADMIT_MIN_ITEMS):
+            #      already satisfied (item_count >= 50 >> 30).
             if item_count < _VIRTUAL_MIN_ITEM_COUNT:
                 reasons[REASON_ASPECT_EXTREME] = reasons.get(REASON_ASPECT_EXTREME, 0) + 1
                 continue

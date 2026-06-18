@@ -1637,6 +1637,34 @@ class TestAspectExtremeFilter:
         cands, _stats = extract_page_vector_images(page, [])
         assert len(cands) == 1
 
+    def test_aspect_extreme_below_item_threshold_drops(self, monkeypatch):
+        self._setup(monkeypatch)
+        # 400x80 strip -> aspect 5.0. items=49 < _VIRTUAL_MIN_ITEM_COUNT=50.
+        # Must be rejected as REASON_ASPECT_EXTREME.
+        drawings = [_drawing(100, 100, 500, 180, items=49)]
+        page = _mock_page(drawings)
+        cands, stats = extract_page_vector_images(page, [])
+        assert cands == []
+        assert stats.reasons.get(REASON_ASPECT_EXTREME) == 1
+
+    def test_aspect_extreme_at_item_threshold_admits_despite_high_overlap(
+        self, monkeypatch
+    ):
+        # 400x80 strip -> aspect 5.0. items=50 == _VIRTUAL_MIN_ITEM_COUNT.
+        # aspect_bypassed=True must suppress the text-overlap gate even
+        # when a text block fully covers the cluster (overlap=1.0 >>
+        # _MAX_TEXT_OVERLAP_FRACTION). Pins that both overlap guards at
+        # line ~1473 are skipped, not just the item-floor guard.
+        self._setup(monkeypatch)
+        drawings = [_drawing(100, 100, 500, 180, items=50)]
+        page = _mock_page(drawings)
+        text_block = Block(bbox=(100.0, 100.0, 500.0, 180.0))
+        cands, _stats = extract_page_vector_images(page, [text_block])
+        assert len(cands) == 1, (
+            "aspect_bypassed must suppress the overlap gate for extreme-aspect "
+            "clusters with items >= _VIRTUAL_MIN_ITEM_COUNT"
+        )
+
 
 class TestContainerDetection:
     """Frame-shaped drawings that enclose smaller clusters trigger
