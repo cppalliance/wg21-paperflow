@@ -291,11 +291,12 @@ Enums:
 - Stops on duplicate first-line (second occurrence = real heading, not TOC entry)
 - Includes preceding "Table of Contents" / "Contents" label
 
-**T29b. Leaked heading-kind TOC removal (#122 post-pass)**
+**T29b. Leaked mixed-kind TOC removal**
 - `structure.py:drop_leaked_toc_headings`, run after the T29 strip and the IMAGE filter, before emit
-- T29 deliberately does not match a heading-kind TOC entry that lacks the dot-leader shape (the `is_heading` guard, to avoid the body-deletion class). Such a TOC therefore leaks: each entry survives as an empty duplicate heading. This pass removes them.
-- Removes a `HEADING` only when it is (1) empty (no section above `_TOC_ENTRY_MAX_BODY_CHARS` between it and the next heading) and (2) its normalized title recurs as a *later* heading, AND it belongs to a contiguous run of at least `MIN_TOC_RUN` (shared with `toc.py`) such headings. A run whose levels strictly increase across the whole run is rejected (a `15`/`15.1`/`15.1.1` clause-container stack, not a TOC). Also drops in-span trivial fragments (split page numbers) and a preceding "Table of Contents" label.
-- Body-safe by construction: an empty heading has no body, so no prose/code/table/list can be removed. The run gate confines removal to dense front-of-section TOC blocks; a lone recurring container is spared. `_TOC_ENTRY_MAX_BODY_CHARS` and `MIN_TOC_RUN` are corpus-tuned; under-removal leaves a cosmetic duplicate heading, never body loss.
+- T29 deliberately does not match a heading-kind TOC entry that lacks the dot-leader shape (the `is_heading` guard, to avoid the body-deletion class). Such a TOC therefore leaks, and it leaks as a *mix* of kinds: some entries survive as empty duplicate `HEADING`s, others as short title-like `PARAGRAPH`/`LIST` sections (`3. The Rationale for Unification`). The heading-only predecessor caught only the heading-kind entries; this pass removes the whole block.
+- The single discriminator across both kinds is **recurrence as a later heading**. A `HEADING` is an entry when it is empty and its normalized title recurs later; a `PARAGRAPH`/`LIST` is an entry when it is title-like (at most `_TOC_ENTRY_MAX_LINES` text lines, derived from `sec.text`) and its first-line title recurs later. A heading's emptiness bridges trivial fragments *and* non-heading entries, so `## 3.7 Summary` sitting over a `LIST`-kind entry still counts as empty.
+- Removal is a contiguous run of entries (only trivial fragments or other entries between members) of length at least `MIN_TOC_RUN` (shared with `toc.py`) that clears the **heading anchor**: it must contain at least one empty-heading entry. A run whose heading subsequence strictly deepens is rejected (`15`/`15.1`/`15.1.1` clause-container stack; applies to all-heading and mixed runs alike). Also drops in-span trivial fragments and a preceding `Table of Contents` label whether it is paragraph-kind or heading-kind (P4003R1's leaked `### Table of Contents`).
+- Not body-safe by construction (it removes `PARAGRAPH`/`LIST`, not only empty headings). The heading anchor restores most of the margin: paragraph/list entries are deleted only inside the span of a confirmed heading-kind TOC block, never as a free-floating cluster. Combined with exact normalized match, the title-like line cap, and the run floor, removal stays structurally bounded; the corpus anchor + near-miss + body-safety gates confirm it. `_TOC_ENTRY_MAX_BODY_CHARS`, `_TOC_ENTRY_MAX_LINES`, and `MIN_TOC_RUN` are corpus-tuned; under-removal leaves a cosmetic remnant. Recall limit: an entry whose body counterpart is *not* a recurrence-matching heading (P4007R0's once-only `8.1`-`8.4` objection titles) carries no signal and is left in place.
 
 ### Layer 9: Emission (8 techniques)
 
@@ -342,7 +343,7 @@ Enums:
 - `pipeline.py:run_pipeline`
 - Strict ordering of all pipeline steps. Early exit via `SkipReason` on empty PDF, slide deck, standards draft, or unreadable text.
 - Metadata merging: `{**structure_metadata, **wg21_metadata}` - WG21 metadata takes precedence.
-- TOC heading collection: only HEADING sections used as the reference set for TOC matching. The per-section `is_heading` flags are also passed to `find_toc_indices` so a body heading cannot match itself out of existence (#122).
+- TOC heading collection: only HEADING sections used as the reference set for TOC matching. The per-section `is_heading` flags are also passed to `find_toc_indices` so a body heading cannot match itself out of existence.
 
 ### Layer 11: Quality Assurance (1 technique)
 
