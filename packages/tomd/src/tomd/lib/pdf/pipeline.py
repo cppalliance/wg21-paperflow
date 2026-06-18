@@ -676,10 +676,10 @@ def _normalize_caption(text: str) -> str:
 
     Conservative by design. Only normalizes whitespace:
 
-    - NBSP (U+00A0) collapses to regular space (PDF text layers
-      sometimes emit NBSP where a normal space rendered visually).
-    - Whitespace runs - including newlines injected by the
-      structure pass's wrap-join - collapse to a single space.
+    - All whitespace runs (including NBSP U+00A0 and newlines injected
+      by the structure pass's wrap-join) collapse to a single space.
+      ``str.split()`` without arguments treats U+00A0 as whitespace,
+      so no explicit NBSP replacement is needed.
     - Leading and trailing whitespace are stripped.
 
     Explicitly does NOT lowercase, strip punctuation, normalize
@@ -688,7 +688,6 @@ def _normalize_caption(text: str) -> str:
     difference; the equality fails and the drop is skipped. Missing
     a leak is preferable to losing content.
     """
-    text = text.replace(" ", " ")
     return " ".join(text.split())
 
 
