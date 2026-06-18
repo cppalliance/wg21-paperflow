@@ -70,6 +70,7 @@ from .docling_backend import (
     absorb_cross_page_spec_rows as _absorb_cross_page_spec_rows,
     discover_tables_with_docling as _discover_tables_with_docling,
 )
+from ._fitz_lock import _FITZ_LOCK
 
 __all__ = ["run_pipeline", "PipelineResult", "ExtractedImage"]
 
@@ -1372,192 +1373,193 @@ def run_pipeline(
     result = PipelineResult()
     doc = None
     vector_stats = _VectorExtractionStats() if extract_vector else None
-    try:
-        doc = fitz.open(str(path))
-        page_count = doc.page_count
-        if page_count == 0:
-            return _enforce_skip_contract(
-                PipelineResult.for_skip(SkipReason.EMPTY_PDF, page_count=0)
-            )
-
-        if _is_slide_deck(doc):
-            _log.info("Detected slide deck (%d pages), skipping conversion",
-                       page_count)
-            return _enforce_skip_contract(PipelineResult.for_skip(
-                SkipReason.SLIDE_DECK,
-                page_count=page_count,
-                prompts=["# tomd - Slide Deck Detected\n\n"
-                    "This PDF appears to be a presentation / slide deck. "
-                    "tomd does not convert slide decks to Markdown.\n"],
-            ))
-
-        if _is_standards_draft(doc):
-            _log.info("Detected standards draft (%d pages), skipping conversion",
-                       page_count)
-            return _enforce_skip_contract(PipelineResult.for_skip(
-                SkipReason.STANDARDS_DRAFT,
-                page_count=page_count,
-                prompts=["# tomd - Standards Draft Detected\n\n"
-                    f"This PDF has {page_count} pages and appears to be "
-                    "a standards draft. tomd is designed for technical papers.\n"],
-            ))
-
-        result.page_count = page_count
-
-        all_mupdf_blocks = []
-        all_spatial_blocks = []
-        all_edge_items = []
-        page_widths: dict[int, float] = {}
-        # Rotated pages: pg -> rotation matrix (page space -> reading
-        # space).  Used for reading-order sorting and table insertion.
-        page_rotations: dict[int, tuple] = {}
-        per_page_image_candidates: list = []
-        # Sub-threshold raster glyphs (font-replacement emoji) and the
-        # text-layer emoji bboxes used to skip coincident positions.
-        # Both gathered while the doc is open; injected after the
-        # readability gate so unreadable PDFs discard glyph state too.
-        glyph_candidates: list = []
-        text_emoji_by_page: dict[int, list] = {}
-
-        for pg_num in range(result.page_count):
-            page = doc[pg_num]
-            page_widths[pg_num] = page.rect.width
-            if page.rotation:
-                page_rotations[pg_num] = tuple(page.rotation_matrix)
-
-            mupdf_blocks = extract_mupdf(page, pg_num)
-            spatial_blocks = extract_spatial(page, pg_num)
-
-            edge_items = (
-                get_edge_items(mupdf_blocks, pg_num)
-                + get_edge_items(spatial_blocks, pg_num)
-            )
-            all_edge_items.append(edge_items)
-
-            links = collect_links(page)
-            attach_links(mupdf_blocks, links)
-            attach_links(spatial_blocks, links)
-
-            raster_candidates = extract_page_images(page, spatial_blocks)
-            if extract_vector:
-                vector_candidates, page_vector_stats = extract_page_vector_images(
-                    page, spatial_blocks, whiteout_text=whiteout_text,
+    with _FITZ_LOCK:  # see _fitz_lock.py for why this lock is required
+        try:
+            doc = fitz.open(str(path))
+            page_count = doc.page_count
+            if page_count == 0:
+                return _enforce_skip_contract(
+                    PipelineResult.for_skip(SkipReason.EMPTY_PDF, page_count=0)
                 )
-                vector_stats = _VectorExtractionStats.combine(
-                    vector_stats, page_vector_stats,
+
+            if _is_slide_deck(doc):
+                _log.info("Detected slide deck (%d pages), skipping conversion",
+                           page_count)
+                return _enforce_skip_contract(PipelineResult.for_skip(
+                    SkipReason.SLIDE_DECK,
+                    page_count=page_count,
+                    prompts=["# tomd - Slide Deck Detected\n\n"
+                        "This PDF appears to be a presentation / slide deck. "
+                        "tomd does not convert slide decks to Markdown.\n"],
+                ))
+
+            if _is_standards_draft(doc):
+                _log.info("Detected standards draft (%d pages), skipping conversion",
+                           page_count)
+                return _enforce_skip_contract(PipelineResult.for_skip(
+                    SkipReason.STANDARDS_DRAFT,
+                    page_count=page_count,
+                    prompts=["# tomd - Standards Draft Detected\n\n"
+                        f"This PDF has {page_count} pages and appears to be "
+                        "a standards draft. tomd is designed for technical papers.\n"],
+                ))
+
+            result.page_count = page_count
+
+            all_mupdf_blocks = []
+            all_spatial_blocks = []
+            all_edge_items = []
+            page_widths: dict[int, float] = {}
+            # Rotated pages: pg -> rotation matrix (page space -> reading
+            # space).  Used for reading-order sorting and table insertion.
+            page_rotations: dict[int, tuple] = {}
+            per_page_image_candidates: list = []
+            # Sub-threshold raster glyphs (font-replacement emoji) and the
+            # text-layer emoji bboxes used to skip coincident positions.
+            # Both gathered while the doc is open; injected after the
+            # readability gate so unreadable PDFs discard glyph state too.
+            glyph_candidates: list = []
+            text_emoji_by_page: dict[int, list] = {}
+
+            for pg_num in range(result.page_count):
+                page = doc[pg_num]
+                page_widths[pg_num] = page.rect.width
+                if page.rotation:
+                    page_rotations[pg_num] = tuple(page.rotation_matrix)
+
+                mupdf_blocks = extract_mupdf(page, pg_num)
+                spatial_blocks = extract_spatial(page, pg_num)
+
+                edge_items = (
+                    get_edge_items(mupdf_blocks, pg_num)
+                    + get_edge_items(spatial_blocks, pg_num)
                 )
-                per_page_image_candidates.append(
-                    raster_candidates + vector_candidates
-                )
-            else:
-                per_page_image_candidates.append(raster_candidates)
+                all_edge_items.append(edge_items)
 
-            page_glyphs = collect_glyph_candidates(page)
-            if page_glyphs:
-                glyph_candidates.extend(page_glyphs)
-                # Only pages carrying glyphs need the coincidence check,
-                # so the rawdict emoji scan is scoped to them.
-                text_emoji_by_page[pg_num + 1] = collect_text_emoji_bboxes(page)
+                links = collect_links(page)
+                attach_links(mupdf_blocks, links)
+                attach_links(spatial_blocks, links)
 
-            all_mupdf_blocks.extend(mupdf_blocks)
-            all_spatial_blocks.extend(spatial_blocks)
+                raster_candidates = extract_page_images(page, spatial_blocks)
+                if extract_vector:
+                    vector_candidates, page_vector_stats = extract_page_vector_images(
+                        page, spatial_blocks, whiteout_text=whiteout_text,
+                    )
+                    vector_stats = _VectorExtractionStats.combine(
+                        vector_stats, page_vector_stats,
+                    )
+                    per_page_image_candidates.append(
+                        raster_candidates + vector_candidates
+                    )
+                else:
+                    per_page_image_candidates.append(raster_candidates)
 
-        # Detect two-column pages from raw (pre-stripping) blocks.
-        two_column_pages: frozenset[int] = frozenset(
-            pg for pg in page_widths
-            if _detect_column_split(
-                [b for b in all_mupdf_blocks if b.page_num == pg],
-                page_widths[pg],
-            ) is not None
-        )
-        if two_column_pages:
-            _log.debug("Two-column pages: %s", sorted(two_column_pages))
+                page_glyphs = collect_glyph_candidates(page)
+                if page_glyphs:
+                    glyph_candidates.extend(page_glyphs)
+                    # Only pages carrying glyphs need the coincidence check,
+                    # so the rawdict emoji scan is scoped to them.
+                    text_emoji_by_page[pg_num + 1] = collect_text_emoji_bboxes(page)
 
-        font_counts: Counter[str] = Counter()
-        for b in all_mupdf_blocks:
-            for ln in b.lines:
-                for s in ln.spans:
-                    if s.text.strip():
-                        font_counts[s.font_name.lower()] += len(s.text)
-        body_fonts = {f for f, _ in font_counts.most_common(5)}
+                all_mupdf_blocks.extend(mupdf_blocks)
+                all_spatial_blocks.extend(spatial_blocks)
 
-        all_hidden: dict[int, set[tuple[float, float, float, float]]] = {}
-        for pg_num in range(result.page_count):
-            page = doc[pg_num]
-            pg_hidden = find_hidden_regions(page, body_fonts)
-            if pg_hidden:
-                all_hidden[pg_num] = pg_hidden
-
-        page0_colors = _get_page0_text_colors(doc[0]) if result.page_count > 0 else {}
-
-        page_drawings: dict[int, list] = {}
-        page_mupdf_tables: dict[int, list[dict]] = {}
-        all_figure_regions = []
-        for pg_num in range(result.page_count):
-            page = doc[pg_num]
-            drawings = collect_line_drawings(page)
-            if drawings:
-                page_drawings[pg_num] = drawings
-
-            raw_drawings = page.get_drawings()
-            page_figures = detect_figure_regions(
-                raw_drawings, pg_num, page.rect.width)
-            all_figure_regions.extend(page_figures)
-
-            # Intentional: runs unconditionally (independent of ml_tables).
-            # Three table-detection passes rely on the MuPDF signal:
-            # SBS deferral (Pass 0/2), inline-grid overlap (Pass 2b),
-            # and MuPDF Native (Pass 5).  Cost accepted across the
-            # 382-paper corpus.  Gate behind a flag if profiling shows
-            # this dominates conversion time on large documents.
-            try:
-                ft = page.find_tables()
-                if ft.tables:
-                    # On rotated pages find_tables() reports bboxes in
-                    # reading (display) space while extract_mupdf blocks
-                    # stay in unrotated page space. Pass the rotation
-                    # matrix so Pass 5 can map block/line midpoints into
-                    # reading space before cell assignment.
-                    rot = page_rotations.get(pg_num)
-                    page_mupdf_tables[pg_num] = [
-                        {"bbox": tuple(t.bbox),
-                         "row_count": t.row_count,
-                         "col_count": t.col_count,
-                         "cells": [tuple(c) if c else None for c in t.cells],
-                         "header_names": t.header.names if t.header else None,
-                         "extract": t.extract(),
-                         "rot": rot}
-                        for t in ft.tables
-                    ]
-            except Exception:
-                _log.debug("find_tables() failed on page %d", pg_num,
-                           exc_info=True)
-
-            # Fallback: detect bordered grids from drawing lines that
-            # find_tables() missed and inject as synthetic entries.
-            # Skipped on rotated pages: the h/v line classification works
-            # in page space and Pass 2b consuming such an entry would
-            # build a transposed table; Pass 5 owns rotated pages.
-            if pg_num in page_rotations:
-                continue
-            drawing_grids = _detect_drawing_grids(
-                page, page.rect.height,
-                page_mupdf_tables.get(pg_num, []),
+            # Detect two-column pages from raw (pre-stripping) blocks.
+            two_column_pages: frozenset[int] = frozenset(
+                pg for pg in page_widths
+                if _detect_column_split(
+                    [b for b in all_mupdf_blocks if b.page_num == pg],
+                    page_widths[pg],
+                ) is not None
             )
-            if drawing_grids:
-                _log.debug("Drawing-grid fallback found %d grid(s) on page %d",
-                           len(drawing_grids), pg_num)
-                page_mupdf_tables.setdefault(pg_num, []).extend(drawing_grids)
+            if two_column_pages:
+                _log.debug("Two-column pages: %s", sorted(two_column_pages))
 
-        if all_figure_regions:
-            _log.info("Detected %d figure region(s)", len(all_figure_regions))
+            font_counts: Counter[str] = Counter()
+            for b in all_mupdf_blocks:
+                for ln in b.lines:
+                    for s in ln.spans:
+                        if s.text.strip():
+                            font_counts[s.font_name.lower()] += len(s.text)
+            body_fonts = {f for f, _ in font_counts.most_common(5)}
 
-        pdf_info_date = _parse_pdf_info_date(doc.metadata.get("creationDate", ""))
-        pdf_info_title = (doc.metadata.get("title") or "").strip()
-        doc_metadata = dict(doc.metadata)
-    finally:
-        if doc is not None:
-            doc.close()
+            all_hidden: dict[int, set[tuple[float, float, float, float]]] = {}
+            for pg_num in range(result.page_count):
+                page = doc[pg_num]
+                pg_hidden = find_hidden_regions(page, body_fonts)
+                if pg_hidden:
+                    all_hidden[pg_num] = pg_hidden
+
+            page0_colors = _get_page0_text_colors(doc[0]) if result.page_count > 0 else {}
+
+            page_drawings: dict[int, list] = {}
+            page_mupdf_tables: dict[int, list[dict]] = {}
+            all_figure_regions = []
+            for pg_num in range(result.page_count):
+                page = doc[pg_num]
+                drawings = collect_line_drawings(page)
+                if drawings:
+                    page_drawings[pg_num] = drawings
+
+                raw_drawings = page.get_drawings()
+                page_figures = detect_figure_regions(
+                    raw_drawings, pg_num, page.rect.width)
+                all_figure_regions.extend(page_figures)
+
+                # Intentional: runs unconditionally (independent of ml_tables).
+                # Three table-detection passes rely on the MuPDF signal:
+                # SBS deferral (Pass 0/2), inline-grid overlap (Pass 2b),
+                # and MuPDF Native (Pass 5).  Cost accepted across the
+                # 382-paper corpus.  Gate behind a flag if profiling shows
+                # this dominates conversion time on large documents.
+                try:
+                    ft = page.find_tables()
+                    if ft.tables:
+                        # On rotated pages find_tables() reports bboxes in
+                        # reading (display) space while extract_mupdf blocks
+                        # stay in unrotated page space. Pass the rotation
+                        # matrix so Pass 5 can map block/line midpoints into
+                        # reading space before cell assignment.
+                        rot = page_rotations.get(pg_num)
+                        page_mupdf_tables[pg_num] = [
+                            {"bbox": tuple(t.bbox),
+                             "row_count": t.row_count,
+                             "col_count": t.col_count,
+                             "cells": [tuple(c) if c else None for c in t.cells],
+                             "header_names": t.header.names if t.header else None,
+                             "extract": t.extract(),
+                             "rot": rot}
+                            for t in ft.tables
+                        ]
+                except Exception:
+                    _log.debug("find_tables() failed on page %d", pg_num,
+                               exc_info=True)
+
+                # Fallback: detect bordered grids from drawing lines that
+                # find_tables() missed and inject as synthetic entries.
+                # Skipped on rotated pages: the h/v line classification works
+                # in page space and Pass 2b consuming such an entry would
+                # build a transposed table; Pass 5 owns rotated pages.
+                if pg_num in page_rotations:
+                    continue
+                drawing_grids = _detect_drawing_grids(
+                    page, page.rect.height,
+                    page_mupdf_tables.get(pg_num, []),
+                )
+                if drawing_grids:
+                    _log.debug("Drawing-grid fallback found %d grid(s) on page %d",
+                               len(drawing_grids), pg_num)
+                    page_mupdf_tables.setdefault(pg_num, []).extend(drawing_grids)
+
+            if all_figure_regions:
+                _log.info("Detected %d figure region(s)", len(all_figure_regions))
+
+            pdf_info_date = _parse_pdf_info_date(doc.metadata.get("creationDate", ""))
+            pdf_info_title = (doc.metadata.get("title") or "").strip()
+            doc_metadata = dict(doc.metadata)
+        finally:
+            if doc is not None:
+                doc.close()
 
     if all_hidden:
         total_hidden = sum(len(v) for v in all_hidden.values())
