@@ -168,24 +168,44 @@ def _render_heading_spans(sec: Section) -> str:
     prefix = "#" * sec.heading_level
 
     rows = [(ln.bbox[1], ln.font_size,
-             _render_line_spans(ln, suppress_bold=True).strip())
+             _render_line_spans(ln, suppress_bold=True).strip(), ln)
             for ln in sec.lines]
     rows = [r for r in rows if r[2]]
     if not rows:
-        first_line = sec.text.split("\n")[0].strip()
-        return f"{prefix} {first_line}"
+        clean_text = sec.text.split("\n")[0].strip()
+        return f"{prefix} {clean_text}" if clean_text else ""
 
-    anchor_y, anchor_fs, _ = rows[0]
+    anchor_y, anchor_fs, _, _ = rows[0]
     row_tol = anchor_fs * _HEADING_SAME_ROW_FONT_FRACTION
 
     seen: set[str] = set()
     parts: list[str] = []
-    for y, _, text in rows:
-        if abs(y - anchor_y) <= row_tol and text not in seen:
-            seen.add(text)
-            parts.append(text)
+    remainder_lines: list[str] = []
+    for y, _, text, ln in rows:
+        if abs(y - anchor_y) <= row_tol:
+            if text not in seen:
+                seen.add(text)
+                parts.append(text)
+        else:
+            body_line = _render_line_spans(ln).strip()
+            if body_line:
+                remainder_lines.append(body_line)
 
-    return f"{prefix} {' '.join(parts)}"
+    clean_text = " ".join(parts).strip()
+    if not clean_text:
+        return ""
+    heading = f"{prefix} {clean_text}"
+
+    if remainder_lines:
+        head_norm = re.sub(r"[^a-z0-9\s]", "", clean_text.lower()).strip()
+        body_parts = []
+        for rl in remainder_lines:
+            rl_norm = re.sub(r"[^a-z0-9\s]", "", rl.lower()).strip()
+            if rl_norm and rl_norm != head_norm:
+                body_parts.append(rl)
+        if body_parts:
+            return f"{heading}\n\n{' '.join(body_parts)}"
+    return heading
 
 
 def _normalize_bullet(char: str) -> str:

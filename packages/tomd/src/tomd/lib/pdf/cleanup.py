@@ -244,6 +244,9 @@ def strip_repeating(blocks: list[Block], repeating: set[tuple[float, str]],
         # Only applies to small blocks at page edges (true header/footer
         # assemblies). Body blocks in the middle of the page are never
         # affected, even if they share a y-bucket with a stripped line.
+        # A long line is body, never header/footer chrome (the same
+        # word-count test the __EDGE_BAND__ rule uses), so it survives the
+        # co-location strip even when it shares a stripped y-bucket.
         if stripped_y_buckets and kept_lines:
             blk_height = block.bbox[3] - block.bbox[1]
             blk_top = block.bbox[1]
@@ -254,6 +257,7 @@ def strip_repeating(blocks: list[Block], repeating: set[tuple[float, str]],
                 kept_lines = [
                     ln for ln in kept_lines
                     if _y_bucket(ln.bbox) not in stripped_y_buckets
+                    or len(ln.text.split()) > RUNNING_FOOTER_MAX_WORDS
                 ]
 
         if kept_lines:
