@@ -45,6 +45,7 @@ What we deliberately do NOT do here:
 from __future__ import annotations
 
 import logging
+import re
 from collections.abc import Mapping, Sequence
 from typing import TYPE_CHECKING
 
@@ -239,6 +240,35 @@ _LOW_OVERLAP_ADMIT_MIN_ITEMS = 30
 # decoration fragments (typically 20-40 items / <10kpt^2 each).
 _MERGE_MIN_ITEMS = 30
 _MERGE_MIN_AREA_PT2 = 20_000.0
+
+# Sub-figure merge: maximum vertical gap (pt) between two clusters that
+# may be connected by (a)/(b)/(c) sub-caption text.
+_SUB_FIGURE_MAX_GAP_PT = 120.0
+
+# Prefix-only match: checks that a gap text line starts with a
+# sub-caption label such as "(a) " or "(b) ". Does not anchor at
+# end-of-line or require content after the label -- the intent is a
+# gap-membership existence check, not structural capture. The similar
+# _SUB_CAPTION_RE in pipeline.py uses (.+)$ and is anchored differently;
+# they serve different purposes and are not the same pattern.
+_SUB_FIGURE_SUB_CAPTION_RE = re.compile(r"^\s*\(([a-z])\)\s+")
+
+# Horizontal row merge: maximum x-gap (pt) between two same-height clusters.
+_SUB_FIGURE_MAX_X_GAP_PT = 120.0
+# How far below the combined cluster bottom (pt) to look for a confirming
+# sub-caption line before accepting a horizontal merge.
+_SUB_FIGURE_CAPTION_OFFSET_PT = 100.0
+
+# Matches figure-caption lines in the vertical gap between two clusters.
+# A caption in the gap means the clusters belong to different logical figures
+# and must not be merged. Mirrors the label set of images._CAPTION_LABEL_RE
+# (Figure, Fig., Listing, Diagram, Image, Source code), case-insensitive, but
+# requires only label + number -- no separator -- so "Figure 1" without a
+# colon still acts as a split signal.
+_FIGURE_CAPTION_RE = re.compile(
+    r"^\s*(Figure|Fig\.?|Listing|Diagram|Image|Source\s+code)\s+\d+",
+    re.IGNORECASE,
+)
 
 # Minimum number of drawing items inside a surviving cluster. Single
 # items are almost always rules or one-stroke decorations. Real
@@ -975,6 +1005,195 @@ def _merge_close_clusters(
     return work
 
 
+def _merge_row_clusters(
+    clusters: list[tuple[tuple[float, float, float, float], int]],
+    page_blocks: Sequence["Block"],
+    *,
+    max_merged_area: float,
+) -> list[tuple[tuple[float, float, float, float], int]]:
+    """Merge horizontally-adjacent clusters that share the same y-band.
+
+    Two clusters i and j are merged when ALL of:
+
+    1. Their y-ranges overlap: min(bb_i[3], bb_j[3]) > max(bb_i[1], bb_j[1]).
+    2. The horizontal gap between them is within _SUB_FIGURE_MAX_X_GAP_PT:
+       max(0, max(bb_i[0], bb_j[0]) - min(bb_i[2], bb_j[2])) <= threshold.
+       Clusters that overlap in x also satisfy this condition.
+    3. At least one text line whose y-range falls in
+       [tentative_bb[3], tentative_bb[3] + _SUB_FIGURE_CAPTION_OFFSET_PT]
+       AND whose x-range overlaps [tentative_bb[0], tentative_bb[2]]
+       matches _SUB_FIGURE_SUB_CAPTION_RE. ``tentative_bb`` is the union of
+       the current accumulated bb_i and bb_j (not the original cluster i).
+       The x-overlap guard prevents a sub-caption from an unrelated column
+       or figure on the same horizontal band from triggering a merge.
+    4. The area of tentative_bb does not exceed max_merged_area.
+
+    Iterates until stable (no merge in the last pass).
+
+    Accumulator-corruption invariant: bb_i must not be mutated until all four
+    checks pass. Criteria 1 and 2 use bb_i and bb_j directly; criteria 3 and 4
+    use tentative_bb. On a successful merge four mutations happen together:
+    bb_i = tentative_bb, ic_i += ic_j, used[j] = True, changed = True.
+    """
+    changed = True
+    while changed:
+        changed = False
+        merged: list[tuple[tuple[float, float, float, float], int]] = []
+        used = [False] * len(clusters)
+        for i in range(len(clusters)):
+            if used[i]:
+                continue
+            bb_i, ic_i = clusters[i]
+            for j in range(i + 1, len(clusters)):
+                if used[j]:
+                    continue
+                bb_j, ic_j = clusters[j]
+                # Criterion 1: y-ranges must overlap.
+                if min(bb_i[3], bb_j[3]) <= max(bb_i[1], bb_j[1]):
+                    continue
+                # Criterion 2: horizontal gap must be within threshold.
+                x_gap = max(0.0, max(bb_i[0], bb_j[0]) - min(bb_i[2], bb_j[2]))
+                if x_gap > _SUB_FIGURE_MAX_X_GAP_PT:
+                    continue
+                # Tentative merged bbox for criteria 3 and 4.
+                tentative_bb = (
+                    min(bb_i[0], bb_j[0]),
+                    min(bb_i[1], bb_j[1]),
+                    max(bb_i[2], bb_j[2]),
+                    max(bb_i[3], bb_j[3]),
+                )
+                # Criterion 3: at least one sub-caption line below the merged row.
+                caption_top = tentative_bb[3]
+                caption_bot = tentative_bb[3] + _SUB_FIGURE_CAPTION_OFFSET_PT
+                found_caption = False
+                for block in page_blocks:
+                    if block.bbox[1] > caption_bot or block.bbox[3] < caption_top:
+                        continue
+                    for line in block.lines:
+                        if line.bbox[3] < caption_top or line.bbox[1] > caption_bot:
+                            continue
+                        if (
+                            _SUB_FIGURE_SUB_CAPTION_RE.match(line.text.strip())
+                            and line.bbox[0] < tentative_bb[2]
+                            and line.bbox[2] > tentative_bb[0]
+                        ):
+                            found_caption = True
+                            break
+                    if found_caption:
+                        break
+                if not found_caption:
+                    continue
+                # Criterion 4: area cap.
+                if (tentative_bb[2] - tentative_bb[0]) * (tentative_bb[3] - tentative_bb[1]) \
+                        > max_merged_area:
+                    continue
+                # All checks passed -- mutate together.
+                bb_i = tentative_bb
+                ic_i = ic_i + ic_j
+                used[j] = True
+                changed = True
+            merged.append((bb_i, ic_i))
+        clusters = merged
+    return clusters
+
+
+def _merge_sub_figure_clusters(
+    clusters: list[tuple[tuple[float, float, float, float], int]],
+    page_blocks: Sequence["Block"],
+    *,
+    max_merged_area: float,
+) -> list[tuple[tuple[float, float, float, float], int]]:
+    """Merge vertically-stacked clusters separated only by sub-caption text.
+
+    Two clusters i (above) and j (below) are merged when ALL of:
+
+    1. Vertical gap between i and j is <= _SUB_FIGURE_MAX_GAP_PT.
+    2. Their x-ranges overlap.
+    3. At least one non-empty text line in the gap matches
+       _SUB_FIGURE_SUB_CAPTION_RE, AND no line in the gap matches
+       _FIGURE_CAPTION_RE (Figure/Fig./Listing/Diagram/Image/Source code +
+       number, case-insensitive). A figure-caption line in the gap means
+       the clusters belong to different logical figures.
+    4. The merged bbox area does not exceed max_merged_area.
+
+    Iterates until stable (no merge occurred in the last pass).
+
+    The above/below assignment uses local `top_bb`/`bot_bb` variables rather
+    than mutating `bb_i` in place. Mutating `bb_i` before all checks pass
+    would corrupt the outer accumulator: if the swap fires but a subsequent
+    check fails with `continue`, `bb_i` would hold j's data for all remaining
+    j' iterations in the inner loop.
+    """
+    changed = True
+    while changed:
+        changed = False
+        merged: list[tuple[tuple[float, float, float, float], int]] = []
+        used = [False] * len(clusters)
+        for i in range(len(clusters)):
+            if used[i]:
+                continue
+            bb_i, ic_i = clusters[i]
+            for j in range(i + 1, len(clusters)):
+                if used[j]:
+                    continue
+                bb_j, ic_j = clusters[j]
+                # Determine which cluster is above WITHOUT mutating bb_i.
+                # Mutating bb_i here (via a swap) before checks pass would
+                # corrupt the outer accumulator if any subsequent check
+                # fires `continue` -- bb_i would silently hold j's data for
+                # all remaining j' iterations.
+                if bb_i[1] <= bb_j[1]:
+                    top_bb, top_ic, bot_bb, bot_ic = bb_i, ic_i, bb_j, ic_j
+                else:
+                    top_bb, top_ic, bot_bb, bot_ic = bb_j, ic_j, bb_i, ic_i
+                # Reject vertically overlapping clusters. After this guard,
+                # top_bb[3] <= bot_bb[1], so y_gap >= 0 is guaranteed.
+                if top_bb[3] > bot_bb[1]:
+                    continue
+                gap_top = top_bb[3]
+                gap_bot = bot_bb[1]
+                y_gap = gap_bot - gap_top
+                if y_gap > _SUB_FIGURE_MAX_GAP_PT:
+                    continue
+                # x-ranges must overlap.
+                if top_bb[0] >= bot_bb[2] or bot_bb[0] >= top_bb[2]:
+                    continue
+                # Collect text lines whose y-range falls inside the gap.
+                gap_lines: list[str] = []
+                for block in page_blocks:
+                    if block.bbox[1] > gap_bot or block.bbox[3] < gap_top:
+                        continue
+                    for line in block.lines:
+                        if line.bbox[3] < gap_top or line.bbox[1] > gap_bot:
+                            continue
+                        text = line.text.strip()
+                        if text:
+                            gap_lines.append(text)
+                if not gap_lines:
+                    continue
+                if not any(_SUB_FIGURE_SUB_CAPTION_RE.match(t) for t in gap_lines):
+                    continue
+                if any(_FIGURE_CAPTION_RE.match(t) for t in gap_lines):
+                    continue
+                # Area cap. Only mutate bb_i after all checks pass.
+                merged_bb = (
+                    min(top_bb[0], bot_bb[0]),
+                    top_bb[1],
+                    max(top_bb[2], bot_bb[2]),
+                    bot_bb[3],
+                )
+                if (merged_bb[2] - merged_bb[0]) * (merged_bb[3] - merged_bb[1]) \
+                        > max_merged_area:
+                    continue
+                bb_i = merged_bb
+                ic_i = top_ic + bot_ic
+                used[j] = True
+                changed = True
+            merged.append((bb_i, ic_i))
+        clusters = merged
+    return clusters
+
+
 # ---- Rasterisation + whiteout helpers --------------------------------------
 
 
@@ -1149,6 +1368,18 @@ def extract_page_vector_images(
     clusters = _merge_close_clusters(
         clusters, max_merged_area=_MAX_CLUSTER_AREA_FRACTION * page_area,
     )
+    # Step 1: merge same-row sub-panels (same y-band, small x-gap) confirmed
+    # by a sub-caption line below the combined bbox.
+    clusters = _merge_row_clusters(
+        clusters, page_blocks,
+        max_merged_area=_MAX_CLUSTER_AREA_FRACTION * page_area,
+    )
+    # Step 2: merge vertically-stacked rows confirmed by sub-caption text in
+    # the gap, blocking on figure-caption lines to avoid cross-figure merges.
+    clusters = _merge_sub_figure_clusters(
+        clusters, page_blocks,
+        max_merged_area=_MAX_CLUSTER_AREA_FRACTION * page_area,
+    )
 
     # Container detection: identify thin frame drawings that enclose
     # smaller clusters (canonical horizontal-flow-diagram shape) and
@@ -1192,16 +1423,32 @@ def extract_page_vector_images(
             # extent.
             reasons[REASON_BBOX_TOO_LARGE] = reasons.get(REASON_BBOX_TOO_LARGE, 0) + 1
             continue
+        aspect_bypassed = False
         if max(width / height, height / width) >= _MAX_CLUSTER_ASPECT_RATIO:
-            # Strip-shaped cluster - code-block background fill or
-            # shaded callout spanning the page width. Real figures
-            # stay under 3.5:1 in the calibration corpus.
-            # Virtual clusters with dense content (>= _VIRTUAL_MIN_ITEM_COUNT
-            # items) bypass: they represent a populated flow diagram
-            # whose container is intentionally extreme-aspect.
-            if not (is_virtual and item_count >= _VIRTUAL_MIN_ITEM_COUNT):
+            # Strip-shaped cluster: code-block background fill or shaded
+            # callout spanning the page width.
+            #
+            # Safety floor: ``item_count >= _VIRTUAL_MIN_ITEM_COUNT`` (50)
+            # is the LOAD-BEARING threshold. Corpus calibration:
+            #   - Code-block backgrounds and shaded callouts: 1-10 items.
+            #   - Real diagram clusters (merged sub-panel rows produced by
+            #     _merge_row_clusters, populated frame containers from
+            #     container detection): >=50 items.
+            # The 50-item floor applies to ALL extreme-aspect clusters,
+            # not only virtual ones from container detection.
+            #
+            # ``aspect_bypassed`` suppresses TWO gates at line ~1473:
+            #   1. The overlap check (_MAX_TEXT_OVERLAP_FRACTION): merging
+            #      sub-panels into one wide bbox inflates overlap because
+            #      internal labels now lie inside the combined bbox,
+            #      making is_diagram unreliable. The item count is the
+            #      reliable structural signal for these clusters.
+            #   2. The low-overlap item floor (_LOW_OVERLAP_ADMIT_MIN_ITEMS):
+            #      already satisfied (item_count >= 50 >> 30).
+            if item_count < _VIRTUAL_MIN_ITEM_COUNT:
                 reasons[REASON_ASPECT_EXTREME] = reasons.get(REASON_ASPECT_EXTREME, 0) + 1
                 continue
+            aspect_bypassed = True
         if item_count < _MIN_CLUSTER_ITEM_COUNT:
             reasons[REASON_TOO_FEW_ITEMS] = reasons.get(REASON_TOO_FEW_ITEMS, 0) + 1
             continue
@@ -1245,7 +1492,7 @@ def extract_page_vector_images(
             and _drawing_coverage_sum(cluster_bbox, after_edge)
                 >= _DIAGRAM_TINY_MIN_COVERAGE
         )
-        if not is_diagram:
+        if not is_diagram and not aspect_bypassed:
             if overlap >= _MAX_TEXT_OVERLAP_FRACTION:
                 reasons[REASON_TEXT_OVERLAP] = reasons.get(REASON_TEXT_OVERLAP, 0) + 1
                 continue

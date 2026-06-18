@@ -675,10 +675,10 @@ def _normalize_caption(text: str) -> str:
 
     Conservative by design. Only normalizes whitespace:
 
-    - NBSP (U+00A0) collapses to regular space (PDF text layers
-      sometimes emit NBSP where a normal space rendered visually).
-    - Whitespace runs - including newlines injected by the
-      structure pass's wrap-join - collapse to a single space.
+    - All whitespace runs (including NBSP U+00A0 and newlines injected
+      by the structure pass's wrap-join) collapse to a single space.
+      ``str.split()`` without arguments treats U+00A0 as whitespace,
+      so no explicit NBSP replacement is needed.
     - Leading and trailing whitespace are stripped.
 
     Explicitly does NOT lowercase, strip punctuation, normalize
@@ -687,7 +687,6 @@ def _normalize_caption(text: str) -> str:
     difference; the equality fails and the drop is skipped. Missing
     a leak is preferable to losing content.
     """
-    text = text.replace(" ", " ")
     return " ".join(text.split())
 
 
@@ -1105,11 +1104,13 @@ def _filter_sections_inside_vector_images(
             kept.append(sec)
             continue
 
-        # 2/3. Caption-shaped section drops. Apply to PARAGRAPH and
-        #     HEADING; the regex is the content signal, the y-only
-        #     band match is the geometry signal. Skipped for sections
-        #     with no lines (no first-line bbox to test).
-        if sec.kind in (SectionKind.PARAGRAPH, SectionKind.HEADING) and sec.lines:
+        # 2/3. Caption-shaped section drops. Apply to PARAGRAPH,
+        #     HEADING, and LIST; the regex is the content signal, the
+        #     y-only band match is the geometry signal. LIST is included
+        #     because the structure pass classifies "(a) text" lines as
+        #     list items, which is the canonical sub-caption shape.
+        #     Skipped for sections with no lines (no first-line bbox to test).
+        if sec.kind in (SectionKind.PARAGRAPH, SectionKind.HEADING, SectionKind.LIST) and sec.lines:
             first_text = sec.lines[0].text.strip()
             first_bbox = sec.lines[0].bbox
 
@@ -1127,7 +1128,8 @@ def _filter_sections_inside_vector_images(
             #    body paragraph inside a tall raster bbox is not
             #    relocated.
             sub_match = _SUB_CAPTION_RE.match(first_text)
-            if sub_match and first_bbox != (0, 0, 0, 0):
+            if (sub_match and first_bbox != (0, 0, 0, 0)
+                    and (sec.kind is not SectionKind.LIST or len(sec.lines) == 1)):
                 letter = sub_match.group(1)
                 owner = next(
                     (im for im in page_caption_eligible

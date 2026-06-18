@@ -65,7 +65,10 @@ from tomd.lib.pdf.vector_images import (
     REASON_WORDING_COLOR,
     _cluster_drawings,
     _colour_in_wording_band,
+    _FIGURE_CAPTION_RE,
     _merge_close_clusters,
+    _merge_row_clusters,
+    _merge_sub_figure_clusters,
     _synthetic_xref,
     _text_overlap_fraction,
     extract_page_vector_images,
@@ -869,6 +872,105 @@ class TestMergeCloseClusters:
         assert merged == [a]
 
 
+class TestMergeRowClusters:
+    """_merge_row_clusters merges horizontally-adjacent clusters confirmed
+    by a sub-caption line below. The confirming line must x-overlap with
+    the tentative merged bbox so a sub-caption from an unrelated column
+    cannot trigger a merge."""
+
+    _UNLIMITED_AREA = 10_000_000.0
+
+    # Two clusters side by side: A=(0,0,100,100), B=(150,0,250,100).
+    # Tentative merged bbox = (0,0,250,100). x_gap=50 < 120 → passes.
+    # Caption band: y in [100, 200].
+    _A = ((0.0, 0.0, 100.0, 100.0), 1)
+    _B = ((150.0, 0.0, 250.0, 100.0), 1)
+
+    @staticmethod
+    def _sub_caption_block(x0: float, x1: float, y0: float = 105.0) -> Block:
+        line = Line(
+            spans=[Span(text="(a) left panel", bbox=(x0, y0, x1, y0 + 12.0))],
+            bbox=(x0, y0, x1, y0 + 12.0),
+        )
+        return Block(lines=[line], bbox=(x0, y0, x1, y0 + 12.0))
+
+    def test_sub_caption_x_overlapping_merges(self):
+        # Sub-caption spans x=[50, 200] — overlaps tentative_bb=[0,0,250,100].
+        block = self._sub_caption_block(50.0, 200.0)
+        merged = _merge_row_clusters(
+            [self._A, self._B], [block], max_merged_area=self._UNLIMITED_AREA,
+        )
+        assert len(merged) == 1, "sub-caption x-overlapping tentative bbox must merge"
+        assert merged[0][1] == 2
+
+    def test_sub_caption_outside_x_range_does_not_merge(self):
+        # Sub-caption spans x=[300, 500] — entirely right of tentative_bb x1=250.
+        block = self._sub_caption_block(300.0, 500.0)
+        merged = _merge_row_clusters(
+            [self._A, self._B], [block], max_merged_area=self._UNLIMITED_AREA,
+        )
+        assert len(merged) == 2, (
+            "sub-caption outside tentative bbox x-range must not trigger merge"
+        )
+
+
+class TestFigureCaptionRe:
+    """_FIGURE_CAPTION_RE must match the full _CAPTION_LABEL_RE label set
+    (Figure, Fig., Listing, Diagram, Image, Source code) case-insensitively.
+    These are the split signals that prevent _merge_sub_figure_clusters from
+    merging two clusters separated by a caption belonging to a different figure.
+    The old regex only matched capital 'Figure', leaving abbreviations and
+    alternative labels as false negatives."""
+
+    @pytest.mark.parametrize("text", [
+        "Figure 1: description",
+        "figure 2",               # lowercase -- missed by old regex
+        "Fig. 3: something",      # abbreviation -- missed by old regex
+        "fig. 4",                 # lowercase abbreviation
+        "Listing 5: code",        # alternative label -- missed by old regex
+        "Diagram 6",
+        "Image 7: picture",
+        "Source code 8",
+        "SOURCE CODE 9",          # all-caps
+    ])
+    def test_caption_labels_match(self, text):
+        assert _FIGURE_CAPTION_RE.match(text), (
+            f"_FIGURE_CAPTION_RE must match caption label: {text!r}"
+        )
+
+    @pytest.mark.parametrize("text", [
+        "(a) left panel",
+        "(b) right panel",
+        "some body prose",
+        "Table 1: results",       # tables are not figure captions
+    ])
+    def test_non_caption_labels_do_not_match(self, text):
+        assert not _FIGURE_CAPTION_RE.match(text), (
+            f"_FIGURE_CAPTION_RE must not match non-caption: {text!r}"
+        )
+
+    def test_listing_caption_prevents_merge(self):
+        """A 'Listing N' line in the gap must prevent two vertically-stacked
+        clusters from merging, just as 'Figure N' does."""
+        top = ((0.0, 0.0, 200.0, 100.0), 1)
+        bot = ((0.0, 150.0, 200.0, 250.0), 1)
+        gap_line = Line(
+            spans=[Span(text="(a) top", bbox=(50.0, 102.0, 150.0, 114.0))],
+            bbox=(50.0, 102.0, 150.0, 114.0),
+        )
+        split_line = Line(
+            spans=[Span(text="Listing 3: some_function()", bbox=(0.0, 120.0, 200.0, 132.0))],
+            bbox=(0.0, 120.0, 200.0, 132.0),
+        )
+        block = Block(lines=[gap_line, split_line], bbox=(0.0, 102.0, 200.0, 132.0))
+        merged = _merge_sub_figure_clusters(
+            [top, bot], [block], max_merged_area=10_000_000.0,
+        )
+        assert len(merged) == 2, (
+            "Listing caption in gap must prevent merge just like Figure caption"
+        )
+
+
 # ---- vector_images: text-overlap fraction ---------------------------------
 
 
@@ -1636,6 +1738,34 @@ class TestAspectExtremeFilter:
         page = _mock_page(drawings)
         cands, _stats = extract_page_vector_images(page, [])
         assert len(cands) == 1
+
+    def test_aspect_extreme_below_item_threshold_drops(self, monkeypatch):
+        self._setup(monkeypatch)
+        # 400x80 strip -> aspect 5.0. items=49 < _VIRTUAL_MIN_ITEM_COUNT=50.
+        # Must be rejected as REASON_ASPECT_EXTREME.
+        drawings = [_drawing(100, 100, 500, 180, items=49)]
+        page = _mock_page(drawings)
+        cands, stats = extract_page_vector_images(page, [])
+        assert cands == []
+        assert stats.reasons.get(REASON_ASPECT_EXTREME) == 1
+
+    def test_aspect_extreme_at_item_threshold_admits_despite_high_overlap(
+        self, monkeypatch
+    ):
+        # 400x80 strip -> aspect 5.0. items=50 == _VIRTUAL_MIN_ITEM_COUNT.
+        # aspect_bypassed=True must suppress the text-overlap gate even
+        # when a text block fully covers the cluster (overlap=1.0 >>
+        # _MAX_TEXT_OVERLAP_FRACTION). Pins that both overlap guards at
+        # line ~1473 are skipped, not just the item-floor guard.
+        self._setup(monkeypatch)
+        drawings = [_drawing(100, 100, 500, 180, items=50)]
+        page = _mock_page(drawings)
+        text_block = Block(bbox=(100.0, 100.0, 500.0, 180.0))
+        cands, _stats = extract_page_vector_images(page, [text_block])
+        assert len(cands) == 1, (
+            "aspect_bypassed must suppress the overlap gate for extreme-aspect "
+            "clusters with items >= _VIRTUAL_MIN_ITEM_COUNT"
+        )
 
 
 class TestContainerDetection:
@@ -3590,6 +3720,72 @@ class TestFilterSectionsInsideVectorImages:
         )
         kept, _ = _filter_sections_inside_vector_images([raster], [caption])
         assert kept == []
+
+    def test_list_kind_sub_caption_captured_and_dropped(self):
+        """The structure pass classifies "(a) text" lines as LIST items.
+        LIST must be included in the kind check so sub-captions are
+        captured and re-emitted as italic paragraphs; without it they
+        leak into the body as plain text."""
+        img = _ext_img(page=6, bbox=(86, 0, 506, 284))
+        sub = Section(
+            kind=SectionKind.LIST,
+            text="(a) Upper sub-figure",
+            confidence=Confidence.HIGH, page_num=5,
+            lines=[Line(
+                spans=[Span(text="(a) Upper sub-figure",
+                            bbox=(86, 290, 506, 302))],
+                bbox=(86, 290, 506, 302),
+            )],
+        )
+        kept, captures = _filter_sections_inside_vector_images([img], [sub])
+        assert kept == []
+        assert captures == {id(img): [("a", "(a) Upper sub-figure")]}
+
+    def test_list_kind_outside_band_kept(self):
+        """A LIST section that matches _SUB_CAPTION_RE but sits outside
+        any image's caption region is kept verbatim - the geometry gate
+        prevents false captures of body enumerated lists."""
+        img = _ext_img(page=6, bbox=(86, 100, 506, 284))
+        # 200pt below cluster bottom (band ends at 284+100=384), outside band.
+        sub = Section(
+            kind=SectionKind.LIST,
+            text="(a) a regular list item in body prose",
+            confidence=Confidence.HIGH, page_num=5,
+            lines=[Line(
+                spans=[Span(text="(a) a regular list item in body prose",
+                            bbox=(86, 500, 506, 512))],
+                bbox=(86, 500, 506, 512),
+            )],
+        )
+        kept, captures = _filter_sections_inside_vector_images([img], [sub])
+        assert kept == [sub]
+        assert captures == {}
+
+    def test_list_kind_multi_line_not_captured(self):
+        """A multi-line LIST section whose first line matches _SUB_CAPTION_RE
+        must NOT be captured as a sub-caption. Only single-line LIST sections
+        qualify; multi-line lists are real enumerated content."""
+        img = _ext_img(page=6, bbox=(86, 0, 506, 284))
+        sub = Section(
+            kind=SectionKind.LIST,
+            text="(a) first item\n(b) second item",
+            confidence=Confidence.HIGH, page_num=5,
+            lines=[
+                Line(
+                    spans=[Span(text="(a) first item",
+                                bbox=(86, 290, 506, 302))],
+                    bbox=(86, 290, 506, 302),
+                ),
+                Line(
+                    spans=[Span(text="(b) second item",
+                                bbox=(86, 304, 506, 316))],
+                    bbox=(86, 304, 506, 316),
+                ),
+            ],
+        )
+        kept, captures = _filter_sections_inside_vector_images([img], [sub])
+        assert kept == [sub], "multi-line LIST must not be captured as sub-caption"
+        assert captures == {}
 
 
 class TestLineInCaptionBandPredicateEquality:
