@@ -49,6 +49,17 @@ _GOLDEN_STEMS = (
     # body below is untouched. p4100r1 above is the byte-identical guard that
     # the pass does not over-reach on an already-clean heading-kind TOC.
     "p4094r0",
+    # Fragmented leaked-TOC guard (relaxed bridging): p4016r0's ~146-entry
+    # Table of Contents leaks before the Abstract as a single block fragmented by
+    # non-recurring stragglers (title-like appendix paragraphs whose body heading
+    # carries a trailing "(Informative)" the leaked line lacks, plus once-only
+    # empty headings like "1.2 Motivating example"). The relaxed-bridging pass
+    # coalesces and removes the whole block: the golden front is title ->
+    # metadata -> Abstract, and Appendices A-Q each appear exactly once, later,
+    # with bodies. Pins that paragraph stragglers are removed only when they
+    # forward-reference a later heading and that the real single-line Abstract
+    # prose immediately after the TOC survives (the trailing rule).
+    "p4016r0",
 )
 
 

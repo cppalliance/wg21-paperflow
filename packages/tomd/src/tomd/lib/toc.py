@@ -35,10 +35,10 @@ _TOC_LABELS = frozenset({
 _WHITESPACE_RE = re.compile(r"\s+")
 
 # Minimum length of a contiguous run that counts as a Table of Contents.
-# Public because `pdf/structure.py:drop_leaked_toc_headings` (the
-# companion pass that removes leaked *heading-kind* TOC entries that
-# `find_toc_indices` deliberately stops matching, #122) gates on the same
-# run length. Shared so the two "what is a TOC" definitions cannot drift.
+# Public because `pdf/structure.py:drop_leaked_toc_entries` (the
+# companion pass that removes leaked TOC entries that `find_toc_indices`
+# deliberately stops matching, #122) gates on the same run length. Shared
+# so the two "what is a TOC" definitions cannot drift.
 MIN_TOC_RUN = 3
 _MAX_GAP = 3
 _MAX_FUZZY_HEADINGS = 200
@@ -153,7 +153,7 @@ def find_toc_indices(
 
     Companion pass: a heading-kind TOC whose entries lack the dot-leader shape
     is deliberately *not* matched here (the is_heading guard), so it leaks as
-    empty duplicate headings; `pdf/structure.py:drop_leaked_toc_headings`
+    empty duplicate headings; `pdf/structure.py:drop_leaked_toc_entries`
     removes those, gating on the same shared `MIN_TOC_RUN`. The two functions
     are the structural and the post-structure halves of one "what is a TOC"
     definition; keep them in sync.
