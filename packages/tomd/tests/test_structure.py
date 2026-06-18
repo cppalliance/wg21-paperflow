@@ -7,7 +7,7 @@ from tomd.lib.pdf.types import (
     Block, Line, Span, Section, SectionKind, Confidence,
 )
 from tomd.lib.pdf.structure import (
-    compare_extractions, structure_sections,
+    compare_extractions, structure_sections, drop_leaked_toc_headings,
     heading_confidence, _extract_metadata,
     _detect_body_size, _validate_nesting,
     _demote_repeated_low_confidence_numbers,
@@ -274,6 +274,191 @@ class TestDocumentPoolPromotion:
             assert len(rescued) == 1, (
                 f"page {pg} emitted {len(rescued)} times after pool promotion, expected 1"
             )
+
+
+class TestDropLeakedTocHeadings:
+    """The leaked heading-kind TOC remover (#122 pt2).
+
+    Removes only *empty* headings that form a contiguous recurring run (a
+    TOC block); never touches body, lone containers, short runs, or
+    strictly-deepening clause stacks.
+    """
+
+    @staticmethod
+    def _h(text, level=2):
+        return make_section(text, kind=SectionKind.HEADING, heading_level=level)
+
+    @staticmethod
+    def _body(text="This is a substantial body paragraph, well over forty chars."):
+        return make_section(text, kind=SectionKind.PARAGRAPH)
+
+    @staticmethod
+    def _frag(text):
+        return make_section(text, kind=SectionKind.PARAGRAPH)
+
+    @staticmethod
+    def _headings(secs):
+        return [s.text for s in secs if s.kind == SectionKind.HEADING]
+
+    def test_toc_block_of_recurring_empty_headings_removed(self):
+        h, body = self._h, self._body
+        secs = [
+            h("Abstract"), h("Motivation"), h("Design"),          # leaked TOC
+            h("Abstract"), body(), h("Motivation"), body(),
+            h("Design"), body(),                                  # real sections
+        ]
+        out = drop_leaked_toc_headings(secs)
+        assert self._headings(out) == ["Abstract", "Motivation", "Design"]
+        assert sum(1 for s in out if s.kind == SectionKind.PARAGRAPH) == 3
+
+    def test_heading_with_body_not_removed(self):
+        """A recurring heading that HAS a body is never removed (body-safety)."""
+        h, body = self._h, self._body
+        secs = [
+            h("A"), body(), h("B"), body(), h("C"), body(),   # real, recur below
+            h("A"), h("B"), h("C"),                           # trailing empties
+        ]
+        out = drop_leaked_toc_headings(secs)
+        # Front A/B/C recur later but have body -> not eligible. Trailing A/B/C
+        # are empty but their duplicates are *earlier* -> not eligible. Nothing
+        # removed; every body survives.
+        assert len(out) == len(secs)
+        assert sum(1 for s in out if s.kind == SectionKind.PARAGRAPH) == 3
+
+    def test_lone_recurring_empty_heading_not_removed(self):
+        """p3556r0 case: a lone empty container (15 -> 15.1) is spared."""
+        h, body = self._h, self._body
+        secs = [
+            h("1 Intro", 2), body(),
+            h("15 Preprocessing directives", 2),          # empty container, recurs
+            h("15.1 Preamble", 3), body(),
+            h("15 Preprocessing directives", 2),          # the recurrence
+            h("15.1 Preamble", 3), body(),
+        ]
+        out = drop_leaked_toc_headings(secs)
+        kept = self._headings(out)
+        assert kept.count("15 Preprocessing directives") == 2  # neither removed
+
+    def test_run_length_below_floor_not_removed(self):
+        """A run of 2 recurring empty headings is below MIN_TOC_RUN -> kept."""
+        h, body = self._h, self._body
+        secs = [
+            h("Abstract"), h("Motivation"),               # run of 2 only
+            h("Abstract"), body(), h("Motivation"), body(),
+        ]
+        out = drop_leaked_toc_headings(secs)
+        assert self._headings(out).count("Abstract") == 2
+        assert self._headings(out).count("Motivation") == 2
+
+    def test_trivial_section_within_run_dropped(self):
+        """Page-number fragments and a preceding label are swept with the run."""
+        h, body, frag = self._h, self._body, self._frag
+        secs = [
+            frag("Table of Contents"),
+            h("Abstract"), frag("3"),
+            h("Motivation"), frag("5"),
+            h("Design"), frag("7"),
+            h("Abstract"), body(), h("Motivation"), body(), h("Design"), body(),
+        ]
+        out = drop_leaked_toc_headings(secs)
+        texts = [s.text for s in out]
+        assert "Table of Contents" not in texts
+        assert "3" not in texts and "5" not in texts and "7" not in texts
+        assert self._headings(out) == ["Abstract", "Motivation", "Design"]
+        assert sum(1 for s in out if s.kind == SectionKind.PARAGRAPH) == 3
+
+    def test_recurrence_is_forward_only(self):
+        """Trailing empties whose only duplicate is earlier are not removed."""
+        h, body = self._h, self._body
+        secs = [
+            h("A"), body(), h("B"), body(), h("C"), body(),
+            h("A"), h("B"), h("C"),     # duplicates are all *earlier*
+        ]
+        out = drop_leaked_toc_headings(secs)
+        assert self._headings(out).count("A") == 2
+        assert len(out) == len(secs)
+
+    def test_non_recurring_block_kept(self):
+        """A run of >=3 empty headings that do NOT recur later is kept."""
+        h, body = self._h, self._body
+        secs = [h("A"), h("B"), h("C"), h("D"), body()]
+        out = drop_leaked_toc_headings(secs)
+        assert self._headings(out) == ["A", "B", "C", "D"]
+
+    def test_normalization_collision_lone_heading_kept(self):
+        """`3.1 Overview` / `5.2 Overview` collide but neither is in a >=3 run."""
+        h, body = self._h, self._body
+        secs = [
+            h("3.1 Overview", 3), h("3.2 Details", 3), body(),
+            h("5.2 Overview", 3), h("5.3 More", 3), body(),
+        ]
+        out = drop_leaked_toc_headings(secs)
+        # Both "Overview" headings normalize alike, but each is a lone eligible
+        # heading (its sibling has body), so no run forms and none is removed.
+        assert sum(1 for t in self._headings(out) if "Overview" in t) == 2
+
+    def test_deepening_container_stack_not_removed(self):
+        """Strictly-monotonic rejection: pure ascent kept; flat/plateau removed."""
+        h, body = self._h, self._body
+
+        def run_with_levels(levels):
+            # front: empty recurring headings at the given levels; back: real.
+            titles = ["Chapter", "Section", "Subsection"]
+            front = [h(t, lvl) for t, lvl in zip(titles, levels)]
+            back = []
+            for t, lvl in zip(titles, levels):
+                back += [h(t, lvl), body()]
+            return drop_leaked_toc_headings(front + back)
+
+        # (a) pure ascent [2,3,4] -> rejected (kept): a clause container stack.
+        out_a = run_with_levels([2, 3, 4])
+        assert self._headings(out_a).count("Chapter") == 2  # front survives
+
+        # (b) flat [2,2,2] -> removed.
+        out_b = run_with_levels([2, 2, 2])
+        assert self._headings(out_b).count("Chapter") == 1  # front removed
+
+        # (c) discriminating plateau [2,2,3] -> removed (NOT strictly increasing).
+        out_c = run_with_levels([2, 2, 3])
+        assert self._headings(out_c).count("Chapter") == 1  # front removed
+
+    def test_non_trivial_toc_neighbour_paragraph_removed(self):
+        """A PARAGRAPH >= 40 chars that recurs as a later heading is transparent.
+
+        This exercises the _is_toc_neighbour path: the non-trivial entry is
+        itself a leaked TOC entry (its text matches a body heading), so it must
+        be swept with the run rather than treated as body prose that blocks
+        eligibility.  Inverting _is_toc_neighbour would leave all three
+        headings and the long paragraph in place.
+        """
+        h, body = self._h, self._body
+        long_title = "Compatibility and Migration Concerns for Existing Code"
+        assert len(long_title) >= 40  # non-trivial by _section_is_trivial
+        secs = [
+            # Leaked TOC block: three headings, the middle one followed by
+            # a non-trivial paragraph whose text is itself a later heading.
+            h("Abstract"),
+            h("Design"),
+            h(long_title),
+            # The paragraph below is >= 40 chars and matches a later heading.
+            self._frag(long_title),
+            h("References"),
+            # Real body sections that supply the forward recurrences.
+            h("Abstract"), body(),
+            h("Design"), body(),
+            h(long_title), body(),
+            h("References"), body(),
+        ]
+        out = drop_leaked_toc_headings(secs)
+        # The leaked run (first Abstract/Design/long_title/References) is removed.
+        assert self._headings(out) == [
+            "Abstract", "Design", long_title, "References"
+        ]
+        # The non-trivial neighbour paragraph is also swept.
+        assert not any(s.text == long_title and s.kind == SectionKind.PARAGRAPH
+                       for s in out)
+        # Body paragraphs are untouched.
+        assert sum(1 for s in out if s.kind == SectionKind.PARAGRAPH) == 4
 
 
 class TestParagraphMerging:
