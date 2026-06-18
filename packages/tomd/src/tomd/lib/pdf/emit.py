@@ -12,6 +12,7 @@ from .. import (
     strip_redundant_body_meta,
     strip_orphan_toc_list,
 )
+from .. import tables as _tables
 from ..shared import _find_front_matter_end
 from .cleanup import normalize_whitespace
 from .glyphs import (
@@ -20,8 +21,9 @@ from .glyphs import (
     GlyphPassStats,
 )
 from .images import TRUNCATION_MARKER_TEMPLATE, VectorUncertaintyStats
-from .types import Line, Span, Section, SectionKind, BULLET_CHARS, FigureGraph
+from .types import Line, Span, Section, SectionKind, BULLET_CHARS, BULLET_RE, NUMBERED_LIST_RE, FigureGraph
 from .vector_images import format_uncertainty_marker, should_emit_marker
+from ..wording_markup import WORDING_FENCE_CLOSE, wording_fence_open
 
 _log = logging.getLogger(__name__)
 
@@ -105,10 +107,13 @@ _EMDASH_BULLET_RE = re.compile(r"^[\u2013\u2014]\s")
 def _render_paragraph_spans(sec: Section) -> str:
     """Render a paragraph section using span-level formatting, then unwrap.
 
+    Falls back to ``sec.text`` when ``sec.lines`` is empty, bypassing
+    ``_render_line_spans`` so pre-escaped text (e.g. sub-caption sections
+    with ``*...*`` wrappers) is not double-processed. PDF line breaks in
+    the text are still flattened to spaces.
+
     Preserves line breaks when every non-empty line starts with an
-    em-dash or en-dash bullet marker so that bullet lists extracted
-    as PARAGRAPH sections render as separate items instead of being
-    collapsed into a single prose line.
+    em-dash or en-dash bullet marker.
     """
     if not sec.lines:
         return " ".join(ln.strip() for ln in sec.text.split("\n") if ln.strip())
@@ -120,18 +125,12 @@ def _render_paragraph_spans(sec: Section) -> str:
     lines = text.split("\n")
     non_empty = [ln.strip() for ln in lines if ln.strip()]
     if non_empty and all(_EMDASH_BULLET_RE.match(ln) for ln in non_empty):
-        # Rewrite em/en-dash bullets as markdown list items so that
-        # renderers display them as a proper list instead of joining
-        # consecutive lines into a single paragraph.
-        # indent_level > 0 indicates a nested sub-list (set by
-        # _assign_emdash_nesting in the emit pre-pass).
         prefix = "  " * sec.indent_level
         return "\n".join(
             prefix + _EMDASH_BULLET_RE.sub("- ", ln, count=1)
             for ln in non_empty
         )
     return " ".join(ln.strip() for ln in lines if ln.strip())
-
 
 _BARE_HEADING_NUM_RE = re.compile(
     r"^\s*(?:\d+(?:\.\d+)*|[A-Z]+)\.?\s*$"
@@ -260,17 +259,88 @@ def _normalize_bullets(text: str) -> str:
     return "".join(_normalize_bullet(ch) for ch in text)
 
 
-def _render_list_spans(sec: Section) -> str:
-    """Render a list section with span formatting and normalized bullets."""
-    if sec.lines:
-        result_lines = []
-        for line in sec.lines:
-            rendered = _render_line_spans(line).rstrip()
-            if rendered:
-                result_lines.append(_normalize_bullets(rendered))
-        return "\n".join(result_lines)
+# Two spaces of leading indentation per nesting level. Markdown nests a
+# sublist when its marker is indented past the parent item's content.
+_LIST_INDENT_UNIT = "  "
 
-    return _normalize_bullets(sec.text.rstrip())
+
+_ITEM_TERMINAL_PUNCT = frozenset(".:;?!")
+
+
+def _is_numbered_item(text: str) -> bool:
+    """Whether a line opens an item with an explicit ordinal marker (``1.``, ``b)``)."""
+    return bool(NUMBERED_LIST_RE.match(text.lstrip()))
+
+
+def _reads_unfinished(text: str) -> bool:
+    """Whether an item's accumulated text looks cut off mid-sentence."""
+    stripped = text.rstrip().rstrip('"”’\'')
+    return bool(stripped) and stripped[-1] not in _ITEM_TERMINAL_PUNCT
+
+
+def _is_list_item_start(text: str, current_item: str) -> bool:
+    """Whether a rendered line begins a new list item (vs. a wrapped continuation).
+
+    A bullet glyph or literal ``-``/``*`` marker always opens an item. An
+    ordinal marker (``1.``, ``b)``) is treated as a wrapped continuation,
+    not a new item, only when the current item is itself unnumbered AND
+    reads as cut off mid-sentence: e.g. a bullet ``...meeting in`` wrapping
+    to ``2017. The...``. A current item that is already numbered, or that
+    ends in terminal punctuation, takes the ordinal as a genuine new item,
+    so ``2.`` after ``1.`` and a ``d)`` label after a finished bullet both
+    stay separate (issue #175 review).
+    """
+    stripped = text.lstrip()
+    if not stripped:
+        return False
+    if stripped[0] in BULLET_CHARS or BULLET_RE.match(stripped):
+        return True
+    if NUMBERED_LIST_RE.match(stripped):
+        return _is_numbered_item(current_item) or not _reads_unfinished(current_item)
+    return False
+
+
+def _format_list_item(text: str, depth: int) -> str:
+    """Format one list item at the given nesting depth.
+
+    A Unicode bullet glyph becomes ``*`` at depth 0 and ``-`` when nested
+    (indented two spaces per level). Anything already carrying its own
+    marker (numbered ``1.``, literal ``-``/``*``) keeps it and is only
+    indented.
+    """
+    text = text.strip()
+    indent = _LIST_INDENT_UNIT * max(depth, 0)
+    if text[:1] in BULLET_CHARS:
+        marker = "-" if depth > 0 else "*"
+        return f"{indent}{marker} {_normalize_bullets(text[1:].lstrip())}"
+    return f"{indent}{_normalize_bullets(text)}"
+
+
+def _render_list_spans(sec: Section) -> str:
+    """Render a list section, unwrapping each item and indenting nested ones.
+
+    A LIST section is either a single (possibly line-wrapped) item from the
+    position splitter or several clean bullet lines from the classification
+    loop. Lines that start a new item open an item; the rest are wrapped
+    continuations joined onto it. ``indent_level`` (assigned by
+    :func:`structure._assign_list_nesting`) sets the nesting depth.
+    """
+    depth = max(sec.indent_level, 0)
+    if not sec.lines:
+        return _format_list_item(sec.text, depth)
+
+    items: list[list[str]] = []
+    for line in sec.lines:
+        rendered = _render_line_spans(line).strip()
+        if not rendered:
+            continue
+        current_item = " ".join(items[-1]) if items else ""
+        if not items or _is_list_item_start(rendered, current_item):
+            items.append([rendered])
+        else:
+            items[-1].append(rendered)
+
+    return "\n".join(_format_list_item(" ".join(parts), depth) for parts in items)
 
 
 _DEFAULT_CHAR_WIDTH = 6.0
@@ -392,9 +462,12 @@ def _render_wording_section(sec: Section) -> str:
         inner = "\n".join(lines)
     else:
         inner = " ".join(ln.strip() for ln in lines)
-    return f":::{div_class}\n\n{inner}\n\n:::"
+    return f"{wording_fence_open(div_class)}\n\n{inner}\n\n{WORDING_FENCE_CLOSE}"
 
 
+# Intentionally limited to the two ZapfDingbats glyphs observed in the
+# corpus (checkmark and cross).  Unmapped dingbats pass through as-is;
+# extend this map when new glyphs are encountered in real papers.
 _DINGBATS_MAP: dict[int, str] = {
     0x14: "✓",
     0x18: "✗",
@@ -576,13 +649,16 @@ def _render_html_table(sec: Section) -> str:
     rows = sec.columns
     is_continuation = getattr(sec, "table_continuation", False)
     num_cols = max(len(row) for row in rows)
-    col_w = f"{100 // num_cols}%" if num_cols else "50%"
-    _S = (f"border: 1px solid #999; padding: 6px 10px; "
-          f"vertical-align: top; width: {col_w};")
-    parts: list[str] = [
-        '<table border="1" rules="all" cellpadding="6" cellspacing="0"'
-        ' style="border-collapse: collapse; width: 100%;">',
-    ]
+    # Shared markup (table tag, cell style, <pre><code> wrapping) lives in
+    # lib/tables.py so PDF and HTML comparison tables render identically.
+    _S = _tables.cell_style(num_cols)
+    parts: list[str] = []
+    # Mark code comparisons as structure-preserving, matching the HTML
+    # renderer. Other html_table kinds (SPEC_TABLE, nb_ballot) are not
+    # "mixed code" tables, so they carry no marker.
+    if getattr(sec, "table_kind", None) == "code_comparison":
+        parts.append(_tables.MIXED_TABLE_MARKER)
+    parts.append(_tables.TABLE_OPEN)
 
     # NB-ballot cells: newlines are MuPDF line-wrapping artifacts from
     # narrow PDF columns, not semantic breaks. Collapse to spaces.
@@ -634,20 +710,17 @@ def _render_html_table(sec: Section) -> str:
                 ).strip()
             else:
                 text = "\n".join(cell_lines).strip()
-            escaped = _html.escape(text)
-            rs_attr = ""
-            if ci == 0 and ri in col0_rowspan:
-                rs_attr = f' rowspan="{col0_rowspan[ri]}"'
+            rowspan = col0_rowspan[ri] if (ci == 0 and ri in col0_rowspan) else 1
             if is_header or not text:
-                parts.append(
-                    f'<{tag} style="{_S}"{rs_attr}>{escaped}</{tag}>')
+                # Header/empty cells carry plain escaped text (the PDF side
+                # has spans, not inline tags); text_cell emits it verbatim.
+                parts.append(_tables.text_cell(
+                    tag, _html.escape(text), _S, rowspan=rowspan))
             else:
-                parts.append(
-                    f'<{tag} style="{_S}"{rs_attr}>'
-                    f'<pre style="margin: 0;">{escaped}</pre></{tag}>')
+                parts.append(_tables.code_cell(tag, text, _S, rowspan=rowspan))
         parts.append("</tr>")
 
-    parts.append("</table>")
+    parts.append(_tables.TABLE_CLOSE)
     return "\n".join(parts)
 
 
@@ -1021,6 +1094,44 @@ def _escape_alt_text(text: str) -> str:
     the literal ``]``.
     """
     return _ALT_TEXT_ESCAPE_RE.sub(r"\\\1", text)
+
+
+_ITALIC_INLINE_ESCAPE_RE = re.compile(r"([\\*_`])")
+# Leading characters that would otherwise be parsed as a list marker,
+# blockquote, ATX heading, or ordered-list start. The synthesised
+# sub-caption paragraph (text == "*...*") would be misclassified if any
+# of these appears at column 0 inside the italics wrapper.
+_LEADING_BLOCK_CHARS = ("-", "*", "+", ">", "#")
+_LEADING_ORDERED_RE = re.compile(r"^(\d+)\.")
+
+
+def _escape_italic_text(text: str) -> str:
+    """Escape characters that would break a ``*...*`` italic wrapper.
+
+    Used by the sub-caption insertion path in the pipeline (sub-caption
+    PARAGRAPH sections are emitted as ``*<escaped>*``). Escapes:
+
+    - ``\\`` so a trailing backslash doesn't eat the closing ``*``.
+    - ``*``, ``_``, and backticks so they don't terminate the wrapper
+      or open a code span.
+    - A leading list/quote/heading character so the paragraph doesn't
+      render as a list item, blockquote, or heading once the italics
+      wrapper is in place.
+    """
+    escaped = _ITALIC_INLINE_ESCAPE_RE.sub(r"\\\1", text)
+    if not escaped:
+        return escaped
+    if escaped[0] in _LEADING_BLOCK_CHARS:
+        # The first character has already been backslash-escaped if it
+        # was ``*``; the other leading-block characters need their own
+        # leading backslash.
+        if escaped[0] != "\\":
+            escaped = "\\" + escaped
+    else:
+        m = _LEADING_ORDERED_RE.match(escaped)
+        if m:
+            escaped = escaped[:m.end() - 1] + "\\." + escaped[m.end():]
+    return escaped
 
 
 def _render_image(sec: Section) -> str:

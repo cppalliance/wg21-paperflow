@@ -354,17 +354,19 @@ def compare_extractions(mupdf_blocks: list[Block],
             promoted.add(next_pg)
 
     if promoted:
+        # `promoted` holds both the uncertain pages and the confident neighbours
+        # they paired with. Only pages that carry an UNCERTAIN section have it
+        # removed by the filter below and need their blocks re-emitted as
+        # paragraphs; a confident neighbour still holds the PARAGRAPH sections
+        # built for it on the first pass, so re-emitting it here would place
+        # every block on that page twice.
+        promoted_uncertain = {s.page_num for s in sections
+                              if s.kind == SectionKind.UNCERTAIN
+                              and s.page_num in promoted}
         kept = [s for s in sections
                 if not (s.kind == SectionKind.UNCERTAIN
                         and s.page_num in promoted)]
-        # Only re-add blocks for pages that were actually uncertain.
-        # Pages pulled into the promoted set as neighbors may already
-        # have high-confidence sections; re-adding would duplicate them.
-        already_covered = {s.page_num for s in kept
-                           if s.page_num in promoted}
-        for pg in sorted(promoted):
-            if pg in already_covered:
-                continue
+        for pg in sorted(promoted_uncertain):
             for block in mupdf_by_page.get(pg, []):
                 kept.append(_make_paragraph_section(block))
         sections = kept
@@ -385,14 +387,17 @@ def compare_extractions(mupdf_blocks: list[Block],
                      >= SIMILARITY_THRESHOLD)
         if doc_match:
             bulk_promoted = set(still_uncertain)
+            # Defence-in-depth only: `still_uncertain` pages all carry an
+            # UNCERTAIN section by construction, so `promoted_uncertain` here
+            # always equals `bulk_promoted` and this guard is a no-op. It mirrors
+            # the pairwise block above so the two re-insertion paths cannot drift.
+            promoted_uncertain = {s.page_num for s in sections
+                                  if s.kind == SectionKind.UNCERTAIN
+                                  and s.page_num in bulk_promoted}
             kept = [s for s in sections
                     if not (s.kind == SectionKind.UNCERTAIN
                             and s.page_num in bulk_promoted)]
-            already_covered = {s.page_num for s in kept
-                               if s.page_num in bulk_promoted}
-            for pg in sorted(bulk_promoted):
-                if pg in already_covered:
-                    continue
+            for pg in sorted(promoted_uncertain):
                 for block in mupdf_by_page.get(pg, []):
                     kept.append(_make_paragraph_section(block))
             sections = kept
@@ -900,6 +905,7 @@ def _structure_body_impl(metadata: dict,
     structured = _detect_lists_by_position(structured)
     structured = _merge_paragraphs(structured)
     structured = _split_mixed_mono_sections(structured)
+    _assign_list_nesting(structured)
     structured = _detect_code_blocks(structured)
     structured = [s for s in structured if _detect_lang_label(s) is None]
     structured = _classify_wording_sections(structured)
@@ -1103,7 +1109,6 @@ def _split_section_by_position(sec: Section, body_margin: float) -> list[Section
 
     items: list[Section] = []
     current_lines: list = []
-    current_indent = 0
     current_is_bullet = False
 
     for line in lines:
@@ -1114,13 +1119,12 @@ def _split_section_by_position(sec: Section, body_margin: float) -> list[Section
 
         x = line.bbox[0]
         is_bullet = _line_starts_with_bullet(line)
-        indent = 0
-        if x > body_margin + _INDENT_TOLERANCE:
-            indent = 1
-        if x > body_margin + _INDENT_TOLERANCE * 3:
-            indent = 2
+        # We only need item boundaries here (is this bullet indented past
+        # the body margin); nesting depth is assigned later, relative to
+        # siblings, by _assign_list_nesting.
+        is_indented = x > body_margin + _INDENT_TOLERANCE
 
-        if is_bullet and indent > 0:
+        if is_bullet and is_indented:
             if current_lines:
                 text = "\n".join(ln.text for ln in current_lines if ln.text.strip())
                 items.append(Section(
@@ -1130,12 +1134,10 @@ def _split_section_by_position(sec: Section, body_margin: float) -> list[Section
                     lines=list(current_lines),
                     page_num=sec.page_num,
                     font_size=sec.font_size,
-                    indent_level=current_indent,
                 ))
             current_lines = [line]
-            current_indent = indent
             current_is_bullet = True
-        elif indent == 0 and current_is_bullet:
+        elif not is_indented and current_is_bullet:
             if current_lines:
                 text = "\n".join(ln.text for ln in current_lines if ln.text.strip())
                 items.append(Section(
@@ -1145,10 +1147,8 @@ def _split_section_by_position(sec: Section, body_margin: float) -> list[Section
                     lines=list(current_lines),
                     page_num=sec.page_num,
                     font_size=sec.font_size,
-                    indent_level=current_indent,
                 ))
             current_lines = [line]
-            current_indent = 0
             current_is_bullet = False
         else:
             current_lines.append(line)
@@ -1163,7 +1163,6 @@ def _split_section_by_position(sec: Section, body_margin: float) -> list[Section
                 lines=list(current_lines),
                 page_num=sec.page_num,
                 font_size=sec.font_size,
-                indent_level=current_indent,
             ))
 
     if not items:
@@ -1198,6 +1197,80 @@ def _split_inline_bullets_text(sec: Section) -> list[Section]:
             font_size=sec.font_size,
         ))
     return result if result else [sec]
+
+
+def _bullet_x(sec: Section) -> float | None:
+    """Return the x-position of a list item's bullet (its first content line).
+
+    Text-only list items (from the inline-bullet fallback) carry no
+    geometry and return None.
+    """
+    for line in sec.lines:
+        if line.text.strip() and line.spans:
+            return line.bbox[0]
+    return None
+
+
+def _assign_list_nesting(sections: list[Section]) -> None:
+    """Set ``indent_level`` on LIST sections from their relative x-position.
+
+    Mutates the sections in place. Nesting depth is relative within each
+    run of consecutive LIST sections on a single page, not absolute from
+    the body margin: the leftmost bullets in a run are depth 0, the next
+    x-stop is depth 1, and so on. This is the only place depth is computed
+    (the position splitter just finds item boundaries) because a parent
+    list and its nested children can arrive as separate sections, so a
+    child's depth is only knowable relative to its siblings across the run.
+
+    A run is split at page boundaries before depth is computed. Because
+    depth is purely x-relative, a list that continues onto the next page
+    (or into a second column) can resume at a different left margin, which
+    a whole-run clustering would misread as a new nesting level. Clustering
+    each page independently keeps that margin shift from inventing depth.
+    """
+    i = 0
+    while i < len(sections):
+        if sections[i].kind != SectionKind.LIST:
+            i += 1
+            continue
+        j = i
+        while j < len(sections) and sections[j].kind == SectionKind.LIST:
+            j += 1
+        run = sections[i:j]
+        start = 0
+        for k in range(1, len(run) + 1):
+            if k == len(run) or run[k].page_num != run[start].page_num:
+                _set_run_depths(run[start:k])
+                start = k
+        i = j
+
+
+def _set_run_depths(run: list[Section]) -> None:
+    """Assign relative nesting depth to each LIST section in one run.
+
+    Bullet x-positions are clustered into stops (gaps wider than
+    ``_INDENT_TOLERANCE`` open a new stop); an item's depth is the number
+    of stops it sits clear to the right of, using the same tolerance as
+    the clustering so the two never disagree.
+
+    Clustering is greedy against the last stop, so a chain of bullets each
+    within tolerance of the previous but spanning more than tolerance
+    end-to-end (e.g. 50, 54, 58 at tolerance 5 -> stops 50, 58) can place
+    near-neighbours at different depths. This is acceptable: real PDFs keep
+    same-level bullets at a consistent x well inside the tolerance, so the
+    evenly-bridged spread does not occur in practice.
+    """
+    positioned = [(x, sec) for sec in run if (x := _bullet_x(sec)) is not None]
+    if not positioned:
+        return
+
+    stops: list[float] = []
+    for x in sorted(x for x, _ in positioned):
+        if not stops or x - stops[-1] > _INDENT_TOLERANCE:
+            stops.append(x)
+
+    for x, sec in positioned:
+        sec.indent_level = sum(1 for stop in stops if x - stop > _INDENT_TOLERANCE)
 
 
 _LIST_CONTINUATION_INDENT = 10.0  # min extra x-offset (pt) for indent merge

@@ -27,6 +27,13 @@ _GOLDEN_STEMS = (
     # a pre-existing leak.
     "p4174r0",
     "p4004r1",
+    # Population-B promotion-dedup guard (pt3): a confident page paired into a
+    # promotion was emitted twice. p3968r0's sole defect was this double-emit
+    # (sections 6 and 7 doubled at the tail); the golden pins that each section
+    # appears exactly once. One uncertain region covers the front-page
+    # metadata/TOC block (L12-L114); sections 2-8 are all confident and each
+    # appears exactly once. Not a zero-uncertain-markers specimen.
+    "p3968r0",
 )
 
 

@@ -1,14 +1,17 @@
 """Tests for lib.html.render."""
 
 import re
+from markdown_it import MarkdownIt
 
 from tomd.lib.html.extract import parse_html
 from tomd.lib.html.render import (
     render_body,
     _fix_misnested_table_cells,
     _LOSSY_TABLE_MARKER,
-    _MIXED_TABLE_MARKER,
 )
+from tomd.lib.tables import MIXED_TABLE_MARKER as _MIXED_TABLE_MARKER
+
+_COMMONMARK = MarkdownIt("commonmark")
 
 
 class TestHeading:
@@ -802,6 +805,158 @@ class TestLossyTableMarker:
         """
         md = render_body(parse_html(html), "mpark")
         assert md.count("<!-- tomd:lossy-table -->") == 2
+
+
+class TestMixedCodeTable:
+    """Tables containing code that also carry headers or non-code cells render
+    as a structure-preserving HTML table via ``_render_mixed_code_table``:
+    a ``<!-- tomd:mixed-table -->`` marker, ``<th>`` headers, ``<pre><code>``
+    code cells, and inline markup kept in non-code cells. Only headerless,
+    all-code tables take the flat lossy fenced-block path
+    (``_render_code_table``).
+
+    These pin ``_render_mixed_code_table`` (added in #109), which preserves the
+    Before/After, Current/Proposed comparison labels that the flat emit drops.
+    """
+
+    def test_headered_comparison_renders_mixed_html_table(self):
+        """thead/tbody comparison (the P2906R1 shape): mixed-table marker, an
+        HTML table with <th> headers and <pre><code> code cells."""
+        html = """
+        <table>
+        <thead><tr><th>Before</th><th>After</th></tr></thead>
+        <tbody><tr>
+        <td><pre>int verbose_form();</pre></td>
+        <td><pre>int proposed_form();</pre></td>
+        </tr></tbody>
+        </table>
+        """
+        md = render_body(parse_html(html), "mpark")
+        assert "<!-- tomd:mixed-table -->" in md
+        assert "<!-- tomd:lossy-table -->" not in md
+        assert ">Before</th>" in md
+        assert ">After</th>" in md
+        assert '<pre style="margin: 0;"><code>int verbose_form();</code></pre>' in md
+        assert '<pre style="margin: 0;"><code>int proposed_form();</code></pre>' in md
+        # headers precede the data row; left cell precedes right cell
+        assert (
+            md.index(">Before</th>")
+            < md.index("int verbose_form();")
+            < md.index("int proposed_form();")
+        )
+
+    def test_code_cells_html_escaped(self):
+        """Code containing <, >, & is escaped so it survives inside <pre><code>."""
+        html = """
+        <table>
+        <thead><tr><th>Before</th><th>After</th></tr></thead>
+        <tbody><tr>
+        <td><pre>vector&lt;int&gt; v;</pre></td>
+        <td><pre>a &amp;&amp; b;</pre></td>
+        </tr></tbody>
+        </table>
+        """
+        md = render_body(parse_html(html), "mpark")
+        assert "vector&lt;int&gt; v;" in md
+        assert "a &amp;&amp; b;" in md
+
+    def test_multi_row_one_tr_per_row(self):
+        """2 columns x 2 body rows (bare <tr>, no thead): header cells appear
+        once and each body row is its own <tr> with both cells adjacent."""
+        html = """
+        <table>
+        <tr><th>Before</th><th>After</th></tr>
+        <tr><td><pre>row_one_left;</pre></td><td><pre>row_one_right;</pre></td></tr>
+        <tr><td><pre>row_two_left;</pre></td><td><pre>row_two_right;</pre></td></tr>
+        </table>
+        """
+        md = render_body(parse_html(html), "mpark")
+        assert "<!-- tomd:mixed-table -->" in md
+        assert md.count(">Before</th>") == 1
+        assert md.count(">After</th>") == 1
+        assert md.count("<tr>") == 3  # header + two body rows
+        assert (
+            md.index("row_one_left;")
+            < md.index("row_one_right;")
+            < md.index("row_two_left;")
+            < md.index("row_two_right;")
+        )
+
+    def test_three_column_headers(self):
+        """3-column comparison: all three headers emitted, width 33%."""
+        html = """
+        <table>
+        <thead><tr><th>Desired</th><th>Throwing</th><th>Explicit</th></tr></thead>
+        <tbody><tr>
+        <td><pre>aaa;</pre></td>
+        <td><pre>bbb;</pre></td>
+        <td><pre>ccc;</pre></td>
+        </tr></tbody>
+        </table>
+        """
+        md = render_body(parse_html(html), "mpark")
+        assert ">Desired</th>" in md
+        assert ">Throwing</th>" in md
+        assert ">Explicit</th>" in md
+        assert "width: 33%;" in md
+
+    def test_header_inline_formatting_preserved(self):
+        """Inline markup inside a header cell (here <strong>) is kept as HTML,
+        not flattened. Body rows must be wrapped in <tbody> when a <thead> is
+        present, else the bare body <tr> is dropped (see the next test)."""
+        html = """
+        <table>
+        <thead><tr><th><strong>Before</strong></th><th><strong>After</strong></th></tr></thead>
+        <tbody><tr><td><pre>xx;</pre></td><td><pre>yy;</pre></td></tr></tbody>
+        </table>
+        """
+        md = render_body(parse_html(html), "mpark")
+        assert "<!-- tomd:mixed-table -->" in md
+        assert "<strong>Before</strong></th>" in md
+        assert "<strong>After</strong></th>" in md
+
+    def test_non_code_cells_preserve_inline_markup(self):
+        """The point of the mixed renderer: a code cell and a text cell in the
+        same row are both preserved, with safe inline tags kept in the text."""
+        html = """
+        <table>
+        <tr><th>Code</th><th>Status</th></tr>
+        <tr><td><pre>do_thing();</pre></td><td>Works <a href="http://x">link</a></td></tr>
+        </table>
+        """
+        md = render_body(parse_html(html), "mpark")
+        assert "<!-- tomd:mixed-table -->" in md
+        assert '<pre style="margin: 0;"><code>do_thing();</code></pre>' in md
+        assert 'Works <a href="http://x">link</a>' in md
+
+    def test_header_non_ascii_preserved(self):
+        """Non-ASCII headers (𝔽/𝕃 + en-dash, the P3666/P3721 family) survive
+        into the <th> byte-intact."""
+        html = """
+        <table>
+        <thead><tr><th>\U0001D53D – Fundamental type</th><th>\U0001D543 – Library type</th></tr></thead>
+        <tbody><tr><td><pre>xx;</pre></td><td><pre>yy;</pre></td></tr></tbody>
+        </table>
+        """
+        md = render_body(parse_html(html), "mpark")
+        assert "\U0001D53D – Fundamental type</th>" in md
+        assert "\U0001D543 – Library type</th>" in md
+
+    def test_headerless_pure_code_uses_lossy_fence(self):
+        """A headerless table whose every cell is code takes the flat lossy
+        path: a lossy marker and fenced blocks, not an HTML table."""
+        html = """
+        <table>
+        <tr><td><pre>int a;</pre></td><td><pre>int b;</pre></td></tr>
+        </table>
+        """
+        md = render_body(parse_html(html), "mpark")
+        assert "<!-- tomd:lossy-table -->" in md
+        assert "<!-- tomd:mixed-table -->" not in md
+        assert "<table" not in md
+        assert "```cpp" in md
+        assert "int a;" in md
+        assert "int b;" in md
 
 
 class TestDefinitionList:
@@ -1704,9 +1859,9 @@ class TestListChildDrop:
 
     def test_ol_ol_wording_content_recovered(self):
         # P4179R0's real shape: the synopsis <pre> sits inside a <blockquote>
-        # inside the <li>. Part 1 recovers the CONTENT (the list is no longer
-        # dropped). The <pre> stays flattened by _inline_text (the deferred
-        # <li>-internal flattening), so we assert presence, not a code fence.
+        # inside the <li>. The content is recovered (the list is no longer
+        # dropped); presence is what this test guards. (Structured fencing of
+        # that <li>-internal <pre> is exercised by TestListItemNesting.)
         md = self._md(
             "<div><ol><ol>"
             "<li><p>Add a feature-test macro</p>"
@@ -1764,11 +1919,14 @@ class TestListChildDrop:
         md = self._md("<ul><li>a<ul><li>b</li></ul></li></ul>")
         assert md == "- a\n  - b"
 
-    def test_code_block_in_li_unchanged(self):
+    def test_code_block_in_li_now_indented(self):
+        # Superseded behavior: a <pre> inside an <li> is now indented to the
+        # marker width (3 spaces for "1. ") as a continuation, not left
+        # un-indented. See TestListItemNesting for the full nesting suite.
         md = self._md("<ol><li>x<pre>code</pre></li></ol>")
         assert "1. x" in md
-        assert "```" in md
-        assert "code" in md
+        assert "   ```" in md
+        assert "   code" in md
 
 
 class TestDlChildDrop:
@@ -1789,3 +1947,99 @@ class TestDlChildDrop:
         md = self._md("<dl><dt>term</dt><dd>def</dd></dl>")
         assert "**term**" in md
         assert ": def" in md
+
+
+class TestListItemNesting:
+    """Block content inside an <li> renders as indented continuation blocks
+    (correct CommonMark nesting), not flattened to one inline line."""
+
+    def _md(self, html):
+        return render_body(parse_html(html), "mpark")
+
+    def _html(self, html):
+        # Render our markdown output through a CommonMark parser, collapsed to
+        # one line for structural assertions.
+        return _COMMONMARK.render(self._md(html)).replace("\n", "")
+
+    def test_li_blockquote_rendered_indented(self):
+        md = self._md("<ul><li>label<blockquote>q</blockquote></li></ul>")
+        assert md == "- label\n\n  > q"
+
+    def test_li_leading_paragraph_is_label(self):
+        md = self._md("<ul><li><p>Label</p><blockquote>q</blockquote></li></ul>")
+        assert md == "- Label\n\n  > q"
+
+    def test_li_pre_in_blockquote_fenced_and_nested(self):
+        # P3928R0 shape: <pre> + nested <ol> inside a <blockquote> inside the li.
+        md = self._md(
+            "<ol><li><p>Modify</p>"
+            "<blockquote><pre>code()</pre>"
+            "<ol><li>x</li></ol></blockquote></li></ol>"
+        )
+        assert "```" in md                 # the <pre> is fenced, not inline
+        assert "code()" in md
+        # nested <ol> renders as a list item, fenced code appears before it
+        assert md.index("code()") < md.index("x")
+        # and it nests under the item in a real parser
+        html = self._html(
+            "<ol><li><p>Modify</p>"
+            "<blockquote><pre>code()</pre>"
+            "<ol><li>x</li></ol></blockquote></li></ol>"
+        )
+        assert "<ol><li>" in html and "<blockquote>" in html
+        assert "</li></ol></blockquote></li></ol>" in html  # all inside item 1
+
+    def test_li_multiple_paragraphs(self):
+        md = self._md("<ol><li><p>a</p><p>b</p></li></ol>")
+        assert md == "1. a\n\n   b"        # 3-space marker-width indent
+
+    def test_li_nested_list_in_blockquote_preserved(self):
+        md = self._md("<ul><li>x<blockquote><ul><li>sub</li></ul></blockquote></li></ul>")
+        assert "sub" in md
+        assert "> " in md                  # blockquote preserved
+        assert "- sub" in md               # sub-list is a list item, not inline
+
+    def test_li_block_only_no_label(self):
+        md = self._md("<ol><li><blockquote>q</blockquote></li></ol>")
+        assert md == "1.\n   > q"          # no leading blank line
+        html = self._html("<ol><li><blockquote>q</blockquote></li></ol>")
+        assert html == "<ol><li><blockquote><p>q</p></blockquote></li></ol>"
+
+    def test_li_document_order_preserved(self):
+        md = self._md("<ol><li>x<pre>code</pre><blockquote>q</blockquote></li></ol>")
+        assert md.index("code") < md.index("> q")   # source order
+        assert "\n\n" in md                          # sibling blocks separated
+
+    def test_marker_width_indent(self):
+        # Continuation indent tracks the marker width: '-' -> 2, '1.' -> 3.
+        assert self._md("<ul><li>a<blockquote>q</blockquote></li></ul>") == "- a\n\n  > q"
+        assert self._md("<ol><li>a<blockquote>q</blockquote></li></ol>") == "1. a\n\n   > q"
+
+    def test_ordered_list_nests_in_commonmark(self):
+        html = self._html(
+            "<ol><li><p>a</p><blockquote>q</blockquote></li><li>b</li></ol>"
+        )
+        # blockquote is inside item 1, the <ol> is one list with two items
+        assert html == (
+            "<ol><li><p>a</p><blockquote><p>q</p></blockquote></li>"
+            "<li><p>b</p></li></ol>"
+        )
+
+    def test_simple_li_unchanged(self):
+        assert self._md("<ul><li>plain</li></ul>") == "- plain"
+
+    def test_li_interleaved_and_trailing_inline_preserved(self):
+        md = self._md(
+            "<ul><li>intro<blockquote>q1</blockquote>middle"
+            "<blockquote>q2</blockquote>tail</li></ul>"
+        )
+        assert "intromiddle" not in md           # no token merge
+        assert "intro" in md and "middle" in md and "tail" in md
+        assert md.index("q1") < md.index("middle") < md.index("q2") < md.index("tail")
+
+    def test_non_li_loose_block_under_ordered_item_nests(self):
+        md = self._md("<ol><li>a</li><p>loose</p><li>b</li></ol>")
+        assert md == "1. a\n\n   loose\n2. b"
+        html = self._html("<ol><li>a</li><p>loose</p><li>b</li></ol>")
+        # 'loose' is inside item a; one <ol> with two items
+        assert html == "<ol><li><p>a</p><p>loose</p></li><li><p>b</p></li></ol>"

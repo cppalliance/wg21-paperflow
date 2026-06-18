@@ -14,6 +14,7 @@ dependencies = [
     "assay",
     "cli",
     "preview",
+    "cpp-mcp",
 ]
 
 [dependency-groups]
@@ -22,7 +23,17 @@ dependencies = [
 # pymupdf.Pixmap.set_rect directly. Keeping Pillow out of any package's
 # [project.dependencies] avoids cross-codec linkage (zlib/libjpeg/libpng)
 # drift between pymupdf and Pillow at install time.
-dev = ["pytest~=8.0", "ruff~=0.6", "pyright>=1.1", "pillow>=11.0"]
+# markdown-it-py is also test-only: tomd's list-item-nesting tests render the
+# produced markdown through a real CommonMark parser to assert block nesting.
+# It was only transitively present (via rich); declared+pinned here because the
+# tests assert rendering behavior, which can drift across parser versions.
+dev = [
+    "pytest~=8.0",
+    "ruff~=0.6",
+    "pyright>=1.1",
+    "pillow>=11.0",
+    "markdown-it-py~=4.0",
+]
 
 [tool.uv]
 package = false
@@ -39,6 +50,7 @@ agora        = {workspace = true}
 assay        = {workspace = true}
 cli          = {workspace = true}
 preview      = {workspace = true}
+cpp-mcp      = {workspace = true}
 scrivener  = {git = "https://github.com/gregjkal/wg21-scrivener.git"}
 
 [tool.pytest.ini_options]

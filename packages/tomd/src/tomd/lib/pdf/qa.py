@@ -27,6 +27,8 @@ from paperstore.progress import ProgressCallback
 from tomd.lib.batch import run_parallel_batch
 from tomd.lib.metadata_yaml.format import FRONT_MATTER_ORDER, parse_front_matter
 
+from ..wording_markup import FENCE_MARKER
+
 __all__ = [
     "QABatchResult",
     "QAMetrics",
@@ -42,7 +44,9 @@ _UNCERTAIN_MARKER = "tomd:uncertain"
 _LOSSY_TABLE_MARKER = "tomd:lossy-table"
 _WG21_DOC_NUM_RE = re.compile(r"[DPN]\d{3,5}R?\d*", re.IGNORECASE)
 
-_WORDING_DIV_RE = re.compile(r"^:::wording", re.MULTILINE)
+# Detection-only: counts wording-div openings. Built from the shared marker
+# (lib.wording_markup) so it tracks the same syntax the emitters produce.
+_WORDING_DIV_RE = re.compile(rf"^{re.escape(FENCE_MARKER)}wording", re.MULTILINE)
 
 # Intentionally broader than structure.py's _STRUCTURAL_CODE_RE.
 # qa.py uses it for *detection* (scoring), so false positives just

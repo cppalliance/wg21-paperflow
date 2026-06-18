@@ -50,6 +50,8 @@ def test_format_content_check_report_contains_expected_sections():
             source_format="html",
             coverage=0.92,
             drift=0.01,
+            unigram_coverage=0.95,
+            unigram_drift=0.01,
             source_token_count=100,
             markdown_token_count=98,
             missing_regions=(

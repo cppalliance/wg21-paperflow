@@ -220,8 +220,8 @@ Enums:
 - `structure.py:compare_extractions`
 - Stage 1: Per-page word-level multiset similarity. Threshold 0.85.
 - Stage 2: NFC normalization fallback. If word similarity fails, NFC-normalize joined words and compare. Catches Unicode normalization differences.
-- Stage 3: Page-pair window. For uncertain pages, combine with next page and re-check similarity. Catches content shifted across page boundaries.
-- Stage 4: Document-level pool. Combine all remaining uncertain pages and check total similarity. Catches systematic page-assignment differences.
+- Stage 3: Page-pair window. For uncertain pages, combine with next page and re-check similarity. Catches content shifted across page boundaries. When the pair clears the threshold both pages are promoted, but blocks are re-emitted as paragraphs only for pages that actually carried an UNCERTAIN section: a confident pairing partner already has its first-pass PARAGRAPH sections, so re-emitting it would duplicate every block on that page.
+- Stage 4: Document-level pool. Combine all remaining uncertain pages and check total similarity. Catches systematic page-assignment differences. Same uncertain-only re-emission rule as stage 3 (a no-op here, since pooled pages are all uncertain by construction).
 - Stage 5: Tiny-region demotion. Uncertain sections with fewer than 10 words in the shorter version -> demoted to PARAGRAPH with LOW confidence.
 
 ### Layer 6: WG21 Metadata (2 techniques)

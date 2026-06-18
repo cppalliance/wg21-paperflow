@@ -120,6 +120,42 @@ def test_skips_papers_without_markdown(store):
     assert result["skipped"][0]["reason"] == "no_markdown"
 
 
+def test_zero_citation_paper_is_skipped_on_second_run(store):
+    """A prose-only paper (no citations) sets ``citations_extracted_at`` even
+    though it stores zero rows.  The next run must skip it rather than
+    re-extracting forever."""
+    pid = "P5000R0"
+    _seed(store, pid, "This paper contains no citations at all.\n")
+
+    first = asyncio.run(jobs.run_citations([pid], store))
+    assert first["succeeded"] == [pid]
+    assert store.get_paper_citations(pid) == []
+
+    second = asyncio.run(jobs.run_citations([pid], store))
+    assert second["succeeded"] == []
+    reasons = {s["paper_id"]: s["reason"] for s in second["skipped"]}
+    assert reasons.get(pid) == "already_extracted"
+
+
+def test_citations_not_stale_after_clear_downstream_outputs(store):
+    """After ``clear_downstream_outputs`` clears the citations stamp, the next
+    ``run_citations`` call re-extracts rather than skipping."""
+    pid = "P5000R0"
+    _seed(store, pid, "Cites P1234R0.\n")
+    asyncio.run(jobs.run_citations([pid], store))
+    assert {r.cited_paper_id for r in store.get_paper_citations(pid)} == {"P1234R0"}
+
+    # Simulate a forced re-convert: rewrite markdown, invalidate downstream.
+    store.write_paper_md(pid, "Now only cites P9999R0.\n")
+    store.clear_downstream_outputs(pid)
+
+    assert store.get_paper_citations(pid) == []
+    assert store.get_meta(pid).citations_extracted_at == ""
+
+    asyncio.run(jobs.run_citations([pid], store))
+    assert {r.cited_paper_id for r in store.get_paper_citations(pid)} == {"P9999R0"}
+
+
 def test_count_is_preserved(store):
     pid = "P5000R0"
     _seed(store, pid, "P1234R0 ... P1234R0 ... P1234R0 ... P9999R0\n")

@@ -7,6 +7,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from tomd.lib.metadata_yaml.format import parse_front_matter
 from tomd.lib.pdf.qa import compute_metrics
+from tomd.lib.html.extract import parse_html
+from tomd.lib.html.render import render_body
 
 
 _GOOD_MD = """\
@@ -116,6 +118,25 @@ class TestLossyTableCount:
         md = "## Heading\n\n<!-- tomd:lossy-table -->\n\n| A | B |\n| --- | --- |\n| 1 | 2 |\n"
         m = compute_metrics(md)
         assert m.score == 100
+
+    def test_mixed_code_table_not_counted_as_lossy(self):
+        """A headered code-comparison renders as a structure-preserving mixed
+        table (``tomd:mixed-table``), which is distinct from a lossy table:
+        it does not contribute to lossy_table_count."""
+        html = """
+        <table>
+        <thead><tr><th>Before</th><th>After</th></tr></thead>
+        <tbody><tr>
+        <td><pre>int verbose_form();</pre></td>
+        <td><pre>int proposed_form();</pre></td>
+        </tr></tbody>
+        </table>
+        """
+        md = render_body(parse_html(html), "mpark")
+        assert "<!-- tomd:mixed-table -->" in md
+        assert "<!-- tomd:lossy-table -->" not in md
+        m = compute_metrics("## Heading\n\n" + md + "\n")
+        assert m.lossy_table_count == 0
 
 
 class TestNoHeadings:

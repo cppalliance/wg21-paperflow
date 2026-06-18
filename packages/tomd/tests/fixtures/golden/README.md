@@ -23,6 +23,7 @@ Selected for structural diversity:
 | p1112r4 | uncertain regions, lists, italic |
 | p4174r0 | TOC-strip regression (#122): short paper, no real TOC; full body (title, abstract, sections) must survive |
 | p4004r1 | TOC-strip regression (#122): small partial-loss paper; mid-body sections must survive |
+| p3968r0 | promotion-dedup guard (pt3): confident page doubled by a neighbour's promotion; each section must appear exactly once |
 
 ## Refreshing HTML baselines
 
@@ -60,7 +61,7 @@ from tomd.lib.pdf import run_pipeline
 out = Path('tests/fixtures/golden')
 for stem in ['p0533r9', 'p0957r8', 'p1068r11', 'p3556r0',
              'p1122r3', 'p2040r0', 'p3714r0', 'p1112r4',
-             'p4174r0', 'p4004r1']:
+             'p4174r0', 'p4004r1', 'p3968r0']:
     r = run_pipeline(out / f'{stem}.pdf')
     md, prompts = r.md, r.prompts
     (out / f'{stem}.golden.md').write_text(md, encoding='utf-8', newline='\n')
