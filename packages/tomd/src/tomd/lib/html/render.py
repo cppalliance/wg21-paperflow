@@ -8,10 +8,11 @@ from collections import deque
 from bs4 import BeautifulSoup, CData, Comment, Tag, NavigableString
 
 from .. import strip_format_chars, ALLOWED_LINK_SCHEMES
+from ..wording_markup import WORDING_FENCE_CLOSE, wording_fence_open, wording_tag_open
+from .. import tables as _tables
 
 _BOLD_WRAP_RE = re.compile(r"^\*\*(.+)\*\*$")
 _LOSSY_TABLE_MARKER = "<!-- tomd:lossy-table -->"
-_MIXED_TABLE_MARKER = "<!-- tomd:mixed-table -->"
 _COLLAPSE_WS_RE = re.compile(r"\s+")
 
 _HEADING_TAGS = frozenset({"h1", "h2", "h3", "h4", "h5", "h6"})
@@ -753,16 +754,18 @@ def _render_div(el: Tag, generator: str) -> str | None:
 def _render_wording_div(el: Tag, generator: str) -> str:
     """Render a wording section with Pandoc fenced div markers."""
     classes = el.get("class", [])
+    # Class-selection precedence stays local; only the fence-string
+    # construction is shared (lib.wording_markup). Do not reorder these.
     if "wording-add" in classes:
-        fence = ":::wording-add"
+        fence = wording_fence_open("wording-add")
     elif "wording-remove" in classes:
-        fence = ":::wording-remove"
+        fence = wording_fence_open("wording-remove")
     else:
-        fence = ":::wording"
+        fence = wording_fence_open("wording")
     parts = []
     _render_children(el, parts, generator)
     inner = "\n\n".join(p for p in parts if p.strip())
-    return f"{fence}\n\n{inner}\n\n:::"
+    return f"{fence}\n\n{inner}\n\n{WORDING_FENCE_CLOSE}"
 
 
 def _render_eelis_block(el: Tag, generator: str) -> str | None:
@@ -790,78 +793,139 @@ def _render_eelis_block(el: Tag, generator: str) -> str | None:
 
 _CODE_BLOCK_TAGS = frozenset({"pre", "code-block"})
 
+# Block-level tags that, inside an <li>, become indented continuation blocks
+# rather than being flattened into the item label. Derived from _BLOCK_TAGS so
+# the two cannot silently drift; the deltas are deliberate:
+#   + code-block : Schultke custom code element, block-level here too
+#   - headings   : a heading inside an <li> stays in the inline label (current
+#                  behavior; headings-in-list-items are not real structure)
+#   - section    : transparent wrapper; let its children flatten as today
+#   - hr         : a rule inside an <li> has no continuation meaning (current
+#                  behavior already drops it)
+_LIST_ITEM_BLOCK_TAGS = (
+    (_BLOCK_TAGS | {"code-block"}) - _HEADING_TAGS - {"section", "hr"}
+)
 
-def _indent(text: str) -> str:
-    """Indent every line by two spaces (list-continuation depth)."""
-    return "\n".join("  " + line for line in text.split("\n"))
+
+def _indent(text: str, width: int = 2) -> str:
+    """Indent every line by ``width`` spaces (list-continuation depth).
+
+    Default 2 is the bullet-marker content column; ordered items pass their own
+    marker width (``len(prefix) + 1``) so continuation blocks nest under the
+    item instead of detaching.
+    """
+    pad = " " * width
+    return "\n".join(pad + line for line in text.split("\n"))
+
+
+def _render_list_item(li: Tag, prefix: str, generator: str) -> list[str]:
+    """Render one ``<li>`` as a label line plus indented continuation blocks,
+    preserving document order.
+
+    The label is the leading inline run (text + inline tags, and a leading
+    ``<p>``). The first block element and everything after it become indented
+    continuation blocks in source order; inline text interleaved with or
+    trailing those blocks becomes its own continuation paragraph, so it is
+    neither merged into the label nor silently dropped. A nested list
+    continuation stays tight (no blank line, matching today's sublist output);
+    other blocks get a blank line so siblings do not lazily merge. Blocks are
+    indented to the item's marker width so they nest under it.
+    """
+    width = len(prefix) + 1   # marker content column: '-' -> 2, '1.' -> 3
+    label_run: list = []      # leading inline nodes
+    trailing: list = []       # nodes from the first block onward, in order
+    seen_block = False
+    leading_p_used = False
+    for child in list(li.children):
+        is_block = isinstance(child, Tag) and child.name in _LIST_ITEM_BLOCK_TAGS
+        if is_block and child.name == "p" and not seen_block and not leading_p_used:
+            leading_p_used = True          # leading <p> is part of the label
+            label_run.append(child)
+            continue
+        if is_block:
+            seen_block = True
+        (trailing if seen_block else label_run).append(child)
+
+    label = _collapse_whitespace(_inline_text_nodes(label_run)).strip()
+
+    cont: list[tuple[bool, str]] = []
+    run: list = []
+
+    def _flush_run() -> None:
+        if run:
+            txt = _collapse_whitespace(_inline_text_nodes(run)).strip()
+            if txt:
+                cont.append((False, _indent(txt, width)))
+            run.clear()
+
+    for node in trailing:
+        if isinstance(node, Tag) and node.name in _LIST_ITEM_BLOCK_TAGS:
+            _flush_run()
+            rendered = _render_element(node, generator)
+            if rendered:
+                is_tight = node.name in _LIST_CONTAINER_TAGS   # nested <ol>/<ul>
+                cont.append((is_tight, _indent(rendered, width)))
+        else:
+            run.append(node)
+    _flush_run()
+
+    lines: list[str] = []
+    if label:
+        lines.append(f"{prefix} {label}")
+    elif cont:
+        lines.append(prefix)             # bare marker; blocks follow indented
+    for i, (is_tight, block) in enumerate(cont):
+        # A blank line before the FIRST continuation of a label-less item would
+        # trip CommonMark's "list item begins with a blank line" rule, producing
+        # an empty item + a detached block. Suppress it there; with a label, or
+        # for later continuations, the blank is correct and needed.
+        if not is_tight and not (i == 0 and not label):
+            lines.append("")
+        lines.append(block)
+    return lines
 
 
 def _render_list(el: Tag, marker: str, generator: str) -> str | None:
     """Render an ordered or unordered list.
 
-    Direct ``<li>`` children become list items. Any other direct child (a
-    nested ``<ol>``/``<ul>`` with no wrapping ``<li>``, or a loose
-    ``<p>``/``<pre>``/``<blockquote>``/``<div>``/text) is rendered through the
-    normal element dispatch and indented under the preceding item rather than
-    silently dropped; if it precedes the first item it is emitted standalone.
-    Only ``<li>`` advances the item counter, so interspersed children do not
-    perturb ordered-list numbering.
+    Direct ``<li>`` children become list items (see ``_render_list_item``: a
+    label plus document-order continuation blocks). Any other direct child (a
+    nested list with no wrapping ``<li>``, or a loose
+    ``<p>``/``<pre>``/``<blockquote>``/text) is a continuation of the preceding
+    item, indented to that item's marker width and blank-line separated unless
+    it is a nested list, rather than silently dropped; before the first item it
+    is emitted standalone. Only ``<li>`` advances the item counter, so
+    interspersed children do not perturb ordered-list numbering.
     """
     items: list[str] = []
     item_index = 0
-    # Materialize: the <li> branch calls .extract() during iteration.
+    last_width = 2          # default; set by each <li>, read by trailing children
+    # Materialize: _render_element may mutate descendants during iteration.
     for child in list(el.children):
         if isinstance(child, Tag) and child.name == "li":
             item_index += 1
             prefix = f"{item_index}." if marker == "1." else "-"
-            # Detach nested sublists before capturing inline text so they are not
-            # walked into by _inline_text (which would duplicate their contents).
-            subs = [sub.extract()
-                    for sub in child.find_all(_LIST_CONTAINER_TAGS, recursive=False)]
-            nested_parts = []
-            for sub in subs:
-                sub_rendered = _render_element(sub, generator)
-                if sub_rendered:
-                    nested_parts.append(_indent(sub_rendered))
-
-            # Extract code blocks before inlining so they are rendered as
-            # fenced blocks rather than flattened to inline text.
-            code_parts = []
-            for cb in child.find_all(_CODE_BLOCK_TAGS, recursive=False):
-                rendered = _render_element(cb.extract(), generator)
-                if rendered:
-                    code_parts.append(rendered)
-
-            table_parts: list[str] = []
-            for tbl in child.find_all("table"):
-                if tbl.find_parent("table") is not None:
-                    continue
-                rendered = _render_table(tbl.extract())
-                if rendered:
-                    table_parts.append(rendered)
-
-            text = _collapse_whitespace(_inline_text(child))
-            if text:
-                items.append(f"{prefix} {text}")
-            elif marker == "1." and (code_parts or table_parts
-                                     or nested_parts):
-                items.append(prefix)
-            for cp in code_parts:
-                items.append(cp)
-            for tp in table_parts:
-                items.append("\n" + tp)
-            for np in nested_parts:
-                items.append(np)
+            last_width = len(prefix) + 1
+            items.extend(_render_list_item(child, prefix, generator))
         elif isinstance(child, Tag):
-            # Non-<li> direct child: render via the normal dispatch and indent
-            # under the preceding item (standalone if there is no item yet).
+            # Non-<li> direct child: a continuation of the preceding item (or
+            # standalone before the first item).
             rendered = _render_element(child, generator)
             if rendered:
-                items.append(_indent(rendered) if item_index else rendered)
+                if item_index:
+                    if child.name not in _LIST_CONTAINER_TAGS:
+                        items.append("")
+                    items.append(_indent(rendered, last_width))
+                else:
+                    items.append(rendered)
         elif isinstance(child, NavigableString) and not isinstance(child, (Comment, CData)):
             text = _collapse_whitespace(str(child)).strip()
             if text:
-                items.append(("  " + text) if item_index else text)
+                if item_index:
+                    items.append("")
+                    items.append(_indent(text, last_width))
+                else:
+                    items.append(text)
     return "\n".join(items) if items else None
 
 
@@ -1132,14 +1196,10 @@ def _render_mixed_code_table(el: Tag) -> str | None:
     if num_cols == 0:
         return None
 
-    col_w = f"{100 // num_cols}%"
-    _S = (f"border: 1px solid #999; padding: 6px 10px; "
-          f"vertical-align: top; width: {col_w};")
-    parts: list[str] = [
-        _MIXED_TABLE_MARKER,
-        '<table border="1" rules="all" cellpadding="6" cellspacing="0"'
-        ' style="border-collapse: collapse; width: 100%;">',
-    ]
+    # Shared markup (table tag, cell style, <pre><code> wrapping) lives in
+    # lib/tables.py so HTML and PDF comparison tables render identically.
+    style = _tables.cell_style(num_cols)
+    parts: list[str] = [_tables.MIXED_TABLE_MARKER, _tables.TABLE_OPEN]
 
     for tr in trs:
         parts.append("<tr>")
@@ -1148,19 +1208,14 @@ def _render_mixed_code_table(el: Tag) -> str | None:
             tag = cell.name
             code_el = cell.find(list(_CODE_BLOCK_TAGS))
             if code_el:
-                code_text = code_el.get_text().strip()
-                escaped = _html.escape(code_text)
-                escaped = "\n".join(line or "&#10;" for line in escaped.split("\n"))
                 parts.append(
-                    f'<{tag} style="{_S}">'
-                    f'<pre style="margin: 0;"><code>{escaped}</code></pre>'
-                    f'</{tag}>')
+                    _tables.code_cell(tag, code_el.get_text().strip(), style))
             else:
-                inner = _cell_inner_html(cell)
-                parts.append(f'<{tag} style="{_S}">{inner}</{tag}>')
+                parts.append(
+                    _tables.text_cell(tag, _cell_inner_html(cell), style))
         parts.append("</tr>")
 
-    parts.append("</table>")
+    parts.append(_tables.TABLE_CLOSE)
     return "\n".join(parts)
 
 
@@ -1229,9 +1284,11 @@ def _render_table(el: Tag) -> str | None:
 def _render_code_table(el: Tag) -> str | None:
     """Extract fenced code blocks from a table containing <pre> or <code-block>.
 
-    Some generators (dascandy/fiets, Bikeshed, Schultke) wrap code inside
-    table cells. Emit every non-empty block as its own fenced block so
-    before/after comparisons and multi-snippet tables are preserved.
+    Only reached for headerless pure-code tables (``_is_pure_code_table``);
+    headered comparison tables go to ``_render_mixed_code_table``, which
+    preserves the column labels and row structure. Here every non-empty block
+    is emitted as its own fenced block behind a <!-- tomd:lossy-table -->
+    marker.
     """
     blocks: list[str] = []
     for cb in el.find_all(_CODE_BLOCK_TAGS):
@@ -1302,8 +1359,22 @@ def _inline_text(el: Tag, skip_classes: frozenset[str] = frozenset()) -> str:
     by headings to strip section-number and self-link spans) while preserving
     inline formatting such as <code> on the remaining children.
     """
+    return _inline_text_nodes(el.children, skip_classes)
+
+
+def _inline_text_nodes(nodes, skip_classes: frozenset[str] = frozenset()) -> str:
+    """Render a sequence of nodes (an element's children, or a contiguous
+    subset of them) as inline Markdown text.
+
+    Contributions are concatenated with no separator; the source's own
+    whitespace text nodes carry the spacing, so rendering a run node-by-node
+    matches ``_inline_text`` over the whole element exactly.
+
+    `skip_classes` drops direct children carrying any of those classes (used
+    by headings to strip section-number and self-link spans).
+    """
     parts = []
-    for child in el.children:
+    for child in nodes:
         if isinstance(child, Comment):
             continue
         if isinstance(child, NavigableString):
@@ -1373,11 +1444,11 @@ def _inline_text(el: Tag, skip_classes: frozenset[str] = frozenset()) -> str:
                 continue
 
             if tag == "ins":
-                parts.append(f"<ins>{inner}</ins>")
+                parts.append(wording_tag_open("ins", inner))
                 continue
 
             if tag == "del":
-                parts.append(f"<del>{inner}</del>")
+                parts.append(wording_tag_open("del", inner))
                 continue
 
             if tag == "sub":

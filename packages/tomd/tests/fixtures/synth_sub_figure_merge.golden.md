@@ -1,0 +1,17 @@
+---
+title: "Synthetic Sub-Figure Merge Fixture"
+reply-to:
+
+---
+
+This fixture tests that two vertically-stacked vector clusters separated by a sub-caption line are merged into a single image by the _merge_sub_figure_clusters pass in vector_images.py.
+
+The pipeline must produce exactly one vector image spanning both panels, with (a) and (b) sub-captions as italic paragraphs below.
+
+![Figure 1: Multi-panel sub-figures](synth_sub_figure_merge-fig1-1.png)
+
+*(a) Upper sub-figure*
+
+*(b) Lower sub-figure*
+
+The two panels above are rendered as a merged vector image. Sub-captions (a) and (b) appear as italic paragraphs below the image.

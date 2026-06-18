@@ -19,7 +19,7 @@ _GOLDEN_STEMS = (
     "p2040r0",
     "p3714r0",
     "p1112r4",
-    # TOC-stripping regression guards (issue #122): p4174r0 = total-loss bug paper
+    # TOC-stripping regression guards: p4174r0 = total-loss bug paper
     # (body must survive), p4004r1 = partial-loss bug paper (sensitive mid-body
     # guard). The "TOC stays stripped" direction is covered by the synthetic
     # test_toc.py cases, not a golden: no corpus paper cleanly strips its
@@ -27,6 +27,39 @@ _GOLDEN_STEMS = (
     # a pre-existing leak.
     "p4174r0",
     "p4004r1",
+    # Leaked heading-kind TOC guard: p4100r1 shipped a front block of
+    # empty duplicate headings (its Table of Contents leaked as headings without
+    # a dot-leader page number). The dedup post-pass removes them (35 -> 0). Pure
+    # Population A: no doubled body, so "body intact and not doubled" is real.
+    "p4100r1",
+    # Population-B promotion-dedup guard: a confident page paired into a
+    # promotion was emitted twice. p3968r0's sole defect was this double-emit
+    # (sections 6 and 7 doubled at the tail); the golden pins that each section
+    # appears exactly once. One uncertain region covers the front-page
+    # metadata/TOC block (L12-L114); sections 2-8 are all confident and each
+    # appears exactly once. Not a zero-uncertain-markers specimen.
+    "p3968r0",
+    # Mixed-kind leaked-TOC guard: p4094r0's Table of Contents leaked
+    # as a *mix* of empty headings (## 3.7 Summary, ## 6.4 The Two Framings) and
+    # title-like LIST/PARAGRAPH entries (4./5./7. ...) between the title block
+    # and the Abstract; pt2 caught only the heading-kind ones and stranded the
+    # rest. The unified detector removes the whole block: the golden front is
+    # title -> metadata -> Abstract with no stray pre-Abstract sections and no
+    # Table of Contents remnant. dup_body == 0 (no body duplication), so the
+    # body below is untouched. p4100r1 above is the byte-identical guard that
+    # the pass does not over-reach on an already-clean heading-kind TOC.
+    "p4094r0",
+    # Fragmented leaked-TOC guard (relaxed bridging): p4016r0's ~146-entry
+    # Table of Contents leaks before the Abstract as a single block fragmented by
+    # non-recurring stragglers (title-like appendix paragraphs whose body heading
+    # carries a trailing "(Informative)" the leaked line lacks, plus once-only
+    # empty headings like "1.2 Motivating example"). The relaxed-bridging pass
+    # coalesces and removes the whole block: the golden front is title ->
+    # metadata -> Abstract, and Appendices A-Q each appear exactly once, later,
+    # with bodies. Pins that paragraph stragglers are removed only when they
+    # forward-reference a later heading and that the real single-line Abstract
+    # prose immediately after the TOC survives (the trailing rule).
+    "p4016r0",
 )
 
 

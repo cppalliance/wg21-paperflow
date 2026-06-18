@@ -242,7 +242,7 @@ PAGE_NUM_RE = re.compile(
     r"|^\d+\s+of\s+\d+",
 )
 
-BULLET_CHARS = frozenset("\u2022\u2023\u25cf\u25e6\u2043\u2219\u25aa\u25ab")
+BULLET_CHARS = frozenset("\u2022\u2023\u25cf\u25e6\u2043\u2219\u25aa\u25ab\u25cb")
 
 # Zero-width invisibles that str.strip() does not remove (ZWSP, ZWNJ,
 # ZWJ, ZWNBSP/BOM). A line carrying only these counts as empty for

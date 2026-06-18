@@ -3,6 +3,7 @@
 from tomd.lib.pdf.structure import (
     _detect_lists_by_position,
     _join_bullet_marker_lines,
+    _assign_list_nesting,
 )
 from tomd.lib.pdf.types import Section, SectionKind, Line, Span
 
@@ -77,6 +78,24 @@ def test_detect_converts_indented_bullets_to_list():
     assert SectionKind.LIST in kinds, f"got kinds={kinds}"
 
 
+def test_detect_circle_glyph_bullets_become_list():
+    """U+25CB (○) is recognized as a bullet, so its lines split into LIST (issue #150).
+
+    Mirrors a real nested list: a ● parent followed by ○ children. Before
+    the fix, ○ was absent from BULLET_CHARS and the children stayed prose.
+    """
+    para = _make_section_with_lines([
+        _bullet_line("● parent bullet", x0=54.0, y=100.0),
+        _bullet_line("○ first child", x0=90.0, y=114.0),
+        _bullet_line("○ second child", x0=90.0, y=128.0),
+    ])
+    result = _detect_lists_by_position([para])
+    list_texts = [s.text for s in result if s.kind == SectionKind.LIST]
+    assert any("○ first child" in t for t in list_texts), \
+        f"circle bullets not split into list items: {list_texts}"
+    assert any("○ second child" in t for t in list_texts)
+
+
 def test_detect_mixed_list_and_paragraph_split():
     """Body-margin lines between bullet groups split into their own PARAGRAPH."""
     para = _make_section_with_lines([
@@ -91,22 +110,83 @@ def test_detect_mixed_list_and_paragraph_split():
     assert SectionKind.PARAGRAPH in kinds
 
 
-# ---- _split_section_by_position tracks indent level ----------------------
+# ---- detection + nesting assignment together -----------------------------
 
-def test_split_section_by_position_nested_indent():
-    """A bullet at indent level 2 (x further right) carries indent_level=2."""
-    # body_margin is the leftmost frequent x; derive it from the non-bullet line.
-    # Use the internal _get_body_margin via the public function path instead.
+def test_detect_then_nesting_marks_deeper_bullet():
+    """Detection splits items; the nesting post-pass owns indent_level.
+
+    A bullet further to the right than its predecessor becomes depth 1.
+    """
     para = _make_section_with_lines([
         _body_line("Paragraph body.", x0=50.0, y=100.0),
         _bullet_line("\u2022 outer", x0=80.0, y=114.0),
         _bullet_line("\u2022 nested", x0=120.0, y=128.0),  # further right than outer
     ])
     result = _detect_lists_by_position([para])
-    list_sections = [s for s in result if s.kind == SectionKind.LIST]
-    indent_levels = [s.indent_level for s in list_sections]
-    # At least one section should be at indent_level > 0.
-    assert any(i > 0 for i in indent_levels), f"got indent_levels={indent_levels}"
+    _assign_list_nesting(result)
+    indent_levels = [s.indent_level for s in result if s.kind == SectionKind.LIST]
+    assert indent_levels == [0, 1], f"got indent_levels={indent_levels}"
+
+
+# ---- _assign_list_nesting (relative cross-section depth) -----------------
+
+def _list_item(text, x0):
+    """A LIST section whose bullet sits at x0 (one content line)."""
+    sec = _make_section_with_lines([_bullet_line(text, x0=x0)],
+                                   kind=SectionKind.LIST)
+    return sec
+
+
+def test_assign_list_nesting_relative_depth():
+    """Parent bullets are depth 0; bullets at a deeper x-stop are depth 1."""
+    parent = _list_item("● parent", x0=54.0)
+    child_a = _list_item("○ child a", x0=90.0)
+    child_b = _list_item("○ child b", x0=90.0)
+    _assign_list_nesting([parent, child_a, child_b])
+    assert parent.indent_level == 0
+    assert child_a.indent_level == 1
+    assert child_b.indent_level == 1
+
+
+def test_assign_list_nesting_separate_runs_independent():
+    """A non-list section ends a run; the next list restarts at depth 0.
+
+    The second list is more indented on the page than the first, but its
+    own leftmost bullet must still be depth 0 (depth is relative to the
+    run, not the page).
+    """
+    first = _list_item("● list one", x0=54.0)
+    interlude = _make_section_with_lines([_body_line("interlude")],
+                                         kind=SectionKind.PARAGRAPH)
+    second = _list_item("● list two", x0=90.0)
+    _assign_list_nesting([first, interlude, second])
+    assert first.indent_level == 0
+    assert second.indent_level == 0
+
+
+def test_assign_list_nesting_three_levels():
+    """Three distinct x-stops produce depths 0, 1, 2 in order."""
+    a = _list_item("● a", x0=54.0)
+    b = _list_item("○ b", x0=90.0)
+    c = _list_item("▪ c", x0=126.0)
+    _assign_list_nesting([a, b, c])
+    assert [a.indent_level, b.indent_level, c.indent_level] == [0, 1, 2]
+
+
+def test_assign_list_nesting_splits_by_page():
+    """A list continuing on a new page at a shifted margin is not false-nested.
+
+    Page 2's bullet sits further right than page 1's, but depth is computed
+    per page, so both pages' leftmost bullets are depth 0 (issue #175
+    review): a margin shift across a page break must not read as nesting.
+    """
+    page1 = _list_item("● first page item", x0=54.0)
+    page1.page_num = 0
+    page2 = _list_item("● second page item", x0=90.0)
+    page2.page_num = 1
+    _assign_list_nesting([page1, page2])
+    assert page1.indent_level == 0
+    assert page2.indent_level == 0
 
 
 # ---- _join_bullet_marker_lines -------------------------------------------

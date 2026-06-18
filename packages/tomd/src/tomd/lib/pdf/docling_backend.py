@@ -24,10 +24,12 @@ Architecture: "Enrichment + Discovery"
   - Sections that don't match any Docling table are left unchanged.
 """
 
+import fitz as _fitz
 import logging
 from pathlib import Path
 
 from .types import Block, Line, Section, SectionKind, Span, Confidence
+from ._fitz_lock import _FITZ_LOCK
 
 _log = logging.getLogger(__name__)
 
@@ -180,15 +182,15 @@ def extract_docling_tables(
         # Docling table-level prov bboxes use PDF-native bottom-left
         # origin; cell-level bboxes are already in top-left origin.
         # Collect page heights to flip table bboxes to top-left.
-        import fitz as _fitz
-        _pdf_doc = _fitz.open(str(pdf_path))
-        try:
-            page_heights: dict[int, float] = {
-                pg: _pdf_doc[pg].rect.height
-                for pg in range(_pdf_doc.page_count)
-            }
-        finally:
-            _pdf_doc.close()
+        with _FITZ_LOCK:  # see _fitz_lock.py for why this lock is required
+            _pdf_doc = _fitz.open(str(pdf_path))
+            try:
+                page_heights: dict[int, float] = {
+                    pg: _pdf_doc[pg].rect.height
+                    for pg in range(_pdf_doc.page_count)
+                }
+            finally:
+                _pdf_doc.close()
 
         page_tables: dict[int, list[dict]] = {}
 
