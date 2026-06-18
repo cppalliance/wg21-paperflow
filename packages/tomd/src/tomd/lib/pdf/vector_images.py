@@ -1018,8 +1018,11 @@ def _merge_row_clusters(
        Clusters that overlap in x also satisfy this condition.
     3. At least one text line whose y-range falls in
        [tentative_bb[3], tentative_bb[3] + _SUB_FIGURE_CAPTION_OFFSET_PT]
+       AND whose x-range overlaps [tentative_bb[0], tentative_bb[2]]
        matches _SUB_FIGURE_SUB_CAPTION_RE. ``tentative_bb`` is the union of
        the current accumulated bb_i and bb_j (not the original cluster i).
+       The x-overlap guard prevents a sub-caption from an unrelated column
+       or figure on the same horizontal band from triggering a merge.
     4. The area of tentative_bb does not exceed max_merged_area.
 
     Iterates until stable (no merge in the last pass).
@@ -1066,7 +1069,11 @@ def _merge_row_clusters(
                     for line in block.lines:
                         if line.bbox[3] < caption_top or line.bbox[1] > caption_bot:
                             continue
-                        if _SUB_FIGURE_SUB_CAPTION_RE.match(line.text.strip()):
+                        if (
+                            _SUB_FIGURE_SUB_CAPTION_RE.match(line.text.strip())
+                            and line.bbox[0] < tentative_bb[2]
+                            and line.bbox[2] > tentative_bb[0]
+                        ):
                             found_caption = True
                             break
                     if found_caption:

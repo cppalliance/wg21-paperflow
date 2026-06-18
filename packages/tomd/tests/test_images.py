@@ -66,6 +66,7 @@ from tomd.lib.pdf.vector_images import (
     _cluster_drawings,
     _colour_in_wording_band,
     _merge_close_clusters,
+    _merge_row_clusters,
     _synthetic_xref,
     _text_overlap_fraction,
     extract_page_vector_images,
@@ -867,6 +868,48 @@ class TestMergeCloseClusters:
             [a], max_merged_area=self._UNLIMITED_AREA,
         )
         assert merged == [a]
+
+
+class TestMergeRowClusters:
+    """_merge_row_clusters merges horizontally-adjacent clusters confirmed
+    by a sub-caption line below. The confirming line must x-overlap with
+    the tentative merged bbox so a sub-caption from an unrelated column
+    cannot trigger a merge."""
+
+    _UNLIMITED_AREA = 10_000_000.0
+
+    # Two clusters side by side: A=(0,0,100,100), B=(150,0,250,100).
+    # Tentative merged bbox = (0,0,250,100). x_gap=50 < 120 → passes.
+    # Caption band: y in [100, 200].
+    _A = ((0.0, 0.0, 100.0, 100.0), 1)
+    _B = ((150.0, 0.0, 250.0, 100.0), 1)
+
+    @staticmethod
+    def _sub_caption_block(x0: float, x1: float, y0: float = 105.0) -> Block:
+        line = Line(
+            spans=[Span(text="(a) left panel", bbox=(x0, y0, x1, y0 + 12.0))],
+            bbox=(x0, y0, x1, y0 + 12.0),
+        )
+        return Block(lines=[line], bbox=(x0, y0, x1, y0 + 12.0))
+
+    def test_sub_caption_x_overlapping_merges(self):
+        # Sub-caption spans x=[50, 200] — overlaps tentative_bb=[0,0,250,100].
+        block = self._sub_caption_block(50.0, 200.0)
+        merged = _merge_row_clusters(
+            [self._A, self._B], [block], max_merged_area=self._UNLIMITED_AREA,
+        )
+        assert len(merged) == 1, "sub-caption x-overlapping tentative bbox must merge"
+        assert merged[0][1] == 2
+
+    def test_sub_caption_outside_x_range_does_not_merge(self):
+        # Sub-caption spans x=[300, 500] — entirely right of tentative_bb x1=250.
+        block = self._sub_caption_block(300.0, 500.0)
+        merged = _merge_row_clusters(
+            [self._A, self._B], [block], max_merged_area=self._UNLIMITED_AREA,
+        )
+        assert len(merged) == 2, (
+            "sub-caption outside tentative bbox x-range must not trigger merge"
+        )
 
 
 # ---- vector_images: text-overlap fraction ---------------------------------
