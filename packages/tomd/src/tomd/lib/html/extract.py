@@ -1173,6 +1173,13 @@ def strip_boilerplate(soup: BeautifulSoup, generator: str) -> list[str]:
             and ("marginalizedparent" in c or "sourceLinkParent" in c),
         ):
             chrome.decompose()
+        # The paper title lives in <h1>; metadata extraction already captured
+        # it. Remove it here so _normalize_heading_levels does not include the
+        # H1 in its minimum-heading calculation, which would offset all body
+        # headings by +1 (H2 → H3, etc.).
+        title_h1 = soup.find("h1")
+        if title_h1:
+            title_h1.decompose()
 
     if generator == "unknown":
         problems.append(
