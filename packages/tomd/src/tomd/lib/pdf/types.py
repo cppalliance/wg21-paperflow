@@ -207,6 +207,19 @@ REPEATING_THRESHOLD = 0.5
 
 EDGE_ITEMS_PER_PAGE = 3
 
+# A running footer band recurs at a fixed bottom-margin y across pages but its
+# text varies per page (e.g. "Scope", "Normative references 2", "§ 6.9.2.2 6").
+# The band is identified by a bare page number recurring in it; only lines this
+# short or shorter are stripped, so a one-off body line that happens to share
+# the band's y survives. Running titles are short; body lines are not.
+RUNNING_FOOTER_MAX_WORDS = 8
+
+# The varying-text footer-band rule only fires in the bottom page margin
+# (y > page_height * this fraction). Restricting it to the margin keeps it from
+# misfiring on the section-heading band at the top of body pages, whose bare
+# section numbers ("1", "2", ...) also look like recurring page numbers.
+EDGE_BAND_BOTTOM_FRACTION = 0.85
+
 # Similarity threshold for dual-path comparison (word-level)
 SIMILARITY_THRESHOLD = 0.82
 

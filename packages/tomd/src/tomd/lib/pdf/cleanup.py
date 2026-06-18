@@ -9,6 +9,7 @@ from .. import strip_format_chars, DOC_NUM_RE
 from .types import (
     Block, Line, PageEdgeItem,
     Y_TOLERANCE, REPEATING_THRESHOLD, EDGE_ITEMS_PER_PAGE,
+    RUNNING_FOOTER_MAX_WORDS, EDGE_BAND_BOTTOM_FRACTION,
     TERMINAL_PUNCTUATION,
     PAGE_NUM_RE, COMPOUND_PREFIXES,
 )
@@ -72,17 +73,26 @@ def get_edge_items(blocks: list[Block], page_num: int) -> list[PageEdgeItem]:
 
 
 def detect_repeating(all_edge_items: list[list[PageEdgeItem]],
-                     total_pages: int) -> set[tuple[float, str]]:
+                     total_pages: int,
+                     page_height: float = 0.0) -> set[tuple[float, str]]:
     """Identify header/footer items that repeat across pages.
 
     For each page, captures the top and bottom EDGE_ITEMS_PER_PAGE items
     by y-coordinate. Items appearing at the same y-position on at least
     half the pages are classified as repeating.
 
+    page_height (the representative page height in points) gates the
+    varying-text footer-band rule to the bottom margin; pass 0.0 to
+    disable that rule (the exact-text, page-number, and doc-number rules
+    are unaffected).
+
     Returns a set of (y_region, text_or_pattern) tuples to strip.
     """
     if total_pages < 3:
         return set()
+
+    footer_band_min_y = (page_height * EDGE_BAND_BOTTOM_FRACTION
+                         if page_height > 0 else None)
 
     threshold = total_pages * REPEATING_THRESHOLD
     y_buckets: dict[float, list[PageEdgeItem]] = defaultdict(list)
@@ -107,6 +117,23 @@ def detect_repeating(all_edge_items: list[list[PageEdgeItem]],
             repeating.add((y_key, "__DOC_NUM__"))
             _log.debug("Repeating doc number at y=%.1f", y_key)
             continue
+
+        # Running footer band: the edge y recurs across pages but the text
+        # varies per page (a running section title plus its page number, e.g.
+        # "Normative references 2" or "§ 6.9.2.2 6"). Neither the exact-text
+        # nor the all-page-number rule catches a band of mixed text, but a
+        # bare page number recurring in the band on at least half the pages
+        # is a reliable signal that the whole band is page chrome. Gate to the
+        # bottom margin so the section-heading band at the top of body pages,
+        # whose bare section numbers also match PAGE_NUM_RE, is never stripped.
+        if footer_band_min_y is not None and y_key > footer_band_min_y:
+            page_num_pages = {
+                it.page_num for it in items if PAGE_NUM_RE.match(it.text)
+            }
+            if len(page_num_pages) >= threshold:
+                repeating.add((y_key, "__EDGE_BAND__"))
+                _log.debug("Repeating footer band at y=%.1f", y_key)
+                continue
 
         text_counts = Counter(it.text for it in items)
         exact_hit = False
@@ -159,6 +186,9 @@ def strip_repeating(blocks: list[Block], repeating: set[tuple[float, str]],
         if rpattern == "__PAGE_NUM__" and PAGE_NUM_RE.match(text):
             return True
         if rpattern == "__DOC_NUM__" and DOC_NUM_RE.search(text):
+            return True
+        if (rpattern == "__EDGE_BAND__"
+                and len(text.split()) <= RUNNING_FOOTER_MAX_WORDS):
             return True
         return False
 

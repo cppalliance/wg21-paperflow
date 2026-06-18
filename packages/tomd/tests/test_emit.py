@@ -12,6 +12,32 @@ def test_emit_heading():
     assert "## Introduction" in md
 
 
+def test_emit_heading_joins_all_lines():
+    """A heading split across lines (number / title / clause tag laid out
+    with wide x-gaps on one visual line) renders as a single heading, not
+    just the first line (the bare section number)."""
+    sec = make_section(
+        "1\nScope\n[scope]", kind=SectionKind.HEADING, heading_level=2,
+        lines=[make_line(["1"]), make_line(["Scope"]), make_line(["[scope]"])],
+    )
+    md = emit_markdown({}, [sec])
+    assert "## 1 Scope [scope]" in md
+
+
+def test_emit_heading_dedupes_overprinted_lines():
+    """A heading the PDF overprints several times at the same position (faux
+    bold) renders once, not repeated."""
+    sec = make_section(
+        "Abstract\nAbstract\nAbstract", kind=SectionKind.HEADING,
+        heading_level=2,
+        lines=[make_line(["Abstract"]), make_line(["Abstract"]),
+               make_line(["Abstract"])],
+    )
+    md = emit_markdown({}, [sec])
+    assert "## Abstract\n" in md or md.strip().endswith("## Abstract")
+    assert "Abstract Abstract" not in md
+
+
 def test_emit_paragraph_unwrapped():
     sec = make_section("Hello world")
     md = emit_markdown({}, [sec])

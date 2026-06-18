@@ -27,6 +27,15 @@ from ..wording_markup import WORDING_FENCE_CLOSE, wording_fence_open
 
 _log = logging.getLogger(__name__)
 
+# A heading section can span multiple Line objects two ways: a single visual
+# line split horizontally by wide x-gaps (number / title / clause tag share
+# one baseline), or a following body line the section wrongly absorbed (a
+# lower baseline). Only lines on the heading's own baseline (its first
+# non-empty line) are joined; a line is on that baseline if its y-top is
+# within this fraction of the heading font size. The next text row sits a
+# full line-height (~1.2x font) below, so it is excluded.
+_HEADING_SAME_ROW_FONT_FRACTION = 0.6
+
 
 def _render_span(span: Span, skip_bold: bool = False) -> str:
     """Render a single non-monospace span with inline Markdown formatting.
@@ -132,39 +141,20 @@ def _render_paragraph_spans(sec: Section) -> str:
         )
     return " ".join(ln.strip() for ln in lines if ln.strip())
 
-_BARE_HEADING_NUM_RE = re.compile(
-    r"^\s*(?:\d+(?:\.\d+)*|[A-Z]+)\.?\s*$"
-)
-
-_CONTINUATION_WORDS = frozenset({
-    "a", "an", "the", "of", "for", "in", "to", "with",
-    "from", "and", "or", "by", "at", "on",
-})
-
-
-def _heading_line_continues(text: str) -> bool:
-    """True when heading text is clearly cut mid-phrase by line wrapping.
-
-    Signals: trailing comma/semicolon, unbalanced open parenthesis, or
-    ending with an article/preposition/conjunction.
-    """
-    stripped = text.rstrip()
-    if not stripped:
-        return False
-    if stripped[-1] in (",", ";"):
-        return True
-    if stripped.count("(") > stripped.count(")"):
-        return True
-    words = stripped.split()
-    if words:
-        last = words[-1].lower().rstrip(".,;:")
-        if last in _CONTINUATION_WORDS:
-            return True
-    return False
-
-
 def _render_heading_spans(sec: Section) -> str:
-    """Render a heading using span-level formatting for the first line.
+    """Render a heading, joining the lines that share its visual baseline.
+
+    The PDF can split a single heading line across several ``Line`` objects
+    with wide horizontal gaps (ISO/standardese headings lay out
+    "1   Scope   [scope]" as three lines on one baseline). Rendering only the
+    first line would emit the bare section number ("## 1"); markdown headings
+    are one line, so the lines sharing the heading's baseline are joined.
+
+    Only the heading's own visual row is joined: a section that wrongly
+    absorbs a following body line must not pull that prose into the heading,
+    and such a line sits on a lower baseline. Identical line texts are also
+    collapsed: some PDFs overprint a heading several times at the same
+    position to simulate bold, and joining those verbatim would repeat it.
 
     Bold is suppressed because the ATX prefix already conveys heading weight.
     When line 0 is a bare section number (e.g. "1", "3.2", "I."), subsequent
@@ -176,75 +166,28 @@ def _render_heading_spans(sec: Section) -> str:
     the heading so content is not lost.
     """
     prefix = "#" * sec.heading_level
-    remainder_lines: list[str] = []
-    if sec.lines:
-        first = _render_line_spans(sec.lines[0], suppress_bold=True).strip()
-        if len(sec.lines) > 1 and _BARE_HEADING_NUM_RE.match(first):
-            head_fs = sec.lines[0].font_size
-            parts = [first]
-            consumed = 1
-            for line in sec.lines[1:]:
-                rendered_part = _render_line_spans(
-                    line, suppress_bold=True).strip()
-                # Always join short title lines after a bare number, even
-                # when font size differs (Kretz-style: 19.9pt number +
-                # 11.6pt ALL-CAPS title). Only break on font mismatch once
-                # the title has been consumed (i.e. after the first join).
-                if abs(line.font_size - head_fs) > 0.5:
-                    if consumed == 1 and len(line.text.split()) <= 8:
-                        parts.append(rendered_part)
-                        consumed += 1
-                    break
-                parts.append(rendered_part)
-                consumed += 1
-            text = " ".join(p for p in parts if p)
-            for line in sec.lines[consumed:]:
-                r = _render_line_spans(line).strip()
-                if r:
-                    remainder_lines.append(r)
-        else:
-            text = first
-            head_fs = sec.lines[0].font_size
-            if _heading_line_continues(first):
-                parts = [first]
-                consumed = 1
-                for line in sec.lines[1:]:
-                    if abs(line.font_size - head_fs) > 0.5:
-                        break
-                    part = _render_line_spans(
-                        line, suppress_bold=True).strip()
-                    if part:
-                        parts.append(part)
-                    consumed += 1
-                text = " ".join(p for p in parts if p)
-                for line in sec.lines[consumed:]:
-                    r = _render_line_spans(line).strip()
-                    if r:
-                        remainder_lines.append(r)
-            else:
-                for line in sec.lines[1:]:
-                    r = _render_line_spans(line).strip()
-                    if r:
-                        remainder_lines.append(r)
-    else:
-        text = sec.text.split("\n")[0]
-    clean_text = text.strip()
-    if not clean_text:
-        return ""
-    heading = f"{prefix} {clean_text}"
-    if remainder_lines:
-        # Filter out lines that duplicate the heading text (bold-overlay
-        # artifacts in some PDFs produce 3x repeated heading spans).
-        head_norm = re.sub(r"[^a-z0-9\s]", "", clean_text.lower()).strip()
-        filtered = []
-        for rl in remainder_lines:
-            rl_norm = re.sub(r"[^a-z0-9\s]", "", rl.lower()).strip()
-            if rl_norm and rl_norm != head_norm:
-                filtered.append(rl)
-        if filtered:
-            body = " ".join(filtered)
-            return f"{heading}\n\n{body}"
-    return heading
+
+    rows = [(ln.bbox[1], ln.font_size,
+             _render_line_spans(ln, suppress_bold=True).strip())
+            for ln in sec.lines]
+    rows = [(y, fs, text) for (y, fs, text) in rows if text]
+    if not rows:
+        return f"{prefix} {sec.text.split(chr(10))[0].strip()}"
+
+    anchor_y, anchor_fs, _ = rows[0]
+    row_tol = anchor_fs * _HEADING_SAME_ROW_FONT_FRACTION
+
+    seen: set[str] = set()
+    parts: list[str] = []
+    for y, _fs, text in rows:
+        if abs(y - anchor_y) > row_tol:
+            continue
+        if text in seen:
+            continue
+        seen.add(text)
+        parts.append(text)
+
+    return f"{prefix} {' '.join(parts).strip()}"
 
 
 def _normalize_bullet(char: str) -> str:
