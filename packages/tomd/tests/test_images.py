@@ -65,8 +65,10 @@ from tomd.lib.pdf.vector_images import (
     REASON_WORDING_COLOR,
     _cluster_drawings,
     _colour_in_wording_band,
+    _FIGURE_CAPTION_RE,
     _merge_close_clusters,
     _merge_row_clusters,
+    _merge_sub_figure_clusters,
     _synthetic_xref,
     _text_overlap_fraction,
     extract_page_vector_images,
@@ -909,6 +911,63 @@ class TestMergeRowClusters:
         )
         assert len(merged) == 2, (
             "sub-caption outside tentative bbox x-range must not trigger merge"
+        )
+
+
+class TestFigureCaptionRe:
+    """_FIGURE_CAPTION_RE must match the full _CAPTION_LABEL_RE label set
+    (Figure, Fig., Listing, Diagram, Image, Source code) case-insensitively.
+    These are the split signals that prevent _merge_sub_figure_clusters from
+    merging two clusters separated by a caption belonging to a different figure.
+    The old regex only matched capital 'Figure', leaving abbreviations and
+    alternative labels as false negatives."""
+
+    @pytest.mark.parametrize("text", [
+        "Figure 1: description",
+        "figure 2",               # lowercase -- missed by old regex
+        "Fig. 3: something",      # abbreviation -- missed by old regex
+        "fig. 4",                 # lowercase abbreviation
+        "Listing 5: code",        # alternative label -- missed by old regex
+        "Diagram 6",
+        "Image 7: picture",
+        "Source code 8",
+        "SOURCE CODE 9",          # all-caps
+    ])
+    def test_caption_labels_match(self, text):
+        assert _FIGURE_CAPTION_RE.match(text), (
+            f"_FIGURE_CAPTION_RE must match caption label: {text!r}"
+        )
+
+    @pytest.mark.parametrize("text", [
+        "(a) left panel",
+        "(b) right panel",
+        "some body prose",
+        "Table 1: results",       # tables are not figure captions
+    ])
+    def test_non_caption_labels_do_not_match(self, text):
+        assert not _FIGURE_CAPTION_RE.match(text), (
+            f"_FIGURE_CAPTION_RE must not match non-caption: {text!r}"
+        )
+
+    def test_listing_caption_prevents_merge(self):
+        """A 'Listing N' line in the gap must prevent two vertically-stacked
+        clusters from merging, just as 'Figure N' does."""
+        top = ((0.0, 0.0, 200.0, 100.0), 1)
+        bot = ((0.0, 150.0, 200.0, 250.0), 1)
+        gap_line = Line(
+            spans=[Span(text="(a) top", bbox=(50.0, 102.0, 150.0, 114.0))],
+            bbox=(50.0, 102.0, 150.0, 114.0),
+        )
+        split_line = Line(
+            spans=[Span(text="Listing 3: some_function()", bbox=(0.0, 120.0, 200.0, 132.0))],
+            bbox=(0.0, 120.0, 200.0, 132.0),
+        )
+        block = Block(lines=[gap_line, split_line], bbox=(0.0, 102.0, 200.0, 132.0))
+        merged = _merge_sub_figure_clusters(
+            [top, bot], [block], max_merged_area=10_000_000.0,
+        )
+        assert len(merged) == 2, (
+            "Listing caption in gap must prevent merge just like Figure caption"
         )
 
 

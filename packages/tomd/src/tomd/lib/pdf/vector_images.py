@@ -259,13 +259,16 @@ _SUB_FIGURE_MAX_X_GAP_PT = 120.0
 # sub-caption line before accepting a horizontal merge.
 _SUB_FIGURE_CAPTION_OFFSET_PT = 100.0
 
-# Matches lines like "Figure 2: Some description" -- a figure caption in the
-# vertical gap between two clusters means those clusters belong to different
-# logical figures and must not be merged.
-# Intentionally narrow: matches capital "Figure" + digit only, consistent
-# with WG21 paper conventions. Lowercase "figure" and abbreviations like
-# "Fig. 2" are out of scope; WG21 captions always use the full capitalized form.
-_FIGURE_CAPTION_RE = re.compile(r"^\s*Figure\s+\d+")
+# Matches figure-caption lines in the vertical gap between two clusters.
+# A caption in the gap means the clusters belong to different logical figures
+# and must not be merged. Mirrors the label set of images._CAPTION_LABEL_RE
+# (Figure, Fig., Listing, Diagram, Image, Source code), case-insensitive, but
+# requires only label + number -- no separator -- so "Figure 1" without a
+# colon still acts as a split signal.
+_FIGURE_CAPTION_RE = re.compile(
+    r"^\s*(Figure|Fig\.?|Listing|Diagram|Image|Source\s+code)\s+\d+",
+    re.IGNORECASE,
+)
 
 # Minimum number of drawing items inside a surviving cluster. Single
 # items are almost always rules or one-stroke decorations. Real
@@ -1108,8 +1111,9 @@ def _merge_sub_figure_clusters(
     2. Their x-ranges overlap.
     3. At least one non-empty text line in the gap matches
        _SUB_FIGURE_SUB_CAPTION_RE, AND no line in the gap matches
-       _FIGURE_CAPTION_RE. A figure-caption line in the gap means the
-       clusters belong to different logical figures.
+       _FIGURE_CAPTION_RE (Figure/Fig./Listing/Diagram/Image/Source code +
+       number, case-insensitive). A figure-caption line in the gap means
+       the clusters belong to different logical figures.
     4. The merged bbox area does not exceed max_merged_area.
 
     Iterates until stable (no merge occurred in the last pass).
