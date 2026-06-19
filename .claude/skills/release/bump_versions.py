@@ -31,6 +31,9 @@ def read_version(path):
 def bump(prev, kind):
     if re.fullmatch(r"\d+\.\d+\.\d+", kind):
         return kind
+    if not re.fullmatch(r"\d+\.\d+\.\d+", prev):
+        sys.exit(f"ERROR: previous version {prev!r} is not semver X.Y.Z; "
+                 f"cannot apply a {kind!r} bump. Pass an explicit X.Y.Z instead.")
     major, minor, patch = (int(x) for x in prev.split("."))
     if kind == "major":
         return f"{major + 1}.0.0"
@@ -48,7 +51,7 @@ def main():
     a = ap.parse_args()
 
     tag = latest_tag()
-    prev = tag.lstrip("v")
+    prev = tag.removeprefix("v")
     root_ver = read_version("pyproject.toml")
     if root_ver != prev:
         print(f"DRIFT: root pyproject is {root_ver!r} but latest tag is {tag!r}; "
