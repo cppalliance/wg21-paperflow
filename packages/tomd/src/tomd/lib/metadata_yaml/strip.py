@@ -48,6 +48,66 @@ _META_FIELD_LABEL_RE = re.compile(
 _META_AUTHOR_LIST_MIN_ITEMS = 3
 _META_AUTHOR_LIST_MAX_ITEM_WORDS = 4
 
+# A page-0 paragraph with at least this many words AND no metadata shape is body
+# prose (a sentence), not a metadata line. Used to bound the leading metadata run
+# in strip_pre_content_paragraphs: the first content heading can sit pages away
+# (an unlabeled abstract followed by a "Summary" section at the end), so
+# "everything before it" is not all metadata. Length alone is insufficient: a
+# multi-author Reply-to line is long but metadata, so the boundary also consults
+# the metadata-shape patterns below.
+_BODY_PARA_MIN_WORDS = 12
+_EMAIL_IN_TEXT_RE = re.compile(r"\S+@\S+\.\S+")
+
+# Unambiguous metadata field labels appearing ANYWHERE in a paragraph. WG21
+# page-0 metadata is sometimes merged onto one line ("Document #: P.. Date: ..
+# Audience: .. Reply-to: <email>"); two or more of these labels mark such a
+# block, where a single starting label (handled below) and a single incidental
+# email do not. Only labels that are rare in prose are listed: Date/Project/
+# Target/Source are DELIBERATELY excluded here because, un-anchored, they collide
+# with ordinary technical prose ("our target: zero overhead ... the source: field
+# data ..."), and a false positive is doubly costly (it both strips the paragraph
+# and removes the sweep's break, exposing everything after it). Those four stay in
+# the anchored first-line checks below, where the original code already had them.
+_META_LABEL_ANYWHERE_RE = re.compile(
+    r"(?:Document|Doc\.?|Paper)\s*#?\s*(?:No\.?|Number)?\s*:"
+    r"|Audience\s*:|Reply[- ]?to\s*:|Authors?\s*:|Editors?\s*:"
+    r"|Co-?authors?\s*:|Subgroup\s*:|E-?mails?\s*:",
+    re.IGNORECASE,
+)
+
+
+def _looks_like_metadata_paragraph(text: str) -> bool:
+    """True if a page-0 paragraph is metadata, not body prose.
+
+    Long metadata lines exist (a multi-author Reply-to with emails), so the
+    metadata/body boundary cannot rely on word count alone.
+    """
+    first_line = text.strip().split("\n")[0].strip()
+    if not first_line:
+        return True
+    # Two or more emails => an author/reply-to list, not prose. A SINGLE
+    # incidental email in a body sentence (e.g. an abstract mentioning
+    # "discussed on std-proposals@lists.isocpp.org") must not classify the
+    # paragraph as metadata: that is the citation-collateral over-strip this
+    # project hardens against. Word count handles short single-email metadata
+    # (an unlabeled one-author line is short); a labeled "Reply-to:" line is
+    # caught by _META_FIELD_LABEL_RE below regardless of email count.
+    if len(_EMAIL_IN_TEXT_RE.findall(text)) >= 2:
+        return True
+    # A merged metadata block carries two or more field labels; body prose with
+    # an incidental email or a stray "Note:" does not.
+    if len(_META_LABEL_ANYWHERE_RE.findall(text)) >= 2:
+        return True
+    clean = first_line.strip("*_ ")
+    return bool(
+        _META_FIELD_LABEL_RE.match(first_line)
+        or _META_DOC_HEADING_RE.match(first_line)
+        or _META_DATE_HEADING_RE.match(first_line)
+        or _BARE_DATE_HEADING_RE.match(clean)
+        or _SEPARATOR_HEADING_RE.match(first_line)
+        or _WG21_CATEGORY_LABEL_RE.match(first_line)
+    )
+
 # Bare date heading: "March 26, 2026" or "26 March 2026" without a label.
 _BARE_DATE_HEADING_RE = re.compile(
     r"^(?:(?:January|February|March|April|May|June|July|August|"
@@ -319,11 +379,33 @@ def strip_pre_content_paragraphs(sections: list[Section]) -> int:
     )
     if content_idx is None or content_idx == 0:
         return 0
-    meta_paras = [
-        sections[i] for i in range(content_idx)
-        if sections[i].page_num == 0
-        and sections[i].kind not in (SectionKind.HEADING, SectionKind.TITLE)
-    ]
+    # Metadata sections (doc number, author affiliation, date, audience labels,
+    # metadata tables) sit at the top of page 0 and are short. Walk page 0 and
+    # collect those non-heading sections, but stop at the first body-like
+    # paragraph (a full sentence): the content heading may be pages away (an
+    # unlabeled abstract followed by a "Summary" section at the document end),
+    # so stripping everything up to content_idx would delete the abstract.
+    # Headings are skipped, not stopped on: metadata can follow an early
+    # heading (a title-shaped heading then a Date/Target/Reply-to table).
+    # Deliberate boundary blind spot: a SHORT (< _BODY_PARA_MIN_WORDS) standalone
+    # page-0 paragraph before the content heading is treated as metadata and
+    # stripped, even if it is a one-line body intro. Real abstracts almost always
+    # exceed the threshold (paragraph merging joins wrapped lines), and the
+    # alternative (keep all short leading paragraphs) would leak the doc-number /
+    # date / audience lines this pass exists to remove. A maintainer who sees a
+    # short intro line vanish should know it is by design, not a new bug.
+    meta_paras = []
+    for i in range(content_idx):
+        sec = sections[i]
+        if sec.page_num != 0:
+            break
+        if sec.kind in (SectionKind.HEADING, SectionKind.TITLE):
+            continue
+        text = sec.text or ""
+        if (len(text.split()) >= _BODY_PARA_MIN_WORDS
+                and not _looks_like_metadata_paragraph(text)):
+            break
+        meta_paras.append(sec)
     if not meta_paras:
         return 0
     _log.debug(
