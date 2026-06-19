@@ -17,7 +17,7 @@ from unittest.mock import patch
 
 import pytest
 
-from cli import mailing
+from cli.__main__ import _validate_flags
 from paperstore import SqliteBackend
 
 
@@ -27,6 +27,13 @@ def _run(*args: str) -> subprocess.CompletedProcess:
         capture_output=True,
         text=True,
     )
+
+
+def main_with_argv(argv: list[str]) -> int:
+    from cli.__main__ import main
+
+    with patch.object(sys, "argv", ["cli", *argv]):
+        return main()
 
 
 def test_mailing_help_lists_force():
@@ -49,36 +56,34 @@ def _seed_year(store: SqliteBackend, year: str) -> None:
 
 @pytest.mark.parametrize("force_flag", ["--force", "-f"])
 def test_mailing_force_flag_accepted(tmp_path: Path, force_flag: str):
-    store = SqliteBackend(tmp_path)
-    _seed_year(store, "2024")
-    args = argparse.Namespace(targets=["2024"], force=True)
+    _seed_year(SqliteBackend(tmp_path), "2024")
 
     with patch(
         "mailing.scrape.fetch_all_mailings_for_year", side_effect=_fake_fetch
     ) as fetch:
-        rc = mailing.command(args, store)
+        rc = main_with_argv([
+            "--workspace-dir", str(tmp_path),
+            "mailing", force_flag, "2024",
+        ])
 
     fetch.assert_called_once_with("2024")
     assert rc == 0
+    store = SqliteBackend(tmp_path)
     assert store.list_papers_for_year("2024")[0].title == "Refreshed Title"
 
 
-def test_mailing_force_not_rejected_by_cli(tmp_path: Path):
-    store = SqliteBackend(tmp_path)
-    _seed_year(store, "2024")
+def test_mailing_force_not_rejected_by_cli():
+    """``--force`` is in the mailing flag allowlist."""
+    args = argparse.Namespace(force=True)
+    _validate_flags("mailing", args)
 
-    with patch(
-        "mailing.scrape.fetch_all_mailings_for_year", side_effect=_fake_fetch
-    ):
-        result = subprocess.run(
-            [
-                sys.executable, "-m", "cli",
-                "--workspace-dir", str(tmp_path),
-                "mailing", "--force", "2024",
-            ],
-            capture_output=True,
-            text=True,
-        )
 
-    assert "not valid for 'mailing'" not in result.stderr
-    assert result.returncode == 0
+def test_mailing_force_reaches_command(tmp_path: Path):
+    with patch("cli.mailing.command", return_value=0) as cmd:
+        rc = main_with_argv([
+            "--workspace-dir", str(tmp_path),
+            "mailing", "--force", "2024",
+        ])
+
+    assert rc == 0
+    assert cmd.call_args[0][0].force is True

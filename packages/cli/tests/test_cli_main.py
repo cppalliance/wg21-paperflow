@@ -59,3 +59,31 @@ def test_no_verb_fallback_routes_to_full():
     assert fallback_help == full_help, (
         "no-verb fallback should produce the same help as `full --help`"
     )
+
+
+@pytest.mark.parametrize(
+    ("argv", "msg"),
+    [
+        (["mailing", "P1234R5"], "not paper IDs"),
+        (["mailing", "2026-01"], "not paper IDs"),
+        (["full", "2026-01"], "not year-month"),
+    ],
+)
+def test_invalid_targets_rejected(argv: list[str], msg: str):
+    result = _run(*argv)
+    assert result.returncode != 0
+    assert msg in result.stderr
+
+
+@pytest.mark.parametrize(
+    ("argv", "msg"),
+    [
+        (["full", "all", "2026"], "`all` must be the only target"),
+        (["full", "2026", "all"], "`all` must be the only target"),
+        (["mailing", "all", "2026"], "`all` must be the only target"),
+    ],
+)
+def test_all_target_mixing_rejected(argv: list[str], msg: str):
+    result = _run(*argv)
+    assert result.returncode != 0
+    assert msg in result.stderr

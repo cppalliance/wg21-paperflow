@@ -241,6 +241,22 @@ def _validate_targets(verb: str, targets: list[str]) -> None:
             )
             sys.exit(1)
 
+    if verb == "mailing" and kinds - {"year", "all"}:
+        print(
+            "paperflow mailing: accepts a year (2026) or `all`, "
+            "not paper IDs or year-months.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    if verb == "full" and "month" in kinds:
+        print(
+            "paperflow full: accepts a year (2026), paper ID (P4003R2), "
+            "or `all`, not year-month (2026-01).",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
     if "all" in kinds:
         if len(targets) != 1:
             print(

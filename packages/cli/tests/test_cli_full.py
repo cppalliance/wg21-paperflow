@@ -1,3 +1,10 @@
+#
+# Copyright (c) 2026 Leo Chen (leo.chen0412@outlook.com)
+#
+# Distributed under the Boost Software License, Version 1.0. (See accompanying
+# file LICENSE_1_0.txt or copy at http://www.boost.org/LICENSE_1_0.txt)
+#
+
 """CLI tests for ``paperflow full``."""
 
 from __future__ import annotations
@@ -57,6 +64,7 @@ def test_full_forwards_extract_vector_images(tmp_path: Path):
             "mailing": {"succeeded": [], "skipped": ["2026"], "failed": []},
             "download": {"succeeded": [], "skipped": [], "failed": []},
             "convert": {"succeeded": [], "skipped": [], "failed": []},
+            "citations": {"succeeded": [], "skipped": [], "failed": []},
         }
         on_stage = kw.get("on_stage_complete")
         if on_stage:
@@ -89,9 +97,14 @@ def test_full_prints_stage_summaries_and_final_complete(tmp_path: Path, capsys):
 
     async def _fake_run_full(*a, **kw):
         results = {
-            "mailing": {"succeeded": [{"year": "2026", "papers": 1}], "skipped": [], "failed": []},
+            "mailing": {
+                "succeeded": [{"year": "2026", "papers": 1}],
+                "skipped": [],
+                "failed": [],
+            },
             "download": {"succeeded": ["P1000R0"], "skipped": [], "failed": []},
             "convert": {"succeeded": ["P1000R0"], "skipped": [], "failed": []},
+            "citations": {"succeeded": ["P1000R0"], "skipped": [], "failed": []},
         }
         on_stage = kw.get("on_stage_complete")
         if on_stage:
@@ -111,4 +124,101 @@ def test_full_prints_stage_summaries_and_final_complete(tmp_path: Path, capsys):
     assert "Mailing: 1 scraped, 0 skipped, 0 failed" in out
     assert "Download: 1 succeeded, 0 skipped, 0 failed" in out
     assert "Convert: 1 succeeded, 0 skipped, 0 failed" in out
+    assert "Citations: 1 extracted, 0 skipped, 0 failed" in out
     assert out.strip().endswith("Full: complete")
+
+
+def test_full_citations_failure_does_not_affect_exit_code(tmp_path: Path, capsys):
+    store = SqliteBackend(tmp_path)
+    args = argparse.Namespace(
+        targets=["2026"],
+        force=False,
+        verify=False,
+        concurrency=None,
+        extract_vector_images=False,
+        vector_whiteout_text=False,
+    )
+
+    async def _fake_run_full(*a, **kw):
+        results = {
+            "mailing": {"succeeded": [], "skipped": ["2026"], "failed": []},
+            "download": {"succeeded": [], "skipped": [], "failed": []},
+            "convert": {"succeeded": ["P1000R0"], "skipped": [], "failed": []},
+            "citations": {
+                "succeeded": [],
+                "skipped": [],
+                "failed": [{"paper_id": "*", "error": "boom"}],
+            },
+        }
+        on_stage = kw.get("on_stage_complete")
+        if on_stage:
+            on_stage("mailing", results["mailing"])
+            on_stage("download", results["download"])
+            on_stage("convert", results["convert"])
+        return results
+
+    with (
+        patch("cli.progress.make_progress_handler", return_value=(nullcontext(), None)),
+        patch("cli.full.run_full", new=_fake_run_full),
+    ):
+        rc = full_mod.command(args, store)
+
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "Citations: failed (see logs)" in out
+    assert out.strip().endswith("Full: complete")
+
+
+def test_full_failure_path_sets_exit_code_and_summary(tmp_path: Path, capsys):
+    store = SqliteBackend(tmp_path)
+    store.upsert_year("2026", [
+        {"paper_id": "P1000R0", "title": "A", "url": "http://x/a.pdf"},
+        {"paper_id": "P1001R0", "title": "B", "url": "http://x/b.pdf"},
+    ])
+    args = argparse.Namespace(
+        targets=["2026"],
+        force=False,
+        verify=False,
+        concurrency=None,
+        extract_vector_images=False,
+        vector_whiteout_text=False,
+    )
+
+    async def _fake_run_full(*a, **kw):
+        results = {
+            "mailing": {"succeeded": [], "skipped": ["2026"], "failed": []},
+            "download": {
+                "succeeded": [],
+                "skipped": [],
+                "failed": [{"paper_id": "P1000R0", "error": "download err"}],
+            },
+            "convert": {
+                "succeeded": [],
+                "skipped": [],
+                "failed": [{"paper_id": "P1001R0", "error": "convert err"}],
+            },
+            "citations": {"succeeded": [], "skipped": [], "failed": []},
+        }
+        on_stage = kw.get("on_stage_complete")
+        if on_stage:
+            on_stage("mailing", results["mailing"])
+            on_stage("download", results["download"])
+            on_stage("convert", results["convert"])
+        return results
+
+    with (
+        patch("cli.progress.make_progress_handler", return_value=(nullcontext(), None)),
+        patch("cli.full.run_full", new=_fake_run_full),
+    ):
+        rc = full_mod.command(args, store)
+
+    captured = capsys.readouterr()
+    assert rc == 1
+    assert "P1000R0: download err" in captured.err
+    assert "P1001R0: convert err" in captured.err
+    assert captured.out.strip().endswith(
+        "Full: 2 failed (convert: 1, download: 1)"
+    )
+    by_id = {r.paper_id: r for r in store.list_papers_for_year("2026")}
+    assert by_id["P1000R0"].error == "download err"
+    assert by_id["P1001R0"].error == "convert err"
