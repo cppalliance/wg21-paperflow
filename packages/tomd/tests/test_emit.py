@@ -38,6 +38,46 @@ def test_emit_heading_dedupes_overprinted_lines():
     assert "Abstract Abstract" not in md
 
 
+def test_emit_heading_excludes_lower_baseline_body_line():
+    """A line on a lower baseline than the heading's own row is emitted as a
+    body paragraph below the heading, not folded into the heading line.
+
+    This pins the deliberate trade-off in ``_render_heading_spans``: grouping
+    is same-row only, so a wrapped title or wrongly-absorbed body line drops
+    to a paragraph rather than being joined back into the heading."""
+    sec = make_section(
+        "1\nScope\nBody prose here", kind=SectionKind.HEADING, heading_level=2,
+        lines=[
+            Line(spans=[make_span("1")], bbox=(50, 50, 70, 62), page_num=0),
+            Line(spans=[make_span("Scope")], bbox=(80, 50, 200, 62), page_num=0),
+            Line(spans=[make_span("Body prose here")],
+                 bbox=(50, 75, 400, 87), page_num=0),
+        ],
+    )
+    md = emit_markdown({}, [sec])
+    assert "## 1 Scope" in md
+    assert "Body prose here" not in md.split("\n")[0]
+    assert "Body prose here" in md
+
+
+def test_emit_heading_joins_mixed_font_row_by_baseline():
+    """A single visual row mixing font sizes (a large section number beside a
+    small-caps title) stays one heading. The glyph tops differ even though the
+    baselines align, so grouping must key on the vertical midpoint, not the
+    top edge; keying on the top edge would demote the title to a paragraph."""
+    sec = make_section(
+        "19\nSCOPE", kind=SectionKind.HEADING, heading_level=2,
+        lines=[
+            Line(spans=[make_span("19", font_size=24.0)],
+                 bbox=(50, 30, 90, 62), page_num=0),
+            Line(spans=[make_span("SCOPE", font_size=10.0)],
+                 bbox=(100, 50, 300, 60), page_num=0),
+        ],
+    )
+    md = emit_markdown({}, [sec])
+    assert "## 19 SCOPE" in md
+
+
 def test_emit_paragraph_unwrapped():
     sec = make_section("Hello world")
     md = emit_markdown({}, [sec])

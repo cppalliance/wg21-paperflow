@@ -161,13 +161,29 @@ def _render_heading_spans(sec: Section) -> str:
     lines at the same font size are joined to recover the title text that
     MuPDF split onto a separate line.
 
+    Deliberate trade-off: grouping is purely same-row. A heading whose title
+    genuinely *wraps* onto a second baseline has its continuation emitted as a
+    body paragraph below the heading, not folded back into the heading line.
+    The older line-continuation heuristic (trailing comma/conjunction, etc.)
+    was dropped for simplicity; wrapped section titles are rare in the WG21
+    corpus and no golden regressed. Body prose that a heading section wrongly
+    absorbs sits on a lower baseline too and is handled by the same rule, so
+    the simpler grouping serves both. ``test_emit_heading_excludes_lower``
+    ``_baseline_body_line`` pins this behaviour.
+
+    Row membership keys on each line's vertical midpoint, not its top edge:
+    on a single visual row mixing font sizes (a large section number beside a
+    small-caps title) the glyph tops differ even though the baselines align,
+    so the midpoint tracks the shared baseline far more robustly. This matches
+    the midpoint convention used in ``cleanup.py``.
+
     If the heading section contains additional body lines (e.g. table cells
     merged into a single section), those are emitted as a paragraph below
     the heading so content is not lost.
     """
     prefix = "#" * sec.heading_level
 
-    rows = [(ln.bbox[1], ln.font_size,
+    rows = [((ln.bbox[1] + ln.bbox[3]) / 2.0, ln.font_size,
              _render_line_spans(ln, suppress_bold=True).strip(), ln)
             for ln in sec.lines]
     rows = [r for r in rows if r[2]]
