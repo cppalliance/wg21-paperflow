@@ -4,11 +4,17 @@ import fitz
 import logging
 import re
 from collections import Counter, defaultdict
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
-from .cleanup import (get_edge_items, detect_repeating, strip_repeating,
-                      cleanup_text, find_hidden_regions, strip_hidden_blocks)
+from .cleanup import (
+    get_edge_items,
+    detect_repeating,
+    strip_repeating,
+    cleanup_text,
+    find_hidden_regions,
+    strip_hidden_blocks,
+)
 from .extract import extract_mupdf, extract_spatial, collect_links, attach_links
 from .images import (
     ExtractedImage,
@@ -32,8 +38,13 @@ from .mono import propagate_monospace
 from .figures import detect_figure_regions
 from .wording import classify_wording, collect_line_drawings
 from .spans import normalize_spans
-from .structure import (compare_extractions, drop_leaked_toc_entries,
-                        structure_body, _is_known_section, _TITLE_PID_PREFIX_RE)
+from .structure import (
+    compare_extractions,
+    drop_leaked_toc_entries,
+    structure_body,
+    _is_known_section,
+    _TITLE_PID_PREFIX_RE,
+)
 from ..metadata_yaml.extract import (
     apply_pdf_metadata_fallbacks as _apply_pdf_metadata_fallbacks,
     enrich_pdf_reply_to as _enrich_pdf_reply_to,
@@ -50,6 +61,7 @@ from .types import (
     SkipReason,
     is_readable,
 )
+from .. import DOC_NUM_RE
 from ..shared import override_revision_from_filename
 from ..toc import find_toc_indices, has_dot_leader, is_toc_label
 from ..metadata_yaml.strip import (
@@ -58,10 +70,18 @@ from ..metadata_yaml.strip import (
     strip_pre_content_paragraphs as _strip_pre_content_paragraphs,
 )
 from ..body.abstract import dedup_abstract as _dedup_abstract_new
-from ..body.abstract import promote_abstract_from_uncertain as _promote_abstract_from_uncertain
-from ..body.abstract import reorder_abstract_in_uncertain as _reorder_abstract_in_uncertain
-from ..body.abstract import rescue_stranded_abstract_body as _rescue_stranded_abstract_body
-from ..body.abstract import strip_metadata_from_uncertain as _strip_metadata_from_uncertain
+from ..body.abstract import (
+    promote_abstract_from_uncertain as _promote_abstract_from_uncertain,
+)
+from ..body.abstract import (
+    reorder_abstract_in_uncertain as _reorder_abstract_in_uncertain,
+)
+from ..body.abstract import (
+    rescue_stranded_abstract_body as _rescue_stranded_abstract_body,
+)
+from ..body.abstract import (
+    strip_metadata_from_uncertain as _strip_metadata_from_uncertain,
+)
 
 from .docling_backend import (
     docling_available as _docling_available,
@@ -76,7 +96,7 @@ __all__ = ["run_pipeline", "PipelineResult", "ExtractedImage"]
 
 _log = logging.getLogger(__name__)
 
-_STANDALONE_PAGE_RE = re.compile(r'^\d{1,4}$')
+_STANDALONE_PAGE_RE = re.compile(r"^\d{1,4}$")
 _SECTION_NUM_START_RE = re.compile(r"^(?:\d+(?:\.\d+)*|[IVXLCDM]+)(?:\s|$)")
 _TOC_X_TOLERANCE = 5.0
 _TOC_BODY_PROTECT_MIN_WORDS = 10
@@ -96,7 +116,6 @@ _COLUMN_GAP_MIN = 20.0
 # "ABSTRACT", "CONTENTS") create a tiny cluster of 2-3 blocks that triggers
 # a false column split against 20+ body blocks on the other side.
 _COLUMN_MIN_FRACTION = 0.20
-
 
 
 def _toc_structural_hints(sections) -> list[bool]:
@@ -139,18 +158,18 @@ def _toc_structural_hints(sections) -> list[bool]:
 # detects rectangular grids from vector drawing lines and injects them
 # as synthetic entries so Pass 2b (inline-grid) can fire.
 
-_DRAWING_GRID_SPAN_TOL = 5.0       # grouping tolerance for horizontal lines
-_DRAWING_GRID_AXIS_TOL = 1.0       # max skew for an axis-aligned line
-_DRAWING_GRID_MIN_HORIZONTALS = 5   # 5+ h-lines = header + 2 data rows minimum
-_DRAWING_GRID_MIN_WIDTH = 50.0      # reject tiny decorative boxes
-_DRAWING_GRID_VERT_TOL = 3.0        # tolerance for matching vertical borders
-_DRAWING_GRID_Y_DEDUP = 3.0         # merge near-identical y-values
+_DRAWING_GRID_SPAN_TOL = 5.0  # grouping tolerance for horizontal lines
+_DRAWING_GRID_AXIS_TOL = 1.0  # max skew for an axis-aligned line
+_DRAWING_GRID_MIN_HORIZONTALS = 5  # 5+ h-lines = header + 2 data rows minimum
+_DRAWING_GRID_MIN_WIDTH = 50.0  # reject tiny decorative boxes
+_DRAWING_GRID_VERT_TOL = 3.0  # tolerance for matching vertical borders
+_DRAWING_GRID_Y_DEDUP = 3.0  # merge near-identical y-values
 _DRAWING_GRID_MIN_UNIQUE_ROWS = 3  # deduped rules: header + 2 data rows minimum
 _DRAWING_GRID_MAX_HEIGHT_RATIO = 0.7  # reject grids taller than 70% of page
-_DRAWING_GRID_BAND_TOL = 4.0       # y-band grouping for multi-cell check
+_DRAWING_GRID_BAND_TOL = 4.0  # y-band grouping for multi-cell check
 _DRAWING_GRID_MIN_MULTI_BANDS = 2  # bands that must hold 2+ cells side by side
 _DRAWING_GRID_MIN_MULTI_BAND_FRACTION = 0.5  # multi-cell bands >= half of all bands
-_DRAWING_GRID_COVER_FRAC = 0.5     # find_tables overlap that counts as covered
+_DRAWING_GRID_COVER_FRAC = 0.5  # find_tables overlap that counts as covered
 
 
 def _page_text_line_bboxes(page) -> list[tuple[float, float, float, float]]:
@@ -170,7 +189,8 @@ def _page_text_line_bboxes(page) -> list[tuple[float, float, float, float]]:
 
 
 def _detect_drawing_grids(
-    page, page_height: float,
+    page,
+    page_height: float,
     existing_tables: list[dict],
 ) -> list[dict]:
     """Detect bordered table grids from page drawings that find_tables missed.
@@ -205,8 +225,10 @@ def _detect_drawing_grids(
     # sibling tables with near-identical spans into one grid.
     h_by_span: dict[tuple[float, float], list[float]] = defaultdict(list)
     for hx0, hx1, hy in h_lines:
-        key = (round(hx0 / _DRAWING_GRID_SPAN_TOL) * _DRAWING_GRID_SPAN_TOL,
-               round(hx1 / _DRAWING_GRID_SPAN_TOL) * _DRAWING_GRID_SPAN_TOL)
+        key = (
+            round(hx0 / _DRAWING_GRID_SPAN_TOL) * _DRAWING_GRID_SPAN_TOL,
+            round(hx1 / _DRAWING_GRID_SPAN_TOL) * _DRAWING_GRID_SPAN_TOL,
+        )
         h_by_span[key].append(hy)
 
     results: list[dict] = []
@@ -267,8 +289,7 @@ def _detect_drawing_grids(
 
         # Skip if already covered by find_tables
         already_covered = any(
-            _bbox_overlap_fraction(grid_bbox, ft["bbox"])
-            > _DRAWING_GRID_COVER_FRAC
+            _bbox_overlap_fraction(grid_bbox, ft["bbox"]) > _DRAWING_GRID_COVER_FRAC
             for ft in existing_tables
         )
         if already_covered:
@@ -277,15 +298,17 @@ def _detect_drawing_grids(
         # Full find_tables() entry shape so downstream passes can read all
         # keys safely. row_count=0 makes Pass 5 (MuPDF Native) skip the
         # entry; only Pass 2b (inline-grid) acts on it, via the bbox.
-        results.append({
-            "bbox": grid_bbox,
-            "row_count": 0,
-            "col_count": 0,
-            "cells": [],
-            "header_names": None,
-            "extract": [],
-            "rot": None,
-        })
+        results.append(
+            {
+                "bbox": grid_bbox,
+                "row_count": 0,
+                "col_count": 0,
+                "cells": [],
+                "header_names": None,
+                "extract": [],
+                "rot": None,
+            }
+        )
 
     return results
 
@@ -383,7 +406,6 @@ def _column_aware_sort(
     blocks.sort(key=sort_key)
 
 
-
 def _get_page0_text_colors(page) -> dict[float, float]:
     """Map y-positions to text lightness using texttrace space-color proxy.
 
@@ -476,7 +498,7 @@ def _make_image_section(img: ExtractedImage) -> Section:
         kind=SectionKind.IMAGE,
         text="",
         confidence=confidence,
-        page_num=img.page - 1,    # Section.page_num is 0-based
+        page_num=img.page - 1,  # Section.page_num is 0-based
         image_ref=img,
     )
 
@@ -813,8 +835,12 @@ def _filter_vector_images_against_structural(
         if sec.kind == SectionKind.TABLE:
             body_x = body_x_by_page.get(page)
             if body_x is not None:
-                bbox = (min(bbox[0], body_x[0]), bbox[1],
-                        max(bbox[2], body_x[1]), bbox[3])
+                bbox = (
+                    min(bbox[0], body_x[0]),
+                    bbox[1],
+                    max(bbox[2], body_x[1]),
+                    bbox[3],
+                )
         structural_bboxes_by_page.setdefault(page, []).append(bbox)
 
     if not structural_bboxes_by_page:
@@ -829,14 +855,12 @@ def _filter_vector_images_against_structural(
         page_bboxes = structural_bboxes_by_page.get(im.page, ())
         if im.bbox[1] <= _NEAR_PAGE_TOP_PT:
             prior_bboxes = [
-                b for b in structural_bboxes_by_page.get(im.page - 1, ())
+                b
+                for b in structural_bboxes_by_page.get(im.page - 1, ())
                 if b[3] >= _CROSS_PAGE_STRUCTURAL_BOTTOM_MIN_PT
             ]
             page_bboxes = (*page_bboxes, *prior_bboxes)
-        if any(
-            _bbox_overlap_fraction(im.bbox, b) >= threshold
-            for b in page_bboxes
-        ):
+        if any(_bbox_overlap_fraction(im.bbox, b) >= threshold for b in page_bboxes):
             dropped_ids.add(id(im))
             continue
         kept_images.append(im)
@@ -845,7 +869,8 @@ def _filter_vector_images_against_structural(
         return images, sections, 0
 
     kept_sections = [
-        s for s in sections
+        s
+        for s in sections
         if not (
             s.kind == SectionKind.IMAGE
             and s.image_ref is not None
@@ -901,7 +926,9 @@ def _filter_overlapping_vector_images(
     for page_indices in vectors_by_page.values():
         # Sort descending by area so the largest is considered first.
         sorted_idx = sorted(
-            page_indices, key=lambda i: _area(images[i]), reverse=True,
+            page_indices,
+            key=lambda i: _area(images[i]),
+            reverse=True,
         )
         # Larger images are "potential containers"; smaller images may
         # be detail crops. Compare each smaller against each kept
@@ -931,7 +958,8 @@ def _filter_overlapping_vector_images(
 
     kept_images = [im for im in images if id(im) not in dropped_ids]
     kept_sections = [
-        s for s in sections
+        s
+        for s in sections
         if not (
             s.kind == SectionKind.IMAGE
             and s.image_ref is not None
@@ -1069,7 +1097,6 @@ def _filter_sections_inside_vector_images(
     if not caption_eligible_by_page:
         return sections, {}
 
-    from dataclasses import replace
     captures_by_id: dict[int, list[tuple[str, str]]] = {}
     kept: list[Section] = []
 
@@ -1096,8 +1123,7 @@ def _filter_sections_inside_vector_images(
                 kept.append(sec)
                 continue
             mostly_inside = any(
-                _bbox_overlap_fraction(sec_bbox, im.bbox)
-                >= structural_threshold
+                _bbox_overlap_fraction(sec_bbox, im.bbox) >= structural_threshold
                 for im in page_vectors
             )
             if mostly_inside:
@@ -1184,8 +1210,7 @@ def _filter_sections_inside_vector_images(
                 kept_lines.append(line)
                 continue
             if any(
-                _bbox_overlap_fraction(line_bbox, ib) >= threshold
-                for ib in page_bboxes
+                _bbox_overlap_fraction(line_bbox, ib) >= threshold for ib in page_bboxes
             ):
                 continue
             kept_lines.append(line)
@@ -1221,9 +1246,11 @@ def _insert_image_sections(
                 out.insert(i, img_sec)
                 inserted = True
                 break
-            if (sec.page_num == img_sec.page_num
-                    and sec.lines
-                    and sec.lines[0].bbox[1] > img.bbox[1]):
+            if (
+                sec.page_num == img_sec.page_num
+                and sec.lines
+                and sec.lines[0].bbox[1] > img.bbox[1]
+            ):
                 out.insert(i, img_sec)
                 inserted = True
                 break
@@ -1249,6 +1276,7 @@ class PipelineResult:
     - ``images_truncated``: True iff ``source_image_count`` exceeded
       the cap and the emit step appended the truncation HTML comment.
     """
+
     md: str = ""
     prompts: list[str] | None = None
     sections: list[Section] = field(default_factory=list)
@@ -1329,10 +1357,10 @@ def _enforce_skip_contract(result: PipelineResult) -> PipelineResult:
                 "PipelineResult images must be empty when skipped=True"
             )
         if result.md.strip():
-            _log.error("PipelineResult skip contract violated: skipped with non-empty md")
-            raise AssertionError(
-                "PipelineResult md must be empty when skipped=True"
+            _log.error(
+                "PipelineResult skip contract violated: skipped with non-empty md"
             )
+            raise AssertionError("PipelineResult md must be empty when skipped=True")
     return result
 
 
@@ -1563,22 +1591,28 @@ def run_pipeline(
 
     if all_hidden:
         total_hidden = sum(len(v) for v in all_hidden.values())
-        _log.info("Stripping text hidden by %d covered regions on %d pages",
-                  total_hidden, len(all_hidden))
+        _log.info(
+            "Stripping text hidden by %d covered regions on %d pages",
+            total_hidden,
+            len(all_hidden),
+        )
         all_mupdf_blocks = strip_hidden_blocks(all_mupdf_blocks, all_hidden)
         all_spatial_blocks = strip_hidden_blocks(all_spatial_blocks, all_hidden)
 
     mupdf_text = "\n".join(b.text for b in all_mupdf_blocks)
     if not is_readable(mupdf_text):
         _log.warning("Extracted text is not readable (encrypted/scanned PDF?)")
-        return _enforce_skip_contract(PipelineResult.for_skip(
-            SkipReason.UNREADABLE,
-            page_count=result.page_count,
-            readable=False,
-        ))
+        return _enforce_skip_contract(
+            PipelineResult.for_skip(
+                SkipReason.UNREADABLE,
+                page_count=result.page_count,
+                readable=False,
+            )
+        )
 
     extraction_result = finalize_extraction(
-        per_page_image_candidates, path.stem.lower(),
+        per_page_image_candidates,
+        path.stem.lower(),
         vector_stats=vector_stats,
     )
     result.images = extraction_result.images
@@ -1597,7 +1631,8 @@ def run_pipeline(
     # multiset, so the same token added to both paths stays balanced.
     if glyph_candidates:
         orphans, skipped_coincident = filter_coincident(
-            glyph_candidates, text_emoji_by_page,
+            glyph_candidates,
+            text_emoji_by_page,
         )
         glyph_stats = inject_glyph_spans(all_mupdf_blocks, orphans)
         inject_glyph_spans(all_spatial_blocks, orphans)
@@ -1607,10 +1642,13 @@ def run_pipeline(
             free_standing=glyph_stats.free_standing,
         )
         if result.glyph_stats.fired:
-            _log.info("Glyph placeholders: injected=%d skipped_coincident=%d "
-                      "free_standing=%d", result.glyph_stats.injected,
-                      result.glyph_stats.skipped_coincident,
-                      result.glyph_stats.free_standing)
+            _log.info(
+                "Glyph placeholders: injected=%d skipped_coincident=%d "
+                "free_standing=%d",
+                result.glyph_stats.injected,
+                result.glyph_stats.skipped_coincident,
+                result.glyph_stats.free_standing,
+            )
 
     repeating = detect_repeating(all_edge_items, result.page_count)
     if repeating:
@@ -1639,8 +1677,9 @@ def run_pipeline(
     all_mupdf_blocks = normalize_spans(all_mupdf_blocks)
     all_spatial_blocks = normalize_spans(all_spatial_blocks)
 
-    wg21_metadata, _ = extract_metadata_from_blocks(all_mupdf_blocks,
-                                                     text_colors=page0_colors)
+    wg21_metadata, _ = extract_metadata_from_blocks(
+        all_mupdf_blocks, text_colors=page0_colors
+    )
 
     # Snapshot for Docling enrichment: detect_tables consumes blocks,
     # but the enrichment needs access to ALL page spans (including
@@ -1649,12 +1688,13 @@ def run_pipeline(
     pre_detect_blocks = list(all_mupdf_blocks) if ml_tables else []
 
     table_sections, all_mupdf_blocks = detect_tables(
-        all_mupdf_blocks, page_mupdf_tables=page_mupdf_tables,
-        two_column_pages=two_column_pages)
+        all_mupdf_blocks,
+        page_mupdf_tables=page_mupdf_tables,
+        two_column_pages=two_column_pages,
+    )
     if table_sections:
         _log.info("Detected %d table(s)", len(table_sections))
-        all_spatial_blocks = exclude_table_regions(
-            all_spatial_blocks, table_sections)
+        all_spatial_blocks = exclude_table_regions(all_spatial_blocks, table_sections)
 
     # --- Optional Docling ML table processing ---
     # When ml_tables=True and Docling is available:
@@ -1667,30 +1707,30 @@ def run_pipeline(
         if docling_tables:
             if table_sections:
                 n = _enrich_tables_with_docling(
-                    table_sections, docling_tables, pre_detect_blocks)
+                    table_sections, docling_tables, pre_detect_blocks
+                )
                 if n:
-                    _log.info("Docling enriched %d/%d table(s)",
-                              n, len(table_sections))
+                    _log.info("Docling enriched %d/%d table(s)", n, len(table_sections))
 
             all_mupdf_blocks = _absorb_cross_page_spec_rows(
-                table_sections, all_mupdf_blocks, docling_tables)
+                table_sections, all_mupdf_blocks, docling_tables
+            )
 
             new_tables, all_mupdf_blocks = _discover_tables_with_docling(
-                docling_tables, all_mupdf_blocks, table_sections)
+                docling_tables, all_mupdf_blocks, table_sections
+            )
             if new_tables:
                 table_sections.extend(new_tables)
                 all_spatial_blocks = exclude_table_regions(
-                    all_spatial_blocks, new_tables)
-                _log.info("Docling discovered %d new table(s)",
-                          len(new_tables))
+                    all_spatial_blocks, new_tables
+                )
+                _log.info("Docling discovered %d new table(s)", len(new_tables))
 
     sections = compare_extractions(all_mupdf_blocks, all_spatial_blocks)
 
     for ts in table_sections:
         inserted = False
-        data_on_label_page = (
-            ts.lines and ts.lines[0].page_num == ts.page_num
-        )
+        data_on_label_page = ts.lines and ts.lines[0].page_num == ts.page_num
         # On rotated pages compare in reading space; page-space y does
         # not reflect visual order there.
         ts_rot = page_rotations.get(ts.page_num)
@@ -1699,11 +1739,14 @@ def run_pipeline(
                 sections.insert(i, ts)
                 inserted = True
                 break
-            if (data_on_label_page
-                    and sec.page_num == ts.page_num and sec.lines
-                    and ts.lines
-                    and _rot_bbox(sec.lines[0].bbox, ts_rot)[1]
-                    > _rot_bbox(ts.lines[0].bbox, ts_rot)[1]):
+            if (
+                data_on_label_page
+                and sec.page_num == ts.page_num
+                and sec.lines
+                and ts.lines
+                and _rot_bbox(sec.lines[0].bbox, ts_rot)[1]
+                > _rot_bbox(ts.lines[0].bbox, ts_rot)[1]
+            ):
                 sections.insert(i, ts)
                 inserted = True
                 break
@@ -1711,9 +1754,11 @@ def run_pipeline(
             sections.append(ts)
 
     if result.images:
-        _log.info("Extracted %d image(s) (cap %s)",
-                   len(result.images),
-                   "tripped" if result.images_truncated else "ok")
+        _log.info(
+            "Extracted %d image(s) (cap %s)",
+            len(result.images),
+            "tripped" if result.images_truncated else "ok",
+        )
         sections = _insert_image_sections(sections, result.images)
 
     has_title = "title" in wg21_metadata
@@ -1727,8 +1772,8 @@ def run_pipeline(
 
     # --- Phase 1b: Body structuring (may detect title for metadata) ---
     body_metadata, sections, nesting_corrections = structure_body(
-        sections, has_title=has_title,
-        figure_regions=all_figure_regions or None)
+        sections, has_title=has_title, figure_regions=all_figure_regions or None
+    )
     for k, v in body_metadata.items():
         if k not in metadata:
             metadata[k] = v
@@ -1739,26 +1784,28 @@ def run_pipeline(
     # structurally. The marker discloses the count so the loss is not
     # silent. Runs after structure has assigned section kinds.
     if result.glyph_stats is not None:
-        result.glyph_stats.skipped_code_section = (
-            drop_glyphs_in_code_and_tables(sections)
+        result.glyph_stats.skipped_code_section = drop_glyphs_in_code_and_tables(
+            sections
         )
 
     # Vector-image post-processing
     if result.images:
         total_dropped = 0
-        result.images, sections, dropped_a = (
-            _filter_vector_images_against_structural(result.images, sections)
+        result.images, sections, dropped_a = _filter_vector_images_against_structural(
+            result.images, sections
         )
         total_dropped += dropped_a
-        result.images, sections, dropped_b = (
-            _filter_overlapping_vector_images(result.images, sections)
+        result.images, sections, dropped_b = _filter_overlapping_vector_images(
+            result.images, sections
         )
         total_dropped += dropped_b
         sections, captures_by_id = _filter_sections_inside_vector_images(
-            result.images, sections,
+            result.images,
+            sections,
         )
         if captures_by_id:
             from dataclasses import replace as _replace
+
             # Thread the captures into BOTH ``result.images`` AND every
             # IMAGE section's ``image_ref``. Both containers share the
             # same ``ExtractedImage`` instances (placed by
@@ -1777,51 +1824,54 @@ def run_pipeline(
             new_sections: list[Section] = []
             for sec in sections:
                 new_sections.append(sec)
-                if (sec.kind == SectionKind.IMAGE
-                        and sec.image_ref is not None
-                        and id(sec.image_ref) in captures_by_id):
+                if (
+                    sec.kind == SectionKind.IMAGE
+                    and sec.image_ref is not None
+                    and id(sec.image_ref) in captures_by_id
+                ):
                     for letter, caption_text in sorted(
-                            captures_by_id[id(sec.image_ref)]):
+                        captures_by_id[id(sec.image_ref)]
+                    ):
                         # Collapse internal whitespace (incl. newlines
                         # from the structure pass's wrap-join) to single
                         # spaces so the italic wrapper renders as one
                         # unwrapped paragraph, matching the existing
                         # PARAGRAPH emit path's behaviour.
                         unwrapped = " ".join(caption_text.split())
-                        new_sections.append(Section(
-                            kind=SectionKind.PARAGRAPH,
-                            text=(
-                                "*"
-                                + _escape_italic_text(unwrapped)
-                                + "*"
-                            ),
-                            confidence=Confidence.MEDIUM,
-                            page_num=sec.page_num,
-                        ))
+                        new_sections.append(
+                            Section(
+                                kind=SectionKind.PARAGRAPH,
+                                text=("*" + _escape_italic_text(unwrapped) + "*"),
+                                confidence=Confidence.MEDIUM,
+                                page_num=sec.page_num,
+                            )
+                        )
             sections = new_sections
 
             replaced: dict[int, ExtractedImage] = {
                 id(im): _replace(
-                    im, sub_captions=tuple(sorted(captures_by_id[id(im)])),
+                    im,
+                    sub_captions=tuple(sorted(captures_by_id[id(im)])),
                 )
                 for im in result.images
                 if id(im) in captures_by_id
             }
             for sec in sections:
-                if (sec.kind == SectionKind.IMAGE
-                        and sec.image_ref is not None
-                        and id(sec.image_ref) in replaced):
+                if (
+                    sec.kind == SectionKind.IMAGE
+                    and sec.image_ref is not None
+                    and id(sec.image_ref) in replaced
+                ):
                     sec.image_ref = replaced[id(sec.image_ref)]
             result.images = [replaced.get(id(im), im) for im in result.images]
         if total_dropped and result.vector_uncertainty is not None:
-            from dataclasses import replace
             new_kept = sum(1 for im in result.images if im.source == "vector")
             result.vector_uncertainty = replace(
-                result.vector_uncertainty, kept=new_kept,
+                result.vector_uncertainty,
+                kept=new_kept,
             )
 
     if "document" not in metadata:
-        from .. import DOC_NUM_RE
         stem_match = DOC_NUM_RE.search(path.stem)
         if stem_match:
             metadata["document"] = stem_match.group(1).upper()
@@ -1835,8 +1885,7 @@ def run_pipeline(
         for sec in sections:
             if sec.kind == SectionKind.HEADING:
                 first_line = sec.text.split("\n")[0].strip().lstrip("# ").strip()
-                if (first_line
-                        and first_line.lower().rstrip(":") not in KNOWN_SECTIONS):
+                if first_line and first_line.lower().rstrip(":") not in KNOWN_SECTIONS:
                     metadata["title"] = first_line
                     break
 
@@ -1873,9 +1922,15 @@ def run_pipeline(
     _enrich_pdf_reply_to(metadata, all_mupdf_blocks)
     # --- Phase 1c: Metadata fallbacks & enrichment (metadata_yaml) ---
     _apply_pdf_metadata_fallbacks(
-        metadata, path, pdf_info_date, pdf_info_title,
-        doc_metadata, sections, all_mupdf_blocks,
-        _TITLE_PID_PREFIX_RE)
+        metadata,
+        path,
+        pdf_info_date,
+        pdf_info_title,
+        doc_metadata,
+        sections,
+        all_mupdf_blocks,
+        _TITLE_PID_PREFIX_RE,
+    )
 
     # --- Phase 1d: Metadata stripping from body sections (metadata_yaml) ---
     _strip_pre_heading_fragments(sections)
@@ -1897,14 +1952,22 @@ def run_pipeline(
 
     texts = [sec.text.split("\n")[0].strip() for sec in sections]
     full_texts = [sec.text for sec in sections]
-    heading_texts = {sec.text.split("\n")[0].strip()
-                     for sec in sections if sec.kind == SectionKind.HEADING}
+    heading_texts = {
+        sec.text.split("\n")[0].strip()
+        for sec in sections
+        if sec.kind == SectionKind.HEADING
+    }
     structural_hints = _toc_structural_hints(sections) if not heading_texts else None
     # A body heading matches itself in heading_texts; pass per-section heading
     # flags so find_toc_indices excludes them and does not delete the body.
     is_heading = [sec.kind == SectionKind.HEADING for sec in sections]
-    toc_indices = find_toc_indices(texts, heading_texts, structural_hints,
-                                   full_texts=full_texts, is_heading=is_heading)
+    toc_indices = find_toc_indices(
+        texts,
+        heading_texts,
+        structural_hints,
+        full_texts=full_texts,
+        is_heading=is_heading,
+    )
 
     # Plausibility guard: reject phantom TOC detection.
     # A valid TOC must have at least one confirming signal:
@@ -1917,8 +1980,7 @@ def run_pipeline(
     if toc_indices:
         # IMAGE sections are never TOC content.
         toc_indices = {
-            i for i in toc_indices
-            if sections[i].kind is not SectionKind.IMAGE
+            i for i in toc_indices if sections[i].kind is not SectionKind.IMAGE
         }
 
     if toc_indices:
@@ -1940,8 +2002,10 @@ def run_pipeline(
                     if _n:
                         _outside.add(_n)
             if not (_inside & _outside):
-                _log.info("Rejected phantom TOC (%d entries, no confirming signal)",
-                          len(toc_indices))
+                _log.info(
+                    "Rejected phantom TOC (%d entries, no confirming signal)",
+                    len(toc_indices),
+                )
                 toc_indices = set()
 
     for li, sec in enumerate(sections):
@@ -1964,28 +2028,28 @@ def run_pipeline(
             j_dot = any(has_dot_leader(ln) for ln in sec_j.text.split("\n"))
             for line in sec_j.text.split("\n"):
                 stripped = line.strip()
-                if (_NUMBERED_LINE_RE.match(stripped)
-                        or _BARE_PAGE_NUM_RE.match(stripped)):
+                if _NUMBERED_LINE_RE.match(stripped) or _BARE_PAGE_NUM_RE.match(
+                    stripped
+                ):
                     has_numbered = True
                     numbered += 1
             if j_dot or has_numbered:
                 candidate.add(j)
                 if j_dot and not has_numbered:
                     numbered += 1
-            elif jfl.lower() in ('ii', 'iii', 'iv', 'v', 'vi', 'vii', 'viii'):
+            elif jfl.lower() in ("ii", "iii", "iv", "v", "vi", "vii", "viii"):
                 candidate.add(j)
             elif sec_j.kind == SectionKind.TABLE and not j_dot:
                 candidate.add(j)
             elif sec_j.kind == SectionKind.HEADING and not has_numbered and not j_dot:
                 break
-            elif jfl.strip() == '':
+            elif jfl.strip() == "":
                 continue
             else:
                 break
         if len(candidate) > 1 and numbered >= _LABEL_TOC_MIN_NUMBERED_LINES:
             toc_indices |= candidate
-            _log.info("Label-anchored TOC: %d entries after '%s'",
-                      len(candidate), fl)
+            _log.info("Label-anchored TOC: %d entries after '%s'", len(candidate), fl)
 
     if toc_indices:
         non_toc_known: set[str] = set()
@@ -2006,26 +2070,28 @@ def run_pipeline(
                     if fl.lower().rstrip(":") in non_toc_known:
                         continue
                     protected.add(idx)
-                    is_abstract_heading = (
-                        fl.lower().rstrip(":") == "abstract"
-                    )
+                    is_abstract_heading = fl.lower().rstrip(":") == "abstract"
                     first_body_confirmed = False
                     for nxt in range(idx + 1, len(sections)):
                         if nxt not in toc_indices:
                             break
                         nxt_sec = sections[nxt]
                         if nxt_sec.kind == SectionKind.HEADING:
-                            if (is_abstract_heading
-                                    and not first_body_confirmed
-                                    and nxt_sec.confidence == Confidence.LOW):
+                            if (
+                                is_abstract_heading
+                                and not first_body_confirmed
+                                and nxt_sec.confidence == Confidence.LOW
+                            ):
                                 nxt_sec.kind = SectionKind.PARAGRAPH
                                 nxt_sec.heading_level = 0
                                 first_body_confirmed = True
                                 protected.add(nxt)
                                 continue
                             parent_level = sections[idx].heading_level
-                            if (parent_level > 0
-                                    and nxt_sec.heading_level > parent_level):
+                            if (
+                                parent_level > 0
+                                and nxt_sec.heading_level > parent_level
+                            ):
                                 protected.add(nxt)
                                 first_body_confirmed = True
                                 continue
@@ -2038,18 +2104,28 @@ def run_pipeline(
                         nxt_fl = nxt_sec.text.split("\n")[0].strip()
                         if has_dot_leader(nxt_fl):
                             break
-                        if not first_body_confirmed and _SECTION_NUM_START_RE.match(nxt_fl):
+                        if not first_body_confirmed and _SECTION_NUM_START_RE.match(
+                            nxt_fl
+                        ):
                             break
                         nxt_words = len(nxt_sec.text.split())
                         if not first_body_confirmed:
-                            if not is_abstract_heading and nxt_words < _TOC_BODY_PROTECT_MIN_WORDS:
+                            if (
+                                not is_abstract_heading
+                                and nxt_words < _TOC_BODY_PROTECT_MIN_WORDS
+                            ):
                                 break
                             first_body_confirmed = True
                         protected.add(nxt)
         if protected:
-            _log.debug("Protecting %d section heading(s) from TOC removal: %s",
-                        len(protected),
-                        [sections[i].text.split("\n")[0].strip()[:60] for i in sorted(protected)])
+            _log.debug(
+                "Protecting %d section heading(s) from TOC removal: %s",
+                len(protected),
+                [
+                    sections[i].text.split("\n")[0].strip()[:60]
+                    for i in sorted(protected)
+                ],
+            )
             toc_indices -= protected
         if toc_indices:
             sections[:] = [s for i, s in enumerate(sections) if i not in toc_indices]

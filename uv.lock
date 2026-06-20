@@ -513,8 +513,11 @@ version = "0.4.1"
 source = { editable = "packages/cli" }
 dependencies = [
     { name = "agora" },
+    { name = "assay" },
     { name = "mailing" },
     { name = "paperstore" },
+    { name = "pipeline" },
+    { name = "pydantic-ai" },
     { name = "rich" },
     { name = "tomd" },
 ]
@@ -522,8 +525,11 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "agora", editable = "packages/agora" },
+    { name = "assay", editable = "packages/assay" },
     { name = "mailing", editable = "packages/mailing" },
     { name = "paperstore", editable = "packages/paperstore" },
+    { name = "pipeline", editable = "packages/pipeline" },
+    { name = "pydantic-ai" },
     { name = "rich" },
     { name = "tomd", editable = "packages/tomd" },
 ]

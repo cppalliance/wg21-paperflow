@@ -1,5 +1,6 @@
 """Header/footer detection and text cleanup for PDF extraction."""
 
+import fitz
 import logging
 import re
 from collections import defaultdict, Counter
@@ -344,7 +345,6 @@ def strip_hidden_blocks(
     if not hidden_by_page:
         return blocks
 
-    import fitz  # lazy: PyMuPDF not required for HTML-only paths
     result = []
     for block in blocks:
         page_hidden = hidden_by_page.get(block.page_num)

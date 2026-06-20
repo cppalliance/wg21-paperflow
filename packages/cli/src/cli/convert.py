@@ -13,7 +13,10 @@ import argparse
 import asyncio
 import sys
 
+from cli.jobs import run_content_check, run_convert, _CONTENT_CHECK_TIMEOUT
+from cli.progress import make_progress_handler
 from paperstore.backend import StorageBackend
+from paperstore.stages import STAGES
 
 
 _CONTENT_CHECK_WORKERS = 1
@@ -22,10 +25,6 @@ _CONTENT_CHECK_WORKERS = 1
 def command(args: argparse.Namespace, backend: StorageBackend) -> int:
     if getattr(args, "check_content", False) or getattr(args, "check_content_json", None):
         return _check_content_command(args, backend)
-
-    from cli.jobs import run_convert
-    from cli.progress import make_progress_handler
-    from paperstore.stages import STAGES
 
     targets = args.targets
     force = getattr(args, "force", False)
@@ -77,8 +76,6 @@ def _check_content_command(
     source and converted markdown, scores coverage, and emits a ranked
     report.
     """
-    from cli.jobs import _CONTENT_CHECK_TIMEOUT, run_content_check
-
     result = run_content_check(
         args.targets,
         backend,

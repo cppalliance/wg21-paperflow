@@ -12,12 +12,13 @@ from __future__ import annotations
 import asyncio
 import sys
 
+from assay import assay_paper
+from assay.render import rerender_report
+from cli.progress import make_progress_handler
 from paperstore.errors import MissingMetaError, MissingPaperMdError
 
 
 def command(args, backend):
-    from cli.progress import make_progress_handler
-
     pid = args.targets[0].upper()
     rerender = getattr(args, "rerender", False)
 
@@ -49,7 +50,6 @@ def command(args, backend):
 
     try:
         with progress_ctx:
-            from assay import assay_paper
             report = asyncio.run(assay_paper(
                 pid, backend,
                 debug=debug, trace=trace,
@@ -77,7 +77,6 @@ def _rerender(pid: str, backend) -> int:
         return 1
 
     try:
-        from assay.render import rerender_report
         report = rerender_report(pid, backend)
         out_path = backend.write_assay_md(pid, report)
         print(f"{pid}: report regenerated -> {out_path}")
