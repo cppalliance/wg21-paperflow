@@ -467,7 +467,7 @@ def _normalize_heading_levels(body: Tag) -> None:
     """
     headings = [
         el for el in body.find_all(list(_HEADING_TAGS))
-        if _inline_text(el, _HEADING_SKIP_CLASSES).strip()
+        if _inline_text(el, _HEADING_EMPTY_CHECK_CLASSES).strip()
     ]
     if not headings:
         return
@@ -617,7 +617,10 @@ def rewrite_imgs_via_manifest(
         img["alt"] = alt
 
 
-_HEADING_SKIP_CLASSES = frozenset({"header-section-number", "secno", "self-link"})
+_HEADING_SKIP_CLASSES = frozenset({"self-link"})
+# Emptiness gate stays number-blind: a heading whose only content is a clause
+# number must not flip from dropped to real (would corrupt H2-root normalization).
+_HEADING_EMPTY_CHECK_CLASSES = frozenset({"header-section-number", "secno", "self-link"})
 
 
 def _render_heading(el: Tag) -> str | None:
@@ -625,6 +628,8 @@ def _render_heading(el: Tag) -> str | None:
     if len(el.name) < 2 or not el.name[1].isdigit():
         return ""
     level = int(el.name[1])
+    if not _inline_text(el, _HEADING_EMPTY_CHECK_CLASSES).strip():
+        return None
     text = _inline_text(el, _HEADING_SKIP_CLASSES).strip()
     if not text:
         return None

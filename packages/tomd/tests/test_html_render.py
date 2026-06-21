@@ -20,11 +20,11 @@ class TestHeading:
         md = render_body(soup, "mpark")
         assert "## Introduction" in md
 
-    def test_strips_section_number_span(self):
+    def test_keeps_section_number_span(self):
         soup = parse_html(
             '<h1><span class="header-section-number">1</span> Abstract</h1>')
         md = render_body(soup, "mpark")
-        assert "# Abstract" in md
+        assert "# 1 Abstract" in md
 
     def test_preserves_leading_dotted_number(self):
         soup = parse_html("<h3>2.1.3 Details</h3>")
@@ -322,11 +322,13 @@ class TestStructuralTags:
 
 
 class TestHeadingEdgeCases:
-    def test_secno_stripped_self_link_skipped(self):
+    def test_secno_kept_self_link_skipped(self):
         html = """<h2><span class="secno">3</span>Sec
         <a class="self-link" href="#x">#</a></h2>"""
         md = render_body(parse_html(html), "mpark")
-        assert "## Sec" in md
+        # No space between "3" and "Sec": the source has no whitespace between
+        # </span> and the title text, so the rendered output joins them faithfully.
+        assert "## 3Sec" in md
         assert "self-link" not in md
 
     def test_heading_number_only_span_stripped(self):
@@ -339,13 +341,13 @@ class TestHeadingEdgeCases:
         md = render_body(soup, "mpark")
         assert "## The `foo_bar` section" in md
 
-    def test_inline_code_preserved_with_skipped_number_span(self):
+    def test_inline_code_preserved_with_kept_number_span(self):
         soup = parse_html(
             '<h2><span class="header-section-number">3</span> '
             "<code>foo</code> bar</h2>"
         )
         md = render_body(soup, "mpark")
-        assert "## `foo` bar" in md
+        assert "## 3 `foo` bar" in md
 
     def test_link_preserved_in_heading(self):
         soup = parse_html(
