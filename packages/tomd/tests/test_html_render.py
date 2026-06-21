@@ -7,6 +7,7 @@ from tomd.lib.html.extract import parse_html
 from tomd.lib.html.render import (
     render_body,
     _fix_misnested_table_cells,
+    _fix_misnested_dl_items,
     _LOSSY_TABLE_MARKER,
 )
 from tomd.lib.tables import MIXED_TABLE_MARKER as _MIXED_TABLE_MARKER
@@ -1947,6 +1948,62 @@ class TestDlChildDrop:
         md = self._md("<dl><dt>term</dt><dd>def</dd></dl>")
         assert "**term**" in md
         assert ": def" in md
+
+
+class TestDlEntryGrouping:
+    """Entry-level grouping: one entry per <dt>, blank lines between entries."""
+
+    def _md(self, html):
+        return render_body(parse_html(html), "bikeshed")
+
+    def test_misnested_bikeshed_dl_splits_into_entries(self):
+        html = "<dl><dt>[A]<dd>def A<dt>[B]<dd>def B</dl>"
+        md = self._md(html)
+        assert "**[A]**" in md
+        assert "**[B]**" in md
+        assert ": def A" in md
+        assert ": def B" in md
+        assert "**[A]**\n: def A\n\n**[B]**\n: def B" in md
+
+    def test_wellformed_dl_entries_blank_line_separated(self):
+        html = "<dl><dt>A</dt><dd>1</dd><dt>B</dt><dd>2</dd></dl>"
+        md = self._md(html)
+        assert md == "**A**\n: 1\n\n**B**\n: 2"
+
+    def test_single_dt_multiple_dd_stays_one_entry(self):
+        html = "<dl><dt>T</dt><dd>d1</dd><dd>d2</dd></dl>"
+        md = self._md(html)
+        assert md == "**T**\n: d1\n: d2"
+
+    def test_dt_without_dd_is_standalone_term(self):
+        html = "<dl><dt>Solo</dt></dl>"
+        md = self._md(html)
+        assert "**Solo**" in md
+        assert ": " not in md
+
+    def test_fix_misnested_dl_items_noop_on_wellformed(self):
+        soup = parse_html(
+            "<dl><dt>A</dt><dd>1</dd><dt>B</dt><dd>2</dd></dl>"
+        )
+        before = [c.name for c in soup.find("dl").find_all(["dt", "dd"])]
+        _fix_misnested_dl_items(soup)
+        after = [c.name for c in soup.find("dl").find_all(["dt", "dd"])]
+        assert after == before
+        assert all(
+            c.parent is soup.find("dl")
+            for c in soup.find("dl").find_all(["dt", "dd"])
+        )
+
+    def test_nested_inner_dl_left_for_own_pass(self):
+        html = (
+            "<dl><dt>Outer</dt><dd>def"
+            "<dl><dt>Inner</dt><dd>idef</dd></dl>"
+            "</dd></dl>"
+        )
+        md = self._md(html)
+        assert "**Outer**" in md
+        assert "Inner" in md
+        assert "idef" in md
 
 
 class TestListItemNesting:

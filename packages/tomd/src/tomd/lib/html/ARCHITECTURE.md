@@ -139,7 +139,7 @@ The converter handles six generator families (mpark/wg21, Bikeshed, hand-written
 **T16. Blockquote and note rendering**
 - `render.py:_render_blockquote`, `_render_div` (note/example/advisement classes)
 - `<blockquote>` and note-class divs rendered with `> ` prefix per line
-- Definition lists (`<dl>`) rendered as `**term**` + `: definition`
+- Definition lists (`<dl>`) rendered as one entry per `<dt>` (`**term**` + `: definition`), entries blank-line separated; chain-nesting from `html.parser` is repaired by `_fix_misnested_dl_items` before render
 
 ### Layer 5: Output (2 techniques)
 
