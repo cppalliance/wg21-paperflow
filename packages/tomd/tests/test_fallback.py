@@ -178,3 +178,11 @@ class TestMetadataFallback:
         """No front matter and no mailing meta returns input unchanged."""
         md = "Body text here\n"
         assert _normalize_front_matter(md, None) == md
+
+    def test_comment_only_front_matter_stripped_on_mailing_fallback(self):
+        md = "---\n# comment only\n---\n\nBody text.\n"
+        result = _normalize_front_matter(md, {"title": "From Mailing", "paper_id": "P0001R0"})
+        assert result.count("---") == 2
+        assert "From Mailing" in result
+        assert result.endswith("Body text.\n") or "Body text." in result
+        assert "# comment only" not in result

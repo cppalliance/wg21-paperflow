@@ -487,7 +487,7 @@ Pass 2 (`strip_pre_content_paragraphs` in [`metadata_yaml/strip.py`](lib/metadat
 
 **Sections**
 
-- YAML front matter via shared `format_front_matter` ([`emit.py`](lib/pdf/emit.py), [`lib/__init__.py`](lib/__init__.py)).
+- YAML front matter via shared `format_front_matter` ([`lib/metadata_yaml/format.py`](lib/metadata_yaml/format.py), re-exported from [`lib/__init__.py`](lib/__init__.py); called by [`emit.py`](lib/pdf/emit.py)).
 
 **Uncertainty**
 
