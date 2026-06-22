@@ -40,13 +40,13 @@ def test_run_full_chains_stages_and_returns_citations(
         assert result is not None
 
     monkeypatch.setattr(
-        "mailing.scrape.fetch_all_mailings_for_year", _fake_fetch,
+        "cli.jobs.fetch_all_mailings_for_year", _fake_fetch,
     )
 
     async def _download(paper_id: str, *, source_url: str, client=None, timeout: float = 30.0):
         return (b"%PDF-stub", ".pdf")
 
-    monkeypatch.setattr("mailing.download.download_paper", _download)
+    monkeypatch.setattr("cli.jobs.download_paper", _download)
 
     def _convert(paper: Paper, **_kwargs):
         return ConvertResult(
@@ -59,7 +59,7 @@ def test_run_full_chains_stages_and_returns_citations(
             status="ok",
         )
 
-    monkeypatch.setattr("cli.orchestrator.convert_one_paper", _convert)
+    monkeypatch.setattr("cli.jobs.convert_one_paper", _convert)
 
     results = asyncio.run(jobs.run_full(
         ["2026"],

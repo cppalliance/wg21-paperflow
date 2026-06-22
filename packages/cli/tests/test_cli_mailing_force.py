@@ -59,7 +59,7 @@ def test_mailing_force_flag_accepted(tmp_path: Path, force_flag: str):
     _seed_year(SqliteBackend(tmp_path), "2024")
 
     with patch(
-        "mailing.scrape.fetch_all_mailings_for_year", side_effect=_fake_fetch
+        "cli.jobs.fetch_all_mailings_for_year", side_effect=_fake_fetch
     ) as fetch:
         rc = main_with_argv([
             "--workspace-dir", str(tmp_path),
