@@ -82,9 +82,13 @@ _KEYWORDS_BEFORE_ANGLE = frozenset({"template", "concept"})
 
 # `ident <` where ident is a template-class-like name. The lookahead
 # rejects `<<` (stream insertion) and whitespace (`a < b` comparison),
-# and requires the next char to begin a template-argument list. The
-# keyword skip is enforced by the substitution callback.
-_IDENT_OPEN_ANGLE_RE = re.compile(r"([A-Za-z_]\w*) <(?=[A-Za-z_:])")
+# and requires the next char to begin a template-argument list. A
+# template-argument list always starts with an identifier, never with
+# `::`, so a leading `:` is excluded from the lookahead: a sequence like
+# `sz <::std::size_t>` is a global-namespace comparison, not a template
+# opener, and must be left untouched. The keyword skip is enforced by
+# the substitution callback.
+_IDENT_OPEN_ANGLE_RE = re.compile(r"([A-Za-z_]\w*) <(?=[A-Za-z_])")
 
 # Space before closing angle bracket when immediately followed by a
 # template-closing punctuation token. Whitespace is intentionally NOT

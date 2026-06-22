@@ -100,6 +100,17 @@ class TestTemplateAngles:
         # `>>=` starts with `>>`, which the negative lookahead protects.
         assert normalize_code_line("x >>= y;") == "x >>= y;"
 
+    def test_global_namespace_comparison_left_alone(self):
+        # `sz <::std::size_t>` is a comparison against a global-namespace
+        # operand, not a template-id opener: template-argument lists
+        # always start with an identifier, never with `::`. The
+        # open-angle lookahead therefore excludes `:` so the line is
+        # left untouched.
+        assert (
+            normalize_code_line("sz <::std::size_t>")
+            == "sz <::std::size_t>"
+        )
+
 
 class TestAttributeBrackets:
     def test_strip_inside_attribute(self):
