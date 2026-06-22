@@ -513,8 +513,11 @@ version = "0.4.1"
 source = { editable = "packages/cli" }
 dependencies = [
     { name = "agora" },
+    { name = "assay" },
     { name = "mailing" },
     { name = "paperstore" },
+    { name = "pipeline" },
+    { name = "pydantic-ai" },
     { name = "rich" },
     { name = "tomd" },
 ]
@@ -522,8 +525,11 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "agora", editable = "packages/agora" },
+    { name = "assay", editable = "packages/assay" },
     { name = "mailing", editable = "packages/mailing" },
     { name = "paperstore", editable = "packages/paperstore" },
+    { name = "pipeline", editable = "packages/pipeline" },
+    { name = "pydantic-ai" },
     { name = "rich" },
     { name = "tomd", editable = "packages/tomd" },
 ]
@@ -4172,6 +4178,7 @@ dependencies = [
 
 [package.dev-dependencies]
 dev = [
+    { name = "markdown-it-py" },
     { name = "pillow" },
     { name = "pyright" },
     { name = "pytest" },
@@ -4193,6 +4200,7 @@ requires-dist = [
 
 [package.metadata.requires-dev]
 dev = [
+    { name = "markdown-it-py", specifier = "~=4.0" },
     { name = "pillow", specifier = ">=11.0" },
     { name = "pyright", specifier = ">=1.1" },
     { name = "pytest", specifier = "~=8.0" },

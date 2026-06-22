@@ -33,6 +33,11 @@ from pathlib import Path
 import httpx
 
 from cli.errors import EmptyTargetsError, MixedTargetsError
+from cli.models import Paper
+from cli.orchestrator import convert_one_paper
+from cli.targets import MONTH_RE, resolve_pid
+from mailing.download import content_length, default_client, download_paper
+from mailing.scrape import discover_years, fetch_all_mailings_for_year
 from paperstore import parse_authors_raw
 from paperstore.backend import PaperRow, StorageBackend
 from paperstore.errors import (
@@ -152,8 +157,6 @@ async def run_mailing(
     updates mailing metadata (title, authors, url, dates) without touching
     downloaded sources or converted markdown.
     """
-    from mailing.scrape import discover_years, fetch_all_mailings_for_year
-
     if current_year is None:
         current_year = str(datetime.now(timezone.utc).year)
 
@@ -249,8 +252,6 @@ async def run_download(
     ``on_progress`` is invoked after each task completion with a
     :class:`~paperstore.progress.ProgressEvent`.
     """
-    from mailing.download import content_length, default_client, download_paper
-
     concurrency = max(1, concurrency)
     target_type = _validate_targets(targets)
     all_papers = _papers_from_scope(targets, target_type, backend)
@@ -386,9 +387,6 @@ async def run_convert(
     ``on_progress`` is invoked after each task completion with a
     :class:`~paperstore.progress.ProgressEvent`.
     """
-    from cli.orchestrator import convert_one_paper
-    from cli.models import Paper
-
     concurrency = max(1, concurrency)
     target_type = _validate_targets(targets)
     all_papers = _papers_from_scope(targets, target_type, backend)
@@ -536,6 +534,7 @@ async def run_convert(
 # run_citations
 # ---------------------------------------------------------------------------
 
+
 async def run_citations(
     targets: list[str],
     backend: StorageBackend,
@@ -596,10 +595,14 @@ async def run_citations(
 
         if on_progress is not None:
             try:
-                on_progress(ProgressEvent(
-                    step=i + 1, total=total, name=pid,
-                    pct=(i + 1) / total if total else 1.0,
-                ))
+                on_progress(
+                    ProgressEvent(
+                        step=i + 1,
+                        total=total,
+                        name=pid,
+                        pct=(i + 1) / total if total else 1.0,
+                    )
+                )
             except Exception:
                 logger.warning("on_progress hook raised; disabling", exc_info=True)
                 on_progress = None
@@ -625,8 +628,6 @@ def _rows_for_content_check_targets(
     year-month) reaches :func:`run_content_check`. The older
     :func:`_papers_from_scope` predates year-month targets.
     """
-    from cli.targets import MONTH_RE, resolve_pid
-
     seen: set[str] = set()
     rows: list[PaperRow] = []
 
@@ -666,7 +667,10 @@ def _make_stderr_progress() -> ProgressCallback:
 
     def handler(event: ProgressEvent) -> None:
         line = format_batch_progress_line(
-            event.step, event.total, event.name, t0,
+            event.step,
+            event.total,
+            event.name,
+            t0,
         )
         print(line, end="", file=sys.stderr)
         sys.stderr.flush()
@@ -726,7 +730,9 @@ def run_content_check(
     )
     print(
         format_content_check_report(
-            batch.results, batch.skipped, batch.errors,
+            batch.results,
+            batch.skipped,
+            batch.errors,
         ),
         end="",
     )
@@ -734,10 +740,7 @@ def run_content_check(
         write_content_check_json_atomic(json_path, batch.results)
         print(f"\nDetailed metrics written to {json_path}")
 
-    failed = [
-        {"paper_id": pid, "reason": msg}
-        for pid, msg in batch.errors
-    ]
+    failed = [{"paper_id": pid, "reason": msg} for pid, msg in batch.errors]
 
     failed_ids = {entry["paper_id"] for entry in failed}
 
@@ -848,8 +851,10 @@ async def run_full(
         results["citations"] = await run_citations(targets, backend, force=force)
     except Exception as exc:
         logger.exception("run_citations failed; convert results unaffected")
-        results["citations"] = {"succeeded": [], "skipped": [], "failed": [
-            {"paper_id": "*", "error": str(exc)}
-        ]}
+        results["citations"] = {
+            "succeeded": [],
+            "skipped": [],
+            "failed": [{"paper_id": "*", "error": str(exc)}],
+        }
 
     return results

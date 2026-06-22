@@ -9,11 +9,11 @@
 
 from __future__ import annotations
 
+from cli.targets import MONTH_RE, resolve_pid
+from paperstore.stages import STAGE_NAMES, failed_stage
+
 
 def command(args, backend):
-    from paperstore.stages import STAGE_NAMES, failed_stage
-    from cli.targets import MONTH_RE, resolve_pid
-
     target = args.targets[0] if args.targets else None
 
     if target is None:

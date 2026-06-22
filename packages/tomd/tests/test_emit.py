@@ -162,6 +162,112 @@ def test_emit_list():
     assert "- item one" in md
 
 
+def test_emit_list_top_level_bullet_uses_star():
+    sec = make_section("● item", kind=SectionKind.LIST)
+    md = emit_markdown({}, [sec])
+    assert "* item" in md
+    assert "●" not in md
+
+
+def test_emit_list_nested_bullet_indented_dash():
+    sec = make_section("○ nested", kind=SectionKind.LIST, indent_level=1)
+    md = emit_markdown({}, [sec])
+    assert "  - nested" in md
+
+
+def test_emit_list_circle_glyph_not_emitted_literally():
+    """U+25CB is a recognized bullet, never left as a literal glyph (issue #150)."""
+    sec = make_section("○ child", kind=SectionKind.LIST, indent_level=1)
+    md = emit_markdown({}, [sec])
+    assert "○" not in md
+
+
+def test_emit_list_deeper_nesting_indents_more():
+    sec = make_section("○ deep", kind=SectionKind.LIST, indent_level=2)
+    md = emit_markdown({}, [sec])
+    assert "    - deep" in md
+
+
+def test_emit_list_unwraps_wrapped_item():
+    """A single bullet item split across PDF lines renders as one line."""
+    line1 = make_line(["○ Perform a check of the value"])
+    line2 = make_line(["expected."])
+    sec = make_section(
+        "○ Perform a check of the value\nexpected.",
+        kind=SectionKind.LIST, lines=[line1, line2], indent_level=1,
+    )
+    md = emit_markdown({}, [sec])
+    assert "  - Perform a check of the value expected." in md
+
+
+def test_emit_list_multiple_clean_items_one_per_line():
+    line1 = make_line(["● first"])
+    line2 = make_line(["● second"])
+    sec = make_section("● first\n● second",
+                       kind=SectionKind.LIST, lines=[line1, line2])
+    md = emit_markdown({}, [sec])
+    assert "* first" in md
+    assert "* second" in md
+
+
+def test_emit_list_numbered_item_keeps_own_marker():
+    """An item that already carries an ordinal marker keeps it, not a bullet.
+
+    Exercises the _format_list_item branch for self-marked items directly
+    rather than only through the golden files.
+    """
+    sec = make_section("2. The override keyword shall be added",
+                       kind=SectionKind.LIST)
+    md = emit_markdown({}, [sec])
+    assert "2. The override keyword shall be added" in md
+
+
+def test_emit_list_consecutive_numbered_items_split():
+    """Successive numbered lines stay separate items (current item numbered)."""
+    line1 = make_line(["1. first"])
+    line2 = make_line(["2. second"])
+    sec = make_section("1. first\n2. second",
+                       kind=SectionKind.LIST, lines=[line1, line2])
+    md = emit_markdown({}, [sec])
+    assert "1. first" in md
+    assert "2. second" in md
+
+
+def test_emit_list_year_continuation_stays_joined():
+    """A wrapped bullet continuation starting with a year does not split.
+
+    The continuation "2017. The meeting..." matches the numbered-list
+    pattern, but the open item is a bullet (not numbered), so it stays
+    joined instead of opening a phantom numbered item (issue #175 review).
+    """
+    line1 = make_line(["● Approved at the meeting in"])
+    line2 = make_line(["2017. The decision still stands."])
+    sec = make_section("● Approved at the meeting in\n2017. The decision still stands.",
+                       kind=SectionKind.LIST, lines=[line1, line2])
+    md = emit_markdown({}, [sec])
+    assert "* Approved at the meeting in 2017. The decision still stands." in md
+
+
+def test_emit_list_ordinal_after_finished_bullet_stays_separate():
+    """A genuine ordinal label after a completed bullet is its own item.
+
+    Regression guard (issue #175, p1068r11): the bullet ends in terminal
+    punctuation, so "d) ..." must not be absorbed as a continuation the way
+    a mid-sentence wrap would be.
+    """
+    line1 = make_line(["● It may be considered a controversial feature."])
+    line2 = make_line(["d) Constraining iterators and ranges"])
+    sec = make_section(
+        "● It may be considered a controversial feature.\n"
+        "d) Constraining iterators and ranges",
+        kind=SectionKind.LIST, lines=[line1, line2],
+    )
+    md = emit_markdown({}, [sec])
+    assert "* It may be considered a controversial feature." in md
+    assert "d) Constraining iterators and ranges" in md
+    assert "feature. d)" not in md
+
+
 def test_emit_table():
     from tomd.lib.pdf.types import Section
     sec = Section(
@@ -177,6 +283,50 @@ def test_emit_table():
     assert "Header B" in md
     assert "---" in md
     assert "Cell 1" in md
+
+
+def test_emit_code_comparison_html_table():
+    """A CODE_COMPARISON table renders via the shared comparison markup:
+    the mixed-table marker, <th> headers, and <pre><code> code cells. This is
+    byte-identical to what the HTML converter emits (see lib/tables.py)."""
+    from tomd.lib.pdf.types import Section
+    sec = Section(
+        kind=SectionKind.TABLE,
+        text="",
+        table_strategy="html_table",
+        table_kind="code_comparison",
+        columns=[
+            [[make_span("Before")], [make_span("After")]],
+            [[make_span("int verbose();")], [make_span("int proposed();")]],
+        ],
+    )
+    md = emit_markdown({}, [sec])
+    assert "<!-- tomd:mixed-table -->" in md
+    assert ">Before</th>" in md
+    assert ">After</th>" in md
+    assert '<pre style="margin: 0;"><code>int verbose();</code></pre>' in md
+    assert '<pre style="margin: 0;"><code>int proposed();</code></pre>' in md
+
+
+def test_emit_spec_table_html_no_mixed_marker():
+    """Other html_table kinds (here SPEC_TABLE) render as an HTML table with
+    the shared <pre><code> cells but carry no mixed-table marker: only code
+    comparisons are marked, matching the HTML side."""
+    from tomd.lib.pdf.types import Section
+    sec = Section(
+        kind=SectionKind.TABLE,
+        text="",
+        table_strategy="html_table",
+        table_kind="spec_table",
+        columns=[
+            [[make_span("Expression")], [make_span("Return type")]],
+            [[make_span("a.foo()")], [make_span("int")]],
+        ],
+    )
+    md = emit_markdown({}, [sec])
+    assert "<!-- tomd:mixed-table -->" not in md
+    assert "<table" in md
+    assert '<pre style="margin: 0;"><code>' in md
 
 
 def test_emit_wording_section():

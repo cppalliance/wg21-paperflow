@@ -5,7 +5,10 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+from tomd.lib.metadata_yaml.format import parse_front_matter
 from tomd.lib.pdf.qa import compute_metrics
+from tomd.lib.html.extract import parse_html
+from tomd.lib.html.render import render_body
 
 
 _GOOD_MD = """\
@@ -115,6 +118,25 @@ class TestLossyTableCount:
         md = "## Heading\n\n<!-- tomd:lossy-table -->\n\n| A | B |\n| --- | --- |\n| 1 | 2 |\n"
         m = compute_metrics(md)
         assert m.score == 100
+
+    def test_mixed_code_table_not_counted_as_lossy(self):
+        """A headered code-comparison renders as a structure-preserving mixed
+        table (``tomd:mixed-table``), which is distinct from a lossy table:
+        it does not contribute to lossy_table_count."""
+        html = """
+        <table>
+        <thead><tr><th>Before</th><th>After</th></tr></thead>
+        <tbody><tr>
+        <td><pre>int verbose_form();</pre></td>
+        <td><pre>int proposed_form();</pre></td>
+        </tr></tbody>
+        </table>
+        """
+        md = render_body(parse_html(html), "mpark")
+        assert "<!-- tomd:mixed-table -->" in md
+        assert "<!-- tomd:lossy-table -->" not in md
+        m = compute_metrics("## Heading\n\n" + md + "\n")
+        assert m.lossy_table_count == 0
 
 
 class TestNoHeadings:
@@ -244,6 +266,35 @@ class TestMetadata:
         m = compute_metrics(md)
         assert m.front_matter_count >= 1
         assert not any("front matter" in i for i in m.issues)
+
+    def test_d4036_front_matter_count_includes_intent(self):
+        """intent is part of FRONT_MATTER_ORDER and must be counted."""
+        md = (_FIXTURES_DIR / "d4036-why-not-span.md").read_text(encoding="utf-8")
+        m = compute_metrics(md, file="d4036")
+        assert m.front_matter_count == 6
+
+    def test_front_matter_parser_agreement_with_shared(self):
+        """QA reads the same title and reply-to shape as parse_front_matter."""
+        md = (
+            "---\n"
+            'title: "Symmetric Transfer and Sender Composition"\n'
+            "document: P2583R0\n"
+            "date: 2026-02-22\n"
+            "audience: LEWG\n"
+            "reply-to:\n"
+            '  - "Mungo Gill <mungo.gill@me.com>"\n'
+            '  - "Vinnie Falco <vinnie.falco@gmail.com>"\n'
+            "---\n\n"
+            "## Abstract\n\n"
+            "Body.\n"
+        )
+        shared = parse_front_matter(md)
+        assert shared["title"] == "Symmetric Transfer and Sender Composition"
+        assert isinstance(shared["reply-to"], list)
+        assert len(shared["reply-to"]) == 2
+        m = compute_metrics(md)
+        assert m.front_matter_count == 5
+        assert m.has_doc_number is True
 
 
 class TestLowVariety:
@@ -614,7 +665,7 @@ class TestReferenceFixtures:
         assert m.heading_level_skips == 0
         assert m.table_count == 5
         assert m.code_block_count == 4
-        assert m.front_matter_count == 5
+        assert m.front_matter_count == 6
         assert m.has_doc_number is True
         assert m.unfenced_code_lines == 0
         assert m.mojibake_count == 0

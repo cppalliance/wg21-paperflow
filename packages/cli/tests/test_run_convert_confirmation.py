@@ -95,7 +95,7 @@ def _run(
     from cli._process import run_process_command
 
     with (
-        patch("pipeline.process_paper", new=fake_process_paper),
+        patch("cli._process.process_paper", new=fake_process_paper),
         patch("sys.stdin.isatty", return_value=stdin_isatty),
         patch("builtins.input", return_value=stdin_answer),
     ):

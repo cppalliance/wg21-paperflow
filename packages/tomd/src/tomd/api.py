@@ -35,15 +35,21 @@ import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from tomd.lib.metadata_yaml.format import (
+    FRONT_MATTER_RE,
+    format_front_matter,
+    parse_front_matter,
+    sanitize_metadata,
+    strip_front_matter,
+)
 from tomd.errors import UnsupportedSourceFormatError
 from tomd.lib import (
     apply_strip_leading_h1,
-    format_front_matter,
-    sanitize_metadata,
     strip_freeform_metadata_lines,
     EMAIL_RE,
 )
 from tomd.lib.html import convert_html
+from tomd.lib.html.images import load_html_images
 from tomd.lib.pdf import ExtractedImage, PipelineResult, SkipReason, run_pipeline
 
 __all__ = ["ConvertedPaper", "convert_paper", "convert_paper_full"]
@@ -128,9 +134,6 @@ _FALLBACK_KEY_MAP = {
 # paper_id (P/N-number) is the canonical identifier.
 _OVERRIDE_KEYS = {"document"}
 
-_FRONT_MATTER_RE = re.compile(r"\A---\s*\n(?P<body>.*?)\n---\s*\n?", re.DOTALL)
-
-
 def _strip_toc_replace(m: re.Match[str]) -> str:
     span = m.group(0)
     if span.count("\n") > _TOC_MAX_LINES:
@@ -153,96 +156,14 @@ def _strip_toc(text: str) -> str:
     return _TOC_RE.sub(_strip_toc_replace, text)
 
 
-_LIST_ITEM_RE = re.compile(r"^\s+-\s+(.*)$")
-
-
-def _unquote_yaml_scalar(s: str) -> str:
-    """Strip surrounding double-quotes and resolve YAML backslash escapes."""
-    if len(s) < 2 or s[0] != '"' or s[-1] != '"':
-        return s
-    inner = s[1:-1]
-    out: list[str] = []
-    i = 0
-    while i < len(inner):
-        ch = inner[i]
-        if ch == "\\" and i + 1 < len(inner):
-            nxt = inner[i + 1]
-            if nxt == "n":
-                out.append("\n")
-            elif nxt in ('"', "\\"):
-                out.append(nxt)
-            else:
-                out.append(nxt)
-            i += 2
-        else:
-            out.append(ch)
-            i += 1
-    return "".join(out)
-
-
-def _parse_front_matter_body(body: str) -> dict:
-    """Parse a YAML front-matter body into a dict.
-
-    Recognizes the two shapes tomd emits: ``key: value`` (optionally
-    double-quoted) and ``key:`` followed by indented ``- "item"`` lines.
-    Anything else is dropped. Sufficient for round-tripping tomd's own
-    front matter through ``format_front_matter``.
-    """
-    parsed: dict = {}
-    lines = body.splitlines()
-    i = 0
-    while i < len(lines):
-        line = lines[i]
-        stripped = line.strip()
-        if not stripped or stripped.startswith("#"):
-            i += 1
-            continue
-        if line.startswith((" ", "\t", "-")):
-            i += 1
-            continue
-        head, sep, tail = line.partition(":")
-        if not sep:
-            i += 1
-            continue
-        key = head.strip()
-        value = tail.strip()
-        if value:
-            parsed[key] = _unquote_yaml_scalar(value)
-            i += 1
-            continue
-        items: list[str] = []
-        j = i + 1
-        while j < len(lines):
-            item_line = lines[j]
-            if not item_line.strip():
-                j += 1
-                continue
-            m = _LIST_ITEM_RE.match(item_line)
-            if not m:
-                break
-            items.append(_unquote_yaml_scalar(m.group(1).strip()))
-            j += 1
-        if items:
-            parsed[key] = items
-            i = j
-        else:
-            i += 1
-    return parsed
-
-
 def _normalize_front_matter(md: str, mailing_meta: dict | None) -> str:
     """Parse front matter once, sanitize, apply mailing fallback, and re-emit.
 
     Replaces the former three-pass sequence of ``_sanitize_front_matter``,
     ``_apply_metadata_fallback``, and ``_canonicalize_front_matter``.
     """
-    match = _FRONT_MATTER_RE.match(md)
-    if match:
-        parsed = _parse_front_matter_body(match.group("body"))
-        rest = md[match.end() :]
-    else:
-        parsed = {}
-        rest = md
+    parsed = parse_front_matter(md)
+    rest = strip_front_matter(md)
 
     if not parsed and not mailing_meta:
         return md
@@ -311,7 +232,7 @@ def _strip_body_metadata_text(md: str) -> str:
     rows contain metadata labels (Doc No, Date, Author, etc.). Removes
     complete tables (including separator rows) when >=2 label rows are found.
     """
-    match = _FRONT_MATTER_RE.match(md)
+    match = FRONT_MATTER_RE.match(md)
     if not match:
         return md
 
@@ -418,8 +339,6 @@ def _convert_with_tomd_full(
     if suffix in (".html", ".htm"):
         html_result = None
         if html_images_manifest is not None:
-            from tomd.lib.html.images import load_html_images
-
             html_result = load_html_images(html_images_manifest)
         md, prompts = convert_html(path, html_images_result=html_result)
         if html_result is None:
@@ -447,19 +366,10 @@ def _convert_with_tomd_full(
     )
 
 
-_INTENT_LINE_RE = re.compile(r"^intent\s*:\s*(\S+)", re.MULTILINE)
-
-
 def _extract_intent_from_front_matter(md: str) -> str:
     """Return the ``intent`` value from the markdown YAML front matter, or ``""``."""
-    front_matter_match = _FRONT_MATTER_RE.match(md)
-    if not front_matter_match:
-        return ""
-    body = front_matter_match.group("body")
-    intent_match = _INTENT_LINE_RE.search(body)
-    if not intent_match:
-        return ""
-    return intent_match.group(1).strip().strip("\"'")
+    intent = parse_front_matter(md).get("intent", "")
+    return intent if isinstance(intent, str) else ""
 
 
 def convert_paper_full(
@@ -531,9 +441,9 @@ def convert_paper_full(
 
     # Re-run H1 stripping: leaked metadata before the H1 may have
     # blocked strip_leading_h1 in the emit layer.
-    title_m = re.search(r'^title:\s*"?(.+?)"?\s*$', md, re.MULTILINE)
-    if title_m:
-        md = apply_strip_leading_h1(md, title_m.group(1))
+    title = parse_front_matter(md).get("title")
+    if isinstance(title, str) and title:
+        md = apply_strip_leading_h1(md, title)
 
     md = _strip_toc(md)
 

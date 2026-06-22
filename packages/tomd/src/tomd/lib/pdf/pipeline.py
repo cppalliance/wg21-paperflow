@@ -4,11 +4,17 @@ import fitz
 import logging
 import re
 from collections import Counter, defaultdict
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
-from .cleanup import (get_edge_items, detect_repeating, strip_repeating,
-                      cleanup_text, find_hidden_regions, strip_hidden_blocks)
+from .cleanup import (
+    get_edge_items,
+    detect_repeating,
+    strip_repeating,
+    cleanup_text,
+    find_hidden_regions,
+    strip_hidden_blocks,
+)
 from .extract import extract_mupdf, extract_spatial, collect_links, attach_links
 from .images import (
     ExtractedImage,
@@ -32,8 +38,13 @@ from .mono import propagate_monospace
 from .figures import detect_figure_regions
 from .wording import classify_wording, collect_line_drawings
 from .spans import normalize_spans
-from .structure import (compare_extractions, structure_body,
-                        _is_known_section, _TITLE_PID_PREFIX_RE)
+from .structure import (
+    compare_extractions,
+    drop_leaked_toc_entries,
+    structure_body,
+    _is_known_section,
+    _TITLE_PID_PREFIX_RE,
+)
 from ..metadata_yaml.extract import (
     apply_pdf_metadata_fallbacks as _apply_pdf_metadata_fallbacks,
     enrich_pdf_reply_to as _enrich_pdf_reply_to,
@@ -50,18 +61,27 @@ from .types import (
     SkipReason,
     is_readable,
 )
+from .. import DOC_NUM_RE
 from ..shared import override_revision_from_filename
-from ..toc import find_toc_indices, has_dot_leader, _is_toc_label
+from ..toc import find_toc_indices, has_dot_leader, is_toc_label
 from ..metadata_yaml.strip import (
     strip_metadata_headings as _strip_metadata_headings_new,
     strip_pre_heading_fragments as _strip_pre_heading_fragments,
     strip_pre_content_paragraphs as _strip_pre_content_paragraphs,
 )
 from ..body.abstract import dedup_abstract as _dedup_abstract_new
-from ..body.abstract import promote_abstract_from_uncertain as _promote_abstract_from_uncertain
-from ..body.abstract import reorder_abstract_in_uncertain as _reorder_abstract_in_uncertain
-from ..body.abstract import rescue_stranded_abstract_body as _rescue_stranded_abstract_body
-from ..body.abstract import strip_metadata_from_uncertain as _strip_metadata_from_uncertain
+from ..body.abstract import (
+    promote_abstract_from_uncertain as _promote_abstract_from_uncertain,
+)
+from ..body.abstract import (
+    reorder_abstract_in_uncertain as _reorder_abstract_in_uncertain,
+)
+from ..body.abstract import (
+    rescue_stranded_abstract_body as _rescue_stranded_abstract_body,
+)
+from ..body.abstract import (
+    strip_metadata_from_uncertain as _strip_metadata_from_uncertain,
+)
 
 from .docling_backend import (
     docling_available as _docling_available,
@@ -70,12 +90,13 @@ from .docling_backend import (
     absorb_cross_page_spec_rows as _absorb_cross_page_spec_rows,
     discover_tables_with_docling as _discover_tables_with_docling,
 )
+from ._fitz_lock import _FITZ_LOCK
 
 __all__ = ["run_pipeline", "PipelineResult", "ExtractedImage"]
 
 _log = logging.getLogger(__name__)
 
-_STANDALONE_PAGE_RE = re.compile(r'^\d{1,4}$')
+_STANDALONE_PAGE_RE = re.compile(r"^\d{1,4}$")
 _SECTION_NUM_START_RE = re.compile(r"^(?:\d+(?:\.\d+)*|[IVXLCDM]+)(?:\s|$)")
 _TOC_X_TOLERANCE = 5.0
 _TOC_BODY_PROTECT_MIN_WORDS = 10
@@ -95,7 +116,6 @@ _COLUMN_GAP_MIN = 20.0
 # "ABSTRACT", "CONTENTS") create a tiny cluster of 2-3 blocks that triggers
 # a false column split against 20+ body blocks on the other side.
 _COLUMN_MIN_FRACTION = 0.20
-
 
 
 def _toc_structural_hints(sections) -> list[bool]:
@@ -138,18 +158,18 @@ def _toc_structural_hints(sections) -> list[bool]:
 # detects rectangular grids from vector drawing lines and injects them
 # as synthetic entries so Pass 2b (inline-grid) can fire.
 
-_DRAWING_GRID_SPAN_TOL = 5.0       # grouping tolerance for horizontal lines
-_DRAWING_GRID_AXIS_TOL = 1.0       # max skew for an axis-aligned line
-_DRAWING_GRID_MIN_HORIZONTALS = 5   # 5+ h-lines = header + 2 data rows minimum
-_DRAWING_GRID_MIN_WIDTH = 50.0      # reject tiny decorative boxes
-_DRAWING_GRID_VERT_TOL = 3.0        # tolerance for matching vertical borders
-_DRAWING_GRID_Y_DEDUP = 3.0         # merge near-identical y-values
+_DRAWING_GRID_SPAN_TOL = 5.0  # grouping tolerance for horizontal lines
+_DRAWING_GRID_AXIS_TOL = 1.0  # max skew for an axis-aligned line
+_DRAWING_GRID_MIN_HORIZONTALS = 5  # 5+ h-lines = header + 2 data rows minimum
+_DRAWING_GRID_MIN_WIDTH = 50.0  # reject tiny decorative boxes
+_DRAWING_GRID_VERT_TOL = 3.0  # tolerance for matching vertical borders
+_DRAWING_GRID_Y_DEDUP = 3.0  # merge near-identical y-values
 _DRAWING_GRID_MIN_UNIQUE_ROWS = 3  # deduped rules: header + 2 data rows minimum
 _DRAWING_GRID_MAX_HEIGHT_RATIO = 0.7  # reject grids taller than 70% of page
-_DRAWING_GRID_BAND_TOL = 4.0       # y-band grouping for multi-cell check
+_DRAWING_GRID_BAND_TOL = 4.0  # y-band grouping for multi-cell check
 _DRAWING_GRID_MIN_MULTI_BANDS = 2  # bands that must hold 2+ cells side by side
 _DRAWING_GRID_MIN_MULTI_BAND_FRACTION = 0.5  # multi-cell bands >= half of all bands
-_DRAWING_GRID_COVER_FRAC = 0.5     # find_tables overlap that counts as covered
+_DRAWING_GRID_COVER_FRAC = 0.5  # find_tables overlap that counts as covered
 
 
 def _page_text_line_bboxes(page) -> list[tuple[float, float, float, float]]:
@@ -169,7 +189,8 @@ def _page_text_line_bboxes(page) -> list[tuple[float, float, float, float]]:
 
 
 def _detect_drawing_grids(
-    page, page_height: float,
+    page,
+    page_height: float,
     existing_tables: list[dict],
 ) -> list[dict]:
     """Detect bordered table grids from page drawings that find_tables missed.
@@ -204,8 +225,10 @@ def _detect_drawing_grids(
     # sibling tables with near-identical spans into one grid.
     h_by_span: dict[tuple[float, float], list[float]] = defaultdict(list)
     for hx0, hx1, hy in h_lines:
-        key = (round(hx0 / _DRAWING_GRID_SPAN_TOL) * _DRAWING_GRID_SPAN_TOL,
-               round(hx1 / _DRAWING_GRID_SPAN_TOL) * _DRAWING_GRID_SPAN_TOL)
+        key = (
+            round(hx0 / _DRAWING_GRID_SPAN_TOL) * _DRAWING_GRID_SPAN_TOL,
+            round(hx1 / _DRAWING_GRID_SPAN_TOL) * _DRAWING_GRID_SPAN_TOL,
+        )
         h_by_span[key].append(hy)
 
     results: list[dict] = []
@@ -266,8 +289,7 @@ def _detect_drawing_grids(
 
         # Skip if already covered by find_tables
         already_covered = any(
-            _bbox_overlap_fraction(grid_bbox, ft["bbox"])
-            > _DRAWING_GRID_COVER_FRAC
+            _bbox_overlap_fraction(grid_bbox, ft["bbox"]) > _DRAWING_GRID_COVER_FRAC
             for ft in existing_tables
         )
         if already_covered:
@@ -276,15 +298,17 @@ def _detect_drawing_grids(
         # Full find_tables() entry shape so downstream passes can read all
         # keys safely. row_count=0 makes Pass 5 (MuPDF Native) skip the
         # entry; only Pass 2b (inline-grid) acts on it, via the bbox.
-        results.append({
-            "bbox": grid_bbox,
-            "row_count": 0,
-            "col_count": 0,
-            "cells": [],
-            "header_names": None,
-            "extract": [],
-            "rot": None,
-        })
+        results.append(
+            {
+                "bbox": grid_bbox,
+                "row_count": 0,
+                "col_count": 0,
+                "cells": [],
+                "header_names": None,
+                "extract": [],
+                "rot": None,
+            }
+        )
 
     return results
 
@@ -382,7 +406,6 @@ def _column_aware_sort(
     blocks.sort(key=sort_key)
 
 
-
 def _get_page0_text_colors(page) -> dict[float, float]:
     """Map y-positions to text lightness using texttrace space-color proxy.
 
@@ -475,7 +498,7 @@ def _make_image_section(img: ExtractedImage) -> Section:
         kind=SectionKind.IMAGE,
         text="",
         confidence=confidence,
-        page_num=img.page - 1,    # Section.page_num is 0-based
+        page_num=img.page - 1,  # Section.page_num is 0-based
         image_ref=img,
     )
 
@@ -626,12 +649,68 @@ def _line_in_caption_region(
     markdown where ``(a)`` lives inside the PNG and ``(b)`` lives
     in italic text.
 
-    This helper is used **only** by the sub-caption capture path.
-    The overall-caption drop (the ``_CAPTION_LABEL_RE`` path) must
-    stay on :func:`_line_in_caption_band` so it remains
-    predicate-equal to :func:`images._caption_for`.
+    This helper is used **only** by the vector branch of the
+    sub-caption capture path (via :func:`_sub_caption_owns`). The
+    overall-caption drop (the ``_CAPTION_LABEL_RE`` path) must stay
+    on :func:`_line_in_caption_band` so it remains predicate-equal to
+    :func:`images._caption_for`.
     """
     return im_bbox[1] <= line_bbox[1] <= im_bbox[3] + _FIGURE_CAPTION_BAND_BELOW_PT
+
+
+def _sub_caption_owns(
+    line_bbox: tuple[float, float, float, float],
+    im: ExtractedImage,
+) -> bool:
+    """Does image ``im`` own the sub-caption line at ``line_bbox``?
+
+    The owning predicate depends on the image source:
+
+    - **Vector** clusters use the wider :func:`_line_in_caption_region`
+      (cluster interior UNION band below). A stacked-sub-figure layout
+      (P3127R1 Figure 1) places one sub-caption *between* the
+      sub-figures, inside the cluster bbox, so the interior must be in
+      scope to capture it.
+    - **Raster** images use the narrow :func:`_line_in_caption_band`
+      (band below only). A raster bbox is a resource-dictionary
+      rectangle that can be hundreds of points tall, and each raster is
+      its own :class:`ExtractedImage` - there is never an interior
+      sub-caption to rescue, only the band-below caption. Using the
+      wide region for raster would capture any ``(a)``-shaped body
+      paragraph anywhere in the raster's vertical span and relocate it
+      as italic text after the image; ``(a)``/``(b)`` enumerations are
+      common in WG21 prose, so the interior must stay out of scope.
+    """
+    if im.source == "vector":
+        return _line_in_caption_region(line_bbox, im.bbox)
+    return _line_in_caption_band(line_bbox, im.bbox)
+
+
+def _normalize_caption(text: str) -> str:
+    """Normalize a caption string for equality comparison.
+
+    Used by the overall-caption section drop to gate the drop on
+    ``_normalize_caption(sec.text) == _normalize_caption(im.suggested_alt)``.
+    The gate is the content-loss guard: it skips the drop when the
+    body paragraph carries text that the alt-text does not (the
+    merged-continuation case where the structure pass joined a
+    caption line with subsequent prose).
+
+    Conservative by design. Only normalizes whitespace:
+
+    - All whitespace runs (including NBSP U+00A0 and newlines injected
+      by the structure pass's wrap-join) collapse to a single space.
+      ``str.split()`` without arguments treats U+00A0 as whitespace,
+      so no explicit NBSP replacement is needed.
+    - Leading and trailing whitespace are stripped.
+
+    Explicitly does NOT lowercase, strip punctuation, normalize
+    quotes/dashes, or strip the ``Figure N:`` prefix. A trailing
+    period that the body carries but the alt-text omits is a real
+    difference; the equality fails and the drop is skipped. Missing
+    a leak is preferable to losing content.
+    """
+    return " ".join(text.split())
 
 
 def _section_bbox(
@@ -756,8 +835,12 @@ def _filter_vector_images_against_structural(
         if sec.kind == SectionKind.TABLE:
             body_x = body_x_by_page.get(page)
             if body_x is not None:
-                bbox = (min(bbox[0], body_x[0]), bbox[1],
-                        max(bbox[2], body_x[1]), bbox[3])
+                bbox = (
+                    min(bbox[0], body_x[0]),
+                    bbox[1],
+                    max(bbox[2], body_x[1]),
+                    bbox[3],
+                )
         structural_bboxes_by_page.setdefault(page, []).append(bbox)
 
     if not structural_bboxes_by_page:
@@ -772,14 +855,12 @@ def _filter_vector_images_against_structural(
         page_bboxes = structural_bboxes_by_page.get(im.page, ())
         if im.bbox[1] <= _NEAR_PAGE_TOP_PT:
             prior_bboxes = [
-                b for b in structural_bboxes_by_page.get(im.page - 1, ())
+                b
+                for b in structural_bboxes_by_page.get(im.page - 1, ())
                 if b[3] >= _CROSS_PAGE_STRUCTURAL_BOTTOM_MIN_PT
             ]
             page_bboxes = (*page_bboxes, *prior_bboxes)
-        if any(
-            _bbox_overlap_fraction(im.bbox, b) >= threshold
-            for b in page_bboxes
-        ):
+        if any(_bbox_overlap_fraction(im.bbox, b) >= threshold for b in page_bboxes):
             dropped_ids.add(id(im))
             continue
         kept_images.append(im)
@@ -788,7 +869,8 @@ def _filter_vector_images_against_structural(
         return images, sections, 0
 
     kept_sections = [
-        s for s in sections
+        s
+        for s in sections
         if not (
             s.kind == SectionKind.IMAGE
             and s.image_ref is not None
@@ -844,7 +926,9 @@ def _filter_overlapping_vector_images(
     for page_indices in vectors_by_page.values():
         # Sort descending by area so the largest is considered first.
         sorted_idx = sorted(
-            page_indices, key=lambda i: _area(images[i]), reverse=True,
+            page_indices,
+            key=lambda i: _area(images[i]),
+            reverse=True,
         )
         # Larger images are "potential containers"; smaller images may
         # be detail crops. Compare each smaller against each kept
@@ -874,7 +958,8 @@ def _filter_overlapping_vector_images(
 
     kept_images = [im for im in images if id(im) not in dropped_ids]
     kept_sections = [
-        s for s in sections
+        s
+        for s in sections
         if not (
             s.kind == SectionKind.IMAGE
             and s.image_ref is not None
@@ -891,13 +976,19 @@ def _filter_sections_inside_vector_images(
     threshold: float = _SECTION_INSIDE_VECTOR_THRESHOLD,
     structural_threshold: float = _STRUCTURAL_INSIDE_VECTOR_THRESHOLD,
 ) -> tuple[list[Section], dict[int, list[tuple[str, str]]]]:
-    """Drop text duplicated by a surviving vector image; capture sub-captions.
+    """Drop text duplicated by a surviving image; capture sub-captions.
 
-    The vector image already shows the line's text content as
-    rasterised pixels (a label rendered inside a diagram is baked
-    into the PNG by ``page.get_pixmap``), so re-emitting the same
-    line as body markdown produces visible duplication. The filter
-    handles four cases:
+    The image already shows the line's text content as rasterised
+    pixels (a label rendered inside a diagram is baked into the PNG
+    by ``page.get_pixmap``; a raster figure's caption is attributed
+    as alt-text by :func:`images._caption_for`), so re-emitting the
+    same line as body markdown produces visible duplication. The
+    filter handles four cases, split across two image scopes:
+
+    **Vector-only behaviours** (raster bboxes are resource-dictionary
+    rectangles, not claims of region ownership over overlapping body
+    text, so they would risk dropping unrelated columns or
+    watermark-backdropped content):
 
     1. **CODE / TABLE sections wholly inside a vector** (Fix A):
        when a section's bbox is at least ``structural_threshold``
@@ -907,11 +998,24 @@ def _filter_sections_inside_vector_images(
        ``im.bbox`` (not the extended caption band) so a real CODE
        listing immediately below a figure - the figure-then-example
        pattern common in WG21 papers - is not dropped.
+    4. **Other PARAGRAPH sections**: per-line filter against the
+       *unextended* ``im.bbox`` only. A line whose bbox is at least
+       ``threshold`` inside any vector's drawing region is dropped;
+       the section is rebuilt from surviving lines (or removed
+       entirely when no lines survive). Body lines that fall in the
+       caption band but outside the unextended cluster bbox are
+       KEPT - the band is reserved for the caption-shaped section
+       drops below.
+
+    **Caption-related behaviours** (raster AND vector; HTML images
+    skipped via the ``(0,0,0,0)`` bbox sentinel):
+
     2. **Sub-caption sections** (``(a) ... / (b) ...``): when a
        PARAGRAPH section's first line matches ``_SUB_CAPTION_RE`` AND
-       ``_line_in_caption_band(first_line.bbox, im.bbox)`` is True for
-       some vector, the section is captured against the owning vector
-       and dropped. Captures are returned in the second tuple element
+       ``_line_in_caption_region(first_line.bbox, im.bbox)`` is True
+       for some image, the section is captured against the owning
+       image (upper-image wins by the y0-sorted iteration order) and
+       dropped. Captures are returned in the second tuple element
        so the caller can rebuild the affected
        :class:`ExtractedImage` records via ``dataclasses.replace``
        and insert italicised PARAGRAPH sections immediately after
@@ -919,23 +1023,33 @@ def _filter_sections_inside_vector_images(
     3. **Overall-caption sections** (``Figure N: ...``): when a
        PARAGRAPH *or* HEADING section's first line matches
        ``_CAPTION_LABEL_RE`` AND ``_line_in_caption_band(...)`` is
-       True for some vector, the whole section is dropped. The
-       caption text already lives on the image's ``suggested_alt``
-       via :func:`images._caption_for`; dropping the body
-       duplicate is the structural fix that keeps the markdown
-       from referencing the same caption twice. HEADING is included
-       because WG21 figure captions are sometimes bold or
-       distinct-font and trip the heading heuristic.
-    4. **Other PARAGRAPH sections**: existing per-line filter against
-       the *unextended* ``im.bbox`` only. A line whose bbox is at
-       least ``threshold`` inside any vector's drawing region is
-       dropped; the section is rebuilt from surviving lines (or
-       removed entirely when no lines survive). Body lines that fall
-       in the caption band but outside the unextended cluster bbox
-       are KEPT - the band is reserved for the caption-shaped
-       section drops above.
+       True for some image AND ``_normalize_caption(sec.text)`` equals
+       ``_normalize_caption(im.suggested_alt)`` for the SAME image,
+       the whole section is dropped. The equality gate is the
+       content-loss guard: ``_caption_for`` captures only the first
+       text line, so a multi-line wrapped caption or a caption joined
+       with trailing prose by the structure pass produces a body
+       paragraph longer than the alt-text - the gate then skips the
+       drop, the duplicate survives as body text, and no content is
+       lost. HEADING is included because WG21 figure captions are
+       sometimes bold or distinct-font and trip the heading
+       heuristic.
 
     IMAGE sections are always kept verbatim.
+
+    **Predicate semantics for the overall-caption drop**. Originally
+    the body-drop fired on EXACTLY the set of caption lines
+    :func:`images._caption_for` attributes (set equality between the
+    body-drop predicate and the alt-text predicate). With the
+    equality gate the relationship weakens to a **subset**: the
+    body-drop fires on a subset of the lines ``_caption_for``
+    attributes (specifically, those whose body paragraph still
+    equals the alt-text). The direction is safe - the body-drop is
+    strictly more conservative; a caption can never be both
+    attributed as alt-text AND retained in the body - but a future
+    refactor that adds a horizontal multi-column gate must add it to
+    BOTH ``_line_in_caption_band`` and ``images._caption_for`` in
+    the same commit.
 
     Returns ``(filtered_sections, captures_by_image_id)``. The
     captures dict maps ``id(image)`` to a list of
@@ -943,28 +1057,46 @@ def _filter_sections_inside_vector_images(
     for threading these into the matching :class:`ExtractedImage`
     records (and into each IMAGE section's ``image_ref``).
     """
-    # Index vector images by 1-based page for the structural drops
-    # and the per-line filter; the caption-shaped drops also need the
-    # ``ExtractedImage`` instance itself so they can record captures
-    # against ``id(image)``. Sort by ``(page, im.bbox.y0, im.bbox.x0)``
-    # so that, when two vectors' extended caption bands overlap on
-    # the same page, the upper one (smaller ``y0``) wins attribution.
-    # The y0 tiebreak matches the WG21 convention that a caption sits
-    # below the figure it captions.
+    # Index images twice. ``vector_images_by_page`` powers Fix A
+    # (CODE/TABLE drop inside the cluster) and the per-line filter -
+    # both rely on the fact that a vector cluster's bbox is derived
+    # from the drawing operations that compose the figure, so any
+    # text inside that bbox is the figure's own content.
+    # ``caption_eligible_by_page`` powers the caption-shaped drops
+    # and sub-caption capture - both fire on the y-only caption band
+    # below an image, which works identically for raster and vector
+    # because ``_caption_for`` attributes captions for both. Raster
+    # images participate only in caption-related cleanup; their bbox
+    # is just a resource-dictionary rectangle and does not claim
+    # region ownership over overlapping body text (a raster bbox can
+    # cover unrelated columns or a watermark backdrop), so Fix A and
+    # the per-line filter remain vector-only.
+    #
+    # Sort by ``(page, im.bbox.y0, im.bbox.x0)`` so that when two
+    # images' caption bands overlap, the upper one (smaller ``y0``)
+    # wins attribution. HTML images carry the sentinel
+    # ``(0, 0, 0, 0)`` bbox and would false-fire the y-only band
+    # predicate, so they are skipped at indexing time.
     vector_images_by_page: dict[int, list[ExtractedImage]] = {}
+    caption_eligible_by_page: dict[int, list[ExtractedImage]] = {}
     for im in images:
-        if im.source != "vector":
+        if im.bbox == (0.0, 0.0, 0.0, 0.0):
             continue
-        vector_images_by_page.setdefault(im.page, []).append(im)
+        caption_eligible_by_page.setdefault(im.page, []).append(im)
+        if im.source == "vector":
+            vector_images_by_page.setdefault(im.page, []).append(im)
+    for page in caption_eligible_by_page:
+        caption_eligible_by_page[page].sort(
+            key=lambda im: (im.bbox[1], im.bbox[0]),
+        )
     for page in vector_images_by_page:
         vector_images_by_page[page].sort(
             key=lambda im: (im.bbox[1], im.bbox[0]),
         )
 
-    if not vector_images_by_page:
+    if not caption_eligible_by_page:
         return sections, {}
 
-    from dataclasses import replace
     captures_by_id: dict[int, list[tuple[str, str]]] = {}
     kept: list[Section] = []
 
@@ -976,7 +1108,8 @@ def _filter_sections_inside_vector_images(
 
         page = sec.page_num + 1
         page_vectors = vector_images_by_page.get(page, ())
-        if not page_vectors:
+        page_caption_eligible = caption_eligible_by_page.get(page, ())
+        if not page_vectors and not page_caption_eligible:
             kept.append(sec)
             continue
 
@@ -990,8 +1123,7 @@ def _filter_sections_inside_vector_images(
                 kept.append(sec)
                 continue
             mostly_inside = any(
-                _bbox_overlap_fraction(sec_bbox, im.bbox)
-                >= structural_threshold
+                _bbox_overlap_fraction(sec_bbox, im.bbox) >= structural_threshold
                 for im in page_vectors
             )
             if mostly_inside:
@@ -999,29 +1131,36 @@ def _filter_sections_inside_vector_images(
             kept.append(sec)
             continue
 
-        # 2/3. Caption-shaped section drops. Apply to PARAGRAPH and
-        #     HEADING; the regex is the content signal, the y-only
-        #     band match is the geometry signal. Skipped for sections
-        #     with no lines (no first-line bbox to test).
-        if sec.kind in (SectionKind.PARAGRAPH, SectionKind.HEADING) and sec.lines:
+        # 2/3. Caption-shaped section drops. Apply to PARAGRAPH,
+        #     HEADING, and LIST; the regex is the content signal, the
+        #     y-only band match is the geometry signal. LIST is included
+        #     because the structure pass classifies "(a) text" lines as
+        #     list items, which is the canonical sub-caption shape.
+        #     Skipped for sections with no lines (no first-line bbox to test).
+        if sec.kind in (SectionKind.PARAGRAPH, SectionKind.HEADING, SectionKind.LIST) and sec.lines:
             first_text = sec.lines[0].text.strip()
             first_bbox = sec.lines[0].bbox
 
-            # 2. Sub-caption: capture + drop. Uses the wider
-            #    _line_in_caption_region (cluster bbox + band below)
-            #    so that a sub-caption sitting between stacked
-            #    sub-figures (P3127R1 Figure 1's "(a)" caption) is
-            #    captured + re-emitted as italic alongside any
-            #    below-cluster sub-captions. Without this widening,
-            #    the per-line filter below would drop the inside-
-            #    cluster sub-caption silently, producing asymmetric
-            #    output (one caption inside the PNG, others italic).
+            # 2. Sub-caption: capture + drop. Walks raster and
+            #    vector together via ``page_caption_eligible`` -
+            #    sub-captions sit in the caption band of any image,
+            #    raster or vector, and the attribution is the upper
+            #    image (smaller ``y0``) by the sort order built at
+            #    indexing time. The owning predicate is source-aware
+            #    (``_sub_caption_owns``): vector clusters use the wide
+            #    cluster-interior-plus-band region so a sub-caption
+            #    between stacked sub-figures (P3127R1 Figure 1's
+            #    "(a)") is captured, while raster images use the
+            #    narrow band-below-only region so an ``(a)``-shaped
+            #    body paragraph inside a tall raster bbox is not
+            #    relocated.
             sub_match = _SUB_CAPTION_RE.match(first_text)
-            if sub_match and first_bbox != (0, 0, 0, 0):
+            if (sub_match and first_bbox != (0, 0, 0, 0)
+                    and (sec.kind is not SectionKind.LIST or len(sec.lines) == 1)):
                 letter = sub_match.group(1)
                 owner = next(
-                    (im for im in page_vectors
-                     if _line_in_caption_region(first_bbox, im.bbox)),
+                    (im for im in page_caption_eligible
+                     if _sub_caption_owns(first_bbox, im)),
                     None,
                 )
                 if owner is not None:
@@ -1030,14 +1169,25 @@ def _filter_sections_inside_vector_images(
                     )
                     continue
 
-            # 3. Overall caption: drop. Same y-only band predicate.
+            # 3. Overall caption: drop only when an image's caption
+            #    band fires AND its ``suggested_alt`` matches the
+            #    section text after whitespace normalization. The
+            #    equality gate is the content-loss guard: when the
+            #    structure pass merged the caption line with trailing
+            #    prose into one paragraph, the body carries text the
+            #    alt-text does not, and dropping the section would
+            #    lose that prose. ``_caption_for`` captures only the
+            #    first text line, so this case is real and surfaces
+            #    in the corpus (P3100R4/R5/R6, P3064R3 Fig 5).
             if (_CAPTION_LABEL_RE.match(first_text)
                     and first_bbox != (0, 0, 0, 0)):
-                in_band = any(
+                sec_norm = _normalize_caption(sec.text)
+                matched = any(
                     _line_in_caption_band(first_bbox, im.bbox)
-                    for im in page_vectors
+                    and _normalize_caption(im.suggested_alt) == sec_norm
+                    for im in page_caption_eligible
                 )
-                if in_band:
+                if matched:
                     continue
 
         # 4. PARAGRAPH / UNCERTAIN: per-line filter against unextended bbox.
@@ -1060,8 +1210,7 @@ def _filter_sections_inside_vector_images(
                 kept_lines.append(line)
                 continue
             if any(
-                _bbox_overlap_fraction(line_bbox, ib) >= threshold
-                for ib in page_bboxes
+                _bbox_overlap_fraction(line_bbox, ib) >= threshold for ib in page_bboxes
             ):
                 continue
             kept_lines.append(line)
@@ -1097,9 +1246,11 @@ def _insert_image_sections(
                 out.insert(i, img_sec)
                 inserted = True
                 break
-            if (sec.page_num == img_sec.page_num
-                    and sec.lines
-                    and sec.lines[0].bbox[1] > img.bbox[1]):
+            if (
+                sec.page_num == img_sec.page_num
+                and sec.lines
+                and sec.lines[0].bbox[1] > img.bbox[1]
+            ):
                 out.insert(i, img_sec)
                 inserted = True
                 break
@@ -1125,6 +1276,7 @@ class PipelineResult:
     - ``images_truncated``: True iff ``source_image_count`` exceeded
       the cap and the emit step appended the truncation HTML comment.
     """
+
     md: str = ""
     prompts: list[str] | None = None
     sections: list[Section] = field(default_factory=list)
@@ -1205,10 +1357,10 @@ def _enforce_skip_contract(result: PipelineResult) -> PipelineResult:
                 "PipelineResult images must be empty when skipped=True"
             )
         if result.md.strip():
-            _log.error("PipelineResult skip contract violated: skipped with non-empty md")
-            raise AssertionError(
-                "PipelineResult md must be empty when skipped=True"
+            _log.error(
+                "PipelineResult skip contract violated: skipped with non-empty md"
             )
+            raise AssertionError("PipelineResult md must be empty when skipped=True")
     return result
 
 
@@ -1249,211 +1401,218 @@ def run_pipeline(
     result = PipelineResult()
     doc = None
     vector_stats = _VectorExtractionStats() if extract_vector else None
-    try:
-        doc = fitz.open(str(path))
-        page_count = doc.page_count
-        if page_count == 0:
-            return _enforce_skip_contract(
-                PipelineResult.for_skip(SkipReason.EMPTY_PDF, page_count=0)
-            )
-
-        if _is_slide_deck(doc):
-            _log.info("Detected slide deck (%d pages), skipping conversion",
-                       page_count)
-            return _enforce_skip_contract(PipelineResult.for_skip(
-                SkipReason.SLIDE_DECK,
-                page_count=page_count,
-                prompts=["# tomd - Slide Deck Detected\n\n"
-                    "This PDF appears to be a presentation / slide deck. "
-                    "tomd does not convert slide decks to Markdown.\n"],
-            ))
-
-        if _is_standards_draft(doc):
-            _log.info("Detected standards draft (%d pages), skipping conversion",
-                       page_count)
-            return _enforce_skip_contract(PipelineResult.for_skip(
-                SkipReason.STANDARDS_DRAFT,
-                page_count=page_count,
-                prompts=["# tomd - Standards Draft Detected\n\n"
-                    f"This PDF has {page_count} pages and appears to be "
-                    "a standards draft. tomd is designed for technical papers.\n"],
-            ))
-
-        result.page_count = page_count
-
-        all_mupdf_blocks = []
-        all_spatial_blocks = []
-        all_edge_items = []
-        page_widths: dict[int, float] = {}
-        # Rotated pages: pg -> rotation matrix (page space -> reading
-        # space).  Used for reading-order sorting and table insertion.
-        page_rotations: dict[int, tuple] = {}
-        per_page_image_candidates: list = []
-        # Sub-threshold raster glyphs (font-replacement emoji) and the
-        # text-layer emoji bboxes used to skip coincident positions.
-        # Both gathered while the doc is open; injected after the
-        # readability gate so unreadable PDFs discard glyph state too.
-        glyph_candidates: list = []
-        text_emoji_by_page: dict[int, list] = {}
-
-        for pg_num in range(result.page_count):
-            page = doc[pg_num]
-            page_widths[pg_num] = page.rect.width
-            if page.rotation:
-                page_rotations[pg_num] = tuple(page.rotation_matrix)
-
-            mupdf_blocks = extract_mupdf(page, pg_num)
-            spatial_blocks = extract_spatial(page, pg_num)
-
-            edge_items = (
-                get_edge_items(mupdf_blocks, pg_num)
-                + get_edge_items(spatial_blocks, pg_num)
-            )
-            all_edge_items.append(edge_items)
-
-            links = collect_links(page)
-            attach_links(mupdf_blocks, links)
-            attach_links(spatial_blocks, links)
-
-            raster_candidates = extract_page_images(page, spatial_blocks)
-            if extract_vector:
-                vector_candidates, page_vector_stats = extract_page_vector_images(
-                    page, spatial_blocks, whiteout_text=whiteout_text,
+    with _FITZ_LOCK:  # see _fitz_lock.py for why this lock is required
+        try:
+            doc = fitz.open(str(path))
+            page_count = doc.page_count
+            if page_count == 0:
+                return _enforce_skip_contract(
+                    PipelineResult.for_skip(SkipReason.EMPTY_PDF, page_count=0)
                 )
-                vector_stats = _VectorExtractionStats.combine(
-                    vector_stats, page_vector_stats,
+
+            if _is_slide_deck(doc):
+                _log.info("Detected slide deck (%d pages), skipping conversion",
+                           page_count)
+                return _enforce_skip_contract(PipelineResult.for_skip(
+                    SkipReason.SLIDE_DECK,
+                    page_count=page_count,
+                    prompts=["# tomd - Slide Deck Detected\n\n"
+                        "This PDF appears to be a presentation / slide deck. "
+                        "tomd does not convert slide decks to Markdown.\n"],
+                ))
+
+            if _is_standards_draft(doc):
+                _log.info("Detected standards draft (%d pages), skipping conversion",
+                           page_count)
+                return _enforce_skip_contract(PipelineResult.for_skip(
+                    SkipReason.STANDARDS_DRAFT,
+                    page_count=page_count,
+                    prompts=["# tomd - Standards Draft Detected\n\n"
+                        f"This PDF has {page_count} pages and appears to be "
+                        "a standards draft. tomd is designed for technical papers.\n"],
+                ))
+
+            result.page_count = page_count
+
+            all_mupdf_blocks = []
+            all_spatial_blocks = []
+            all_edge_items = []
+            page_widths: dict[int, float] = {}
+            # Rotated pages: pg -> rotation matrix (page space -> reading
+            # space).  Used for reading-order sorting and table insertion.
+            page_rotations: dict[int, tuple] = {}
+            per_page_image_candidates: list = []
+            # Sub-threshold raster glyphs (font-replacement emoji) and the
+            # text-layer emoji bboxes used to skip coincident positions.
+            # Both gathered while the doc is open; injected after the
+            # readability gate so unreadable PDFs discard glyph state too.
+            glyph_candidates: list = []
+            text_emoji_by_page: dict[int, list] = {}
+
+            for pg_num in range(result.page_count):
+                page = doc[pg_num]
+                page_widths[pg_num] = page.rect.width
+                if page.rotation:
+                    page_rotations[pg_num] = tuple(page.rotation_matrix)
+
+                mupdf_blocks = extract_mupdf(page, pg_num)
+                spatial_blocks = extract_spatial(page, pg_num)
+
+                edge_items = (
+                    get_edge_items(mupdf_blocks, pg_num)
+                    + get_edge_items(spatial_blocks, pg_num)
                 )
-                per_page_image_candidates.append(
-                    raster_candidates + vector_candidates
-                )
-            else:
-                per_page_image_candidates.append(raster_candidates)
+                all_edge_items.append(edge_items)
 
-            page_glyphs = collect_glyph_candidates(page)
-            if page_glyphs:
-                glyph_candidates.extend(page_glyphs)
-                # Only pages carrying glyphs need the coincidence check,
-                # so the rawdict emoji scan is scoped to them.
-                text_emoji_by_page[pg_num + 1] = collect_text_emoji_bboxes(page)
+                links = collect_links(page)
+                attach_links(mupdf_blocks, links)
+                attach_links(spatial_blocks, links)
 
-            all_mupdf_blocks.extend(mupdf_blocks)
-            all_spatial_blocks.extend(spatial_blocks)
+                raster_candidates = extract_page_images(page, spatial_blocks)
+                if extract_vector:
+                    vector_candidates, page_vector_stats = extract_page_vector_images(
+                        page, spatial_blocks, whiteout_text=whiteout_text,
+                    )
+                    vector_stats = _VectorExtractionStats.combine(
+                        vector_stats, page_vector_stats,
+                    )
+                    per_page_image_candidates.append(
+                        raster_candidates + vector_candidates
+                    )
+                else:
+                    per_page_image_candidates.append(raster_candidates)
 
-        # Detect two-column pages from raw (pre-stripping) blocks.
-        two_column_pages: frozenset[int] = frozenset(
-            pg for pg in page_widths
-            if _detect_column_split(
-                [b for b in all_mupdf_blocks if b.page_num == pg],
-                page_widths[pg],
-            ) is not None
-        )
-        if two_column_pages:
-            _log.debug("Two-column pages: %s", sorted(two_column_pages))
+                page_glyphs = collect_glyph_candidates(page)
+                if page_glyphs:
+                    glyph_candidates.extend(page_glyphs)
+                    # Only pages carrying glyphs need the coincidence check,
+                    # so the rawdict emoji scan is scoped to them.
+                    text_emoji_by_page[pg_num + 1] = collect_text_emoji_bboxes(page)
 
-        font_counts: Counter[str] = Counter()
-        for b in all_mupdf_blocks:
-            for ln in b.lines:
-                for s in ln.spans:
-                    if s.text.strip():
-                        font_counts[s.font_name.lower()] += len(s.text)
-        body_fonts = {f for f, _ in font_counts.most_common(5)}
+                all_mupdf_blocks.extend(mupdf_blocks)
+                all_spatial_blocks.extend(spatial_blocks)
 
-        all_hidden: dict[int, set[tuple[float, float, float, float]]] = {}
-        for pg_num in range(result.page_count):
-            page = doc[pg_num]
-            pg_hidden = find_hidden_regions(page, body_fonts)
-            if pg_hidden:
-                all_hidden[pg_num] = pg_hidden
-
-        page0_colors = _get_page0_text_colors(doc[0]) if result.page_count > 0 else {}
-
-        page_drawings: dict[int, list] = {}
-        page_mupdf_tables: dict[int, list[dict]] = {}
-        all_figure_regions = []
-        for pg_num in range(result.page_count):
-            page = doc[pg_num]
-            drawings = collect_line_drawings(page)
-            if drawings:
-                page_drawings[pg_num] = drawings
-
-            raw_drawings = page.get_drawings()
-            page_figures = detect_figure_regions(
-                raw_drawings, pg_num, page.rect.width)
-            all_figure_regions.extend(page_figures)
-
-            # Intentional: runs unconditionally (independent of ml_tables).
-            # Three table-detection passes rely on the MuPDF signal:
-            # SBS deferral (Pass 0/2), inline-grid overlap (Pass 2b),
-            # and MuPDF Native (Pass 5).  Cost accepted across the
-            # 382-paper corpus.  Gate behind a flag if profiling shows
-            # this dominates conversion time on large documents.
-            try:
-                ft = page.find_tables()
-                if ft.tables:
-                    # On rotated pages find_tables() reports bboxes in
-                    # reading (display) space while extract_mupdf blocks
-                    # stay in unrotated page space. Pass the rotation
-                    # matrix so Pass 5 can map block/line midpoints into
-                    # reading space before cell assignment.
-                    rot = page_rotations.get(pg_num)
-                    page_mupdf_tables[pg_num] = [
-                        {"bbox": tuple(t.bbox),
-                         "row_count": t.row_count,
-                         "col_count": t.col_count,
-                         "cells": [tuple(c) if c else None for c in t.cells],
-                         "header_names": t.header.names if t.header else None,
-                         "extract": t.extract(),
-                         "rot": rot}
-                        for t in ft.tables
-                    ]
-            except Exception:
-                _log.debug("find_tables() failed on page %d", pg_num,
-                           exc_info=True)
-
-            # Fallback: detect bordered grids from drawing lines that
-            # find_tables() missed and inject as synthetic entries.
-            # Skipped on rotated pages: the h/v line classification works
-            # in page space and Pass 2b consuming such an entry would
-            # build a transposed table; Pass 5 owns rotated pages.
-            if pg_num in page_rotations:
-                continue
-            drawing_grids = _detect_drawing_grids(
-                page, page.rect.height,
-                page_mupdf_tables.get(pg_num, []),
+            # Detect two-column pages from raw (pre-stripping) blocks.
+            two_column_pages: frozenset[int] = frozenset(
+                pg for pg in page_widths
+                if _detect_column_split(
+                    [b for b in all_mupdf_blocks if b.page_num == pg],
+                    page_widths[pg],
+                ) is not None
             )
-            if drawing_grids:
-                _log.debug("Drawing-grid fallback found %d grid(s) on page %d",
-                           len(drawing_grids), pg_num)
-                page_mupdf_tables.setdefault(pg_num, []).extend(drawing_grids)
+            if two_column_pages:
+                _log.debug("Two-column pages: %s", sorted(two_column_pages))
 
-        if all_figure_regions:
-            _log.info("Detected %d figure region(s)", len(all_figure_regions))
+            font_counts: Counter[str] = Counter()
+            for b in all_mupdf_blocks:
+                for ln in b.lines:
+                    for s in ln.spans:
+                        if s.text.strip():
+                            font_counts[s.font_name.lower()] += len(s.text)
+            body_fonts = {f for f, _ in font_counts.most_common(5)}
 
-        pdf_info_date = _parse_pdf_info_date(doc.metadata.get("creationDate", ""))
-        pdf_info_title = (doc.metadata.get("title") or "").strip()
-        doc_metadata = dict(doc.metadata)
-    finally:
-        if doc is not None:
-            doc.close()
+            all_hidden: dict[int, set[tuple[float, float, float, float]]] = {}
+            for pg_num in range(result.page_count):
+                page = doc[pg_num]
+                pg_hidden = find_hidden_regions(page, body_fonts)
+                if pg_hidden:
+                    all_hidden[pg_num] = pg_hidden
+
+            page0_colors = _get_page0_text_colors(doc[0]) if result.page_count > 0 else {}
+
+            page_drawings: dict[int, list] = {}
+            page_mupdf_tables: dict[int, list[dict]] = {}
+            all_figure_regions = []
+            for pg_num in range(result.page_count):
+                page = doc[pg_num]
+                drawings = collect_line_drawings(page)
+                if drawings:
+                    page_drawings[pg_num] = drawings
+
+                raw_drawings = page.get_drawings()
+                page_figures = detect_figure_regions(
+                    raw_drawings, pg_num, page.rect.width)
+                all_figure_regions.extend(page_figures)
+
+                # Intentional: runs unconditionally (independent of ml_tables).
+                # Three table-detection passes rely on the MuPDF signal:
+                # SBS deferral (Pass 0/2), inline-grid overlap (Pass 2b),
+                # and MuPDF Native (Pass 5).  Cost accepted across the
+                # 382-paper corpus.  Gate behind a flag if profiling shows
+                # this dominates conversion time on large documents.
+                try:
+                    ft = page.find_tables()
+                    if ft.tables:
+                        # On rotated pages find_tables() reports bboxes in
+                        # reading (display) space while extract_mupdf blocks
+                        # stay in unrotated page space. Pass the rotation
+                        # matrix so Pass 5 can map block/line midpoints into
+                        # reading space before cell assignment.
+                        rot = page_rotations.get(pg_num)
+                        page_mupdf_tables[pg_num] = [
+                            {"bbox": tuple(t.bbox),
+                             "row_count": t.row_count,
+                             "col_count": t.col_count,
+                             "cells": [tuple(c) if c else None for c in t.cells],
+                             "header_names": t.header.names if t.header else None,
+                             "extract": t.extract(),
+                             "rot": rot}
+                            for t in ft.tables
+                        ]
+                except Exception:
+                    _log.debug("find_tables() failed on page %d", pg_num,
+                               exc_info=True)
+
+                # Fallback: detect bordered grids from drawing lines that
+                # find_tables() missed and inject as synthetic entries.
+                # Skipped on rotated pages: the h/v line classification works
+                # in page space and Pass 2b consuming such an entry would
+                # build a transposed table; Pass 5 owns rotated pages.
+                if pg_num in page_rotations:
+                    continue
+                drawing_grids = _detect_drawing_grids(
+                    page, page.rect.height,
+                    page_mupdf_tables.get(pg_num, []),
+                )
+                if drawing_grids:
+                    _log.debug("Drawing-grid fallback found %d grid(s) on page %d",
+                               len(drawing_grids), pg_num)
+                    page_mupdf_tables.setdefault(pg_num, []).extend(drawing_grids)
+
+            if all_figure_regions:
+                _log.info("Detected %d figure region(s)", len(all_figure_regions))
+
+            pdf_info_date = _parse_pdf_info_date(doc.metadata.get("creationDate", ""))
+            pdf_info_title = (doc.metadata.get("title") or "").strip()
+            doc_metadata = dict(doc.metadata)
+        finally:
+            if doc is not None:
+                doc.close()
 
     if all_hidden:
         total_hidden = sum(len(v) for v in all_hidden.values())
-        _log.info("Stripping text hidden by %d covered regions on %d pages",
-                  total_hidden, len(all_hidden))
+        _log.info(
+            "Stripping text hidden by %d covered regions on %d pages",
+            total_hidden,
+            len(all_hidden),
+        )
         all_mupdf_blocks = strip_hidden_blocks(all_mupdf_blocks, all_hidden)
         all_spatial_blocks = strip_hidden_blocks(all_spatial_blocks, all_hidden)
 
     mupdf_text = "\n".join(b.text for b in all_mupdf_blocks)
     if not is_readable(mupdf_text):
         _log.warning("Extracted text is not readable (encrypted/scanned PDF?)")
-        return _enforce_skip_contract(PipelineResult.for_skip(
-            SkipReason.UNREADABLE,
-            page_count=result.page_count,
-            readable=False,
-        ))
+        return _enforce_skip_contract(
+            PipelineResult.for_skip(
+                SkipReason.UNREADABLE,
+                page_count=result.page_count,
+                readable=False,
+            )
+        )
 
     extraction_result = finalize_extraction(
-        per_page_image_candidates, path.stem.lower(),
+        per_page_image_candidates,
+        path.stem.lower(),
         vector_stats=vector_stats,
     )
     result.images = extraction_result.images
@@ -1472,7 +1631,8 @@ def run_pipeline(
     # multiset, so the same token added to both paths stays balanced.
     if glyph_candidates:
         orphans, skipped_coincident = filter_coincident(
-            glyph_candidates, text_emoji_by_page,
+            glyph_candidates,
+            text_emoji_by_page,
         )
         glyph_stats = inject_glyph_spans(all_mupdf_blocks, orphans)
         inject_glyph_spans(all_spatial_blocks, orphans)
@@ -1482,10 +1642,13 @@ def run_pipeline(
             free_standing=glyph_stats.free_standing,
         )
         if result.glyph_stats.fired:
-            _log.info("Glyph placeholders: injected=%d skipped_coincident=%d "
-                      "free_standing=%d", result.glyph_stats.injected,
-                      result.glyph_stats.skipped_coincident,
-                      result.glyph_stats.free_standing)
+            _log.info(
+                "Glyph placeholders: injected=%d skipped_coincident=%d "
+                "free_standing=%d",
+                result.glyph_stats.injected,
+                result.glyph_stats.skipped_coincident,
+                result.glyph_stats.free_standing,
+            )
 
     repeating = detect_repeating(all_edge_items, result.page_count)
     if repeating:
@@ -1514,8 +1677,9 @@ def run_pipeline(
     all_mupdf_blocks = normalize_spans(all_mupdf_blocks)
     all_spatial_blocks = normalize_spans(all_spatial_blocks)
 
-    wg21_metadata, _ = extract_metadata_from_blocks(all_mupdf_blocks,
-                                                     text_colors=page0_colors)
+    wg21_metadata, _ = extract_metadata_from_blocks(
+        all_mupdf_blocks, text_colors=page0_colors
+    )
 
     # Snapshot for Docling enrichment: detect_tables consumes blocks,
     # but the enrichment needs access to ALL page spans (including
@@ -1524,12 +1688,13 @@ def run_pipeline(
     pre_detect_blocks = list(all_mupdf_blocks) if ml_tables else []
 
     table_sections, all_mupdf_blocks = detect_tables(
-        all_mupdf_blocks, page_mupdf_tables=page_mupdf_tables,
-        two_column_pages=two_column_pages)
+        all_mupdf_blocks,
+        page_mupdf_tables=page_mupdf_tables,
+        two_column_pages=two_column_pages,
+    )
     if table_sections:
         _log.info("Detected %d table(s)", len(table_sections))
-        all_spatial_blocks = exclude_table_regions(
-            all_spatial_blocks, table_sections)
+        all_spatial_blocks = exclude_table_regions(all_spatial_blocks, table_sections)
 
     # --- Optional Docling ML table processing ---
     # When ml_tables=True and Docling is available:
@@ -1542,30 +1707,30 @@ def run_pipeline(
         if docling_tables:
             if table_sections:
                 n = _enrich_tables_with_docling(
-                    table_sections, docling_tables, pre_detect_blocks)
+                    table_sections, docling_tables, pre_detect_blocks
+                )
                 if n:
-                    _log.info("Docling enriched %d/%d table(s)",
-                              n, len(table_sections))
+                    _log.info("Docling enriched %d/%d table(s)", n, len(table_sections))
 
             all_mupdf_blocks = _absorb_cross_page_spec_rows(
-                table_sections, all_mupdf_blocks, docling_tables)
+                table_sections, all_mupdf_blocks, docling_tables
+            )
 
             new_tables, all_mupdf_blocks = _discover_tables_with_docling(
-                docling_tables, all_mupdf_blocks, table_sections)
+                docling_tables, all_mupdf_blocks, table_sections
+            )
             if new_tables:
                 table_sections.extend(new_tables)
                 all_spatial_blocks = exclude_table_regions(
-                    all_spatial_blocks, new_tables)
-                _log.info("Docling discovered %d new table(s)",
-                          len(new_tables))
+                    all_spatial_blocks, new_tables
+                )
+                _log.info("Docling discovered %d new table(s)", len(new_tables))
 
     sections = compare_extractions(all_mupdf_blocks, all_spatial_blocks)
 
     for ts in table_sections:
         inserted = False
-        data_on_label_page = (
-            ts.lines and ts.lines[0].page_num == ts.page_num
-        )
+        data_on_label_page = ts.lines and ts.lines[0].page_num == ts.page_num
         # On rotated pages compare in reading space; page-space y does
         # not reflect visual order there.
         ts_rot = page_rotations.get(ts.page_num)
@@ -1574,11 +1739,14 @@ def run_pipeline(
                 sections.insert(i, ts)
                 inserted = True
                 break
-            if (data_on_label_page
-                    and sec.page_num == ts.page_num and sec.lines
-                    and ts.lines
-                    and _rot_bbox(sec.lines[0].bbox, ts_rot)[1]
-                    > _rot_bbox(ts.lines[0].bbox, ts_rot)[1]):
+            if (
+                data_on_label_page
+                and sec.page_num == ts.page_num
+                and sec.lines
+                and ts.lines
+                and _rot_bbox(sec.lines[0].bbox, ts_rot)[1]
+                > _rot_bbox(ts.lines[0].bbox, ts_rot)[1]
+            ):
                 sections.insert(i, ts)
                 inserted = True
                 break
@@ -1586,9 +1754,11 @@ def run_pipeline(
             sections.append(ts)
 
     if result.images:
-        _log.info("Extracted %d image(s) (cap %s)",
-                   len(result.images),
-                   "tripped" if result.images_truncated else "ok")
+        _log.info(
+            "Extracted %d image(s) (cap %s)",
+            len(result.images),
+            "tripped" if result.images_truncated else "ok",
+        )
         sections = _insert_image_sections(sections, result.images)
 
     has_title = "title" in wg21_metadata
@@ -1602,8 +1772,8 @@ def run_pipeline(
 
     # --- Phase 1b: Body structuring (may detect title for metadata) ---
     body_metadata, sections, nesting_corrections = structure_body(
-        sections, has_title=has_title,
-        figure_regions=all_figure_regions or None)
+        sections, has_title=has_title, figure_regions=all_figure_regions or None
+    )
     for k, v in body_metadata.items():
         if k not in metadata:
             metadata[k] = v
@@ -1614,26 +1784,28 @@ def run_pipeline(
     # structurally. The marker discloses the count so the loss is not
     # silent. Runs after structure has assigned section kinds.
     if result.glyph_stats is not None:
-        result.glyph_stats.skipped_code_section = (
-            drop_glyphs_in_code_and_tables(sections)
+        result.glyph_stats.skipped_code_section = drop_glyphs_in_code_and_tables(
+            sections
         )
 
     # Vector-image post-processing
     if result.images:
         total_dropped = 0
-        result.images, sections, dropped_a = (
-            _filter_vector_images_against_structural(result.images, sections)
+        result.images, sections, dropped_a = _filter_vector_images_against_structural(
+            result.images, sections
         )
         total_dropped += dropped_a
-        result.images, sections, dropped_b = (
-            _filter_overlapping_vector_images(result.images, sections)
+        result.images, sections, dropped_b = _filter_overlapping_vector_images(
+            result.images, sections
         )
         total_dropped += dropped_b
         sections, captures_by_id = _filter_sections_inside_vector_images(
-            result.images, sections,
+            result.images,
+            sections,
         )
         if captures_by_id:
             from dataclasses import replace as _replace
+
             # Thread the captures into BOTH ``result.images`` AND every
             # IMAGE section's ``image_ref``. Both containers share the
             # same ``ExtractedImage`` instances (placed by
@@ -1652,51 +1824,54 @@ def run_pipeline(
             new_sections: list[Section] = []
             for sec in sections:
                 new_sections.append(sec)
-                if (sec.kind == SectionKind.IMAGE
-                        and sec.image_ref is not None
-                        and id(sec.image_ref) in captures_by_id):
+                if (
+                    sec.kind == SectionKind.IMAGE
+                    and sec.image_ref is not None
+                    and id(sec.image_ref) in captures_by_id
+                ):
                     for letter, caption_text in sorted(
-                            captures_by_id[id(sec.image_ref)]):
+                        captures_by_id[id(sec.image_ref)]
+                    ):
                         # Collapse internal whitespace (incl. newlines
                         # from the structure pass's wrap-join) to single
                         # spaces so the italic wrapper renders as one
                         # unwrapped paragraph, matching the existing
                         # PARAGRAPH emit path's behaviour.
                         unwrapped = " ".join(caption_text.split())
-                        new_sections.append(Section(
-                            kind=SectionKind.PARAGRAPH,
-                            text=(
-                                "*"
-                                + _escape_italic_text(unwrapped)
-                                + "*"
-                            ),
-                            confidence=Confidence.MEDIUM,
-                            page_num=sec.page_num,
-                        ))
+                        new_sections.append(
+                            Section(
+                                kind=SectionKind.PARAGRAPH,
+                                text=("*" + _escape_italic_text(unwrapped) + "*"),
+                                confidence=Confidence.MEDIUM,
+                                page_num=sec.page_num,
+                            )
+                        )
             sections = new_sections
 
             replaced: dict[int, ExtractedImage] = {
                 id(im): _replace(
-                    im, sub_captions=tuple(sorted(captures_by_id[id(im)])),
+                    im,
+                    sub_captions=tuple(sorted(captures_by_id[id(im)])),
                 )
                 for im in result.images
                 if id(im) in captures_by_id
             }
             for sec in sections:
-                if (sec.kind == SectionKind.IMAGE
-                        and sec.image_ref is not None
-                        and id(sec.image_ref) in replaced):
+                if (
+                    sec.kind == SectionKind.IMAGE
+                    and sec.image_ref is not None
+                    and id(sec.image_ref) in replaced
+                ):
                     sec.image_ref = replaced[id(sec.image_ref)]
             result.images = [replaced.get(id(im), im) for im in result.images]
         if total_dropped and result.vector_uncertainty is not None:
-            from dataclasses import replace
             new_kept = sum(1 for im in result.images if im.source == "vector")
             result.vector_uncertainty = replace(
-                result.vector_uncertainty, kept=new_kept,
+                result.vector_uncertainty,
+                kept=new_kept,
             )
 
     if "document" not in metadata:
-        from .. import DOC_NUM_RE
         stem_match = DOC_NUM_RE.search(path.stem)
         if stem_match:
             metadata["document"] = stem_match.group(1).upper()
@@ -1710,8 +1885,7 @@ def run_pipeline(
         for sec in sections:
             if sec.kind == SectionKind.HEADING:
                 first_line = sec.text.split("\n")[0].strip().lstrip("# ").strip()
-                if (first_line
-                        and first_line.lower().rstrip(":") not in KNOWN_SECTIONS):
+                if first_line and first_line.lower().rstrip(":") not in KNOWN_SECTIONS:
                     metadata["title"] = first_line
                     break
 
@@ -1748,9 +1922,15 @@ def run_pipeline(
     _enrich_pdf_reply_to(metadata, all_mupdf_blocks)
     # --- Phase 1c: Metadata fallbacks & enrichment (metadata_yaml) ---
     _apply_pdf_metadata_fallbacks(
-        metadata, path, pdf_info_date, pdf_info_title,
-        doc_metadata, sections, all_mupdf_blocks,
-        _TITLE_PID_PREFIX_RE)
+        metadata,
+        path,
+        pdf_info_date,
+        pdf_info_title,
+        doc_metadata,
+        sections,
+        all_mupdf_blocks,
+        _TITLE_PID_PREFIX_RE,
+    )
 
     # --- Phase 1d: Metadata stripping from body sections (metadata_yaml) ---
     _strip_pre_heading_fragments(sections)
@@ -1772,14 +1952,22 @@ def run_pipeline(
 
     texts = [sec.text.split("\n")[0].strip() for sec in sections]
     full_texts = [sec.text for sec in sections]
-    heading_texts = {sec.text.split("\n")[0].strip()
-                     for sec in sections if sec.kind == SectionKind.HEADING}
+    heading_texts = {
+        sec.text.split("\n")[0].strip()
+        for sec in sections
+        if sec.kind == SectionKind.HEADING
+    }
     structural_hints = _toc_structural_hints(sections) if not heading_texts else None
     # A body heading matches itself in heading_texts; pass per-section heading
     # flags so find_toc_indices excludes them and does not delete the body.
     is_heading = [sec.kind == SectionKind.HEADING for sec in sections]
-    toc_indices = find_toc_indices(texts, heading_texts, structural_hints,
-                                   full_texts=full_texts, is_heading=is_heading)
+    toc_indices = find_toc_indices(
+        texts,
+        heading_texts,
+        structural_hints,
+        full_texts=full_texts,
+        is_heading=is_heading,
+    )
 
     # Plausibility guard: reject phantom TOC detection.
     # A valid TOC must have at least one confirming signal:
@@ -1792,14 +1980,13 @@ def run_pipeline(
     if toc_indices:
         # IMAGE sections are never TOC content.
         toc_indices = {
-            i for i in toc_indices
-            if sections[i].kind is not SectionKind.IMAGE
+            i for i in toc_indices if sections[i].kind is not SectionKind.IMAGE
         }
 
     if toc_indices:
         _has_dot = any(has_dot_leader(sections[i].text) for i in toc_indices)
         _has_label = any(
-            _is_toc_label(s.text.split("\n")[0].strip()) for s in sections
+            is_toc_label(s.text.split("\n")[0].strip()) for s in sections
         )
         if not _has_dot and not _has_label:
             _inside = set()
@@ -1815,8 +2002,10 @@ def run_pipeline(
                     if _n:
                         _outside.add(_n)
             if not (_inside & _outside):
-                _log.info("Rejected phantom TOC (%d entries, no confirming signal)",
-                          len(toc_indices))
+                _log.info(
+                    "Rejected phantom TOC (%d entries, no confirming signal)",
+                    len(toc_indices),
+                )
                 toc_indices = set()
 
     for li, sec in enumerate(sections):
@@ -1826,7 +2015,7 @@ def run_pipeline(
             (ln.strip() for ln in sec.text.split("\n") if ln.strip()),
             "",
         )
-        if not _is_toc_label(fl):
+        if not is_toc_label(fl):
             continue
         candidate = {li}
         numbered = 0
@@ -1839,28 +2028,28 @@ def run_pipeline(
             j_dot = any(has_dot_leader(ln) for ln in sec_j.text.split("\n"))
             for line in sec_j.text.split("\n"):
                 stripped = line.strip()
-                if (_NUMBERED_LINE_RE.match(stripped)
-                        or _BARE_PAGE_NUM_RE.match(stripped)):
+                if _NUMBERED_LINE_RE.match(stripped) or _BARE_PAGE_NUM_RE.match(
+                    stripped
+                ):
                     has_numbered = True
                     numbered += 1
             if j_dot or has_numbered:
                 candidate.add(j)
                 if j_dot and not has_numbered:
                     numbered += 1
-            elif jfl.lower() in ('ii', 'iii', 'iv', 'v', 'vi', 'vii', 'viii'):
+            elif jfl.lower() in ("ii", "iii", "iv", "v", "vi", "vii", "viii"):
                 candidate.add(j)
             elif sec_j.kind == SectionKind.TABLE and not j_dot:
                 candidate.add(j)
             elif sec_j.kind == SectionKind.HEADING and not has_numbered and not j_dot:
                 break
-            elif jfl.strip() == '':
+            elif jfl.strip() == "":
                 continue
             else:
                 break
         if len(candidate) > 1 and numbered >= _LABEL_TOC_MIN_NUMBERED_LINES:
             toc_indices |= candidate
-            _log.info("Label-anchored TOC: %d entries after '%s'",
-                      len(candidate), fl)
+            _log.info("Label-anchored TOC: %d entries after '%s'", len(candidate), fl)
 
     if toc_indices:
         non_toc_known: set[str] = set()
@@ -1881,26 +2070,28 @@ def run_pipeline(
                     if fl.lower().rstrip(":") in non_toc_known:
                         continue
                     protected.add(idx)
-                    is_abstract_heading = (
-                        fl.lower().rstrip(":") == "abstract"
-                    )
+                    is_abstract_heading = fl.lower().rstrip(":") == "abstract"
                     first_body_confirmed = False
                     for nxt in range(idx + 1, len(sections)):
                         if nxt not in toc_indices:
                             break
                         nxt_sec = sections[nxt]
                         if nxt_sec.kind == SectionKind.HEADING:
-                            if (is_abstract_heading
-                                    and not first_body_confirmed
-                                    and nxt_sec.confidence == Confidence.LOW):
+                            if (
+                                is_abstract_heading
+                                and not first_body_confirmed
+                                and nxt_sec.confidence == Confidence.LOW
+                            ):
                                 nxt_sec.kind = SectionKind.PARAGRAPH
                                 nxt_sec.heading_level = 0
                                 first_body_confirmed = True
                                 protected.add(nxt)
                                 continue
                             parent_level = sections[idx].heading_level
-                            if (parent_level > 0
-                                    and nxt_sec.heading_level > parent_level):
+                            if (
+                                parent_level > 0
+                                and nxt_sec.heading_level > parent_level
+                            ):
                                 protected.add(nxt)
                                 first_body_confirmed = True
                                 continue
@@ -1913,18 +2104,28 @@ def run_pipeline(
                         nxt_fl = nxt_sec.text.split("\n")[0].strip()
                         if has_dot_leader(nxt_fl):
                             break
-                        if not first_body_confirmed and _SECTION_NUM_START_RE.match(nxt_fl):
+                        if not first_body_confirmed and _SECTION_NUM_START_RE.match(
+                            nxt_fl
+                        ):
                             break
                         nxt_words = len(nxt_sec.text.split())
                         if not first_body_confirmed:
-                            if not is_abstract_heading and nxt_words < _TOC_BODY_PROTECT_MIN_WORDS:
+                            if (
+                                not is_abstract_heading
+                                and nxt_words < _TOC_BODY_PROTECT_MIN_WORDS
+                            ):
                                 break
                             first_body_confirmed = True
                         protected.add(nxt)
         if protected:
-            _log.debug("Protecting %d section heading(s) from TOC removal: %s",
-                        len(protected),
-                        [sections[i].text.split("\n")[0].strip()[:60] for i in sorted(protected)])
+            _log.debug(
+                "Protecting %d section heading(s) from TOC removal: %s",
+                len(protected),
+                [
+                    sections[i].text.split("\n")[0].strip()[:60]
+                    for i in sorted(protected)
+                ],
+            )
             toc_indices -= protected
         if toc_indices:
             sections[:] = [s for i, s in enumerate(sections) if i not in toc_indices]
@@ -1932,7 +2133,7 @@ def run_pipeline(
     sections[:] = [
         s for s in sections
         if not (s.kind == SectionKind.PARAGRAPH
-                and _is_toc_label(s.text.split("\n")[0].strip())
+                and is_toc_label(s.text.split("\n")[0].strip())
                 and len(s.text.split("\n")[0].strip().split()) <= _TOC_LABEL_MAX_WORDS)
     ]
 
@@ -1941,6 +2142,11 @@ def run_pipeline(
 
     _strip_metadata_from_uncertain(sections, metadata)
     _reorder_abstract_in_uncertain(sections)
+
+    # Remove a leaked TOC that survived find_toc_indices: a mix of empty
+    # duplicate headings and title-like paragraph/list entries, plus the
+    # non-recurring stragglers (front-region only) that fragment the block.
+    sections = drop_leaked_toc_entries(sections)
 
     md = emit_markdown(
         metadata,

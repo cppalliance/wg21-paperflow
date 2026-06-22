@@ -12,11 +12,11 @@ from __future__ import annotations
 import asyncio
 import sys
 
+from cli.jobs import run_mailing
+from cli.progress import make_progress_handler
+
 
 def command(args, backend):
-    from cli.jobs import run_mailing
-    from cli.progress import make_progress_handler
-
     targets = args.targets or ["all"]
     force = getattr(args, "force", False)
 

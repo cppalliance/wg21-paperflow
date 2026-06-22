@@ -220,8 +220,8 @@ Enums:
 - `structure.py:compare_extractions`
 - Stage 1: Per-page word-level multiset similarity. Threshold 0.85.
 - Stage 2: NFC normalization fallback. If word similarity fails, NFC-normalize joined words and compare. Catches Unicode normalization differences.
-- Stage 3: Page-pair window. For uncertain pages, combine with next page and re-check similarity. Catches content shifted across page boundaries.
-- Stage 4: Document-level pool. Combine all remaining uncertain pages and check total similarity. Catches systematic page-assignment differences.
+- Stage 3: Page-pair window. For uncertain pages, combine with next page and re-check similarity. Catches content shifted across page boundaries. When the pair clears the threshold both pages are promoted, but blocks are re-emitted as paragraphs only for pages that actually carried an UNCERTAIN section: a confident pairing partner already has its first-pass PARAGRAPH sections, so re-emitting it would duplicate every block on that page.
+- Stage 4: Document-level pool. Combine all remaining uncertain pages and check total similarity. Catches systematic page-assignment differences. Same uncertain-only re-emission rule as stage 3 (a no-op here, since pooled pages are all uncertain by construction).
 - Stage 5: Tiny-region demotion. Uncertain sections with fewer than 10 words in the shorter version -> demoted to PARAGRAPH with LOW confidence.
 
 ### Layer 6: WG21 Metadata (2 techniques)
@@ -279,7 +279,7 @@ Enums:
 - Body size: most common font size by character count (fallback 11.0)
 - Font ranking: sizes > body * 1.05 ranked descending (rank 1 = largest = shallowest heading)
 
-### Layer 8: TOC Detection (1 technique)
+### Layer 8: TOC Detection (2 techniques)
 
 **T29. TOC detection with exact-match + fuzzy fallback**
 - `toc.py:find_toc_indices`
@@ -287,9 +287,17 @@ Enums:
 - Fast path: exact-match set lookup (`_exact_set`) against normalized headings. O(1) per section.
 - Fuzzy fallback: only when heading count is below `_MAX_FUZZY_HEADINGS` (200). Uses dual-algorithm OR-gate (SequenceMatcher >= 0.75 OR Jaccard >= 0.65). Without this guard, large documents (2000+ pages, 40k sections) hang on O(sections * headings) fuzzy comparisons.
 - Requires 3+ consecutive matches. Bridges gaps up to 3 non-matching entries, but only when each bridged entry is trivial (`_bridgeable`: blank, a bare/numeric label, or <= `_MAX_BRIDGE_ENTRY_WORDS` words with no terminal punctuation). A real prose paragraph breaks the run instead of being swallowed.
-- A section that is itself a body heading (`is_heading[i]`) is excluded from matching, *unless* its own text is shaped like a TOC line (`_TOC_LINE_RE`: a dot leader followed by a page number, e.g. `Foo .... 7`). Without this, every body heading matched itself in the reference set and the gap-fill deleted the prose between headings, destroying the body of short papers (#122). The shipped predicate keys on the dot-leader-then-page-number shape, not a bare trailing number, so body headings like `Step 1` / `Phase 2` are never eligible.
+- A section that is itself a body heading (`is_heading[i]`) is excluded from matching, *unless* its own text is shaped like a TOC line (`_TOC_LINE_RE`: a dot leader followed by a page number, e.g. `Foo .... 7`). Without this, every body heading matched itself in the reference set and the gap-fill deleted the prose between headings, destroying the body of short papers. The shipped predicate keys on the dot-leader-then-page-number shape, not a bare trailing number, so body headings like `Step 1` / `Phase 2` are never eligible.
 - Stops on duplicate first-line (second occurrence = real heading, not TOC entry)
 - Includes preceding "Table of Contents" / "Contents" label
+
+**T29b. Leaked mixed-kind TOC removal**
+- `structure.py:drop_leaked_toc_entries`, run after the T29 strip and the IMAGE filter, before emit
+- T29 deliberately does not match a heading-kind TOC entry that lacks the dot-leader shape (the `is_heading` guard, to avoid the body-deletion class). Such a TOC therefore leaks, and it leaks as a *mix* of kinds: some entries survive as empty duplicate `HEADING`s, others as short title-like `PARAGRAPH`/`LIST` sections (`3. The Rationale for Unification`). The heading-only predecessor caught only the heading-kind entries; this pass removes the whole block.
+- The single discriminator across both *entry* kinds is **recurrence as a later heading**. A `HEADING` is an entry when it is empty and its normalized title recurs later; a `PARAGRAPH`/`LIST` is an entry when it is title-like (at most `_TOC_ENTRY_MAX_LINES` text lines, derived from `sec.text`) and its first-line title recurs later. A heading's emptiness bridges trivial fragments *and* title-like non-headings, so `## 3.7 Summary` sitting over a `LIST`-kind entry still counts as empty.
+- Removal is a run of entries of length at least `MIN_TOC_RUN` (shared with `toc.py`) that clears the **heading anchor** (at least one empty-heading entry). A run whose heading subsequence strictly deepens is rejected (`15`/`15.1`/`15.1.1` clause-container stack; applies to all-heading and mixed runs alike). Also drops in-span trivial fragments and a preceding `Table of Contents` label whether paragraph-kind or heading-kind (P4003R1's leaked `### Table of Contents`).
+- **Relaxed bridging.** A real leaked TOC is often *fragmented* by non-recurring **stragglers**: title-like paragraph/list lines whose body heading text drifted, and once-only empty headings. The strict variant broke its run at each; this pass bridges stragglers as in-span run members so the block coalesces and removes whole (P4016R0's ~146-entry appendix dump, P4007R0's once-only `8.1`-`8.4` objections, both previously left as a residual). The relaxation is gated by five interacting layers, and the body-safety is the *conjunction*, not any single layer: (1) the **heading anchor** above; (2) a **front-region bound** (`body_start` = the first non-recurring, non-trivial, `>= 2`-line `PARAGRAPH`) so straggler bridging fires only in the front matter, never in the body where repeated spec boilerplate forms dense false runs (this is the guard against p2846r6's `Effects:` wording loss); (3) a **recurrence-density floor** (`_TOC_RUN_MIN_RECUR_FRACTION`, fraction of counted members that recur as headings); (4) the **in-span / trailing rule** (only stragglers strictly between the first and last *entry* are removed; trailing stragglers the scan bridged are kept, protecting a real section and real single-line abstract prose right after the TOC, e.g. P4016R0's idx150/151); (5) a **forward-reference gate** on paragraph/list stragglers only (`_straggler_forward_references`: removed only if the normalized title appears as a later heading via bidirectional containment, so a unique body sentence is never deleted; empty-heading stragglers are exempt because heading text drifts between TOC and body and a hard gate there regresses P4007R0).
+- The gates are decomposed into independently unit-tested predicates (`_is_title_like_straggler`, `_is_empty_heading`, `_straggler_forward_references`, `_run_recurrence_density`, `_compute_body_start`) so a refactor cannot silently drop one layer's contribution. Not body-safe by construction for the empty-heading-straggler class (heading-level loss only), which the corpus anchor/density/front/in-span gates plus a standing manual heading review cover; the paragraph-straggler (prose) class is gated automatically by forward-reference. `_TOC_ENTRY_MAX_BODY_CHARS`, `_TOC_ENTRY_MAX_LINES`, `_TOC_RUN_MIN_RECUR_FRACTION`, `_TOC_STRAGGLER_MIN_TITLE_LEN`, and `MIN_TOC_RUN` are corpus-tuned; under-removal leaves a cosmetic remnant (a forward-ref-failing paragraph straggler is bridged-but-kept, leaving at most one stray line). Recall limit: an entry whose body counterpart is *not* a recurrence-matching heading carries no signal and is left in place.
 
 ### Layer 9: Emission (8 techniques)
 
@@ -336,7 +344,7 @@ Enums:
 - `pipeline.py:run_pipeline`
 - Strict ordering of all pipeline steps. Early exit via `SkipReason` on empty PDF, slide deck, standards draft, or unreadable text.
 - Metadata merging: `{**structure_metadata, **wg21_metadata}` - WG21 metadata takes precedence.
-- TOC heading collection: only HEADING sections used as the reference set for TOC matching. The per-section `is_heading` flags are also passed to `find_toc_indices` so a body heading cannot match itself out of existence (#122).
+- TOC heading collection: only HEADING sections used as the reference set for TOC matching. The per-section `is_heading` flags are also passed to `find_toc_indices` so a body heading cannot match itself out of existence.
 
 ### Layer 11: Quality Assurance (1 technique)
 
