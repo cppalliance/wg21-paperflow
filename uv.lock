@@ -3515,7 +3515,7 @@ wheels = [
 [[package]]
 name = "scrivener"
 version = "0.1.0"
-source = { git = "https://github.com/gregjkal/wg21-scrivener.git#583771026872e878320ec6d6237887dd1a1752ae" }
+source = { git = "https://github.com/gregjkal/wg21-scrivener.git#9bf01d60d0f4e7463b3e0e1baddef550b786da4b" }
 dependencies = [
     { name = "beautifulsoup4" },
     { name = "mistune" },
