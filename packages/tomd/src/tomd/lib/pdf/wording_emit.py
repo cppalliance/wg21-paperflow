@@ -172,7 +172,9 @@ def _render_wording_code_block(sec: Section, lang: str) -> str:
 
     Preserves the per-line structure (unlike the prose path which
     collapses lines) and runs every emitted line through
-    ``normalize_code_line``. Leading indentation is reconstructed from
+    ``normalize_code_line``. Extend with :func:`is_diagram_block` if
+    wording-colored diagrams ever appear in the corpus. Leading
+    indentation is reconstructed from
     glyph x-positions via ``CodeGrid``, the same machinery the
     code-diff sibling (:func:`_render_wording_code_diff`) uses, with an
     implausibly deep indent (a right-margin element split onto its own

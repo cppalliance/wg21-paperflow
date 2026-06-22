@@ -11,7 +11,11 @@
 
 import pytest
 
-from tomd.lib.pdf.code_format import normalize_code_line
+from tomd.lib.pdf.code_format import (
+    is_diagram_block,
+    maybe_normalize_code_line,
+    normalize_code_line,
+)
 
 
 class TestTemplateAngles:
@@ -251,6 +255,60 @@ class TestPreprocessorDirective:
         # `#define FOO bar (baz)` should not collapse `bar (baz)`.
         line = "#define FOO bar (baz)"
         assert normalize_code_line(line) == line
+
+
+class TestIsDiagramBlock:
+    def test_box_drawing_line(self):
+        assert is_diagram_block(["┌─────┐", "int x;"])
+
+    def test_unicode_arrow_line(self):
+        assert is_diagram_block(["A ──→ B", "return 0;"])
+
+    def test_empty_set_and_section_sign(self):
+        assert is_diagram_block(["∅", "§3.2"])
+
+    def test_subscript_line(self):
+        assert is_diagram_block(["x₀ + y₁"])
+
+    def test_pipe_only_art_line(self):
+        assert is_diagram_block(["             |", "  code();"])
+
+    def test_slash_art_line(self):
+        assert is_diagram_block(["    /        \\", "  fn();"])
+
+    def test_not_flagged_pipe_in_expression(self):
+        assert not is_diagram_block(["a | b", "c | d"])
+
+    def test_not_flagged_arrow_operator(self):
+        assert not is_diagram_block(["ptr->m", "-> int"])
+
+    def test_not_flagged_line_comment_dashes(self):
+        assert not is_diagram_block(["// ----", "//"])
+
+    def test_not_flagged_preprocessor(self):
+        assert not is_diagram_block(["#define FOO(x)"])
+
+    def test_whole_block_skip_preserves_cpp_line(self):
+        block = ["             |", "vector <T > x;"]
+        assert is_diagram_block(block)
+        assert (
+            maybe_normalize_code_line(
+                "vector <T > x;", preserve_spacing=True,
+            )
+            == "vector <T > x;"
+        )
+
+
+class TestMaybeNormalizeCodeLine:
+    def test_preserve_spacing_skips_tightening(self):
+        line = "vector <T > x;"
+        assert maybe_normalize_code_line(line, preserve_spacing=True) == line
+
+    def test_normalize_when_not_diagram(self):
+        assert (
+            maybe_normalize_code_line("vector <T > x;", preserve_spacing=False)
+            == "vector<T > x;"
+        )
 
 
 class TestLineComment:

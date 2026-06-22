@@ -15,7 +15,7 @@ from .. import (
 from .. import tables as _tables
 from ..shared import _find_front_matter_end
 from .cleanup import normalize_whitespace
-from .code_format import normalize_code_line
+from .code_format import is_diagram_block, maybe_normalize_code_line
 from .code_grid import CodeGrid
 from .wording_emit import _render_wording_section
 from .glyphs import (
@@ -491,6 +491,10 @@ def _detect_code_gutter(
     return numbers, origin_x
 
 
+def _section_span_text_lines(sec: Section) -> list[str]:
+    return ["".join(span.text for span in line.spans) for line in sec.lines]
+
+
 def _render_code_block(sec: Section) -> str:
     """Render a code section as a fenced code block.
 
@@ -512,14 +516,20 @@ def _render_code_block(sec: Section) -> str:
     if gutter is not None:
         return _render_code_block_with_gutter(sec, lang, gutter)
 
+    preserve_spacing = is_diagram_block(_section_span_text_lines(sec))
+
     grid = CodeGrid.for_code_section(sec)
 
     def render_single(line: Line) -> str:
         raw = _render_line_spans(line, in_code_section=True)
         if not line.spans:
-            return normalize_code_line(raw)
+            return maybe_normalize_code_line(
+                raw, preserve_spacing=preserve_spacing,
+            )
         indent = grid.indent(line)
-        return " " * indent + normalize_code_line(raw.lstrip())
+        return " " * indent + maybe_normalize_code_line(
+            raw.lstrip(), preserve_spacing=preserve_spacing,
+        )
 
     lines = []
     for row in _group_code_rows(sec.lines):
@@ -535,8 +545,9 @@ def _render_code_block(sec: Section) -> str:
             continue
         rendered = render_single(frags[0])
         for frag in frags[1:]:
-            tail = normalize_code_line(
-                _render_line_spans(frag, in_code_section=True).strip()
+            tail = maybe_normalize_code_line(
+                _render_line_spans(frag, in_code_section=True).strip(),
+                preserve_spacing=preserve_spacing,
             )
             if tail:
                 rendered += _SAME_ROW_JOIN + tail
@@ -564,6 +575,8 @@ def _render_code_block_with_gutter(
     filler whitespace.
     """
     numbers, origin_x = gutter
+    preserve_spacing = is_diagram_block(_section_span_text_lines(sec))
+
     grid = CodeGrid.for_gutter(sec, origin_x)
     index_of = {id(ln): i for i, ln in enumerate(sec.lines)}
     code_lines = [
@@ -589,8 +602,9 @@ def _render_code_block_with_gutter(
 
         lead = frags[0]
         code_col = grid.column(_first_nonspace_x(lead))
-        code_str = normalize_code_line(
-            _render_line_spans(lead, in_code_section=True).lstrip()
+        code_str = maybe_normalize_code_line(
+            _render_line_spans(lead, in_code_section=True).lstrip(),
+            preserve_spacing=preserve_spacing,
         )
 
         if number is not None:
@@ -604,8 +618,9 @@ def _render_code_block_with_gutter(
         buf += " " * (code_col - len(buf)) + code_str
 
         for frag in frags[1:]:
-            tail = normalize_code_line(
-                _render_line_spans(frag, in_code_section=True).strip()
+            tail = maybe_normalize_code_line(
+                _render_line_spans(frag, in_code_section=True).strip(),
+                preserve_spacing=preserve_spacing,
             )
             if tail:
                 buf += _SAME_ROW_JOIN + tail

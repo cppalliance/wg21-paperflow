@@ -26,11 +26,17 @@ literal delimiter (``"`` or ``'``) is left untouched, since the rules
 would otherwise corrupt literal contents (``"a < b"`` -> ``"a< b"``).
 The corpus is template/declaration-heavy and rarely contains literals,
 so the skip is a small loss for a large safety margin.
+
+:func:`is_diagram_block` detects text-layer ASCII diagrams (box-drawing
+glyphs, Unicode arrows, math symbols, pipe/slash art). When any line
+in a CODE block trips a diagram signal, the whole block skips
+:func:`normalize_code_line` so spacing is preserved verbatim.
 """
 
 from __future__ import annotations
 
 import re
+from collections.abc import Iterable
 
 # C++ keywords that legitimately take a space before ``(``. Stripping
 # the space here would produce non-idiomatic code (``if(x)``) for
@@ -99,6 +105,75 @@ _ATTR_CLOSE_RE = re.compile(r"\s+\]\]")
 
 # Space before comma between template/argument items: `<From , To>`.
 _SPACE_BEFORE_COMMA_RE = re.compile(r"(\w) ,")
+
+# Diagram guard: Unicode ranges and symbols that signal ASCII-art blocks.
+_BOX_DRAWING_FIRST = "\u2500"
+_BOX_DRAWING_LAST = "\u257f"
+_UNICODE_ARROW_FIRST = "\u2190"
+_UNICODE_ARROW_LAST = "\u21ff"
+_EMPTY_SET_CHAR = "\u2205"
+_SECTION_SIGN_CHAR = "\u00a7"
+_SUPERSCRIPT_FIRST = 0x2070
+_SUPERSCRIPT_LAST = 0x209C
+
+# ASCII-art lines may use only these characters (plus space). A line must
+# also contain ``\`` or ``|`` so ``//`` and ``// ----`` are not flagged.
+_ASCII_ART_CHARS = frozenset(" /\\|_+-.':~")
+_ASCII_ART_REQUIRED = frozenset("\\|")
+
+
+def _has_box_drawing(line: str) -> bool:
+    return any(_BOX_DRAWING_FIRST <= ch <= _BOX_DRAWING_LAST for ch in line)
+
+
+def _has_unicode_arrow(line: str) -> bool:
+    return any(_UNICODE_ARROW_FIRST <= ch <= _UNICODE_ARROW_LAST for ch in line)
+
+
+def _has_diagram_special(line: str) -> bool:
+    for ch in line:
+        if ch == _EMPTY_SET_CHAR or ch == _SECTION_SIGN_CHAR:
+            return True
+        code = ord(ch)
+        if _SUPERSCRIPT_FIRST <= code <= _SUPERSCRIPT_LAST:
+            return True
+    return False
+
+
+def _is_ascii_art_line(line: str) -> bool:
+    stripped = line.strip()
+    if not stripped:
+        return False
+    if not any(ch in _ASCII_ART_REQUIRED for ch in stripped):
+        return False
+    return all(ch in _ASCII_ART_CHARS for ch in stripped)
+
+
+def is_diagram_block(lines: Iterable[str]) -> bool:
+    """Return True when any line signals a text-layer ASCII diagram.
+
+    Whole-block skip: one diagram line disables normalization for every
+    line in the CODE section. Signals are box-drawing glyphs, Unicode
+    arrows (ASCII ``->`` is deliberately excluded), math symbols
+    (empty set, section sign, sub/superscript), and pipe/slash ASCII
+    art whose characters are confined to spacing and diagram punctuation.
+    """
+    for line in lines:
+        if (
+            _has_box_drawing(line)
+            or _has_unicode_arrow(line)
+            or _has_diagram_special(line)
+            or _is_ascii_art_line(line)
+        ):
+            return True
+    return False
+
+
+def maybe_normalize_code_line(line: str, *, preserve_spacing: bool) -> str:
+    """Normalize a code line unless the block is a diagram (spacing preserved)."""
+    if preserve_spacing:
+        return line
+    return normalize_code_line(line)
 
 
 def _has_string_literal(line: str) -> bool:
