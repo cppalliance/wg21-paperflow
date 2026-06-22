@@ -26,8 +26,6 @@ from .glyphs import (
 from .images import TRUNCATION_MARKER_TEMPLATE, VectorUncertaintyStats
 from .types import Line, Span, Section, SectionKind, BULLET_CHARS, BULLET_RE, NUMBERED_LIST_RE, FigureGraph
 from .vector_images import format_uncertainty_marker, should_emit_marker
-from ..wording_markup import WORDING_FENCE_CLOSE, wording_fence_open
-
 _log = logging.getLogger(__name__)
 
 

@@ -22,6 +22,7 @@ already collapsed.
 from __future__ import annotations
 
 from .. import DEFAULT_FENCE_LANG
+from ..wording_markup import WORDING_FENCE_CLOSE, wording_fence_open
 from ..wording_policy import UNIFORM_ROLE_THRESHOLD, implicit_role_for
 from .cleanup import normalize_whitespace
 from .code_format import normalize_code_line
@@ -312,15 +313,15 @@ def _render_wording_section(sec: Section) -> str:
         lang = sec.fence_lang or DEFAULT_FENCE_LANG
         code = _render_wording_code_block(sec, lang)
         if code:
-            return f":::{div_class}\n\n{code}\n\n:::"
+            return f"{wording_fence_open(div_class)}\n\n{code}\n\n{WORDING_FENCE_CLOSE}"
 
     if code_shaped:
         diff = _render_wording_code_diff(sec)
         if diff:
             neutral = SectionKind.WORDING.value
-            return f":::{neutral}\n\n{diff}\n\n:::"
+            return f"{wording_fence_open(neutral)}\n\n{diff}\n\n{WORDING_FENCE_CLOSE}"
 
     rendered_lines = [_render_wording_line(line) for line in sec.lines]
     text = normalize_whitespace("\n".join(rendered_lines))
     inner = " ".join(ln.strip() for ln in text.split("\n") if ln.strip())
-    return f":::{div_class}\n\n{inner}\n\n:::"
+    return f"{wording_fence_open(div_class)}\n\n{inner}\n\n{WORDING_FENCE_CLOSE}"
