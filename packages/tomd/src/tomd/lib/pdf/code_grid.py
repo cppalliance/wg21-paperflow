@@ -123,7 +123,7 @@ class CodeGrid:
 
     @classmethod
     def for_code_section(cls, sec: Section) -> "CodeGrid":
-        """Grid with origin at the block left margin, width from any span.
+        """Grid with origin at the block left margin, width from mono spans.
 
         The origin samples each line's first *content* span (the same
         accessor :meth:`indent` uses), not ``spans[0]``: a line whose
@@ -131,8 +131,13 @@ class CodeGrid:
         the origin computation, and if every line started that way the
         origin fell back to ``0.0`` and inflated every reconstructed
         indent.
+
+        Width estimation passes ``mono_only=True`` so a proportional
+        (serif) leading comment cannot be the first qualifying span and
+        skew the per-character pitch for the monospace code that
+        follows. :meth:`for_gutter` already uses the same constraint.
         """
-        char_w = _estimate_char_width(sec.lines)
+        char_w = _estimate_char_width(sec.lines, mono_only=True)
         content_x = [
             span.bbox[0] for ln in sec.lines
             if (span := ln.first_content_span()) is not None

@@ -164,6 +164,22 @@ class TestForCodeSection:
         assert grid.origin_x == 0.0
         assert grid.char_w == _DEFAULT_CHAR_WIDTH
 
+    def test_width_sampled_from_monospace_only(self):
+        # A proportional (serif) leading comment must not anchor the
+        # per-character pitch for the monospace code that follows: the
+        # serif "10" measures 15pt/char and would corrupt every indent
+        # if it were the first qualifying span. ``for_code_section``
+        # now passes ``mono_only=True``, matching ``for_gutter``.
+        serif = make_span(
+            "10", monospace=False, bbox=(0.0, 0.0, 30.0, 10.0),
+        )
+        mono = make_span(
+            "code", monospace=True, bbox=(0.0, 0.0, 24.0, 10.0),
+        )
+        sec = _code_section([_multi_span_line([serif, mono])])
+        grid = CodeGrid.for_code_section(sec)
+        assert grid.char_w == 6.0
+
 
 class TestForGutter:
     def test_origin_is_caller_supplied(self):
