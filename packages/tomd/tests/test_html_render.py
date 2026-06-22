@@ -2000,10 +2000,27 @@ class TestDlEntryGrouping:
             "<dl><dt>Inner</dt><dd>idef</dd></dl>"
             "</dd></dl>"
         )
+        # Capture the inner items BEFORE the repair. If the ownership guard
+        # regressed and promoted them into the outer <dl>, inner.find_all
+        # would return an empty list afterwards and a vacuous all() would
+        # mask the bug, so hold direct references instead.
+        soup = parse_html(html)
+        outer = soup.find("dl")
+        inner = outer.find("dl")
+        inner_dt = inner.find("dt")
+        inner_dd = inner.find("dd")
+        _fix_misnested_dl_items(soup)
+        # The ownership guard must leave the inner items under the inner <dl>.
+        assert inner_dt.parent is inner
+        assert inner_dd.parent is inner
+        # The outer <dl> keeps exactly its own two direct children (dt + dd),
+        # not four (which is what promoting the inner items would produce).
+        outer_direct = outer.find_all(["dt", "dd"], recursive=False)
+        assert [c.name for c in outer_direct] == ["dt", "dd"]
+        # Documented current behavior: a nested inner <dl> flattens into the
+        # outer definition text rather than splitting into sibling entries.
         md = self._md(html)
-        assert "**Outer**" in md
-        assert "Inner" in md
-        assert "idef" in md
+        assert md == "**Outer**\n: defInneridef"
 
 
 class TestListItemNesting:
