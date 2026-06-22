@@ -541,6 +541,24 @@ class TestRenderWordingSection:
         assert "\nab\n" in out
         assert "\n   cd\n" in out
 
+    def test_near_uniform_add_with_minority_del_falls_through_to_diff(self):
+        # An almost-uniform-ins block that still carries a small ``<del>``
+        # run must NOT be fenced: a fence path drops inline role tags, so
+        # the deletion would silently disappear (a fidelity violation).
+        # The implicit-role share is well above ``UNIFORM_ROLE_THRESHOLD``
+        # (0.95) but the contrarian-char count is non-zero, so the fence
+        # gate falls through to the ``<br>`` code-diff renderer with the
+        # ``<del>`` tag preserved.
+        ins_payload = _mono_span("x" * 200, "ins")
+        del_payload = _mono_span("noexcept", "del")
+        l1 = Line(spans=[ins_payload])
+        l2 = Line(spans=[del_payload])
+        sec = _make_wording_section(SectionKind.WORDING_ADD, [l1, l2])
+        out = _render_wording_section(sec)
+        assert "```" not in out
+        assert "<del>noexcept</del>" in out
+        assert out.splitlines()[0] == ":::wording"
+
     def test_multiline_mono_mixed_emits_br_code_diff(self):
         # Monospace, multi-line, but NOT uniform role: a partial edit
         # inside a code listing. Keep line structure (<br>) and the inline

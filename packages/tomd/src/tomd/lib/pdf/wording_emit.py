@@ -264,9 +264,23 @@ def _render_wording_section(sec: Section) -> str:
     implicit_role = implicit_role_for(div_class)
 
     total, mono, roles = _wording_glyph_stats(sec.lines)
+    # A fence cannot carry inline ``<ins>`` / ``<del>`` tags (they would
+    # render literally), so the fence path collapses every span into the
+    # div's implicit role. Promotion is therefore gated on two clauses:
+    # the dominant role must clear ``UNIFORM_ROLE_THRESHOLD`` (the share
+    # contract with ``lib.wording_cleanup``), AND no contrarian-role
+    # chars may exist. The strict zero check prevents a small ``<del>``
+    # inside an otherwise-uniform ``<ins>`` block from being silently
+    # flattened into the implicit role; when one is present the section
+    # falls through to ``_render_wording_code_diff`` (the ``<br>`` diff
+    # path), which preserves the contrarian tag verbatim.
+    contrarian_chars = sum(
+        n for role, n in roles.items() if role != implicit_role
+    )
     uniform_role = (
         implicit_role is not None
         and total > 0
+        and contrarian_chars == 0
         and roles.get(implicit_role, 0) / total >= UNIFORM_ROLE_THRESHOLD
     )
     monospace_dominant = total > 0 and mono / total >= _MONO_DOMINANT_THRESHOLD
