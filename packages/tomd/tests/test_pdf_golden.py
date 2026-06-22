@@ -5,7 +5,6 @@ import json
 from pathlib import Path
 
 import pytest
-
 from tomd.lib.pdf import run_pipeline
 
 _GOLDEN = Path(__file__).resolve().parent / "fixtures" / "golden"
@@ -73,6 +72,11 @@ _GOLDEN_STEMS = (
     # Distinct-page counting keeps it. The golden pins the full body; the
     # explicit closing-sentence assertion below is the focused guard.
     "p4024r0",
+    # Code-block extraction regression guards (issue #128).
+    "p4012r0-codeblock",
+    "p4012r0-page-10",
+    "p4012r0-page-6",
+    "p0876r22-page-14",
 )
 
 # Issue-180 reported symptom: this sentence is P4024R0's final paragraph.
@@ -87,7 +91,11 @@ def _diff_head(actual: str, golden: str, limit: int = 120) -> str:
     a_lines = _normalize_newlines(actual).splitlines(keepends=True)
     b_lines = _normalize_newlines(golden).splitlines(keepends=True)
     diff = difflib.unified_diff(
-        b_lines, a_lines, fromfile="golden", tofile="actual", n=3,
+        b_lines,
+        a_lines,
+        fromfile="golden",
+        tofile="actual",
+        n=3,
     )
     return "".join(list(diff)[:limit])
 

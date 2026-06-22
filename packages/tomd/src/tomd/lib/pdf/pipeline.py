@@ -64,6 +64,7 @@ from .types import (
 from .. import DOC_NUM_RE
 from ..shared import override_revision_from_filename
 from ..toc import find_toc_indices, has_dot_leader, is_toc_label
+from ..wording_cleanup import clean_wording_blocks
 from ..metadata_yaml.strip import (
     strip_metadata_headings as _strip_metadata_headings_new,
     strip_pre_heading_fragments as _strip_pre_heading_fragments,
@@ -1960,6 +1961,8 @@ def run_pipeline(
     structural_hints = _toc_structural_hints(sections) if not heading_texts else None
     # A body heading matches itself in heading_texts; pass per-section heading
     # flags so find_toc_indices excludes them and does not delete the body.
+    # The guard keeps the _toc_structured exception so a genuine numbered TOC
+    # entry that section numbering classified as a heading is still stripped.
     is_heading = [sec.kind == SectionKind.HEADING for sec in sections]
     toc_indices = find_toc_indices(
         texts,
@@ -2156,6 +2159,7 @@ def run_pipeline(
         vector_uncertainty=result.vector_uncertainty,
         glyph_stats=result.glyph_stats,
     )
+    md = clean_wording_blocks(md)
     prompts = emit_prompts(sections)
 
     if wording_problems:

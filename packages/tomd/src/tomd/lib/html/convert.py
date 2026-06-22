@@ -18,6 +18,7 @@ from . import extract as _extract
 from . import render as _render
 from .images import HtmlImagesResult
 from ..pdf.images import TRUNCATION_MARKER_TEMPLATE
+from ..wording_cleanup import clean_wording_blocks
 
 _log = logging.getLogger(__name__)
 
@@ -105,6 +106,8 @@ def convert_html(
     md = strip_orphan_toc_list(md)
     if metadata:
         md = apply_strip_leading_h1(md, metadata.get("title", ""), 2)
+
+    md = clean_wording_blocks(md)
     md = md.rstrip() + "\n"
 
     prompts: list[str] | None = None

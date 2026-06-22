@@ -14,6 +14,7 @@ from tomd.lib.pdf.structure import (
     _section_top_y, _reorders_only_monospace, _page_is_multicolumn,
     _is_title_like_straggler, _is_empty_heading, _straggler_forward_references,
     _run_recurrence_density, _compute_body_start,
+    _classify_wording_sections, _split_embedded_code,
 )
 
 
@@ -1344,6 +1345,69 @@ class TestSplitMixedMonoSections:
         assert any("upper bound" in s.text for s in paras)
 
 
+class TestWordingSectionCodeGuard:
+    """A syntax-highlighted code block must not be reclassified as wording.
+
+    Some WG21 papers print appendix code listings with keyword syntax
+    highlighting whose keyword color (e.g. green ``#008547``, hue ~152)
+    falls inside the wording "ins" hue band, so ``classify_wording``
+    stamps a stray ``ins`` role on the keyword. When the all-monospace
+    listing has already been merged into a ``CODE`` section, a foreign
+    chromatic color elsewhere in the section (cyan/olive syntax colors)
+    proves it is syntax highlighting, not diff markup, so the section
+    must stay ``CODE`` and render as a fenced block instead of collapsing
+    into a single ``:::wording-add`` line.
+    """
+
+    _GREEN_INS = 0x008547   # ins green keyword, hue ~152
+    _FOREIGN_CYAN = 0x006895  # syntax-highlight cyan, hue ~198 (not ins/del/link)
+    _BLACK = 0x000000
+
+    def _code_section(self, spans):
+        line = Line(spans=spans)
+        return Section(
+            kind=SectionKind.CODE,
+            text=" ".join(s.text for s in spans),
+            lines=[line],
+            confidence=Confidence.HIGH,
+        )
+
+    def test_syntax_highlighted_code_stays_code(self):
+        keyword = Span(text="template", color=self._GREEN_INS,
+                       monospace=True, wording_role="ins")
+        cyan = Span(text="bool", color=self._FOREIGN_CYAN, monospace=True)
+        sec = self._code_section([keyword, cyan])
+
+        _classify_wording_sections([sec])
+
+        assert sec.kind == SectionKind.CODE
+
+    def test_green_only_wording_code_still_reclassified(self):
+        # Control: no foreign chromatic color means genuine green-only
+        # wording-as-code is still promoted, so the guard is targeted.
+        keyword = Span(text="constexpr", color=self._GREEN_INS,
+                       monospace=True, wording_role="ins")
+        black = Span(text="void f();", color=self._BLACK, monospace=True)
+        sec = self._code_section([keyword, black])
+
+        _classify_wording_sections([sec])
+
+        assert sec.kind == SectionKind.WORDING_ADD
+
+    def test_deletion_amid_syntax_highlighting_stays_wording(self):
+        # A genuine strikethrough deletion ("del") inside syntax-highlighted
+        # monospace code (foreign chromatic spans present) is real WG21
+        # wording and must NOT be suppressed by the ins-only code guard.
+        deletion = Span(text="__j", color=self._BLACK,
+                        monospace=True, wording_role="del")
+        magenta = Span(text="__k", color=0xFF00FF, monospace=True)
+        sec = self._code_section([deletion, magenta])
+
+        _classify_wording_sections([sec])
+
+        assert sec.kind == SectionKind.WORDING_REMOVE
+
+
 class TestBlockFontSize:
     def test_line_count_voting(self):
         """Block.font_size uses line-count voting, not character weighting."""
@@ -1513,6 +1577,109 @@ class TestGlyphBulletPrefixLine:
         assert "P3589" in joined, (
             "paper-title body line must survive; was lost when bullet "
             "line was mis-classified as a heading"
+        )
+
+
+class TestMonospaceCodeSyntaxFirstLineNotAHeading:
+    """A monospace first line with code-syntax characters is code, never
+    a section heading.
+
+    Canonical case: single-page extracts of P4012R0 skew the font
+    distribution so the C++ code font ranks above body. Without an
+    outer guard, ``heading_confidence``'s ``font_level`` branch returns
+    ``level = font_level + 1`` and promotes lines like
+    ``V f(int n, short m, ...)`` and ``V x = '\\1'; // OK`` to H2.
+    ``_split_heading_body`` then drops the rest of the listing into a
+    PARAGRAPH where ``emit.py`` renders each monospace span as inline
+    code, splitting one CODE block into "fence + headings + backticked
+    paragraph".
+
+    The conjunction (monospace AND ``_CODE_CHARS`` overlap) is the
+    discriminator: ``std::assert`` is monospace but carries no syntax
+    punctuation and must stay a legitimate code-styled heading
+    (golden: p2040r0).
+    """
+
+    _CODE_LINE = (
+        "V f(int n, short m, std::reference_wrapper <int > l, "
+        "std::reference_wrapper <float > f)"
+    )
+
+    @staticmethod
+    def _mono_section(text, *, font_size, bold=False):
+        return _mk_section(text, font_size=font_size,
+                           monospace=True, bold=bold)
+
+    def test_monospace_code_syntax_at_heading_font_stays_non_heading(self):
+        """A monospace line with parens/semicolons at heading font is not H2."""
+        body_fill = [_mk_section("ordinary body " + ("x" * 80), font_size=10.0)
+                     for _ in range(10)]
+        # 11.0 > 10.0 * _HEADING_SIZE_RATIO (1.05) so it ranks as a heading.
+        sec = self._mono_section(self._CODE_LINE, font_size=11.0)
+        _, result, _ = structure_sections(body_fill + [sec], has_title=True)
+        matches = [s for s in result if self._CODE_LINE in s.text]
+        assert matches, "expected the monospace code line in the output"
+        assert all(s.kind != SectionKind.HEADING for s in matches), (
+            "monospace first line with code-syntax chars must never be "
+            "promoted to HEADING even when its font ranks as a heading size"
+        )
+
+    def test_monospace_bold_code_syntax_stays_non_heading(self):
+        """Bold + monospace + code-syntax + heading font still isn't a heading."""
+        body_fill = [_mk_section("ordinary body " + ("x" * 80), font_size=10.0)
+                     for _ in range(10)]
+        sec = self._mono_section(self._CODE_LINE, font_size=11.0, bold=True)
+        _, result, _ = structure_sections(body_fill + [sec], has_title=True)
+        matches = [s for s in result if self._CODE_LINE in s.text]
+        assert matches
+        assert all(s.kind != SectionKind.HEADING for s in matches)
+
+    def test_monospace_run_collapses_into_one_code_block(self):
+        """A run of monospace code-syntax sections becomes one CODE block.
+
+        Mirrors the P4012R0 page-extract cascade: previously the first
+        line split off as a heading and the rest became a backticked
+        paragraph; now ``_detect_code_blocks`` folds the whole run into
+        a single CODE section.
+        """
+        body_fill = [_mk_section("ordinary body " + ("x" * 80), font_size=10.0)
+                     for _ in range(10)]
+        code_lines = [
+            self._CODE_LINE,
+            "V x = '\\1'; // OK",
+            "x = 1; // OK",
+            "x = V(n); // ill-formed",
+        ]
+        code_secs = [self._mono_section(t, font_size=11.0) for t in code_lines]
+        _, result, _ = structure_sections(body_fill + code_secs,
+                                          has_title=True)
+        code_kinds = [s.kind for s in result
+                      if any(line in s.text for line in code_lines)]
+        assert code_kinds, "expected at least one code section in the output"
+        assert all(k == SectionKind.CODE for k in code_kinds), (
+            "monospace run must collapse to CODE, not split into HEADING + "
+            f"PARAGRAPH; got kinds={code_kinds}"
+        )
+
+    def test_monospace_styled_heading_without_code_syntax_stays_heading(self):
+        """A monospace identifier-only heading like ``std::assert`` is kept.
+
+        Pins the ``_CODE_CHARS`` half of the conjunction: an API-name
+        heading rendered in monospace (no parens, no braces, no ``=``,
+        no semicolon) must still be promoted to a HEADING. Without this
+        guarantee the p2040r0 golden regresses: ``### `std::assert```
+        gets demoted into the following code fence.
+        """
+        body_fill = [_mk_section("ordinary body " + ("x" * 80), font_size=10.0)
+                     for _ in range(10)]
+        sec = self._mono_section("std::assert", font_size=12.0, bold=True)
+        _, result, _ = structure_sections(body_fill + [sec], has_title=True)
+        matches = [s for s in result if s.text == "std::assert"]
+        assert matches, "expected the code-styled heading in the output"
+        assert any(s.kind == SectionKind.HEADING for s in matches), (
+            "monospace identifier-only line at a heading font must stay "
+            "a HEADING (no code-syntax characters means it's a styled name, "
+            "not a code expression)"
         )
 
 
@@ -1948,3 +2115,62 @@ class TestSectionTopY:
                  page_num=7),
         ])
         assert _section_top_y(sec) == 700
+
+
+class TestSplitEmbeddedCode:
+    """`_split_embedded_code` extracts code runs glued into prose."""
+
+    @staticmethod
+    def _line(text, *, mono):
+        return Line(spans=[Span(text=text, monospace=mono)])
+
+    def _paragraph(self, specs):
+        lines = [self._line(t, mono=m) for t, m in specs]
+        text = "\n".join(t for t, _ in specs)
+        return Section(kind=SectionKind.PARAGRAPH, text=text, lines=lines)
+
+    def test_code_run_between_prose_is_extracted(self):
+        sec = self._paragraph([
+            ("Some heading text", False),
+            ("V f(V x) {", True),
+            ("  return x + 1;", True),
+            ("}", True),
+            ("needs to use something else.", False),
+        ])
+        out = _split_embedded_code([sec])
+        kinds = [s.kind for s in out]
+        assert kinds == [
+            SectionKind.PARAGRAPH, SectionKind.CODE, SectionKind.PARAGRAPH,
+        ]
+        assert out[1].text == "V f(V x) {\n  return x + 1;\n}"
+        assert out[0].text == "Some heading text"
+        assert out[2].text == "needs to use something else."
+
+    def test_single_mono_line_not_split(self):
+        # A lone inline monospace line is below _SPLIT_MIN_CODE_RUN.
+        sec = self._paragraph([
+            ("prose before", False),
+            ("inline_ref", True),
+            ("prose after", False),
+        ])
+        out = _split_embedded_code([sec])
+        assert [s.kind for s in out] == [SectionKind.PARAGRAPH]
+
+    def test_wording_section_untouched(self):
+        sec = self._paragraph([
+            ("template<class T> {", True),
+            ("  body;", True),
+        ])
+        sec.kind = SectionKind.WORDING_ADD
+        out = _split_embedded_code([sec])
+        assert out == [sec]
+
+    def test_already_code_section_untouched(self):
+        sec = self._paragraph([
+            ("// comment", False),
+            ("V f(V x) {", True),
+            ("}", True),
+        ])
+        sec.kind = SectionKind.CODE
+        out = _split_embedded_code([sec])
+        assert out == [sec]
