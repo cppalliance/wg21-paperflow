@@ -917,3 +917,24 @@ class TestCodeGutter:
         assert body[0] == "int main() {"
         assert body[1] == "  return 0;"
         assert body[2] == "}"
+
+    def test_runaway_code_column_pinned_to_zero(self):
+        # A right-margin element (e.g. a stable-name anchor) split onto
+        # its own line at x=500 would otherwise produce a code_col in
+        # the high 80s on the 6pt grid (round((500-6)/6) = 82), pushing
+        # the real code past the right margin. The gutter cap rewrites
+        # an implausibly deep column back to 0 so the code stays
+        # readable; line numbers and the regular rows are untouched.
+        sec = _gutter_section([
+            (6, "1", 24, "a();"),
+            (6, "2", 24, "b();"),
+            (6, "3", 24, "c();"),
+            (6, "4", 500, "[anchor]"),
+        ])
+        body = _render_code_block(sec).splitlines()[1:-1]
+        assert body[0] == "1  a();"
+        # The fourth row's code starts at column 2 (right after the
+        # gutter number + its spacer, because the cap pinned the
+        # measured column to 0 and the buf-overflow fallback nudged
+        # past the number).
+        assert body[3] == "4 [anchor]"

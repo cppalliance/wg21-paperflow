@@ -364,6 +364,16 @@ _GUTTER_MIN_NUMBERS = 3
 # else. Anchored so `1.` or `1)` list markers do not qualify.
 _GUTTER_NUMBER_RE = re.compile(r"^\d+$")
 
+# Maximum reconstructed indent for the gutter code path. Line-numbered
+# listings are line-by-line code (rarely nested past a few levels); the
+# deepest legitimate column observed in the gutter goldens is 8, so 32
+# leaves comfortable headroom (4x) while still pinning a right-margin
+# anchor (e.g. a stable-name fragment split onto its own line at x=500)
+# back to column zero instead of pushing the real code past the right
+# margin. The plain native path is intentionally uncapped because its
+# legitimate continuation indents reach the high 30s.
+_MAX_GUTTER_CODE_INDENT = 32
+
 
 def _line_y_center(line: Line) -> float | None:
     """Vertical center of a line's first non-blank glyph, or None if blank."""
@@ -602,6 +612,12 @@ def _render_code_block_with_gutter(
 
         lead = frags[0]
         code_col = grid.column(_first_nonspace_x(lead))
+        # An implausibly deep column means the leading fragment is a
+        # right-margin element (a stable-name anchor split onto its
+        # own line), not real indentation; pin it back to column zero
+        # so the actual code is not pushed past the right margin.
+        if code_col > _MAX_GUTTER_CODE_INDENT:
+            code_col = 0
         code_str = maybe_normalize_code_line(
             _render_line_spans(lead, in_code_section=True).lstrip(),
             preserve_spacing=preserve_spacing,
