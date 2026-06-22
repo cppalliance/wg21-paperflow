@@ -89,8 +89,14 @@ _IDENT_OPEN_ANGLE_RE = re.compile(r"([A-Za-z_]\w*) <(?=[A-Za-z_:])")
 # Space before closing angle bracket when immediately followed by a
 # template-closing punctuation token. Whitespace is intentionally NOT
 # allowed in the lookahead so `a > b` (comparison), `a > 0` and `a >= b`
-# are left alone.
-_SPACE_BEFORE_CLOSE_ANGLE_RE = re.compile(r"(\w) >(?=$|[,;)\]}>]|\(|::|\.|->)")
+# are left alone. The `(?!>)` negative lookahead after the `>` capture
+# also leaves `cin >> x;` and `x >>= y;` (stream / shift operators)
+# untouched: those are a `>` followed by another `>`, not a template
+# close. Nested template close (`vector<vector<int>>`) is still safe
+# because the inner `>` is already adjacent to its neighbor.
+_SPACE_BEFORE_CLOSE_ANGLE_RE = re.compile(
+    r"(\w) >(?!>)(?=$|[,;)\]}>]|\(|::|\.|->)"
+)
 
 # `ident (` where ident is not a control keyword. Function call/decl
 # tightening. Skip-list is consulted at substitution time.

@@ -87,6 +87,19 @@ class TestTemplateAngles:
         # excludes `>` following another `>`.
         assert normalize_code_line("vector<vector<int>>") == "vector<vector<int>>"
 
+    def test_stream_extraction_operator_preserved(self):
+        # `cin >> x;` is a stream extraction, not a template close: the
+        # space-before-`>` rule must leave it alone, otherwise wording
+        # sections that quote `std::cin >> x;` get corrupted to `cin>> x;`.
+        assert normalize_code_line("cin >> x;") == "cin >> x;"
+
+    def test_right_shift_operator_preserved(self):
+        assert normalize_code_line("a >> b;") == "a >> b;"
+
+    def test_compound_right_shift_assignment_preserved(self):
+        # `>>=` starts with `>>`, which the negative lookahead protects.
+        assert normalize_code_line("x >>= y;") == "x >>= y;"
+
 
 class TestAttributeBrackets:
     def test_strip_inside_attribute(self):
