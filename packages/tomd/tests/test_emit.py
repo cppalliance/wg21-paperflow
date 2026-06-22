@@ -541,6 +541,24 @@ class TestRenderWordingSection:
         assert "\nab\n" in out
         assert "\n   cd\n" in out
 
+    def test_code_diff_normalizes_kerning_inside_del_tag(self):
+        # The diff path normalizes PDF kerning in role-less context
+        # already, but until M4 the inner text of an ``<ins>`` / ``<del>``
+        # tag kept the raw extracted spacing. Verify that a contrived
+        # ``explicit (see below)`` deletion is cleaned to
+        # ``explicit(see below)`` inside the tag, matching how the same
+        # token would render outside any role span.
+        l1 = Line(spans=[_mono_span("template<class U>")])
+        l2 = Line(spans=[
+            _mono_span("  constexpr "),
+            _mono_span("explicit (see below)", "del"),
+            _mono_span(" basic_vec(U&& value) noexcept;"),
+        ])
+        sec = _make_wording_section(SectionKind.WORDING_REMOVE, [l1, l2])
+        out = _render_wording_section(sec)
+        assert "<del>explicit(see below)</del>" in out
+        assert "explicit (see below)" not in out
+
     def test_uniform_code_fence_preserves_blank_lines(self):
         # A uniform-ins multi-line monospace block whose middle line is
         # blank in the source PDF (a paragraph break inside a declaration

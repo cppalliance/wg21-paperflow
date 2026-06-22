@@ -103,16 +103,25 @@ def _group_wording_spans(line: Line) -> list[tuple[str | None, list[Span]]]:
     return segments
 
 
-def _role_tag(role: str, spans: list[Span]) -> str:
+def _role_tag(
+    role: str, spans: list[Span], *, normalize: bool = False,
+) -> str:
     """Wrap a same-role run in its ``<ins>`` / ``<del>`` tag.
 
     Leading and trailing whitespace stay outside the tag so adjacent
-    segments join cleanly; the inner text is HTML-escaped.
+    segments join cleanly; the inner text is HTML-escaped. When
+    ``normalize`` is true (the code-diff path), the inner text is also
+    run through :func:`normalize_code_line` so edited tokens get the
+    same PDF kerning cleanup the surrounding role-less context already
+    receives. The prose path keeps ``normalize=False`` because its
+    inner text is natural-language, not C++.
     """
     text = "".join(s.text for s in spans)
     inner = text.strip()
     lead = text[:len(text) - len(text.lstrip())]
     trail = text[len(text.rstrip()):]
+    if normalize:
+        inner = normalize_code_line(inner)
     return f"{lead}<{role}>{_escape_wording_text(inner)}</{role}>{trail}"
 
 
@@ -215,7 +224,7 @@ def _render_wording_code_diff_line(line: Line) -> str:
     """
     def _emit(role: str | None, spans: list[Span]) -> str:
         if role in ("ins", "del"):
-            return _role_tag(role, spans)
+            return _role_tag(role, spans, normalize=True)
         text = "".join(s.text for s in spans)
         return _escape_wording_text(normalize_code_line(text))
 
