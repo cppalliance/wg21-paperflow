@@ -1580,6 +1580,109 @@ class TestGlyphBulletPrefixLine:
         )
 
 
+class TestMonospaceCodeSyntaxFirstLineNotAHeading:
+    """A monospace first line with code-syntax characters is code, never
+    a section heading.
+
+    Canonical case: single-page extracts of P4012R0 skew the font
+    distribution so the C++ code font ranks above body. Without an
+    outer guard, ``heading_confidence``'s ``font_level`` branch returns
+    ``level = font_level + 1`` and promotes lines like
+    ``V f(int n, short m, ...)`` and ``V x = '\\1'; // OK`` to H2.
+    ``_split_heading_body`` then drops the rest of the listing into a
+    PARAGRAPH where ``emit.py`` renders each monospace span as inline
+    code, splitting one CODE block into "fence + headings + backticked
+    paragraph".
+
+    The conjunction (monospace AND ``_CODE_CHARS`` overlap) is the
+    discriminator: ``std::assert`` is monospace but carries no syntax
+    punctuation and must stay a legitimate code-styled heading
+    (golden: p2040r0).
+    """
+
+    _CODE_LINE = (
+        "V f(int n, short m, std::reference_wrapper <int > l, "
+        "std::reference_wrapper <float > f)"
+    )
+
+    @staticmethod
+    def _mono_section(text, *, font_size, bold=False):
+        return _mk_section(text, font_size=font_size,
+                           monospace=True, bold=bold)
+
+    def test_monospace_code_syntax_at_heading_font_stays_non_heading(self):
+        """A monospace line with parens/semicolons at heading font is not H2."""
+        body_fill = [_mk_section("ordinary body " + ("x" * 80), font_size=10.0)
+                     for _ in range(10)]
+        # 11.0 > 10.0 * _HEADING_SIZE_RATIO (1.05) so it ranks as a heading.
+        sec = self._mono_section(self._CODE_LINE, font_size=11.0)
+        _, result, _ = structure_sections(body_fill + [sec], has_title=True)
+        matches = [s for s in result if self._CODE_LINE in s.text]
+        assert matches, "expected the monospace code line in the output"
+        assert all(s.kind != SectionKind.HEADING for s in matches), (
+            "monospace first line with code-syntax chars must never be "
+            "promoted to HEADING even when its font ranks as a heading size"
+        )
+
+    def test_monospace_bold_code_syntax_stays_non_heading(self):
+        """Bold + monospace + code-syntax + heading font still isn't a heading."""
+        body_fill = [_mk_section("ordinary body " + ("x" * 80), font_size=10.0)
+                     for _ in range(10)]
+        sec = self._mono_section(self._CODE_LINE, font_size=11.0, bold=True)
+        _, result, _ = structure_sections(body_fill + [sec], has_title=True)
+        matches = [s for s in result if self._CODE_LINE in s.text]
+        assert matches
+        assert all(s.kind != SectionKind.HEADING for s in matches)
+
+    def test_monospace_run_collapses_into_one_code_block(self):
+        """A run of monospace code-syntax sections becomes one CODE block.
+
+        Mirrors the P4012R0 page-extract cascade: previously the first
+        line split off as a heading and the rest became a backticked
+        paragraph; now ``_detect_code_blocks`` folds the whole run into
+        a single CODE section.
+        """
+        body_fill = [_mk_section("ordinary body " + ("x" * 80), font_size=10.0)
+                     for _ in range(10)]
+        code_lines = [
+            self._CODE_LINE,
+            "V x = '\\1'; // OK",
+            "x = 1; // OK",
+            "x = V(n); // ill-formed",
+        ]
+        code_secs = [self._mono_section(t, font_size=11.0) for t in code_lines]
+        _, result, _ = structure_sections(body_fill + code_secs,
+                                          has_title=True)
+        code_kinds = [s.kind for s in result
+                      if any(line in s.text for line in code_lines)]
+        assert code_kinds, "expected at least one code section in the output"
+        assert all(k == SectionKind.CODE for k in code_kinds), (
+            "monospace run must collapse to CODE, not split into HEADING + "
+            f"PARAGRAPH; got kinds={code_kinds}"
+        )
+
+    def test_monospace_styled_heading_without_code_syntax_stays_heading(self):
+        """A monospace identifier-only heading like ``std::assert`` is kept.
+
+        Pins the ``_CODE_CHARS`` half of the conjunction: an API-name
+        heading rendered in monospace (no parens, no braces, no ``=``,
+        no semicolon) must still be promoted to a HEADING. Without this
+        guarantee the p2040r0 golden regresses: ``### `std::assert```
+        gets demoted into the following code fence.
+        """
+        body_fill = [_mk_section("ordinary body " + ("x" * 80), font_size=10.0)
+                     for _ in range(10)]
+        sec = self._mono_section("std::assert", font_size=12.0, bold=True)
+        _, result, _ = structure_sections(body_fill + [sec], has_title=True)
+        matches = [s for s in result if s.text == "std::assert"]
+        assert matches, "expected the code-styled heading in the output"
+        assert any(s.kind == SectionKind.HEADING for s in matches), (
+            "monospace identifier-only line at a heading font must stay "
+            "a HEADING (no code-syntax characters means it's a styled name, "
+            "not a code expression)"
+        )
+
+
 class TestDemoteRepeatedLowConfidenceNumbers:
     """Paragraph-number resets collapse to PARAGRAPH; TOC/body pairs do not."""
 

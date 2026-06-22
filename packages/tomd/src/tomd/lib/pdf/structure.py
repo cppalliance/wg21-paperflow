@@ -1304,6 +1304,23 @@ def _structure_body_impl(metadata: dict,
             )
         )
 
+        # A monospace first line carrying code-syntax characters (parens,
+        # braces, semicolons, ``=``, ``<``/``>``, ``[``/``]``) is a code
+        # line, never a WG21 section heading. Single-page PDF extracts
+        # skew the font distribution so the code font ranks as a heading
+        # size; without this gate a line like ``V f(int n, ...)`` or
+        # ``V x = '\1'; // OK`` is promoted to H2 and the rest of the
+        # listing is dropped into a PARAGRAPH where emit.py renders each
+        # monospace span as inline code, splitting one CODE block into a
+        # fence + heading + backticked paragraph. The ``_CODE_CHARS``
+        # conjunction is what distinguishes a syntactic code line from a
+        # legitimate code-styled heading like ``std::assert`` (monospace
+        # at a heading font, but no syntax punctuation).
+        first_line_is_mono_code = (
+            bool(sec.lines) and sec.lines[0].is_monospace
+            and bool(_CODE_CHARS & set(first_line))
+        )
+
         # A section with no visible text (e.g. a blank elevated-font spacer
         # on a TOC page) must never become a heading; otherwise emit.py
         # renders it as a textless "##### ".
@@ -1312,7 +1329,8 @@ def _structure_body_impl(metadata: dict,
 
         if (heading_has_text
                 and (has_number or font_level is not None or is_known or is_bold)
-                and not first_line_is_bullet_marker):
+                and not first_line_is_bullet_marker
+                and not first_line_is_mono_code):
             number_level = _heading_level_from_number(section_num) if has_number else 0
             level, conf = heading_confidence(
                 has_number, number_level, font_level, is_bold, is_known)
@@ -1332,6 +1350,9 @@ def _structure_body_impl(metadata: dict,
             # clamped to at least 3 so bold-only never becomes H2.
             # Reject if the line contains code-like characters or is
             # monospace (avoids misclassifying code fragments as headings).
+            # The monospace+code-syntax case is already filtered by the
+            # outer guard; this is the safety net for bold-only mono with
+            # no syntax punctuation at LOW confidence.
             if level == 0 and is_bold and conf == Confidence.LOW:
                 has_code_chars = bool(_CODE_CHARS & set(first_line))
                 is_mono = bool(sec.lines) and sec.lines[0].is_monospace
