@@ -21,7 +21,7 @@ from .glyphs import (
     GlyphPassStats,
 )
 from .images import TRUNCATION_MARKER_TEMPLATE, VectorUncertaintyStats
-from .types import Line, Span, Section, SectionKind, BULLET_CHARS, BULLET_RE, NUMBERED_LIST_RE, FigureGraph
+from .types import Line, Span, Section, SectionKind, BULLET_CHARS, BULLET_RE, NUMBERED_LIST_RE, FigureGraph, FALLBACK_FONT_SIZE
 from .vector_images import format_uncertainty_marker, should_emit_marker
 from ..wording_markup import WORDING_FENCE_CLOSE, wording_fence_open
 
@@ -192,7 +192,9 @@ def _render_heading_spans(sec: Section) -> str:
         return f"{prefix} {clean_text}" if clean_text else ""
 
     anchor_y, anchor_fs, _, _ = rows[0]
-    row_tol = anchor_fs * _HEADING_SAME_ROW_FONT_FRACTION
+    # Type-3/bitmap fonts report font_size 0; fall back so the tolerance never
+    # collapses to 0 and demotes a same-baseline title to a body paragraph.
+    row_tol = (anchor_fs or FALLBACK_FONT_SIZE) * _HEADING_SAME_ROW_FONT_FRACTION
 
     seen: set[str] = set()
     parts: list[str] = []

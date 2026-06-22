@@ -225,6 +225,32 @@ def test_strip_repeating_edge_band_strips_short_footer_keeps_body():
     assert body in texts
 
 
+def test_strip_repeating_edge_band_keeps_short_body_line_in_tall_block():
+    """A short (<= word-cap) genuine body line landing in the footer band's
+    y-bucket must NOT be stripped when it belongs to a tall body block. The
+    band strip fires only inside small edge (footer) blocks; body flows in tall
+    blocks. Pins the fix for the silent short-body-line data loss."""
+    lines = [
+        _make_line("first body line of a full page", 120),
+        _make_line("more body text in the middle", 400),
+        _make_line("See annex B for details.", 790),   # 5 words, in the band
+    ]
+    block = Block(lines=lines, bbox=(50.0, 120.0, 550.0, 802.0), page_num=2)
+    repeating = {(796.0, "__EDGE_BAND__")}
+    result = strip_repeating([block], repeating)
+    texts = [ln.text for blk in result for ln in blk.lines]
+    assert "See annex B for details." in texts
+
+
+def test_strip_repeating_edge_band_still_strips_short_footer_block():
+    """Regression guard: a short footer in a small edge block at the band y is
+    still stripped after the edge-block gate."""
+    block = _make_block_at_y([("Normative references 2", 790)])  # top 790 > 700
+    repeating = {(796.0, "__EDGE_BAND__")}
+    result = strip_repeating([block], repeating)
+    assert result == []
+
+
 def test_strip_repeating_edge_band_does_not_shred_body_spans():
     """A long (>word-cap) body line sharing the band y must keep all its
     spans: the band rule matches whole short lines, never individual spans

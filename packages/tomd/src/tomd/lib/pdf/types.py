@@ -209,9 +209,11 @@ EDGE_ITEMS_PER_PAGE = 3
 
 # A running footer band recurs at a fixed bottom-margin y across pages but its
 # text varies per page (e.g. "Scope", "Normative references 2", "§ 6.9.2.2 6").
-# The band is identified by a bare page number recurring in it; only lines this
-# short or shorter are stripped, so a one-off body line that happens to share
-# the band's y survives. Running titles are short; body lines are not.
+# The band is identified by a bare page number recurring in it. The strip is
+# bounded two ways so it never drops body content: it fires only inside small
+# edge (footer) blocks, never tall body blocks, and only on lines this short or
+# shorter (running titles are short; a wide body line that shares the band's y
+# survives the word cap regardless).
 RUNNING_FOOTER_MAX_WORDS = 8
 
 # The varying-text footer-band rule only fires in the bottom page margin

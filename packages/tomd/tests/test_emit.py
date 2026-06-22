@@ -78,6 +78,24 @@ def test_emit_heading_joins_mixed_font_row_by_baseline():
     assert "## 19 SCOPE" in md
 
 
+def test_emit_heading_joins_split_row_when_font_size_zero():
+    """Type-3/bitmap fonts report ``font_size`` 0, so the same-row tolerance
+    would collapse to 0 and join only exact-midpoint lines, demoting a split
+    "1" / "Scope" title to a body paragraph. A fallback font size keeps the row
+    together."""
+    sec = make_section(
+        "1\nScope", kind=SectionKind.HEADING, heading_level=2,
+        lines=[
+            Line(spans=[make_span("1", font_size=0.0)],
+                 bbox=(50, 100, 70, 122), page_num=0),     # midpoint 111
+            Line(spans=[make_span("Scope", font_size=0.0)],
+                 bbox=(80, 105, 200, 121), page_num=0),    # midpoint 113
+        ],
+    )
+    md = emit_markdown({}, [sec])
+    assert "## 1 Scope" in md
+
+
 def test_emit_paragraph_unwrapped():
     sec = make_section("Hello world")
     md = emit_markdown({}, [sec])

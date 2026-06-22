@@ -22,6 +22,20 @@ _EDGE_BLOCK_TOP_MAX_Y = 60.0
 _EDGE_BLOCK_BOTTOM_MIN_Y = 700.0
 
 
+def _is_edge_block(block: Block) -> bool:
+    """Whether a block is a small assembly hugging the top or bottom page edge.
+
+    Header/footer chrome sits in short blocks at the page margins; body text
+    flows in tall blocks spanning the text column. The footer-band strip and
+    the co-location strip both use this to avoid touching body content.
+    """
+    blk_height = block.bbox[3] - block.bbox[1]
+    blk_top = block.bbox[1]
+    return (blk_height < _EDGE_BLOCK_MAX_HEIGHT
+            and (blk_top < _EDGE_BLOCK_TOP_MAX_Y
+                 or blk_top > _EDGE_BLOCK_BOTTOM_MIN_Y))
+
+
 def _y_bucket(bbox: tuple[float, float, float, float]) -> float:
     """Quantize a bbox's vertical center to the Y_TOLERANCE grid."""
     y_center = (bbox[1] + bbox[3]) / 2.0
@@ -180,23 +194,27 @@ def strip_repeating(blocks: list[Block], repeating: set[tuple[float, str]],
                 + patterns_by_y.get(y_key, [])
                 + patterns_by_y.get(y_key + Y_TOLERANCE, []))
 
-    def _matches(text: str, rpattern: str, whole_line: bool = False) -> bool:
+    def _matches(text: str, rpattern: str, whole_line: bool = False,
+                 is_edge_block: bool = True) -> bool:
         if rpattern == text:
             return True
         if rpattern == "__PAGE_NUM__" and PAGE_NUM_RE.match(text):
             return True
         if rpattern == "__DOC_NUM__" and DOC_NUM_RE.search(text):
             return True
-        # A footer band strips whole short lines, never individual spans:
+        # A footer band strips whole short lines (never individual spans:
         # span-level matching would shred a long body line that happens to
-        # share the band's y (each short span would match the word cap).
-        if (rpattern == "__EDGE_BAND__" and whole_line
+        # share the band's y) and only inside small edge blocks. The band is a
+        # varying-text heuristic, so without the edge-block gate a genuine
+        # short body line that lands in the band's y-bucket would be dropped.
+        if (rpattern == "__EDGE_BAND__" and whole_line and is_edge_block
                 and len(text.split()) <= RUNNING_FOOTER_MAX_WORDS):
             return True
         return False
 
     result = []
     for block in blocks:
+        block_is_edge = _is_edge_block(block)
         kept_lines = []
         # Track y-buckets of stripped lines so co-located sibling lines
         # (variable header text like "3 Motivation" next to repeating
@@ -213,7 +231,8 @@ def strip_repeating(blocks: list[Block], repeating: set[tuple[float, str]],
                 kept_lines.append(line)
                 continue
 
-            if any(_matches(text, rp, whole_line=True) for rp in line_patterns):
+            if any(_matches(text, rp, whole_line=True, is_edge_block=block_is_edge)
+                   for rp in line_patterns):
                 if block.page_num == 0 and line.bbox[1] < _page0_meta_y:
                     kept_lines.append(line)
                     continue
@@ -248,12 +267,7 @@ def strip_repeating(blocks: list[Block], repeating: set[tuple[float, str]],
         # word-count test the __EDGE_BAND__ rule uses), so it survives the
         # co-location strip even when it shares a stripped y-bucket.
         if stripped_y_buckets and kept_lines:
-            blk_height = block.bbox[3] - block.bbox[1]
-            blk_top = block.bbox[1]
-            is_edge_block = (blk_height < _EDGE_BLOCK_MAX_HEIGHT
-                             and (blk_top < _EDGE_BLOCK_TOP_MAX_Y
-                                  or blk_top > _EDGE_BLOCK_BOTTOM_MIN_Y))
-            if is_edge_block:
+            if block_is_edge:
                 kept_lines = [
                     ln for ln in kept_lines
                     if _y_bucket(ln.bbox) not in stripped_y_buckets
