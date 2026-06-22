@@ -183,13 +183,22 @@ def _render_wording_code_block(sec: Section, lang: str) -> str:
     """
     grid = CodeGrid.for_code_section(sec)
     code_lines: list[str] = []
+    has_content = False
     for line in sec.lines:
         text = "".join(span.text for span in line.spans).rstrip()
         if not text:
+            # Preserve blank lines so a fenced wording listing keeps
+            # the same paragraph rhythm the source PDF had: the plain
+            # code path also keeps them (a fenced ``cpp`` block with a
+            # blank middle line renders as two visual paragraphs of
+            # code), and dropping them silently rewraps unrelated
+            # declarations together.
+            code_lines.append("")
             continue
+        has_content = True
         indent = grid.indent(line, max_indent=_MAX_CODE_DIFF_INDENT)
         code_lines.append(" " * indent + normalize_code_line(text.lstrip()))
-    if not code_lines:
+    if not has_content:
         return ""
     return f"```{lang}\n" + "\n".join(code_lines) + "\n```"
 

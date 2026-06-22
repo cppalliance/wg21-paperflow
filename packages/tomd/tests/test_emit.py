@@ -541,6 +541,24 @@ class TestRenderWordingSection:
         assert "\nab\n" in out
         assert "\n   cd\n" in out
 
+    def test_uniform_code_fence_preserves_blank_lines(self):
+        # A uniform-ins multi-line monospace block whose middle line is
+        # blank in the source PDF (a paragraph break inside a declaration
+        # list) must render with that blank line preserved inside the
+        # fence, mirroring the plain code path. Dropping it silently
+        # rewraps unrelated declarations together.
+        s1 = Span(text="int a;", monospace=True, bbox=(0.0, 0.0, 12.0, 10.0))
+        s1.wording_role = "ins"
+        s3 = Span(text="int b;", monospace=True, bbox=(0.0, 24.0, 12.0, 34.0))
+        s3.wording_role = "ins"
+        sec = _make_wording_section(
+            SectionKind.WORDING_ADD,
+            [Line(spans=[s1]), Line(spans=[]), Line(spans=[s3])],
+        )
+        out = _render_wording_section(sec)
+        assert "```cpp" in out
+        assert "int a;\n\nint b;" in out
+
     def test_near_uniform_add_with_minority_del_falls_through_to_diff(self):
         # An almost-uniform-ins block that still carries a small ``<del>``
         # run must NOT be fenced: a fence path drops inline role tags, so
