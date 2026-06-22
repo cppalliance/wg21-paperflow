@@ -799,7 +799,32 @@ async def run_full(
     on_progress: ProgressCallback | None = None,
     on_stage_complete: StageCompleteCallback | None = None,
 ) -> dict:
-    """Chain mailing -> download -> convert for the given targets."""
+    """Chain mailing, download, convert, and citation extraction.
+
+    Mailing runs only when ``targets`` are years or ``["all"]``. For
+    paper-ID targets, mailing is skipped entirely; if
+    ``on_stage_complete`` is set, it is called with
+    ``("mailing", None)`` to signal that the stage did not run.
+
+    Download and convert always run. Convert uses ``concurrency // 2``
+    workers (minimum 1). ``extract_vector`` and ``whiteout_text`` are
+    forwarded to :func:`run_convert`.
+
+    Citation extraction runs after convert. Failures there are recorded
+    in the returned ``"citations"`` aggregate but do not discard earlier
+    stage results.
+
+    Returns a dict with ``"download"``, ``"convert"``, and
+    ``"citations"`` keys, plus ``"mailing"`` when that stage ran. Each
+    stage value is a ``{"succeeded", "skipped", "failed"}`` aggregate.
+
+    ``on_progress`` receives stage-prefixed
+    :class:`~paperstore.progress.ProgressEvent` objects (e.g.
+    ``"Mailing 2026"``, ``"Downloading P1000R0"``).
+    ``on_stage_complete(stage, result)`` is invoked after each of
+    mailing, download, and convert; ``result=None`` means the stage was
+    not executed.
+    """
     target_type = _validate_targets(targets)
 
     # Determine years for mailing stage.
