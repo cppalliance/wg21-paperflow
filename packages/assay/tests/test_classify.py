@@ -77,6 +77,7 @@ class _StubAgent:
 
 
 class _Step:
+    name = "6. Classify"
     model = "fast"
     max_output_tokens = 16384
     thinking_budget = 4096
