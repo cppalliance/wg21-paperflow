@@ -151,6 +151,20 @@ def test_hatemplate_boilerplate_strips_chrome():
     assert soup.find("div", id="hide") is None
     assert soup.find("div", class_="marginalizedparent") is None
     assert soup.find("div", class_="sourceLinkParent") is None
+    # The title <h1> is stripped so it does not inflate the heading-level
+    # baseline used by _normalize_heading_levels.
+    assert soup.find("h1") is None
+
+
+def test_hatemplate_heading_levels_not_offset_by_title_h1():
+    """Body headings keep their source level: stripping the title <h1> keeps
+    it out of the minimum-heading calculation, so body headings are not
+    offset by +1 (### staying ###, not becoming ####)."""
+    soup = parse_html(_load("hatemplate_sample.html"))
+    strip_boilerplate(soup, "hatemplate")
+    md = render_body(soup, "hatemplate")
+    assert "### 1.1 Header synopsis [test.syn]" in md
+    assert "##### " not in md
 
 
 def test_hatemplate_wording_flows_as_prose():

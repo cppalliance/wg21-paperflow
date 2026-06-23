@@ -172,7 +172,8 @@ Tightening similarity without prompts; loosening TOC detection; aggressive parag
 
 **Repeating detection**
 
-- Bucket by quantized **y** (`Y_TOLERANCE`). Mark repeating when the bucket appears on **at least half** of all pages **and** lines match **exact text**, **page-number patterns**, or **document-number patterns** ([`detect_repeating`](lib/pdf/cleanup.py)).
+- Bucket by quantized **y** (`Y_TOLERANCE`). Mark repeating when the bucket appears on **at least half** of all pages **and** lines match **exact text**, **page-number patterns**, **document-number patterns**, or a **varying-text footer band** ([`detect_repeating`](lib/pdf/cleanup.py)).
+- The **footer band** is a fourth category for running footers whose text varies per page (a running section title plus its page number). The band is identified by a **recurring bare page number** in the bucket on at least half the pages, gated to the **bottom margin** (`y > page_height * EDGE_BAND_BOTTOM_FRACTION`, so the section-heading band at the top of body pages is never matched), and at strip time removes **whole short lines only** (`len(words) <= RUNNING_FOOTER_MAX_WORDS`), never individual spans, so a long body line sharing the band's y survives ([`types.py`](lib/pdf/types.py) `EDGE_BAND_BOTTOM_FRACTION`, `RUNNING_FOOTER_MAX_WORDS`).
 
 **Skip short PDFs**
 

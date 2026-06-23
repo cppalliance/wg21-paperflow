@@ -1449,12 +1449,14 @@ def run_pipeline(
             # readability gate so unreadable PDFs discard glyph state too.
             glyph_candidates: list = []
             text_emoji_by_page: dict[int, list] = {}
+            page_height = 0.0
 
             for pg_num in range(result.page_count):
                 page = doc[pg_num]
                 page_widths[pg_num] = page.rect.width
                 if page.rotation:
                     page_rotations[pg_num] = tuple(page.rotation_matrix)
+                page_height = max(page_height, page.rect.height)
 
                 mupdf_blocks = extract_mupdf(page, pg_num)
                 spatial_blocks = extract_spatial(page, pg_num)
@@ -1651,7 +1653,7 @@ def run_pipeline(
                 result.glyph_stats.free_standing,
             )
 
-    repeating = detect_repeating(all_edge_items, result.page_count)
+    repeating = detect_repeating(all_edge_items, result.page_count, page_height)
     if repeating:
         _log.info("Stripping %d repeating header/footer patterns", len(repeating))
         all_mupdf_blocks = strip_repeating(all_mupdf_blocks, repeating)

@@ -124,6 +124,57 @@ def test_detect_repeating_page_number_pattern():
     assert (586.0, "__PAGE_NUM__") in result
 
 
+def test_detect_repeating_edge_band_varying_titles():
+    """A running footer band (varying section title + page number at a fixed
+    bottom-margin y) is classified as __EDGE_BAND__ via the recurring page
+    number."""
+    titles = ["Scope", "Normative references", "Terms and definitions", "§ 4.2"]
+    all_edges = []
+    for i, title in enumerate(titles):
+        pg = i + 1
+        all_edges.append([
+            PageEdgeItem(text=title, y=790.0, page_num=pg,
+                         bbox=(64, 790, 200, 800)),
+            PageEdgeItem(text=str(pg), y=790.0, page_num=pg,
+                         bbox=(525, 790, 535, 800)),
+        ])
+    result = detect_repeating(all_edges, total_pages=4, page_height=842.0)
+    # bbox center (790+800)/2 = 795, quantized to Y_TOLERANCE=2 -> 796.
+    assert (796.0, "__EDGE_BAND__") in result
+
+
+def test_detect_repeating_edge_band_only_in_bottom_margin():
+    """The footer-band rule must NOT fire on the top-of-page section-heading
+    band, whose bare section numbers ("1", "2", ...) also match PAGE_NUM_RE.
+    A recurring number band high on the page is left alone."""
+    # Heading band near the top: number + title at y~101 on each page.
+    titles = ["Scope", "Normative references", "Terms and definitions"]
+    all_edges = []
+    for i, title in enumerate(titles):
+        pg = i + 1
+        all_edges.append([
+            PageEdgeItem(text=str(pg), y=101.0, page_num=pg,
+                         bbox=(63, 101, 70, 110)),
+            PageEdgeItem(text=title, y=101.0, page_num=pg,
+                         bbox=(98, 101, 250, 110)),
+        ])
+    result = detect_repeating(all_edges, total_pages=3, page_height=842.0)
+    assert not any(p == "__EDGE_BAND__" for _, p in result)
+
+
+def test_detect_repeating_edge_band_needs_recurring_page_number():
+    """Without a recurring bare page number, a varying-text footer band is not
+    treated as chrome (falls through to the exact-text rule, which also misses
+    it) so unique edge content is preserved."""
+    titles = ["Scope", "Normative references", "Terms and definitions", "§ 4.2"]
+    all_edges = [
+        [PageEdgeItem(text=t, y=790.0, page_num=i + 1, bbox=(64, 790, 200, 800))]
+        for i, t in enumerate(titles)
+    ]
+    result = detect_repeating(all_edges, total_pages=4, page_height=842.0)
+    assert not any(p == "__EDGE_BAND__" for _, p in result)
+
+
 def test_detect_repeating_doc_number_pattern():
     """Running doc number at same y across pages is classified as __DOC_NUM__."""
     # Same paper, revision number varies line-by-line — not realistic, but exercises
@@ -276,6 +327,71 @@ def test_strip_repeating_removes_page_numbers():
     texts = [ln.text for ln in result[0].lines]
     assert "42" not in texts
     assert "Body line" in texts
+
+
+def test_strip_repeating_edge_band_strips_short_footer_keeps_body():
+    """__EDGE_BAND__ strips a short running-footer line at the band y but
+    preserves a long body line that happens to share the band y-bucket."""
+    body = "this is a genuine body sentence that runs the full width of the page"
+    b = _make_block_at_y([("Normative references 2", 790), (body, 790)])
+    repeating = {(796.0, "__EDGE_BAND__")}
+    result = strip_repeating([b], repeating)
+    texts = [ln.text for blk in result for ln in blk.lines]
+    assert "Normative references 2" not in texts
+    assert body in texts
+
+
+def test_strip_repeating_edge_band_keeps_short_body_line_in_tall_block():
+    """A short (<= word-cap) genuine body line landing in the footer band's
+    y-bucket must NOT be stripped when it belongs to a tall body block. The
+    band strip fires only inside small edge (footer) blocks; body flows in tall
+    blocks. Pins the fix for the silent short-body-line data loss."""
+    lines = [
+        _make_line("first body line of a full page", 120),
+        _make_line("more body text in the middle", 400),
+        _make_line("See annex B for details.", 790),   # 5 words, in the band
+    ]
+    block = Block(lines=lines, bbox=(50.0, 120.0, 550.0, 802.0), page_num=2)
+    repeating = {(796.0, "__EDGE_BAND__")}
+    result = strip_repeating([block], repeating)
+    texts = [ln.text for blk in result for ln in blk.lines]
+    assert "See annex B for details." in texts
+
+
+def test_strip_repeating_edge_band_still_strips_short_footer_block():
+    """Regression guard: a short footer in a small edge block at the band y is
+    still stripped after the edge-block gate."""
+    block = _make_block_at_y([("Normative references 2", 790)])  # top 790 > 700
+    repeating = {(796.0, "__EDGE_BAND__")}
+    result = strip_repeating([block], repeating)
+    assert result == []
+
+
+def test_strip_repeating_edge_band_does_not_shred_body_spans():
+    """A long (>word-cap) body line sharing the band y must keep all its
+    spans: the band rule matches whole short lines, never individual spans
+    (each short span would otherwise hit the word cap and be stripped)."""
+    words = ["this", "genuine", "body", "line", "has", "many", "short",
+             "spans", "that", "run", "wide"]
+    spans = [Span(text=w + " ", font_name="Body", font_size=11.0,
+                  bbox=(50.0 + i * 40, 790.0, 80.0 + i * 40, 802.0))
+             for i, w in enumerate(words)]
+    line = Line(spans=spans, bbox=(50.0, 790.0, 500.0, 802.0), page_num=0)
+    block = Block(lines=[line], bbox=line.bbox, page_num=0)
+    repeating = {(796.0, "__EDGE_BAND__")}
+    result = strip_repeating([block], repeating)
+    kept = [s.text.strip() for blk in result for ln in blk.lines for s in ln.spans]
+    assert kept == words
+
+
+def test_strip_repeating_edge_band_strips_roman_footer():
+    """The band strip also removes a footer using a roman page number
+    ("Contents ii") even though roman numerals aren't bare page numbers:
+    the band is identified elsewhere, and the whole short band is chrome."""
+    b = _make_block_at_y([("Contents ii", 790)])
+    repeating = {(796.0, "__EDGE_BAND__")}
+    result = strip_repeating([b], repeating)
+    assert result == []
 
 
 def test_strip_repeating_y_tolerance():

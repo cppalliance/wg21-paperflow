@@ -220,6 +220,7 @@ Before dual extraction, scan all pages for repeating content at page edges.
 - Compare across pages: same text at same y on 50%+ of pages = repeating = strip
 - Page numbers: same y, content is a bare number or "Page N" or "N of M" = strip
 - Running doc numbers: same y, content matches document number pattern = strip
+- Varying-text footer band: a running footer whose text changes per page (a running section title plus its page number, e.g. "Normative references 2") is not caught by the exact-text or all-page-number rules. When a bare page number recurs in the band on 50%+ of pages, the whole band is page chrome. Gated to the bottom margin (`y > page_height * EDGE_BAND_BOTTOM_FRACTION`) so the top-of-page section-heading band, whose bare section numbers also look like page numbers, is never stripped. Because the band is a varying-text heuristic, the strip is bounded so it never drops body content: it fires only inside small edge (footer) blocks (`_is_edge_block`), never tall body blocks, and only on whole short lines (`len(words) <= RUNNING_FOOTER_MAX_WORDS`), never individual spans, so a body line that shares the band's y survives either because it sits in a tall block or because it exceeds the word cap. Both constants live in `types.py`.
 - Strip these items from page data before extraction runs. They are not content.
 
 ## Text Cleanup Rules
