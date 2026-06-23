@@ -33,7 +33,7 @@ def test_run_mailing_skips_past_indexed_year_by_default(tmp_path: Path) -> None:
     store = SqliteBackend(tmp_path)
     _seed_year(store, "2024")
 
-    with patch("mailing.scrape.fetch_all_mailings_for_year") as fetch:
+    with patch("cli.jobs.fetch_all_mailings_for_year") as fetch:
         result = asyncio.run(run_mailing(["2024"], store, current_year="2026"))
 
     fetch.assert_not_called()
@@ -47,7 +47,7 @@ def test_run_mailing_force_bypasses_skip_and_updates_metadata(tmp_path: Path) ->
     _seed_year(store, "2024")
 
     with patch(
-        "mailing.scrape.fetch_all_mailings_for_year", side_effect=_fake_fetch
+        "cli.jobs.fetch_all_mailings_for_year", side_effect=_fake_fetch
     ) as fetch:
         result = asyncio.run(
             run_mailing(["2024"], store, current_year="2026", force=True)
@@ -73,7 +73,7 @@ def test_run_mailing_force_preserves_source_and_markdown_paths(
     assert before.source_file
     assert before.markdown_path
 
-    with patch("mailing.scrape.fetch_all_mailings_for_year", side_effect=_fake_fetch):
+    with patch("cli.jobs.fetch_all_mailings_for_year", side_effect=_fake_fetch):
         asyncio.run(
             run_mailing(["2024"], store, current_year="2026", force=True)
         )
@@ -90,7 +90,7 @@ def test_run_mailing_current_year_always_refetches(tmp_path: Path) -> None:
     _seed_year(store, "2026")
 
     with patch(
-        "mailing.scrape.fetch_all_mailings_for_year", side_effect=_fake_fetch
+        "cli.jobs.fetch_all_mailings_for_year", side_effect=_fake_fetch
     ) as fetch:
         result = asyncio.run(run_mailing(["2026"], store, current_year="2026"))
 

@@ -1,8 +1,9 @@
 """Header/footer detection and text cleanup for PDF extraction."""
 
+import fitz
 import logging
 import re
-from collections import defaultdict, Counter
+from collections import defaultdict
 from dataclasses import replace
 
 from .. import strip_format_chars, DOC_NUM_RE
@@ -20,6 +21,14 @@ _log = logging.getLogger(__name__)
 _EDGE_BLOCK_MAX_HEIGHT = 30.0
 _EDGE_BLOCK_TOP_MAX_Y = 60.0
 _EDGE_BLOCK_BOTTOM_MIN_Y = 700.0
+
+# A text "recurs" once it appears at the same edge y-position on at least this
+# many distinct pages. Floor for the alternating-header coverage-union branch.
+_MIN_RECUR_PAGES = 2
+# Max distinct texts an alternating running header may have (title on recto,
+# authors on verso = 2). Bounds the coverage-union branch so it cannot fire on
+# many-variant edge recurrence (slide-title sets, recurring code-line clusters).
+_MAX_HEADER_VARIANTS = 2
 
 
 def _is_edge_block(block: Block) -> bool:
@@ -92,8 +101,17 @@ def detect_repeating(all_edge_items: list[list[PageEdgeItem]],
     """Identify header/footer items that repeat across pages.
 
     For each page, captures the top and bottom EDGE_ITEMS_PER_PAGE items
-    by y-coordinate. Items appearing at the same y-position on at least
-    half the pages are classified as repeating.
+    by y-coordinate. The unit of repetition is the distinct PAGE: a text is
+    a running header/footer when it appears at the same y-position on at
+    least half the pages (>= threshold distinct pages). The dual MuPDF +
+    spatial extraction paths each contribute one item per page, so distinct
+    pages, not raw item counts, are what cross the threshold.
+
+    Within a gated bucket where no single text reaches threshold, the
+    coverage-union fallback handles alternating headers (title on recto,
+    authors on verso): a set of at most _MAX_HEADER_VARIANTS verbatim texts,
+    each recurring on >= _MIN_RECUR_PAGES pages, whose page union covers
+    >= threshold pages, is stripped together.
 
     page_height (the representative page height in points) gates the
     varying-text footer-band rule to the bottom margin; pass 0.0 to
@@ -149,15 +167,37 @@ def detect_repeating(all_edge_items: list[list[PageEdgeItem]],
                 _log.debug("Repeating footer band at y=%.1f", y_key)
                 continue
 
-        text_counts = Counter(it.text for it in items)
-        exact_hit = False
-        for text, count in text_counts.items():
-            if count >= threshold:
+        # A running header/footer recurs across distinct PAGES. Count distinct
+        # pages per text: the dual MuPDF+spatial paths each contribute one item
+        # per page, so counting raw items double-counts (a single-page line
+        # reaches the old count threshold and is wrongly stripped).
+        text_pages: dict[str, set[int]] = defaultdict(set)
+        for it in items:
+            text_pages[it.text].add(it.page_num)
+        hit = False
+        for text, pages in text_pages.items():
+            if len(pages) >= threshold:
                 repeating.add((y_key, text))
                 _log.debug("Repeating exact: y=%.1f text=%r", y_key, text)
-                exact_hit = True
-        if exact_hit:
-            continue
+                hit = True
+        if not hit:
+            # Alternating header: no single text reaches threshold, but a small
+            # set of verbatim-repeating texts (each on >= _MIN_RECUR_PAGES
+            # pages) together covers >= threshold pages (title on recto, authors
+            # on verso). The variant cap keeps this from firing on many-variant
+            # recurrence (slide-title sets, code-line clusters); a real
+            # alternating header has at most _MAX_HEADER_VARIANTS distinct texts.
+            recurring = {t: pg for t, pg in text_pages.items()
+                         if len(pg) >= _MIN_RECUR_PAGES}
+            if 0 < len(recurring) <= _MAX_HEADER_VARIANTS:
+                covered: set[int] = set()
+                for pg in recurring.values():
+                    covered |= pg
+                if len(covered) >= threshold:
+                    for text in recurring:
+                        repeating.add((y_key, text))
+                        _log.debug("Repeating union: y=%.1f text=%r",
+                                   y_key, text)
 
     return repeating
 
@@ -395,7 +435,6 @@ def strip_hidden_blocks(
     if not hidden_by_page:
         return blocks
 
-    import fitz  # lazy: PyMuPDF not required for HTML-only paths
     result = []
     for block in blocks:
         page_hidden = hidden_by_page.get(block.page_num)

@@ -48,7 +48,7 @@ def test_run_download_skips_already_staged_papers(tmp_path: Path, monkeypatch):
         calls.append(paper_id)
         return (b"%PDF-fresh", ".pdf")
 
-    monkeypatch.setattr("mailing.download.download_paper", _record)
+    monkeypatch.setattr("cli.jobs.download_paper", _record)
 
     result = asyncio.run(jobs.run_download(["P1000R0", "P1001R0"], store))
 
@@ -66,7 +66,7 @@ def test_run_download_force_redownloads_staged(tmp_path: Path, monkeypatch):
     store.put_source("P1000R0", b"%PDF-old", suffix=".pdf")
 
     monkeypatch.setattr(
-        "mailing.download.download_paper",
+        "cli.jobs.download_paper",
         _stub_download(returns={"P1000R0": (b"%PDF-new", ".pdf")}),
     )
 
@@ -84,7 +84,7 @@ def test_run_download_skips_papers_without_url(tmp_path: Path, monkeypatch):
     ])
 
     monkeypatch.setattr(
-        "mailing.download.download_paper",
+        "cli.jobs.download_paper",
         _stub_download(returns={"P1000R0": (b"%PDF", ".pdf")}),
     )
 
@@ -105,7 +105,7 @@ def test_run_download_progress_hooks_fire(tmp_path: Path, monkeypatch):
     ])
 
     monkeypatch.setattr(
-        "mailing.download.download_paper",
+        "cli.jobs.download_paper",
         _stub_download(returns={
             "P1000R0": (b"%PDF-1", ".pdf"),
             "P1001R0": (b"%PDF-2", ".pdf"),

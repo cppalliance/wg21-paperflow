@@ -208,6 +208,21 @@ class TestMarkdownStream:
         assert "text" in tokens
         assert "here" in tokens
 
+    def test_strips_front_matter_opener_with_space(self):
+        md = (
+            "--- \n"
+            'title: "Sample"\n'
+            "document: P9999R0\n"
+            "---\n"
+            "\n"
+            "Body text here.\n"
+        )
+        tokens = _extract_markdown_stream(md)
+        assert "title" not in tokens
+        assert "sample" not in tokens
+        assert "body" in tokens
+        assert "here" in tokens
+
     def test_extracts_paragraph(self):
         tokens = _extract_markdown_stream("The quick brown fox.")
         assert tokens == ("the", "quick", "brown", "fox")

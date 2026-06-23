@@ -22,7 +22,7 @@ Deep technique numbering lives in [`lib/html/ARCHITECTURE.md`](lib/html/ARCHITEC
 - **Single DOM truth:** Unlike PDF, there is no dual extraction or per-page uncertainty routing; structure comes from the parsed tree ([`ARCHITECTURE.md`](lib/html/ARCHITECTURE.md)).
 - **Forgiving parse:** BeautifulSoup uses the stdlib **`html.parser`**, which tolerates malformed HTML but can mis-nest tags; the renderer applies explicit repairs ([`extract.py`](lib/html/extract.py), [`render.py`](lib/html/render.py)).
 - **Problems become prompts:** Unknown generators and other issues are recorded as strings and wrapped into LLM-ready prompts ([`convert_html`](lib/html/__init__.py)).
-- **Shared emit helpers:** PDF and HTML both call [`lib/__init__.py`](lib/__init__.py) `format_front_matter`, `dedup_paragraphs`, `strip_redundant_body_meta`, and `apply_strip_leading_h1` after assembly.
+- **Shared emit helpers:** PDF and HTML both call `format_front_matter` from [`lib/metadata_yaml/format.py`](lib/metadata_yaml/format.py) (re-exported via [`lib/__init__.py`](lib/__init__.py)), plus `dedup_paragraphs`, `strip_redundant_body_meta`, `strip_orphan_toc_list`, and `apply_strip_leading_h1` after assembly.
 
 ## Before changing behavior
 
@@ -163,9 +163,13 @@ Unknown generator prompt suppression when generic metadata still succeeded; loss
 
 - Promote nested `<li>` elements to siblings under the same parent list ([`_fix_misnested_list_items`](lib/html/render.py)).
 
+**Misnested definition list items**
+
+- Promote `<dt>`/`<dd>` chain-nested by `html.parser` (Bikeshed implicit close tags: `dt1 > dd1 > dt2 > dd2 ...`) back to direct children of their owning `<dl>`. Ownership-scoped so a legitimately nested inner `<dl>` is repaired in its own pass; strict no-op on well-formed lists (`_fix_misnested_dl_items`).
+
 **Why:** stdlib parser does not auto-close inline context when blocks appear ([`render.py`](lib/html/render.py) docstrings).
 
-**Sources:** `_fix_misnested_blocks`, `_fix_misnested_list_items`, `render_body`, [`lib/html/render.py`](lib/html/render.py).
+**Sources:** `_fix_misnested_blocks`, `_fix_misnested_list_items`, `_fix_misnested_dl_items`, `render_body`, [`lib/html/render.py`](lib/html/render.py).
 
 ---
 
@@ -282,7 +286,7 @@ Unknown generator prompt suppression when generic metadata still succeeded; loss
 
 **`<dl>`**
 
-- `dt` becomes `**term**`; `dd` becomes `: definition` plus any extracted non-recursive code blocks ([`_render_dl`](lib/html/render.py)).
+- Each `<dt>` opens a new entry rendered as `**term**`; the following `<dd>` (`: definition` plus any extracted non-recursive code blocks) and loose text attach to the current entry. Lines within an entry join with a single newline; entries are separated by a blank line (`_render_dl`).
 
 **Sources:** `_render_blockquote`, `_render_dl`, [`lib/html/render.py`](lib/html/render.py).
 

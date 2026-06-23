@@ -15,6 +15,7 @@ from .. import (
 # two "what is a TOC" definitions stay a single source of truth (see #122).
 from ..toc import MIN_TOC_RUN, is_toc_label, normalize_toc_entry
 from .glyphs import GLYPH_FONT_SENTINEL, UNKNOWN_GLYPH
+from .wording import is_foreign_chromatic
 from .types import (
     Block, Line, Span, Section, SectionKind, Confidence,
     FigureRegion,
@@ -1303,6 +1304,23 @@ def _structure_body_impl(metadata: dict,
             )
         )
 
+        # A monospace first line carrying code-syntax characters (parens,
+        # braces, semicolons, ``=``, ``<``/``>``, ``[``/``]``) is a code
+        # line, never a WG21 section heading. Single-page PDF extracts
+        # skew the font distribution so the code font ranks as a heading
+        # size; without this gate a line like ``V f(int n, ...)`` or
+        # ``V x = '\1'; // OK`` is promoted to H2 and the rest of the
+        # listing is dropped into a PARAGRAPH where emit.py renders each
+        # monospace span as inline code, splitting one CODE block into a
+        # fence + heading + backticked paragraph. The ``_CODE_CHARS``
+        # conjunction is what distinguishes a syntactic code line from a
+        # legitimate code-styled heading like ``std::assert`` (monospace
+        # at a heading font, but no syntax punctuation).
+        first_line_is_mono_code = (
+            bool(sec.lines) and sec.lines[0].is_monospace
+            and bool(_CODE_CHARS & set(first_line))
+        )
+
         # A section with no visible text (e.g. a blank elevated-font spacer
         # on a TOC page) must never become a heading; otherwise emit.py
         # renders it as a textless "##### ".
@@ -1311,7 +1329,8 @@ def _structure_body_impl(metadata: dict,
 
         if (heading_has_text
                 and (has_number or font_level is not None or is_known or is_bold)
-                and not first_line_is_bullet_marker):
+                and not first_line_is_bullet_marker
+                and not first_line_is_mono_code):
             number_level = _heading_level_from_number(section_num) if has_number else 0
             level, conf = heading_confidence(
                 has_number, number_level, font_level, is_bold, is_known)
@@ -1331,6 +1350,9 @@ def _structure_body_impl(metadata: dict,
             # clamped to at least 3 so bold-only never becomes H2.
             # Reject if the line contains code-like characters or is
             # monospace (avoids misclassifying code fragments as headings).
+            # The monospace+code-syntax case is already filtered by the
+            # outer guard; this is the safety net for bold-only mono with
+            # no syntax punctuation at LOW confidence.
             if level == 0 and is_bold and conf == Confidence.LOW:
                 has_code_chars = bool(_CODE_CHARS & set(first_line))
                 is_mono = bool(sec.lines) and sec.lines[0].is_monospace
@@ -1378,6 +1400,7 @@ def _structure_body_impl(metadata: dict,
     structured = _coalesce_code_paragraphs(structured)
     structured = _absorb_code_orphans(structured)
     structured = _rescue_unfenced_code(structured)
+    structured = _split_embedded_code(structured)
     _demote_repeated_low_confidence_numbers(structured)
     nesting_corrections = _validate_nesting(structured)
     return metadata, structured, nesting_corrections
@@ -2010,6 +2033,21 @@ def _detect_code_blocks(sections: list[Section]) -> list[Section]:
     return result
 
 
+def _section_has_foreign_chromatic(sec: Section) -> bool:
+    """True if any non-link span carries a syntax-highlighting color.
+
+    Foreign chromatic = chromatic but outside the green (ins) / red (del)
+    / blue (link) bands. Its presence marks the section as a
+    syntax-highlighted code listing. Mirrors the block-level
+    ``_block_has_foreign_colors`` filter in :mod:`wording`.
+    """
+    return any(
+        is_foreign_chromatic(s.color)
+        for ln in sec.lines for s in ln.spans
+        if s.text.strip() and not s.link_url
+    )
+
+
 def _classify_wording_sections(sections: list[Section]) -> list[Section]:
     """Reclassify sections containing wording-marked spans."""
     for sec in sections:
@@ -2023,6 +2061,16 @@ def _classify_wording_sections(sections: list[Section]) -> list[Section]:
             continue
         roles = {s.wording_role for s in wording_spans}
         non_context = roles - {"context"}
+        # Syntax-highlighted code, not wording markup. A foreign chromatic
+        # color (cyan, olive, purple, ...) is the signature of syntax
+        # highlighting. When the only wording signal is green ("ins"), that
+        # green is a keyword highlight hue that happened to fall in the ins
+        # band, not a real insertion, so the section stays CODE rather than
+        # collapsing into a single wording line. Sections with a red /
+        # strikethrough deletion ("del") are genuine WG21 wording even when
+        # the surrounding code is syntax-highlighted, so they are exempt.
+        if non_context == {"ins"} and _section_has_foreign_chromatic(sec):
+            continue
         if non_context == {"ins"}:
             sec.kind = SectionKind.WORDING_ADD
         elif non_context == {"del"}:
@@ -2178,6 +2226,81 @@ def _rescue_unfenced_code(sections: list[Section]) -> list[Section]:
             sec.kind = SectionKind.CODE
             sec.confidence = Confidence.MEDIUM
     return sections
+
+
+_SPLIT_MIN_CODE_RUN = 2
+
+
+def _split_embedded_code(sections: list[Section]) -> list[Section]:
+    """Extract an embedded run of monospace code lines from a PARAGRAPH.
+
+    _merge_paragraphs glues a code block into the surrounding prose when
+    the code lines lack terminal punctuation (they end in ``{``, ``;``,
+    ``}``) and the following prose starts lowercase. The merged section is
+    mostly prose, so _rescue_unfenced_code (which promotes a section
+    wholesale) leaves it as prose and the code collapses onto one line.
+
+    This pass runs AFTER _classify_wording_sections and
+    _rescue_unfenced_code, so it only sees plain PARAGRAPH sections:
+    wording sections keep their own grouping, and a comment-above-code
+    listing that rescue already promoted to CODE is left intact. Within a
+    PARAGRAPH it splits a maximal run of _SPLIT_MIN_CODE_RUN or more
+    consecutive all-monospace, code-shaped lines into its own CODE
+    section, leaving the surrounding prose as PARAGRAPH sections.
+
+    A PARAGRAPH that survives _detect_code_blocks is never all-monospace,
+    so any monospace run it contains is genuinely embedded code.
+    """
+    result: list[Section] = []
+    for sec in sections:
+        if sec.kind != SectionKind.PARAGRAPH or len(sec.lines) < _SPLIT_MIN_CODE_RUN:
+            result.append(sec)
+            continue
+
+        is_code = [
+            _line_is_monospace(ln) and bool(ln.text.strip())
+            for ln in sec.lines
+        ]
+        if not any(is_code):
+            result.append(sec)
+            continue
+
+        # Partition into alternating prose / code-run segments.
+        segments: list[tuple[bool, list]] = []
+        for code_flag, line in zip(is_code, sec.lines):
+            if segments and segments[-1][0] == code_flag:
+                segments[-1][1].append(line)
+            else:
+                segments.append((code_flag, [line]))
+
+        code_idx = {
+            i for i, (flag, seg) in enumerate(segments)
+            if flag and len(seg) >= _SPLIT_MIN_CODE_RUN
+            and _STRUCTURAL_CODE_RE.search("\n".join(ln.text for ln in seg))
+        }
+        if not code_idx:
+            result.append(sec)
+            continue
+
+        for i, (flag, seg_lines) in enumerate(segments):
+            is_split_code = i in code_idx
+            seg_text = "\n".join(ln.text for ln in seg_lines)
+            if not seg_text.strip():
+                continue
+            if is_split_code:
+                result.append(Section(
+                    kind=SectionKind.CODE,
+                    text=seg_text,
+                    confidence=Confidence.MEDIUM,
+                    lines=list(seg_lines),
+                    page_num=sec.page_num,
+                    fence_lang=DEFAULT_FENCE_LANG,
+                ))
+            else:
+                result.append(replace(
+                    sec, text=seg_text, lines=list(seg_lines),
+                ))
+    return result
 
 
 _PARAGRAPH_NUM_MIN_REPEATS = 3

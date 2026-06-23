@@ -152,6 +152,89 @@ class TestStripPreContentParagraphs:
         n = strip_pre_content_paragraphs(sections)
         assert n == 0
 
+    def test_unlabeled_abstract_not_stripped_when_content_heading_far(self):
+        """Body prose before a distant content heading must survive (p3889r0).
+
+        The only KNOWN_SECTIONS heading ("Summary") sits at the document end,
+        so the metadata/body boundary cannot be "everything before it": the
+        leading short metadata is stripped, but the abstract prose is kept.
+        """
+        abstract = ("P2900 claims to be a minimum viable product, but is that "
+                    "true? This does not sound like one at all.")
+        sections = [
+            make_section("Harald Achitz harald@swedencpp.se", page_num=0),
+            make_section("2026-01-15", page_num=0),
+            make_section(abstract, page_num=0),
+            make_section("More abstract prose continuing the argument here.",
+                         page_num=0),
+            make_section("Summary", kind=SectionKind.HEADING, page_num=2),
+            make_section("Closing body."),
+        ]
+        n = strip_pre_content_paragraphs(sections)
+        assert n == 2  # author + date only
+        assert any(abstract in s.text for s in sections)
+
+    def test_long_multi_author_replyto_is_stripped(self):
+        """A long Reply-to line (multi-author + emails) is metadata, not body.
+
+        Word count alone would misread it as prose; the email/field-label shape
+        keeps it in the metadata run so it does not leak into the body.
+        """
+        replyto = ("Reply-to: Vinnie Falco vinnie@x.org Steve Gerbino "
+                   "steve@x.org Michael Vandeberg michael@x.org Proposal Team")
+        sections = [
+            make_section("P1234R0", page_num=0),
+            make_section(replyto, page_num=0),
+            make_section("Abstract", kind=SectionKind.HEADING, page_num=0),
+            make_section("Real body."),
+        ]
+        n = strip_pre_content_paragraphs(sections)
+        assert n == 2
+        assert not any("Reply-to" in s.text for s in sections)
+
+    def test_body_paragraph_with_single_email_is_kept(self):
+        """A long body paragraph mentioning ONE email must not be over-stripped.
+
+        Guards against citation-collateral: a single incidental email does not
+        make a sentence metadata, so the abstract survives even though a
+        distant "Summary" heading is the only content heading.
+        """
+        body = ("This proposal was discussed on the reflector at "
+                "std-proposals@lists.isocpp.org and we summarize the outcome "
+                "of that long thread in the following paragraphs here.")
+        sections = [
+            make_section("P1234R0", page_num=0),
+            make_section(body, page_num=0),
+            make_section("Summary", kind=SectionKind.HEADING, page_num=2),
+            make_section("Closing body."),
+        ]
+        n = strip_pre_content_paragraphs(sections)
+        assert n == 1  # only the bare doc number
+        assert any(body in s.text for s in sections)
+
+    def test_merged_metadata_block_stripped_via_label_count(self):
+        """A long merged single-line metadata block is stripped via label count.
+
+        Exercises the >= 2 metadata-labels-anywhere path specifically: the block
+        is long (so the short-paragraph path does not fire), has only ONE email
+        (so the >= 2 email path does not fire), and starts with "Document #:"
+        (not matched by the anchored first-line label checks). Only the
+        label-count rule classifies it as metadata. Without that rule the sweep
+        would break at this paragraph and leak it (n == 0).
+        """
+        merged = ("Document #: P9999R0 Date: 2026-01-01 Project: Programming "
+                  "Language C++ Audience: LEWG Reply-to: Solo Author "
+                  "<solo@example.org>")
+        assert len(merged.split()) >= 12  # long: short-path must not fire
+        sections = [
+            make_section(merged, page_num=0),
+            make_section("Summary", kind=SectionKind.HEADING, page_num=3),
+            make_section("Closing body."),
+        ]
+        n = strip_pre_content_paragraphs(sections)
+        assert n == 1
+        assert not any("Reply-to" in s.text for s in sections)
+
 
 class TestFormatFrontMatter:
 

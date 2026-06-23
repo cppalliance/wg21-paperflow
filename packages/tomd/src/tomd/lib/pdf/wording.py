@@ -30,7 +30,12 @@ from .types import Block
 _log = logging.getLogger(__name__)
 
 _HORIZ_LINE_Y_TOL = 1.0
-_HORIZ_LINE_MIN_WIDTH = 5.0
+# A strikethrough over a single narrow glyph (a struck ``2``, ``i``, or
+# ``.``) is only ~4px wide, so the collection floor must sit below one
+# character cell. Noise is rejected downstream: _match_strikethrough
+# requires the rule to cover >=30% of a *red* span at its vertical
+# center, which a stray tick or vector-art fragment will not.
+_HORIZ_LINE_MIN_WIDTH = 3.0
 _CONTEXT_LIGHTNESS_MIN = 0.25
 _CONTEXT_LIGHTNESS_MAX = 0.65
 _BLACK_LIGHTNESS_MAX = 0.15
@@ -45,6 +50,13 @@ _STRIKETHROUGH_Y_TOLERANCE = 2.0
 _STRIKETHROUGH_OVERLAP_MIN = 0.3
 _WORDING_LINE_MAJORITY = 0.5
 _MIN_WORDING_SPANS = 5
+
+# C/C++ comment introducers. A red run that begins a comment is syntax
+# highlighting (a colored code comment), never WG21 deletion markup,
+# which strikes out identifiers / strings / operators - never an
+# entire `//` or `/* */` comment.
+_LINE_COMMENT = "//"
+_BLOCK_COMMENT_OPEN = "/*"
 
 
 def _color_int_to_rgb(color_int: int) -> tuple[float, float, float]:
@@ -126,31 +138,57 @@ def _is_wording_color(color_int: int) -> bool:
     return _in_green_band(h, s) or _in_red_band(h, s)
 
 
-def _is_foreign_chromatic(color_int: int) -> bool:
-    """True if color is chromatic but not green, red, or blue."""
+def is_foreign_chromatic(color_int: int) -> bool:
+    """True if color is chromatic but not green, red, or blue.
+
+    A foreign chromatic color is the signature of syntax-highlighted
+    code (purple, orange, cyan, olive, ...). It is used both by the
+    block-level wording filter here and by the section-level guard in
+    :mod:`structure` that keeps a syntax-highlighted code listing from
+    being reclassified as wording markup.
+    """
     if not _is_chromatic(color_int):
         return False
     return not (_is_wording_color(color_int) or _is_blue_link(color_int))
 
 
 def _match_strikethrough(span_bbox, drawings: list) -> bool:
-    """True if a horizontal drawing crosses the vertical center of the span.
+    """True if horizontal rules cross the vertical center of the span.
 
-    Requires the drawing to overlap at least _STRIKETHROUGH_OVERLAP_MIN of
-    the span width, rejecting full-page table borders and decorative rules.
+    Aggregate coverage must reach _STRIKETHROUGH_OVERLAP_MIN of the span
+    width. A single strikethrough is frequently emitted as several short
+    collinear segments (one per sub-word, e.g. ``experimental::`` then
+    ``native_simd``); summing their merged x-coverage at the span's
+    vertical center recovers the strike that a per-segment test would
+    miss. The y-tolerance gate still rejects full-page table borders and
+    decorative rules, which never sit at a text span's vertical center.
     """
     if not drawings:
         return False
     sx0, sy0, sx1, sy1 = span_bbox
     y_center = (sy0 + sy1) / 2.0
     span_w = max(sx1 - sx0, 1.0)
+    intervals: list[tuple[float, float]] = []
     for dy, dx0, dx1, _ in drawings:
         if abs(dy - y_center) > _STRIKETHROUGH_Y_TOLERANCE:
             continue
-        overlap = min(dx1, sx1) - max(dx0, sx0)
-        if overlap / span_w >= _STRIKETHROUGH_OVERLAP_MIN:
-            return True
-    return False
+        lo = max(dx0, sx0)
+        hi = min(dx1, sx1)
+        if hi > lo:
+            intervals.append((lo, hi))
+    if not intervals:
+        return False
+    intervals.sort()
+    covered = 0.0
+    cur_lo, cur_hi = intervals[0]
+    for lo, hi in intervals[1:]:
+        if lo <= cur_hi:
+            cur_hi = max(cur_hi, hi)
+        else:
+            covered += cur_hi - cur_lo
+            cur_lo, cur_hi = lo, hi
+    covered += cur_hi - cur_lo
+    return covered / span_w >= _STRIKETHROUGH_OVERLAP_MIN
 
 
 def _block_has_foreign_colors(block: Block) -> bool:
@@ -162,9 +200,70 @@ def _block_has_foreign_colors(block: Block) -> bool:
         for span in line.spans:
             if span.link_url or not span.text.strip():
                 continue
-            if _is_foreign_chromatic(span.color):
+            if is_foreign_chromatic(span.color):
                 return True
     return False
+
+
+def _comment_start_offset(text: str) -> int | None:
+    """Char offset of the first ``//`` or ``/*`` in a line, or None.
+
+    Conservative: a ``//`` or ``/*`` inside a string literal would be
+    misread as a comment start, but red string literals being deleted
+    (``<del>"\\n"</del>``) do not themselves contain a comment
+    introducer, so the wording cases this guard protects are unaffected.
+    """
+    offsets = [
+        o for o in (text.find(_LINE_COMMENT), text.find(_BLOCK_COMMENT_OPEN))
+        if o >= 0
+    ]
+    return min(offsets) if offsets else None
+
+
+def _span_is_comment(line, span) -> bool:
+    """True if ``span`` lies within a code comment on its line.
+
+    Walks the line's spans in reading order to locate ``span``'s char
+    offset, then compares it to the line's first comment introducer. A
+    red span at or past the comment start is syntax-highlighted comment
+    text, not a struck-out token, so it must not become a deletion.
+    """
+    offset = 0
+    span_offset: int | None = None
+    for s in line.spans:
+        if s is span:
+            span_offset = offset
+        offset += len(s.text)
+    if span_offset is None:
+        return False
+    comment_start = _comment_start_offset(line.text)
+    return comment_start is not None and span_offset >= comment_start
+
+
+def _line_has_confirmed_strikethrough(line, drawings: list) -> bool:
+    """True if a red span on this line carries a confirmed strikethrough."""
+    for span in line.spans:
+        if span.link_url or not span.text.strip():
+            continue
+        if is_red_del(span.color) and _match_strikethrough(span.bbox, drawings):
+            return True
+    return False
+
+
+def _block_has_confirmed_strikethrough(block: Block, drawings: list) -> bool:
+    """True if a red span in the block carries a confirmed strikethrough.
+
+    A struck-out token is the strongest wording signal there is, so its
+    presence overrides the foreign-color filter: a genuine WG21 deletion
+    can sit inside an otherwise syntax-highlighted code listing (a diff
+    that swaps one type for another, ``native_simd`` -> ``simd::vec``).
+    Syntax-highlighted code never has rules drawn through its glyphs, so
+    this exemption does not readmit ordinary code listings.
+    """
+    return any(
+        _line_has_confirmed_strikethrough(line, drawings)
+        for line in block.lines
+    )
 
 
 def _line_wording_fraction(line) -> float:
@@ -253,15 +352,22 @@ def classify_wording(blocks: list[Block],
     candidates: list[tuple] = []
 
     for block in blocks:
-        if _block_has_foreign_colors(block):
-            continue
-
         drawings = page_drawings.get(block.page_num, [])
+
+        if (_block_has_foreign_colors(block)
+                and not _block_has_confirmed_strikethrough(block, drawings)):
+            continue
 
         for line in block.lines:
             is_majority = _line_wording_fraction(line) > _WORDING_LINE_MAJORITY
             is_partial = not is_majority and _line_has_wording_on_black(line)
-            if not is_majority and not is_partial:
+            # A confirmed strikethrough qualifies the line on its own, even
+            # when it is a lone struck token amid syntax-highlighted code
+            # (a `2` replaced by `std::cw<2>`): the rule through the glyph
+            # is unambiguous, so neither a wording majority nor an
+            # all-black remainder is required.
+            is_struck = _line_has_confirmed_strikethrough(line, drawings)
+            if not is_majority and not is_partial and not is_struck:
                 continue
 
             for span in line.spans:
@@ -273,6 +379,10 @@ def classify_wording(blocks: list[Block],
                 elif is_red_del(span.color):
                     if _match_strikethrough(span.bbox, drawings):
                         candidates.append((span, "del", block.page_num))
+                    elif _span_is_comment(line, span):
+                        # A red `//` or `/* */` comment with no strike is a
+                        # syntax-highlighted code comment, not a deletion.
+                        continue
                     else:
                         candidates.append((span, "del_unconfirmed", block.page_num))
                 elif not _is_chromatic(span.color) and span.color != 0:
@@ -302,7 +412,12 @@ def classify_wording(blocks: list[Block],
     preamble_dropped = pre_drop - len(candidates)
 
     ins_del = [c for c in candidates if c[1] in ("ins", "del")]
-    if len(ins_del) < _MIN_WORDING_SPANS:
+    # The span floor guards against a handful of stray syntax-highlight
+    # tokens that happen to fall in the green/red bands. A confirmed
+    # strikethrough is not noise: a single struck token is unambiguous
+    # wording even when it is the only edit on the page, so it bypasses
+    # the floor.
+    if len(ins_del) < _MIN_WORDING_SPANS and confirmed_del == 0:
         _log.debug("Too few wording candidates (%d < %d), skipping",
                     len(ins_del), _MIN_WORDING_SPANS)
         return []

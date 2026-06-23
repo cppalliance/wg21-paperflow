@@ -15,6 +15,9 @@ from .. import (
 from .. import tables as _tables
 from ..shared import _find_front_matter_end
 from .cleanup import normalize_whitespace
+from .code_format import is_diagram_block, maybe_normalize_code_line
+from .code_grid import CodeGrid
+from .wording_emit import _render_wording_section
 from .glyphs import (
     GLYPH_PLACEHOLDER_MARKER_TEMPLATE,
     UNKNOWN_GLYPH,
@@ -23,8 +26,6 @@ from .glyphs import (
 from .images import TRUNCATION_MARKER_TEMPLATE, VectorUncertaintyStats
 from .types import Line, Span, Section, SectionKind, BULLET_CHARS, BULLET_RE, NUMBERED_LIST_RE, FigureGraph, FALLBACK_FONT_SIZE
 from .vector_images import format_uncertainty_marker, should_emit_marker
-from ..wording_markup import WORDING_FENCE_CLOSE, wording_fence_open
-
 _log = logging.getLogger(__name__)
 
 # A heading section can span multiple Line objects two ways: a single visual
@@ -322,19 +323,163 @@ def _render_list_spans(sec: Section) -> str:
     return "\n".join(_format_list_item(" ".join(parts), depth) for parts in items)
 
 
-_DEFAULT_CHAR_WIDTH = 6.0
+# Two code fragments whose vertical centers are within this many points
+# belong to the same visual row. WG21 code lines are ~12pt apart, so a
+# few points cleanly separates "same line, wide gap" from "next line."
+_ROW_Y_TOLERANCE = 3.0
+
+# Separator inserted when a trailing same-row fragment (a right-aligned
+# `// comment`) is rejoined to the code it annotates.
+_SAME_ROW_JOIN = "  "
+
+# A code block needs at least this many line-number candidates before
+# the left column is treated as a gutter. Two stray numeric tokens
+# (an array literal split across lines) must never trigger it.
+_GUTTER_MIN_NUMBERS = 3
+
+# A gutter cell is a pure integer (the source line number) and nothing
+# else. Anchored so `1.` or `1)` list markers do not qualify.
+_GUTTER_NUMBER_RE = re.compile(r"^\d+$")
+
+# Maximum reconstructed indent for the gutter code path. Line-numbered
+# listings are line-by-line code (rarely nested past a few levels); the
+# deepest legitimate column observed in the gutter goldens is 8, so 32
+# leaves comfortable headroom (4x) while still pinning a right-margin
+# anchor (e.g. a stable-name fragment split onto its own line at x=500)
+# back to column zero instead of pushing the real code past the right
+# margin. The plain native path is intentionally uncapped because its
+# legitimate continuation indents reach the high 30s.
+_MAX_GUTTER_CODE_INDENT = 32
 
 
-def _estimate_char_width(sec_lines: list) -> float:
-    """Estimate monospace character width from span bbox and text length."""
-    for line in sec_lines:
-        for span in line.spans:
-            n = len(span.text.replace(" ", ""))
-            if n >= 2:
-                w = span.bbox[2] - span.bbox[0]
-                if w > 0:
-                    return w / n
-    return _DEFAULT_CHAR_WIDTH
+def _line_y_center(line: Line) -> float | None:
+    """Vertical center of a line's first non-blank glyph, or None if blank."""
+    for span in line.spans:
+        if span.text.strip():
+            return (span.bbox[1] + span.bbox[3]) / 2.0
+    return None
+
+
+def _first_nonspace_x(line: Line) -> float:
+    """X-position of a line's first non-blank glyph (inf if fully blank)."""
+    span = line.first_content_span()
+    return span.bbox[0] if span is not None else float("inf")
+
+
+def _group_code_rows(lines: list[Line]) -> list[list[Line]]:
+    """Group lines that share one visual row (same y) into a single row.
+
+    PDF extraction splits a code line from its right-aligned trailing
+    comment (``f(v,5);    // good``) into separate ``Line`` objects
+    because of the wide horizontal gap: the gap reads as a column break,
+    not the line break it looks like. The two fragments share a y-range,
+    so the vertical center is the reliable signal that they are really
+    one line. A blank line resets the run so nothing merges across it.
+    """
+    rows: list[list[Line]] = []
+    prev_center: float | None = None
+    for line in lines:
+        center = _line_y_center(line)
+        if (center is not None and prev_center is not None
+                and abs(center - prev_center) <= _ROW_Y_TOLERANCE):
+            rows[-1].append(line)
+        else:
+            rows.append([line])
+        prev_center = center
+    return rows
+
+
+def _gutter_line_value(line: Line) -> tuple[int, float, float] | None:
+    """Return ``(value, x0, right_x)`` if a line is a gutter line-number cell.
+
+    A gutter cell is a line whose every non-blank span is
+    non-monospace (the source line numbers are typeset in the body
+    serif font, not the code font) and whose text is a bare integer.
+    Returns ``None`` for anything else: monospace lines, blank lines,
+    and decorated numbers (``1.``, ``1)``) the regex rejects.
+    """
+    nonblank = [s for s in line.spans if s.text.strip()]
+    if not nonblank or any(s.monospace for s in nonblank):
+        return None
+    text = line.text.strip()
+    if not _GUTTER_NUMBER_RE.match(text):
+        return None
+    x0 = min(s.bbox[0] for s in nonblank)
+    right_x = max(s.bbox[2] for s in nonblank)
+    return int(text), x0, right_x
+
+
+def _detect_code_gutter(
+    sec: Section,
+) -> tuple[dict[int, tuple[int, float]], float] | None:
+    """Detect a left-margin source-line-number gutter in a CODE section.
+
+    WG21 listings sometimes print a line-number column to the left of
+    the code (P0876's fiber examples). Extraction keeps each number as
+    its own non-monospace ``Line`` sharing the y-range of its code
+    line. This finds that column so the renderer can keep the numbers
+    while still reconstructing the code's own indentation.
+
+    Returns ``(numbers, origin_x)`` where ``numbers`` maps a code line's
+    index within ``sec.lines`` to ``(value, num_x0)`` for each code line
+    that has a paired gutter number, and ``origin_x`` is the leftmost
+    gutter glyph x (the grid origin shared by numbers and code). Keying
+    by position (not object identity) keeps the pairing valid even if the
+    lines are copied between detection and rendering. Returns ``None``
+    unless at least ``_GUTTER_MIN_NUMBERS`` candidates form a strictly
+    increasing sequence to the left of the monospace margin.
+    """
+    mono_x = [
+        s.bbox[0] for ln in sec.lines for s in ln.spans
+        if s.monospace and s.text.strip()
+    ]
+    if not mono_x:
+        return None
+    code_left = min(mono_x)
+
+    gutter: list[tuple[int, int, float]] = []
+    for i, ln in enumerate(sec.lines):
+        cell = _gutter_line_value(ln)
+        if cell is not None and cell[2] <= code_left:
+            gutter.append((i, cell[0], cell[1]))
+
+    if len(gutter) < _GUTTER_MIN_NUMBERS:
+        return None
+    values = [v for _, v, _ in gutter]
+    if not all(b > a for a, b in zip(values, values[1:])):
+        return None
+
+    origin_x = min(x0 for _, _, x0 in gutter)
+    gutter_idx = {i for i, _, _ in gutter}
+    code_indices = [
+        i for i, ln in enumerate(sec.lines)
+        if i not in gutter_idx and any(s.text.strip() for s in ln.spans)
+    ]
+
+    numbers: dict[int, tuple[int, float]] = {}
+    for gi, value, num_x0 in gutter:
+        gy = _line_y_center(sec.lines[gi])
+        if gy is None:
+            continue
+        best: int | None = None
+        best_dy: float | None = None
+        for ci in code_indices:
+            cy = _line_y_center(sec.lines[ci])
+            if cy is None:
+                continue
+            dy = abs(cy - gy)
+            if dy <= _ROW_Y_TOLERANCE and (best_dy is None or dy < best_dy):
+                best, best_dy = ci, dy
+        if best is not None:
+            numbers[best] = (value, num_x0)
+
+    if not numbers:
+        return None
+    return numbers, origin_x
+
+
+def _section_span_text_lines(sec: Section) -> list[str]:
+    return ["".join(span.text for span in line.spans) for line in sec.lines]
 
 
 def _render_code_block(sec: Section) -> str:
@@ -342,106 +487,140 @@ def _render_code_block(sec: Section) -> str:
 
     Uses glyph x-positions to calculate indentation: the offset
     of each line's first character from the block's left margin,
-    divided by the monospace character width.
+    divided by the monospace character width. Fragments that share a
+    visual row (a code line plus its right-aligned ``// comment``,
+    split by extraction) are merged back onto one line.
+
+    When the section carries a source-line-number gutter (see
+    :func:`_detect_code_gutter`), rendering is delegated to
+    :func:`_render_code_block_with_gutter`, which keeps the numbers.
     """
     lang = sec.fence_lang or DEFAULT_FENCE_LANG
     if not sec.lines:
         return f"```{lang}\n{sec.text}\n```"
 
-    char_w = _estimate_char_width(sec.lines)
-    content_x = [
-        ln.spans[0].bbox[0] for ln in sec.lines
-        if ln.spans and ln.spans[0].text.strip()
-    ]
-    base_x = min(content_x) if content_x else 0.0
+    gutter = _detect_code_gutter(sec)
+    if gutter is not None:
+        return _render_code_block_with_gutter(sec, lang, gutter)
+
+    preserve_spacing = is_diagram_block(_section_span_text_lines(sec))
+
+    grid = CodeGrid.for_code_section(sec)
+
+    def render_single(line: Line) -> str:
+        raw = _render_line_spans(line, in_code_section=True)
+        if not line.spans:
+            return maybe_normalize_code_line(
+                raw, preserve_spacing=preserve_spacing,
+            )
+        indent = grid.indent(line)
+        return " " * indent + maybe_normalize_code_line(
+            raw.lstrip(), preserve_spacing=preserve_spacing,
+        )
 
     lines = []
-    for line in sec.lines:
-        raw = _render_line_spans(line, in_code_section=True)
-        if line.spans:
-            first_text = line.spans[0].text
-            text_indent = len(first_text) - len(first_text.lstrip())
-
-            first_nonspace = line.spans[0]
-            for sp in line.spans:
-                if sp.text.strip():
-                    first_nonspace = sp
-                    break
-            x0 = first_nonspace.bbox[0]
-            x_indent = round((x0 - base_x) / char_w) if char_w > 0 else 0
-            x_indent = max(x_indent, 0)
-
-            if text_indent > 0 and x_indent > 0 and text_indent == x_indent:
-                indent = text_indent
-            else:
-                indent = x_indent if x_indent > 0 else text_indent
-
-            lines.append(" " * indent + raw.lstrip())
-        else:
-            lines.append(raw)
+    for row in _group_code_rows(sec.lines):
+        if len(row) == 1:
+            lines.append(render_single(row[0]))
+            continue
+        frags = sorted(
+            (f for f in row if any(s.text.strip() for s in f.spans)),
+            key=_first_nonspace_x,
+        )
+        if not frags:
+            lines.append(render_single(row[0]))
+            continue
+        rendered = render_single(frags[0])
+        for frag in frags[1:]:
+            tail = maybe_normalize_code_line(
+                _render_line_spans(frag, in_code_section=True).strip(),
+                preserve_spacing=preserve_spacing,
+            )
+            if tail:
+                rendered += _SAME_ROW_JOIN + tail
+        lines.append(rendered)
     code = "\n".join(lines)
     return f"```{lang}\n{code}\n```"
 
 
-def _render_wording_line(line: Line) -> str:
-    """Render a wording line, merging consecutive same-role spans.
+def _render_code_block_with_gutter(
+    sec: Section,
+    lang: str,
+    gutter: tuple[dict[int, tuple[int, float]], float],
+) -> str:
+    """Render a code block that carries a source-line-number gutter.
 
-    Whitespace-only spans between two same-role spans are absorbed into
-    the group; whitespace between different roles is emitted as-is.
-    Both ins and del use the role name directly as the HTML tag.
+    Numbers and code share one character grid whose origin is the
+    leftmost gutter glyph, so each fragment's column is
+    ``round((x0 - origin_x) / char_w)``. Because the PDF right-aligns
+    the gutter, placing each number left-aligned at its own column
+    reproduces the right-aligned column, while the code keeps its true
+    indentation (the gap between gutter and code falls out of the
+    geometry, not a hardcoded separator). Trailing same-row fragments
+    (a right-aligned ``// comment``) are collapsed with
+    :data:`_SAME_ROW_JOIN` rather than grid-placed, to avoid runs of
+    filler whitespace.
     """
-    def _render_group(role: str | None, spans: list[Span]) -> str:
-        text = "".join(s.text for s in spans)
-        if role in ("ins", "del"):
-            s = text.strip()
-            lead = text[:len(text) - len(text.lstrip())]
-            trail = text[len(text.rstrip()):]
-            return f"{lead}<{role}>{s}</{role}>{trail}"
-        return "".join(
-            f"`{s.text.strip()}`" if s.monospace and s.text.strip() else s.text
-            for s in spans
+    numbers, origin_x = gutter
+    preserve_spacing = is_diagram_block(_section_span_text_lines(sec))
+
+    grid = CodeGrid.for_gutter(sec, origin_x)
+    index_of = {id(ln): i for i, ln in enumerate(sec.lines)}
+    code_lines = [
+        ln for ln in sec.lines if _gutter_line_value(ln) is None
+    ]
+
+    out_lines: list[str] = []
+    for row in _group_code_rows(code_lines):
+        frags = sorted(
+            (f for f in row if any(s.text.strip() for s in f.spans)),
+            key=_first_nonspace_x,
+        )
+        number: tuple[int, float] | None = None
+        for f in row:
+            candidate = numbers.get(index_of[id(f)])
+            if candidate is not None:
+                number = candidate
+                break
+
+        if not frags:
+            out_lines.append("")
+            continue
+
+        lead = frags[0]
+        code_col = grid.column(_first_nonspace_x(lead))
+        # An implausibly deep column means the leading fragment is a
+        # right-margin element (a stable-name anchor split onto its
+        # own line), not real indentation; pin it back to column zero
+        # so the actual code is not pushed past the right margin.
+        if code_col > _MAX_GUTTER_CODE_INDENT:
+            code_col = 0
+        code_str = maybe_normalize_code_line(
+            _render_line_spans(lead, in_code_section=True).lstrip(),
+            preserve_spacing=preserve_spacing,
         )
 
-    parts: list[str] = []
-    group: list[Span] = []
-    group_role: str | None = None
-    ws_buf: list[Span] = []
-
-    for span in line.spans:
-        role = span.wording_role if span.text.strip() else None
-        if role is None:
-            ws_buf.append(span)
-        elif role == group_role:
-            group.extend(ws_buf)
-            ws_buf.clear()
-            group.append(span)
+        if number is not None:
+            value, num_x0 = number
+            num_str = str(value)
+            buf = " " * grid.column(num_x0) + num_str
         else:
-            if group:
-                parts.append(_render_group(group_role, group))
-            parts.extend(s.text for s in ws_buf)
-            ws_buf.clear()
-            group_role, group = role, [span]
+            buf = ""
+        if code_col <= len(buf):
+            code_col = len(buf) + 1 if buf else 0
+        buf += " " * (code_col - len(buf)) + code_str
 
-    if group:
-        parts.append(_render_group(group_role, group))
-    parts.extend(s.text for s in ws_buf)
-    return "".join(parts)
+        for frag in frags[1:]:
+            tail = maybe_normalize_code_line(
+                _render_line_spans(frag, in_code_section=True).strip(),
+                preserve_spacing=preserve_spacing,
+            )
+            if tail:
+                buf += _SAME_ROW_JOIN + tail
+        out_lines.append(buf)
 
-
-def _render_wording_section(sec: Section) -> str:
-    """Render a wording section with Pandoc fenced div markers."""
-    div_class = sec.kind.value
-    rendered_lines = []
-    for line in sec.lines:
-        rendered_lines.append(_render_wording_line(line))
-    text = normalize_whitespace("\n".join(rendered_lines))
-    lines = [ln for ln in text.split("\n") if ln.strip()]
-    has_code = any(s.monospace for ln in sec.lines for s in ln.spans if s.text.strip())
-    if has_code:
-        inner = "\n".join(lines)
-    else:
-        inner = " ".join(ln.strip() for ln in lines)
-    return f"{wording_fence_open(div_class)}\n\n{inner}\n\n{WORDING_FENCE_CLOSE}"
+    code = "\n".join(out_lines)
+    return f"```{lang}\n{code}\n```"
 
 
 # Intentionally limited to the two ZapfDingbats glyphs observed in the

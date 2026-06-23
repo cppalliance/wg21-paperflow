@@ -197,6 +197,33 @@ def _fix_misnested_table_cells(soup: BeautifulSoup) -> None:
                         changed = True
 
 
+def _fix_misnested_dl_items(soup: BeautifulSoup) -> None:
+    """Promote <dt>/<dd> chain-nested by html.parser to direct <dl> children.
+
+    Bikeshed emits definition lists with implicit close tags. Python's
+    html.parser does not apply HTML5 implied-end-tags, so each successive
+    <dt>/<dd> nests inside the previous <dd>/<dt>, forming a chain
+    (dt1 > dd1 > dt2 > dd2 > ...). This flattens every <dt>/<dd> back to a
+    direct child of its owning <dl>.
+
+    A <dt>/<dd> is misnested iff its direct parent is not the <dl>. We
+    snapshot all dt/dd in document order, keep only those whose nearest
+    <dl> ancestor is THIS dl (so a legitimately nested inner <dl> is left
+    alone and repaired in its own pass), and re-append only the misnested
+    ones in document order. Already-correct items and loose dl-level
+    content keep their position. Single pass, no worklist; no-op on
+    well-formed dls.
+    """
+    for dl in soup.find_all("dl"):
+        items = [
+            it for it in dl.find_all(["dt", "dd"])
+            if it.find_parent("dl") is dl
+        ]
+        for it in items:
+            if it.parent is not dl:
+                dl.append(it.extract())
+
+
 _INLINE_RENDER_TAGS = frozenset({
     "span", "a", "code", "em", "strong", "b", "i", "sub", "sup",
     "ins", "del", "mark", "small", "s", "u", "abbr", "cite",
@@ -447,6 +474,7 @@ def render_body(soup: BeautifulSoup, generator: str) -> str:
     _fix_misnested_blocks(soup)
     _fix_misnested_list_items(soup)
     _fix_misnested_table_cells(soup)
+    _fix_misnested_dl_items(soup)
     _wrap_bare_blockquote_inline(soup)
     body = soup.find("body") or soup
     _normalize_heading_levels(body)
@@ -467,7 +495,7 @@ def _normalize_heading_levels(body: Tag) -> None:
     """
     headings = [
         el for el in body.find_all(list(_HEADING_TAGS))
-        if _inline_text(el, _HEADING_SKIP_CLASSES).strip()
+        if _inline_text(el, _HEADING_EMPTY_CHECK_CLASSES).strip()
     ]
     if not headings:
         return
@@ -617,7 +645,10 @@ def rewrite_imgs_via_manifest(
         img["alt"] = alt
 
 
-_HEADING_SKIP_CLASSES = frozenset({"header-section-number", "secno", "self-link"})
+_HEADING_SKIP_CLASSES = frozenset({"self-link"})
+# Emptiness gate stays number-blind: a heading whose only content is a clause
+# number must not flip from dropped to real (would corrupt H2-root normalization).
+_HEADING_EMPTY_CHECK_CLASSES = frozenset({"header-section-number", "secno", "self-link"})
 
 
 def _render_heading(el: Tag) -> str | None:
@@ -625,6 +656,8 @@ def _render_heading(el: Tag) -> str | None:
     if len(el.name) < 2 or not el.name[1].isdigit():
         return ""
     level = int(el.name[1])
+    if not _inline_text(el, _HEADING_EMPTY_CHECK_CLASSES).strip():
+        return None
     text = _inline_text(el, _HEADING_SKIP_CLASSES).strip()
     if not text:
         return None
@@ -1311,25 +1344,36 @@ def _render_blockquote(el: Tag, generator: str) -> str | None:
 
 
 def _render_dl(el: Tag, generator: str) -> str | None:
-    """Render a definition list.
+    """Render a definition list as blank-line-separated entries.
 
-    ``<dt>``/``<dd>`` render as term/definition. Any other direct child is
-    rendered through the normal element dispatch rather than dropped; loose
-    text is kept (Comment/CData are not content).
+    Each ``<dt>`` starts a new entry; the following ``<dd>`` (plus any
+    extracted non-recursive code blocks) and loose text/other children
+    attach to the current entry. Lines within an entry join with a single
+    newline; entries are separated by a blank line. Comment/CData are not
+    content.
     """
-    items = []
+    entries: list[list[str]] = []
+    current: list[str] = []
+
+    def _flush() -> None:
+        nonlocal current
+        if current:
+            entries.append(current)
+        current = []
+
     for child in list(el.children):
         if not isinstance(child, Tag):
             if (isinstance(child, NavigableString)
                     and not isinstance(child, (Comment, CData))):
                 text = _collapse_whitespace(str(child)).strip()
                 if text:
-                    items.append(text)
+                    current.append(text)
             continue
         if child.name == "dt":
             text = _inline_text(child).strip()
+            _flush()
             if text:
-                items.append(f"**{text}**")
+                current.append(f"**{text}**")
         elif child.name == "dd":
             code_parts = []
             for cb in child.find_all(_CODE_BLOCK_TAGS, recursive=False):
@@ -1338,13 +1382,17 @@ def _render_dl(el: Tag, generator: str) -> str | None:
                     code_parts.append(rendered)
             text = _inline_text(child).strip()
             if text:
-                items.append(f": {text}")
-            items.extend(code_parts)
+                current.append(f": {text}")
+            current.extend(code_parts)
         else:
             rendered = _render_element(child, generator)
             if rendered:
-                items.append(rendered)
-    return "\n".join(items) if items else None
+                current.append(rendered)
+    _flush()
+
+    if not entries:
+        return None
+    return "\n\n".join("\n".join(entry) for entry in entries)
 
 
 def _render_inline(el: Tag) -> str:

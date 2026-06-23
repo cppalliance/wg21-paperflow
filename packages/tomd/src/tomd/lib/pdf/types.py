@@ -76,6 +76,13 @@ class Line:
         text_spans = [s for s in self.spans if s.text.strip()]
         return bool(text_spans) and all(s.monospace for s in text_spans)
 
+    def first_content_span(self) -> "Span | None":
+        """First span carrying non-whitespace text, or None if blank."""
+        for span in self.spans:
+            if span.text.strip():
+                return span
+        return None
+
 
 @dataclass
 class Block:

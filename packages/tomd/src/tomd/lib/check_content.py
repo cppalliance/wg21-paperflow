@@ -54,6 +54,7 @@ from paperstore.progress import ProgressCallback
 from tomd.errors import CheckContentArgError
 from tomd.lib.batch import run_parallel_batch
 from tomd.lib.html.extract import detect_generator, strip_boilerplate
+from tomd.lib.metadata_yaml.format import strip_front_matter
 from tomd.lib.wording_markup import WORDING_FENCE_RE, WORDING_TAG_RE
 
 __all__ = [
@@ -360,9 +361,6 @@ _SKIP_TYPES = frozenset({"thematic_break", "blank_line"})
 _TOMD_HTML_MARKER_RE = re.compile(
     r"<!--\s*tomd:[^>]*?-->", re.IGNORECASE | re.DOTALL,
 )
-_FRONT_MATTER_RE = re.compile(r"^---\n.+?\n---\n?", re.DOTALL)
-
-
 def _collect_node_text(node: dict, out: list[str]) -> None:
     """Walk a mistune AST node, appending text to ``out``."""
     ntype = node.get("type", "")
@@ -414,7 +412,7 @@ def _extract_markdown_stream(md_text: str) -> tuple[str, ...]:
     paragraphs to parse as ordinary prose, so their text counts toward
     coverage.
     """
-    body = _FRONT_MATTER_RE.sub("", md_text, count=1)
+    body = strip_front_matter(md_text)
     body = _TOMD_HTML_MARKER_RE.sub(" ", body)
     body = WORDING_TAG_RE.sub(" ", body)
     body = WORDING_FENCE_RE.sub(" ", body)

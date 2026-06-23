@@ -59,7 +59,7 @@ def test_cli_prints_already_at_when_stages_run_empty(
         return ProcessResult(final_status=kwargs.get("through", 2), stages_run=[])
 
     from cli._process import run_process_command
-    with patch("pipeline.process_paper", new=fake):
+    with patch("cli._process.process_paper", new=fake):
         rc = run_process_command(_stub_args("P1234R0"), backend, through=2)
 
     out = capsys.readouterr().out
@@ -78,7 +78,7 @@ def test_cli_prints_stage_name_when_work_ran(
         )
 
     from cli._process import run_process_command
-    with patch("pipeline.process_paper", new=fake):
+    with patch("cli._process.process_paper", new=fake):
         rc = run_process_command(_stub_args("P1234R0"), backend, through=2)
 
     out = capsys.readouterr().out

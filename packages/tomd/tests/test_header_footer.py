@@ -190,6 +190,122 @@ def test_detect_repeating_doc_number_pattern():
     assert (36.0, "__DOC_NUM__") in result
 
 
+# ---- detect_repeating: issue-180 regressions -----------------------------
+
+def test_detect_repeating_ignores_dual_path_doubling():
+    """A single-page body line counted twice (MuPDF + spatial) is NOT repeating.
+
+    Reproduces the issue-180 bug: each page's edge items are gathered from
+    both extraction paths, so a single-page line's text appears twice with the
+    SAME page_num. The stock Counter-of-occurrences path saw count=2 >= the
+    1.5 threshold on a 3-page doc and wrongly stripped genuine body. Counting
+    distinct PAGES (here 1) keeps it.
+
+    The bucket is made gate-passing by a genuine 2-page header so the body
+    line actually reaches the per-text test.
+    """
+    bbox = (0, 30, 100, 42)  # center 36 -> bucket 36.0
+
+    def header(pg):
+        return PageEdgeItem(text="Running Head", y=30.0,
+                            page_num=pg, bbox=bbox)
+
+    def body():
+        return PageEdgeItem(text="By embracing these practices", y=30.0,
+                            page_num=3, bbox=bbox)
+
+    all_edges = [
+        [header(1)],
+        [header(2)],
+        # Page 3: dual-path doubling — the SAME body line twice, page_num=3.
+        [body(), body()],
+    ]
+    result = detect_repeating(all_edges, total_pages=3)
+    assert (36.0, "Running Head") in result          # genuine 2/3-page header
+    assert (36.0, "By embracing these practices") not in result  # body kept
+
+
+def test_detect_repeating_alternating_header_coverage_union():
+    """Alternating recto/verso header (title + authors) is stripped via union.
+
+    Mirrors p3692r1/r2: title on odd pages, authors on even pages, each on
+    just under half the pages, so neither reaches threshold alone. The
+    coverage-union fallback strips both because their page union does. Red
+    against a plain distinct-page fix (neither variant reaches threshold),
+    green with the union branch.
+    """
+    bbox = (0, 30, 100, 42)
+
+    def title(pg):
+        return PageEdgeItem(text="Avoiding OOTA Surprises", y=30.0,
+                            page_num=pg, bbox=bbox)
+
+    def authors(pg):
+        return PageEdgeItem(text="A. Author, B. Author", y=30.0,
+                            page_num=pg, bbox=bbox)
+
+    # 6 pages, threshold 3.0. Title on 1,3 (2 pages); authors on 2,4 (2 pages).
+    # Neither reaches 3 alone; union {1,2,3,4} = 4 >= 3.
+    all_edges = [
+        [title(1)], [authors(2)], [title(3)], [authors(4)], [], [],
+    ]
+    result = detect_repeating(all_edges, total_pages=6)
+    assert (36.0, "Avoiding OOTA Surprises") in result
+    assert (36.0, "A. Author, B. Author") in result
+
+
+def test_detect_repeating_union_lower_boundary_keeps_oneoff_body():
+    """Distinct one-off body lines sharing a gated bucket are never stripped.
+
+    Locks the boundary the subset property depends on: each line appears on a
+    single page (< _MIN_RECUR_PAGES), so none enter `recurring` and the
+    coverage-union cannot fire, even though the bucket clears the page gate.
+    """
+    bbox = (0, 30, 100, 42)
+    lines = [
+        "First unique sentence on its page",
+        "Second distinct paragraph opener",
+        "Third one-off body line here",
+        "Fourth and final unique line",
+    ]
+    # 6 pages, threshold 3.0. Four DIFFERENT lines, one per page on pages 1-4.
+    all_edges = [
+        [PageEdgeItem(text=lines[i], y=30.0, page_num=i + 1, bbox=bbox)]
+        for i in range(4)
+    ] + [[], []]
+    result = detect_repeating(all_edges, total_pages=6)
+    assert all(text not in {p for _, p in result} for text in lines)
+
+
+def test_detect_repeating_union_variant_cap_blocks_multi_variant():
+    """The variant cap blocks the constructed >2-variant union counterexample.
+
+    Three distinct verbatim texts, each recurring on >= _MIN_RECUR_PAGES pages,
+    whose page union reaches threshold. Each alone is sub-threshold (so the
+    exact-hit path does not fire) and each clears _MIN_RECUR_PAGES (so the
+    _MIN_RECUR_PAGES floor does not block it) -- the ONLY thing that keeps these
+    out of the repeating set is `len(recurring) <= _MAX_HEADER_VARIANTS` (=2).
+    Locks the cap: raising it to >= 3 or deleting the guard makes this fail.
+    """
+    bbox = (0, 30, 100, 42)
+    variants = ["Variant alpha text", "Variant beta text", "Variant gamma text"]
+
+    def item(text, pg):
+        return PageEdgeItem(text=text, y=30.0, page_num=pg, bbox=bbox)
+
+    # 8 pages, threshold 4.0. Each variant on 2 distinct pages (>= _MIN_RECUR);
+    # none reaches 4 alone; union of all three = pages 1..6 = 6 >= 4. With the
+    # cap at 2, the 3-variant recurring set is rejected -> nothing stripped.
+    all_edges = [
+        [item(variants[0], 1)], [item(variants[0], 2)],
+        [item(variants[1], 3)], [item(variants[1], 4)],
+        [item(variants[2], 5)], [item(variants[2], 6)],
+        [], [],
+    ]
+    result = detect_repeating(all_edges, total_pages=8)
+    assert all(v not in {p for _, p in result} for v in variants)
+
+
 # ---- strip_repeating -----------------------------------------------------
 
 def test_strip_repeating_removes_exact_match():

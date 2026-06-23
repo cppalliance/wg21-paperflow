@@ -6,6 +6,8 @@ import unicodedata
 from pathlib import Path
 from collections import Counter
 
+from tomd.lib.metadata_yaml.format import FRONT_MATTER_RE
+
 _NAMED_ENTITIES = {
     0xC0: "&Agrave;", 0xC1: "&Aacute;", 0xC2: "&Acirc;", 0xC3: "&Atilde;",
     0xC4: "&Auml;", 0xC5: "&Aring;", 0xC6: "&AElig;", 0xC7: "&Ccedil;",
@@ -589,17 +591,16 @@ def _is_metadata_table(lines: list[str]) -> bool:
     return True
 
 
-_FRONT_MATTER_END_RE = re.compile(r"\A---[ \t]*\n.*?\n(---)", re.DOTALL)
-
-
 def _find_front_matter_end(md: str) -> int | None:
     """Find the character offset of the closing ``---`` in YAML front matter.
 
     Returns the offset where the closing ``---`` starts, or None if the
     string does not begin with a valid YAML front matter block.
     """
-    m = _FRONT_MATTER_END_RE.match(md)
-    return m.start(1) if m else None
+    match = FRONT_MATTER_RE.match(md)
+    if not match:
+        return None
+    return match.end("body") + 1
 
 
 def _strip_metadata_table(md: str) -> str:
