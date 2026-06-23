@@ -116,5 +116,14 @@ EXIT_FAIL = 5
 # lists. -v lifts the cap and shows every paper.
 SUMMARY_SECTION_CAP = 15
 
+# -- Region detail (content-level WHERE) -------------------------------------
+# Max regions per side (missing / extra) carried into WhiskerResult and shown
+# in verbose output. Keeps the sidecar and terminal manageable.
+REGION_DETAIL_CAP = 5
+# Display cap for a region snippet. MisalignedRegion.sample is already truncated
+# to ~60 chars by tomd (_REGION_SAMPLE_CHARS); this constant documents the cap
+# and is used where a snippet length reference is needed in rendering.
+REGION_SNIPPET_CHARS = 60
+
 # -- Sidecar / report schema -------------------------------------------------
 WHISKER_SCHEMA_VERSION = 1

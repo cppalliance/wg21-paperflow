@@ -7,6 +7,8 @@
 
 from types import SimpleNamespace
 
+from tomd.lib.check_content import MisalignedRegion
+
 from whisker.report import build_report, render_report_md, render_summary
 from whisker.score import score_markdown
 
@@ -21,15 +23,15 @@ Faithful prose that the source also contains.
 """
 
 
-def _content(coverage, *, drift=0.0):
+def _content(coverage, *, drift=0.0, missing_regions=(), extra_regions=()):
     return SimpleNamespace(
         source_format="pdf",
         coverage=coverage,
         drift=drift,
         unigram_coverage=coverage,
         unigram_drift=drift,
-        missing_regions=(),
-        extra_regions=(),
+        missing_regions=missing_regions,
+        extra_regions=extra_regions,
     )
 
 
@@ -158,3 +160,43 @@ def test_summary_item_line_leads_with_reference_metrics():
     # the review (P0002) line leads with the oracle agreement, not coverage.
     assert "ovr=" in out and "teds=" in out
     assert "cov=" not in out
+
+
+# -- region detail in verbose summary and report.md -------------------------
+
+def _region_result():
+    """A result with missing/extra regions triggering a review verdict."""
+    missing = (
+        MisalignedRegion(side="source", token_start=100, token_end=150,
+                         sample="missing chunk on page seven", page=7),
+    )
+    extra = (
+        MisalignedRegion(side="markdown", token_start=200, token_end=250,
+                         sample="extra chunk no page", page=None),
+    )
+    return score_markdown(
+        "P0099", _CLEAN_MD,
+        content=_content(0.98, missing_regions=missing, extra_regions=extra),
+    )
+
+
+def test_verbose_summary_shows_region_lines():
+    results = [_region_result()]
+    out = render_summary(results, verbose=True)
+    assert 'p.7: "missing chunk on page seven"' in out
+    assert '"extra chunk no page"' in out
+
+
+def test_nonverbose_summary_hides_region_lines():
+    results = [_region_result()]
+    out = render_summary(results, verbose=False)
+    assert "missing chunk on page seven" not in out
+    assert "extra chunk no page" not in out
+
+
+def test_report_md_includes_region_detail():
+    results = [_region_result()]
+    md = render_report_md(results)
+    assert "## Region detail" in md
+    assert 'p.7: "missing chunk on page seven"' in md
+    assert '"extra chunk no page"' in md

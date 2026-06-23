@@ -7,6 +7,9 @@
 
 from types import SimpleNamespace
 
+from tomd.lib.check_content import MisalignedRegion
+
+from whisker.constants import REGION_DETAIL_CAP
 from whisker.score import (
     VERDICT_FAIL,
     VERDICT_PASS,
@@ -29,23 +32,39 @@ More prose describing the design in plain words.
 """
 
 
+def _make_regions(count, side, *, page=7):
+    """Build synthetic MisalignedRegion objects for testing."""
+    return tuple(
+        MisalignedRegion(
+            side=side, token_start=i * 100, token_end=i * 100 + 50,
+            sample=f"sample text at {i}", page=page,
+        )
+        for i in range(count)
+    )
+
+
 def _content(
     coverage, *, unigram=None, drift=0.0, unigram_drift=None,
     missing=0, extra=0, fmt="pdf",
+    missing_regions=None, extra_regions=None,
 ):
     # unigram_coverage is the content gate; it defaults to the shingle coverage
     # but can be set independently to model reflow (low shingle, high unigram).
     # Likewise unigram_drift (order-invariant, the soft signal) defaults to the
     # shingle drift but can be set apart to model a faithful reflow whose only
     # divergence is order (high shingle drift, zero unigram drift).
+    if missing_regions is None:
+        missing_regions = _make_regions(missing, "source")
+    if extra_regions is None:
+        extra_regions = _make_regions(extra, "markdown")
     return SimpleNamespace(
         source_format=fmt,
         coverage=coverage,
         drift=drift,
         unigram_coverage=coverage if unigram is None else unigram,
         unigram_drift=drift if unigram_drift is None else unigram_drift,
-        missing_regions=tuple(range(missing)),
-        extra_regions=tuple(range(extra)),
+        missing_regions=missing_regions,
+        extra_regions=extra_regions,
     )
 
 
@@ -237,3 +256,46 @@ def test_no_reference_leaves_ref_fields_none():
     assert r.ref_overall is None and r.ref_engine is None
     d = r.to_dict()
     assert d["ref_overall"] is None and d["ref_nid"] is None and d["ref_engine"] is None
+
+
+# -- region detail (content-level WHERE) ------------------------------------
+
+def test_to_dict_carries_region_detail_with_expected_keys():
+    r = score_markdown("P1234R0", _CLEAN_MD, content=_content(0.98, missing=2, extra=1))
+    d = r.to_dict()
+    assert len(d["missing_regions"]) == 2
+    assert len(d["extra_regions"]) == 1
+    for reg in d["missing_regions"] + d["extra_regions"]:
+        assert set(reg.keys()) == {"page", "token_start", "token_end", "sample"}
+        assert "side" not in reg
+
+
+def test_region_detail_cap_is_enforced():
+    many = _make_regions(REGION_DETAIL_CAP + 3, "source")
+    r = score_markdown(
+        "P1234R0", _CLEAN_MD,
+        content=_content(0.98, missing_regions=many),
+    )
+    assert len(r.missing_regions) == REGION_DETAIL_CAP
+
+
+def test_region_detail_sorted_by_token_start():
+    unsorted = (
+        MisalignedRegion(side="source", token_start=300, token_end=350, sample="c", page=3),
+        MisalignedRegion(side="source", token_start=100, token_end=150, sample="a", page=1),
+        MisalignedRegion(side="source", token_start=200, token_end=250, sample="b", page=2),
+    )
+    r = score_markdown(
+        "P1234R0", _CLEAN_MD,
+        content=_content(0.98, missing_regions=unsorted),
+    )
+    starts = [reg["token_start"] for reg in r.missing_regions]
+    assert starts == sorted(starts)
+
+
+def test_region_detail_empty_when_no_regions():
+    r = score_markdown("P1234R0", _CLEAN_MD, content=_content(0.98))
+    assert r.missing_regions == []
+    assert r.extra_regions == []
+    d = r.to_dict()
+    assert d["missing_regions"] == [] and d["extra_regions"] == []

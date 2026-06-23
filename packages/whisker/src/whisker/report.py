@@ -47,6 +47,20 @@ def _flags_text(r: WhiskerResult) -> str:
     return "; ".join(sorted(r.hard_flags) + sorted(r.soft_flags)) or "clean"
 
 
+def _region_lines(regions: list[dict], label: str) -> list[str]:
+    """Indented region-detail lines for verbose output."""
+    if not regions:
+        return []
+    lines = [f"      {label}:"]
+    for reg in regions[:C.REGION_DETAIL_CAP]:
+        sample = reg["sample"][:C.REGION_SNIPPET_CHARS]
+        if reg["page"] is not None:
+            lines.append(f'      p.{reg["page"]}: "{sample}"')
+        else:
+            lines.append(f'      "{sample}"')
+    return lines
+
+
 def _item_line(r: WhiskerResult, color: bool) -> str:
     """A single worst-offender line: pid, headline metrics, then the reason.
 
@@ -107,6 +121,23 @@ def render_report_md(results: list[WhiskerResult]) -> str:
             f"| {r.qa_score} | {r.missing_region_count}+{r.extra_region_count} "
             f"| {flags} |"
         )
+    region_papers = [r for r in ordered if r.missing_regions or r.extra_regions]
+    if region_papers:
+        lines.append("")
+        lines.append("## Region detail")
+        lines.append("")
+        for r in region_papers:
+            lines.append(f"### {r.pid}")
+            lines.append("")
+            for label, regions in (("missing", r.missing_regions), ("extra", r.extra_regions)):
+                for reg in regions:
+                    sample = reg["sample"][:C.REGION_SNIPPET_CHARS]
+                    if reg["page"] is not None:
+                        lines.append(f'- {label} p.{reg["page"]}: "{sample}"')
+                    else:
+                        lines.append(f'- {label}: "{sample}"')
+            lines.append("")
+
     lines.append("")
     return "\n".join(lines)
 
@@ -139,6 +170,7 @@ def _section(
     color: bool,
     cap: int | None,
     report_path: str | None,
+    verbose: bool = False,
 ) -> list[str]:
     items = _worst_first(results, verdict)
     if not items:
@@ -146,7 +178,11 @@ def _section(
     header = _paint(f"{verdict} ({len(items)})", _BOLD + _ANSI[verdict], color)
     lines = ["", header]
     shown = items if cap is None else items[:cap]
-    lines.extend(_item_line(r, color) for r in shown)
+    for r in shown:
+        lines.append(_item_line(r, color))
+        if verbose:
+            lines.extend(_region_lines(r.missing_regions, "missing"))
+            lines.extend(_region_lines(r.extra_regions, "extra"))
     hidden = len(items) - len(shown)
     if hidden > 0:
         where = f" (see {report_path})" if report_path else ""
@@ -255,7 +291,8 @@ def render_summary(
         verdicts = (VERDICT_FAIL, VERDICT_REVIEW, VERDICT_PASS)
     for verdict in verdicts:
         lines.extend(
-            _section(results, verdict, color=color, cap=section_cap, report_path=report_path)
+            _section(results, verdict, color=color, cap=section_cap,
+                     report_path=report_path, verbose=verbose)
         )
     if stats:
         lines.extend(_flag_rollup(results))

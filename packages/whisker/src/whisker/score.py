@@ -69,6 +69,8 @@ class WhiskerResult:
     gates: list[GateResult]
     hard_flags: list[str] = field(default_factory=list)
     soft_flags: list[str] = field(default_factory=list)
+    missing_regions: list[dict] = field(default_factory=list)
+    extra_regions: list[dict] = field(default_factory=list)
     # Reference-oracle agreement (tomd vs an independent converter), or None
     # when reference scoring is disabled (--no-reference). When present these
     # are the primary verdict signal; see _decide.
@@ -108,6 +110,8 @@ class WhiskerResult:
             "gates": [asdict(g) for g in self.gates],
             "hard_flags": sorted(self.hard_flags),
             "soft_flags": sorted(self.soft_flags),
+            "missing_regions": self.missing_regions,
+            "extra_regions": self.extra_regions,
         }
 
 
@@ -211,6 +215,14 @@ def score_markdown(
         ref_overall = (ref_nid + ref_teds + ref_mhs) / 3.0
         ref = (ref_nid, ref_teds, ref_mhs, ref_overall)
 
+    def _region_dicts(regions) -> list[dict]:
+        ordered = sorted(regions, key=lambda r: r.token_start)
+        return [
+            {"page": r.page, "token_start": r.token_start,
+             "token_end": r.token_end, "sample": r.sample}
+            for r in ordered[:C.REGION_DETAIL_CAP]
+        ]
+
     verdict, hard, soft = _decide(
         content.unigram_coverage,
         content.unigram_drift,
@@ -244,6 +256,8 @@ def score_markdown(
         gates=gates,
         hard_flags=hard,
         soft_flags=soft,
+        missing_regions=_region_dicts(content.missing_regions),
+        extra_regions=_region_dicts(content.extra_regions),
     )
 
 

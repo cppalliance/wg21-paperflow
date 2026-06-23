@@ -195,6 +195,19 @@ floor). Low nid means LOOK, not "tomd is wrong"; so it raises review, never fail
 `--no-reference` skips the oracle and leaves the `ref_*` fields null; the
 hard/soft gate above is identical, just without the advisory overlay.
 
+## What vs where
+
+Flags carry the rule-level WHY (which check tripped and the threshold it
+crossed). Gate detail carries structural location (which structural invariant
+broke). The region detail (`missing_regions`, `extra_regions` on `WhiskerResult`)
+carries the content-level WHERE: the PDF page and a 60-char text snippet
+locating the missing or extra content, sorted by token position and capped at
+`REGION_DETAIL_CAP` per side.
+
+Deliberate omissions: no HTML/bbox visualization (whisker has no layout stage
+to map token positions back to page coordinates), no per-table-cell diff (no
+benchmark repo does it; tables are scored holistically via TEDS).
+
 ## Invariants
 
 - **Standalone.** Never edit another package to make whisker work. Reuse tomd by
