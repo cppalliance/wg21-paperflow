@@ -55,5 +55,6 @@ LLM steps resolve model slots from ``assay.md`` metadata (``**model:**``, ``**ma
 - Paper text never enters the main context. All paper access through sub-agent calls with `ctx.inject_untrusted(format_numbered_lines(...))`.
 - Serial execution. All LLM calls are sequential `for` loops with `await agent.run()`. No `asyncio.gather`, no `run_task`.
 - Intermediate artifacts (claims, evidence, gaps, thesis, findings) are persisted to paperstore via `_persist_step` for downstream agora consumption.
+- `_build_hooks` keys are full `assay.md` header strings (e.g. `"7. Collect"`), validated by `test_hooks_match_assay_md`. Persistence dispatch uses slugs via `_step_slug` / `_PERSIST_BY_SLUG`, validated by `test_persist_slugs_match_assay_md`. Both are in `test_step_registry.py`.
 - All LLM output types are frozen `BaseModel` with `output_type=`. Post-LLM fixup via `model_copy(update=...)`.
 - Open-weight models are the production target. Prompts and schemas must work with `vllm_thinking` backends (Gemma, Qwen), not just Anthropic. Schema compliance issues on smaller models are solved with retries and prompt engineering. See root `CLAUDE.md` Model sovereignty.
