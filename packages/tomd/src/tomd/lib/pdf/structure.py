@@ -2303,6 +2303,530 @@ def _split_embedded_code(sections: list[Section]) -> list[Section]:
     return result
 
 
+def _line_is_mono_code(line: Line) -> bool:
+    """True if a line is monospace code, optionally with a trailing
+    proportional ``//`` comment.
+
+    Handles the mixed-font shape MuPDF produces for pseudo-code with inline
+    comments: a monospace span holding the code and the ``//`` marker,
+    followed by a proportional span holding the comment text (e.g.
+    ``c1: b = new atomic<int>(0);    // gets the same location``). A
+    pure-monospace line is also code.
+
+    A line whose leading ``//`` is a comment marker with no code before it
+    (a section-reference comment like ``// [c.math.abs]``) or a URI scheme
+    separator (``https://``, ``file://``) is NOT code: returning True there
+    would pull prose and links into a code fence. ``_STRUCTURAL_CODE_RE``
+    and ``_CODE_COMMENT_RE`` make the same URL distinction.
+    """
+    content = [s for s in line.spans if s.text.strip()]
+    if not content:
+        return False
+    if not content[0].monospace:
+        return False
+    if all(s.monospace for s in content):
+        return True
+    # Mixed font: accept only "<monospace code> // <proportional comment>".
+    first_nonmono = next(
+        i for i, s in enumerate(content) if not s.monospace
+    )
+    mono_prefix = "".join(s.text for s in content[:first_nonmono])
+    if "//" not in mono_prefix:
+        return False
+    code_before_comment = mono_prefix.split("//", 1)[0].rstrip()
+    # Empty: the line starts with the comment marker (prose / section ref).
+    # Trailing ":" : the "//" is a URI scheme separator, not a C++ comment.
+    if not code_before_comment or code_before_comment.endswith(":"):
+        return False
+    # The comment must not resume into monospace code.
+    if any(s.monospace for s in content[first_nonmono:]):
+        return False
+    return True
+
+
+def _absorb_mono_code_orphans(sections: list[Section]) -> list[Section]:
+    """Absorb leading mixed-font code lines into a preceding CODE block.
+
+    Sibling of _absorb_code_orphans, but recognises the mixed-font
+    ``code // comment`` shape that _absorb_code_orphans (which requires a
+    purely monospace line) and _split_embedded_code (which tests
+    _line_is_monospace) both miss. When a pseudo-code listing is split
+    across MuPDF blocks (e.g. P3181R1 "Reallocating thread C:" followed by
+    ``c1:`` / ``c2:`` lines carrying proportional comments), the trailing
+    code lines land in a following PARAGRAPH and render as broken inline
+    markdown. This pass moves the leading run of such lines back into the
+    preceding CODE section.
+
+    Runs LAST (after _split_embedded_code) so the preceding section is
+    already classified CODE. Text is rebuilt from each line's text and
+    prev.lines is extended in lockstep, keeping Section.text and
+    Section.lines in sync (the emitter renders CODE from .lines).
+    """
+    result: list[Section] = []
+    for sec in sections:
+        if (result
+                and result[-1].kind == SectionKind.CODE
+                and sec.kind == SectionKind.PARAGRAPH
+                and sec.page_num == result[-1].page_num
+                and sec.lines):
+            # Maximal leading run of (mono-code or blank) lines, requiring at
+            # least one real code line, then trailing blanks trimmed so a
+            # blank separating the code from following prose stays with the
+            # prose paragraph rather than padding the fence.
+            run_len = 0
+            saw_code = False
+            for ln in sec.lines:
+                if _line_is_mono_code(ln):
+                    run_len += 1
+                    saw_code = True
+                elif not ln.text.strip():
+                    run_len += 1
+                else:
+                    break
+            while run_len > 0 and not sec.lines[run_len - 1].text.strip():
+                run_len -= 1
+
+            if saw_code and run_len > 0:
+                absorbed = sec.lines[:run_len]
+                rest_lines = sec.lines[run_len:]
+                prev = result[-1]
+                absorbed_text = "\n".join(ln.text for ln in absorbed)
+                result[-1] = replace(
+                    prev,
+                    text=prev.text + "\n" + absorbed_text,
+                    lines=prev.lines + absorbed,
+                )
+                if rest_lines:
+                    rest_text = "\n".join(ln.text for ln in rest_lines)
+                    result.append(replace(sec, text=rest_text, lines=rest_lines))
+                _log.info("Absorbed %d mixed-font code line(s) into code block",
+                          len(absorbed))
+                continue
+        result.append(sec)
+    return result
+
+
+def _label_first_word(line: Line) -> str:
+    """Lowercased first whitespace-delimited token of *line*, '' if blank."""
+    parts = line.text.strip().split()
+    return parts[0].lower() if parts else ""
+
+
+def _absorb_trailing_label_into_code(sections: list[Section]) -> list[Section]:
+    """Move a trailing pseudo-code listing label out of a PARAGRAPH into the
+    head of the CODE block it introduces.
+
+    A labeled listing ("Thread A:" / "Thread B:" / "Reallocating thread C:")
+    can have its FIRST label wrap onto the tail of the preceding prose
+    paragraph (P3181R1 "Detailed example": "...implementation issues. Thread
+    A:" sits in the paragraph, while "Thread B:" and the code live in the next
+    CODE section). The label then renders as prose instead of heading the
+    fence.
+
+    The move is gated hard so a prose sentence whose last word merely ends in a
+    colon is never torn off:
+
+    - the trailing line must classify as a label (_classify_code_line);
+    - it must carry no citation bracket ('[') (rules out editing instructions
+      like "Modify [dcl.contract.func] as follows:");
+    - its first word must match the first word of a label ALREADY inside the
+      CODE block (same listing series: "Thread A:" -> "Thread B:"). A prose
+      tail ("...populated object:") shares no first word with a code label and
+      stays in the prose.
+
+    Sibling of _absorb_mono_code_orphans: rebuilds text/lines in lockstep so
+    Section.text and Section.lines stay in sync. Runs before
+    _trim_narrative_from_code so the moved label is seen as code.
+    """
+    result = list(sections)
+    i = 0
+    while i < len(result) - 1:
+        para, code = result[i], result[i + 1]
+        if (para.kind == SectionKind.PARAGRAPH
+                and code.kind == SectionKind.CODE
+                and para.page_num == code.page_num
+                and para.lines and code.lines):
+            j = len(para.lines)
+            while j > 0 and not para.lines[j - 1].text.strip():
+                j -= 1
+            last = para.lines[j - 1] if j > 0 else None
+            if (last is not None
+                    and _classify_code_line(last) == "label"
+                    and "[" not in last.text
+                    and any(ln.text.strip() for ln in para.lines[:j - 1])):
+                first = _label_first_word(last)
+                code_label_words = {
+                    _label_first_word(ln) for ln in code.lines
+                    if _classify_code_line(ln) == "label"
+                }
+                head = next((ln for ln in code.lines if ln.text.strip()), None)
+                # Skip when the code block already opens with this exact label
+                # (no duplicate head) or opens with narrative (the moved label
+                # would inherit a narrative forward neighbour in
+                # _trim_narrative_from_code and be peeled straight back out,
+                # orphaning it in its own paragraph).
+                head_ok = (head is not None
+                           and head.text.strip() != last.text.strip()
+                           and _classify_code_line(head) != "narrative")
+                if first and first in code_label_words and head_ok:
+                    moved = para.lines[j - 1:]
+                    kept = para.lines[:j - 1]
+                    result[i] = replace(
+                        para, lines=kept,
+                        text="\n".join(ln.text for ln in kept),
+                    )
+                    merged = moved + code.lines
+                    result[i + 1] = replace(
+                        code, lines=merged,
+                        text="\n".join(ln.text for ln in merged),
+                    )
+                    _log.info("Moved trailing label %r into following code "
+                              "block on page %d", last.text.strip(),
+                              code.page_num)
+        i += 1
+    return result
+
+
+# Anti-narrative trim: characters that count as code symbols when measuring
+# a line's symbol density. Prose carries few of these; code lines (calls,
+# declarations, operators, terminators) are dense in them.
+_NARRATIVE_CODE_SYMBOLS = frozenset("{}()[];=<>+-*/&|%!~^.,:#")
+
+# A line is narrative (prose wrongly trapped in a fence) when it is NOT
+# monospace, carries few code symbols, is mostly alphabetic words, and is
+# long enough to be a sentence fragment rather than a short code statement.
+_NARRATIVE_MAX_SYMBOL_DENSITY = 0.07
+_NARRATIVE_MIN_ALPHA_RATIO = 0.55
+_NARRATIVE_MIN_WORDS = 6
+
+# A line is unambiguously code when it is monospace, dense in code symbols,
+# or sparse in alphabetic words. These short-circuit the narrative test so a
+# dense one-liner (``foo(x);``) is never mistaken for prose.
+_CODE_MIN_SYMBOL_DENSITY = 0.10
+_CODE_MAX_ALPHA_RATIO = 0.40
+
+# A trailing ``label:`` shorter than this is a structural pseudo-code label
+# (``Thread A:``, ``c1:``), kept with the surrounding code, never narrative.
+_LABEL_MAX_WORDS = 4
+
+# A wrapped sentence tail (``value;``, ``slate concept.``) absorbed into a
+# preceding narrative run: short, alphabetic after stripping trailing prose
+# punctuation, and not symbol-dense once that punctuation is removed.
+_CONTINUATION_MAX_WORDS = 5
+_CONTINUATION_MIN_ALPHA_RATIO = 0.55
+_CONTINUATION_MAX_SYMBOL_DENSITY = 0.10
+_CONTINUATION_TRAILING_PUNCT = ";:.,"
+
+
+def _line_alpha_ratio(words: list[str]) -> float:
+    """Fraction of *words* that are purely alphabetic after stripping quotes,
+    parentheses, and hyphens. Higher = more prose-like."""
+    if not words:
+        return 0.0
+    alpha = [w for w in words if w.strip("'\"`()").replace("-", "").isalpha()]
+    return len(alpha) / len(words)
+
+
+def _line_symbol_density(
+    text: str, symbols: frozenset[str] = _NARRATIVE_CODE_SYMBOLS
+) -> float:
+    """Fraction of characters in *text* that are *symbols* (default: code
+    symbols). Higher = more code-like. Returns 0.0 for empty text."""
+    if not text:
+        return 0.0
+    return sum(1 for c in text if c in symbols) / len(text)
+
+
+def _classify_code_line(line: Line) -> str:
+    """Classify a line inside a CODE section as code/narrative/label/blank.
+
+    The discriminator is symbol density and alphabetic-word ratio, NOT font:
+    proportional-font code (e.g. P4174R0) is still code by its dense symbols,
+    and a monospace-styled sentence is still prose by its sparse symbols. A
+    leading ``//`` is always a comment (code); a short trailing-colon line is
+    a structural label kept with the code.
+    """
+    s = line.text.strip()
+    if not s:
+        return "blank"
+    if s.startswith("//"):
+        return "code"
+    words = s.split()
+    if len(words) <= _LABEL_MAX_WORDS and s.endswith(":"):
+        return "label"
+    if _line_is_monospace(line):
+        return "code"
+    sd = _line_symbol_density(s)
+    if sd >= _CODE_MIN_SYMBOL_DENSITY:
+        return "code"
+    ar = _line_alpha_ratio(words)
+    if ar <= _CODE_MAX_ALPHA_RATIO:
+        return "code"
+    if (len(words) >= _NARRATIVE_MIN_WORDS
+            and ar >= _NARRATIVE_MIN_ALPHA_RATIO
+            and sd <= _NARRATIVE_MAX_SYMBOL_DENSITY):
+        return "narrative"
+    return "code"
+
+
+def _is_narrative_continuation(line: Line) -> bool:
+    """True if *line* is a short wrapped prose tail of a preceding narrative
+    line (``value;`` after ``... optional initial``).
+
+    Trailing prose punctuation is stripped before measuring so a tail whose
+    only symbol is a terminator is absorbed, while a genuine code tail
+    (``});``, ``i++;``) stays code: its core is not alphabetic and its symbol
+    density stays high.
+    """
+    s = line.text.strip()
+    if not s or s.startswith("//"):
+        return False
+    if _line_is_monospace(line):
+        return False
+    core = s.rstrip(_CONTINUATION_TRAILING_PUNCT).strip()
+    words = core.split()
+    if not words or len(words) > _CONTINUATION_MAX_WORDS:
+        return False
+    return (_line_alpha_ratio(words) >= _CONTINUATION_MIN_ALPHA_RATIO
+            and _line_symbol_density(core) < _CONTINUATION_MAX_SYMBOL_DENSITY)
+
+
+def _neighbour_narr(kinds: list[str], is_narr: list[bool],
+                    i: int, step: int, skip: tuple[str, ...]) -> bool | None:
+    """is_narr of the nearest line from index *i* in direction *step* (+1/-1)
+    whose kind is not in *skip*; None if none exists in that direction."""
+    j = i + step
+    while 0 <= j < len(kinds):
+        if kinds[j] not in skip:
+            return is_narr[j]
+        j += step
+    return None
+
+
+def _trim_narrative_from_code(sections: list[Section]) -> list[Section]:
+    """Split prose lines out of CODE sections into PARAGRAPH sections.
+
+    Earlier passes (_rescue_unfenced_code wholesale promotion, dual-path
+    merges) can fence whole regions of mixed prose and code, leaving narrative
+    sentences trapped inside a ``` fence (P3181R1, and the P4174R0 golden
+    itself). This pass re-segments each CODE section line by line: narrative
+    runs become PARAGRAPH, code runs stay CODE.
+
+    Three rules keep code intact while removing only genuine prose:
+
+    - A line is narrative only by its own typography-independent signals
+      (sparse code symbols, mostly alphabetic words); monospace and
+      symbol-dense lines are always code.
+    - A short wrapped sentence tail rejoins its narrative run
+      (_is_narrative_continuation).
+    - A single narrative line fully surrounded by code is kept as code
+      (cohesion guard): one wrapped comment or wording-bolded list item must
+      not fragment a contiguous code block. Only edge runs and interior runs
+      of two or more content lines are trimmed.
+
+    Runs LAST in the structure pipeline so all code detection has settled.
+    """
+    result: list[Section] = []
+    for sec in sections:
+        if sec.kind != SectionKind.CODE or not sec.lines:
+            result.append(sec)
+            continue
+
+        kinds = [_classify_code_line(ln) for ln in sec.lines]
+        is_narr = [k == "narrative" for k in kinds]
+
+        # Resolve labels first, then blanks. A label introduces what FOLLOWS
+        # it, so it inherits its forward neighbour ("Thread A:" above code
+        # stays code; a prose connector "For example:" above prose joins the
+        # prose, else it emits as a lone label-only fence). Blanks resolve in
+        # a SECOND pass so a blank sees the label's already-resolved side: the
+        # blank line separating "Thread A:" from "a1: ..." must take the code
+        # side, not skip past the label to unrelated prose above and orphan
+        # the label in its own fence. Both default to code when isolated.
+        for i, k in enumerate(kinds):
+            if k != "label":
+                continue
+            fwd = _neighbour_narr(kinds, is_narr, i, 1, ("blank", "label"))
+            back = _neighbour_narr(kinds, is_narr, i, -1, ("blank", "label"))
+            is_narr[i] = bool(fwd if fwd is not None else back)
+        for i, k in enumerate(kinds):
+            if k != "blank":
+                continue
+            back = _neighbour_narr(kinds, is_narr, i, -1, ("blank",))
+            fwd = _neighbour_narr(kinds, is_narr, i, 1, ("blank",))
+            is_narr[i] = bool(back if back is not None else fwd)
+
+        # Absorb short wrapped tails into a preceding narrative run.
+        for i in range(1, len(sec.lines)):
+            if (not is_narr[i] and is_narr[i - 1] and kinds[i] == "code"
+                    and _is_narrative_continuation(sec.lines[i])):
+                is_narr[i] = True
+
+        # Cohesion guard: keep single interior narrative lines as code.
+        # `groups` is a static snapshot; the guard below mutates is_narr while
+        # reading boundaries from it. Safe only because the guard flips
+        # narrative->code exclusively and `_is_code_group` keys on the
+        # original flag, so a reverted group never invents a new code boundary.
+        # If a future edit flips code->narrative here, recompute groups first.
+        groups: list[tuple[bool, list[int]]] = []
+        for idx, flag in enumerate(is_narr):
+            if groups and groups[-1][0] == flag:
+                groups[-1][1].append(idx)
+            else:
+                groups.append((flag, [idx]))
+
+        def _is_code_group(g: tuple[bool, list[int]]) -> bool:
+            return (not g[0]) and any(sec.lines[k].text.strip() for k in g[1])
+
+        for gi, (flag, idxs) in enumerate(groups):
+            if not flag:
+                continue
+            content = sum(1 for k in idxs if sec.lines[k].text.strip())
+            before = any(_is_code_group(groups[j]) for j in range(gi))
+            after = any(_is_code_group(groups[j]) for j in range(gi + 1, len(groups)))
+            if content == 1 and before and after:
+                for k in idxs:
+                    is_narr[k] = False
+
+        if not any(is_narr):
+            result.append(sec)
+            continue
+
+        # Emit alternating code / narrative segments in order.
+        segments: list[tuple[bool, list[Line]]] = []
+        for flag, ln in zip(is_narr, sec.lines):
+            if segments and segments[-1][0] == flag:
+                segments[-1][1].append(ln)
+            else:
+                segments.append((flag, [ln]))
+
+        split_count = 0
+        for flag, seg in segments:
+            if not any(ln.text.strip() for ln in seg):
+                continue
+            seg_text = "\n".join(ln.text for ln in seg).strip("\n")
+            if flag:
+                result.append(Section(
+                    kind=SectionKind.PARAGRAPH,
+                    text=seg_text,
+                    confidence=sec.confidence,
+                    lines=list(seg),
+                    page_num=sec.page_num,
+                ))
+                split_count += 1
+            else:
+                result.append(replace(sec, text=seg_text, lines=list(seg)))
+        if split_count:
+            _log.info("Trimmed %d narrative run(s) out of a code block on page %d",
+                      split_count, sec.page_num)
+    return result
+
+
+# Trailing-prose peel: a citation reference ("[intro.races]p16") is prose, not
+# code, so it is removed before measuring a tail line. Structural symbols are
+# the code-symbol set minus prose punctuation ('-', '.', ',', ':'), so they
+# still mark real code while sentence punctuation does not.
+_CITATION_RE = re.compile(r"\[[\w.\-:]+\]\w*")
+_PEEL_STRUCT_SYMBOLS = _NARRATIVE_CODE_SYMBOLS - frozenset("-.,:")
+# A tail line is prose only if it is sentence-like: enough words, mostly
+# alphabetic after stripping prose punctuation, and sparse in structural code
+# symbols once citations are removed.
+_PEEL_MIN_WORDS = 6
+_PEEL_MIN_ALPHA_RATIO = 0.60
+_PEEL_MAX_STRUCT_DENSITY = 0.06
+# A line ending in one of these is a code statement/brace: a hard stop that
+# bounds the peel and protects wrapped code (e.g. a P4174R0 type-list line
+# "unsigned long, unsigned long long>;") from being pulled into prose.
+_PEEL_CODE_TERMINATORS = (";", "{", "}")
+
+
+def _is_tail_prose(line: Line) -> bool:
+    """True if *line* is a sentence-like prose tail that can be peeled off the
+    end of a CODE block (the P3181R1 "If c2 follows ... since b1" tail).
+
+    Conservative by construction: monospace lines, comments, code statements
+    ending in ``;{}``, short lines, identifier-heavy lines, and
+    symbol-dense lines are all rejected, so only genuine wrapped prose at a
+    block's tail qualifies.
+    """
+    s = line.text.strip()
+    if not s or s.startswith("//") or _line_is_monospace(line):
+        return False
+    if s.endswith(_PEEL_CODE_TERMINATORS):
+        return False
+    body = _CITATION_RE.sub("", s)
+    words = body.split()
+    if len(words) < _PEEL_MIN_WORDS:
+        return False
+    alpha = sum(
+        1 for w in words
+        if w.strip("'\"`()").strip(_CONTINUATION_TRAILING_PUNCT)
+        .replace("-", "").isalpha()
+    )
+    if alpha / len(words) < _PEEL_MIN_ALPHA_RATIO:
+        return False
+    return _line_symbol_density(body, _PEEL_STRUCT_SYMBOLS) <= _PEEL_MAX_STRUCT_DENSITY
+
+
+def _peel_trailing_prose_from_code(sections: list[Section]) -> list[Section]:
+    """Split a trailing run of prose lines off the end of a CODE section.
+
+    _trim_narrative_from_code segments interior narrative but keeps lines its
+    classifier reads as code. A wrapped prose sentence carrying identifiers and
+    a citation ("If c2 follows a1 ... by [intro.races]p16, ... since b1") scores
+    as code there, so the tail of P3181R1's "Stronger semantics" listing stays
+    fenced and its sentence fragments across the closing ```. This pass walks
+    the tail of each CODE block over blank and _is_tail_prose lines, stopping at
+    the first real code line, and emits the collected run as a PARAGRAPH.
+
+    Operating only on the tail, behind a ``;{}``/monospace hard stop, keeps
+    interior wrapped code (type-lists, multi-line calls) untouched. Runs after
+    _trim_narrative_from_code.
+    """
+    result: list[Section] = []
+    for sec in sections:
+        if sec.kind != SectionKind.CODE or len(sec.lines) < 2:
+            result.append(sec)
+            continue
+        split = len(sec.lines)
+        saw_prose = False
+        while split > 0:
+            ln = sec.lines[split - 1]
+            if not ln.text.strip():
+                split -= 1
+                continue
+            if _is_tail_prose(ln):
+                saw_prose = True
+                split -= 1
+                continue
+            break
+        code_lines = sec.lines[:split]
+        prose_lines = sec.lines[split:]
+        if (not saw_prose
+                or not any(ln.text.strip() for ln in code_lines)
+                or not any(ln.text.strip() for ln in prose_lines)):
+            result.append(sec)
+            continue
+        while code_lines and not code_lines[-1].text.strip():
+            code_lines.pop()
+        while prose_lines and not prose_lines[0].text.strip():
+            prose_lines.pop(0)
+        result.append(replace(
+            sec, lines=code_lines,
+            text="\n".join(ln.text for ln in code_lines),
+        ))
+        result.append(Section(
+            kind=SectionKind.PARAGRAPH,
+            text="\n".join(ln.text for ln in prose_lines).strip("\n"),
+            confidence=sec.confidence,
+            lines=prose_lines,
+            page_num=sec.page_num,
+        ))
+        _log.info("Peeled %d trailing prose line(s) off a code block on page %d",
+                  len(prose_lines), sec.page_num)
+    return result
+
+
 _PARAGRAPH_NUM_MIN_REPEATS = 3
 
 
