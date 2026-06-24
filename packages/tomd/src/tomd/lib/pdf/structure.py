@@ -1401,6 +1401,10 @@ def _structure_body_impl(metadata: dict,
     structured = _absorb_code_orphans(structured)
     structured = _rescue_unfenced_code(structured)
     structured = _split_embedded_code(structured)
+    structured = _absorb_mono_code_orphans(structured)
+    structured = _absorb_trailing_label_into_code(structured)
+    structured = _trim_narrative_from_code(structured)
+    structured = _peel_trailing_prose_from_code(structured)
     _demote_repeated_low_confidence_numbers(structured)
     nesting_corrections = _validate_nesting(structured)
     return metadata, structured, nesting_corrections
@@ -2142,7 +2146,14 @@ def _coalesce_code_paragraphs(sections: list[Section]) -> list[Section]:
             j += 1
         if len(run) >= 2:
             merged_text = "\n".join(s.text for s in run)
-            merged = replace(run[0], text=merged_text)
+            # Merge lines alongside text: emit renders CODE from sec.lines,
+            # so dropping run[1:] lines here silently loses content (the
+            # rescue pass promotes on the full merged_text, but the fence
+            # then renders only run[0]'s lines). Keep text and lines in sync.
+            merged_lines: list[Line] = []
+            for s in run:
+                merged_lines.extend(s.lines)
+            merged = replace(run[0], text=merged_text, lines=merged_lines)
             result.append(merged)
             _log.info("Coalesced %d code-like paragraphs (%d chars)",
                        len(run), len(merged_text))

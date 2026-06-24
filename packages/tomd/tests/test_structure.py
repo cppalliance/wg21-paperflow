@@ -2181,6 +2181,51 @@ class TestSplitEmbeddedCode:
         assert out == [sec]
 
 
+class TestCoalesceCodeParagraphs:
+    """`_coalesce_code_paragraphs` merges adjacent short code-like paragraphs.
+
+    Regression guard for the text/lines desync (P3181R1): the merged
+    section must carry the lines of every run member, not just run[0].
+    Emit renders CODE from sec.lines, so a desync silently drops content.
+    """
+
+    @staticmethod
+    def _para(*texts):
+        lines = [Line(spans=[Span(text=t)]) for t in texts]
+        return Section(
+            kind=SectionKind.PARAGRAPH,
+            text="\n".join(texts),
+            lines=lines,
+        )
+
+    def test_merged_lines_match_merged_text(self):
+        # Two short code-like paragraphs that satisfy _COALESCE_CODE_RE.
+        a = self._para("fence(release);", "a1: a->store(1, relaxed);")
+        b = self._para("b1: r1 = a->load(acquire);", "b2: delete a;")
+        out = _coalesce_code_paragraphs([a, b])
+        assert len(out) == 1
+        merged = out[0]
+        # text and lines must stay in sync: no silent content loss.
+        assert len(merged.lines) == len(a.lines) + len(b.lines)
+        assert [ln.text for ln in merged.lines] == merged.text.split("\n")
+        # the run[1:] content survives in the rendered (lines) channel.
+        rendered = "\n".join(ln.text for ln in merged.lines)
+        assert "b2: delete a;" in rendered
+
+    def test_single_section_run_not_merged(self):
+        # A lone code-like paragraph (run length 1) is passed through.
+        a = self._para("fence(release);", "a1: a->store(1, relaxed);")
+        prose = Section(
+            kind=SectionKind.PARAGRAPH,
+            text="This is ordinary prose that ends with a period.",
+            lines=[Line(spans=[Span(
+                text="This is ordinary prose that ends with a period.")])],
+        )
+        out = _coalesce_code_paragraphs([a, prose])
+        assert out[0] is a
+        assert len(out[0].lines) == 2
+
+
 class TestLineIsMonoCode:
     """`_line_is_mono_code` recognises the mixed-font ``code // comment``
     shape (P3181R1) while rejecting prose, section refs and URLs."""
