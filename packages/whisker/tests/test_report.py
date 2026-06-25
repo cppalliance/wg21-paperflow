@@ -9,6 +9,7 @@ from types import SimpleNamespace
 
 from tomd.lib.check_content import MisalignedRegion
 
+from whisker import constants as C
 from whisker.report import build_report, render_report_md, render_summary
 from whisker.score import score_markdown
 
@@ -48,7 +49,7 @@ def test_build_report_sorts_and_counts():
     assert [r["pid"] for r in report["results"]] == ["P0001", "P0002"]
     assert report["counts"]["pass"] == 1
     assert report["counts"]["review"] == 1
-    assert report["schema_version"] == 1
+    assert report["schema_version"] == C.WHISKER_SCHEMA_VERSION
 
 
 def test_render_report_md_is_table_sorted_by_pid():

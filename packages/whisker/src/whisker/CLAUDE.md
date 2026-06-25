@@ -16,12 +16,45 @@ questions:
 - **Against labeled ground truth:** how good is the conversion on the structural
   fidelity axes, and did it regress? (`whisker bench`)
 
+## Three lanes (do not conflate them)
+
+Regression detection is split into three independent lanes that answer different
+questions. They are deliberately NOT interchangeable; a paper can pass two and
+fail the third.
+
+- **Lane 1 Stability** (`whisker golden`, `golden.py`): did the normalized
+  markdown change vs a committed `<pid>.expected.md` snapshot. Exact `difflib`
+  compare; catches silent regressions AND silent improvements. Bless a change by
+  reviewing the diff, then `--update`. A blessed snapshot is NOT a correctness
+  oracle: it freezes whatever a human approved, bugs included.
+- **Lane 2 Fidelity** (`whisker bench` / `whisker guard`): how CLOSE is the
+  output to a `<pid>.gt.md` reference, on `nid`/`teds`/`mhs`/`content_recall`.
+  This is resemblance, not comprehension.
+- **Lane 3 Comprehension** (`whisker facts`, `facts.py`): can an LLM still
+  RECOVER the paper's facts from the markdown. Deterministic human-verified
+  assertions (`present`/`absent`/`order`/`table`/`math`), no LLM in the loop.
+
+**Fidelity is not comprehension.** A reflow can score high on every Lane 2 axis
+and still scramble a table cell or drop a formula's exponent so a downstream LLM
+reads "row 3, column 2" wrong, with every fidelity metric green. Only Lane 3
+catches that. Lane 3 also sidesteps the ground-truth-provenance problem: across
+the 28 surveyed converters, none has an automatic "this file is 100% correct"
+oracle, and only `olmocr` tests comprehension at all. A handful of human-verified
+facts per paper are cheap to author and independent of any single `tomd` output,
+so they are the honest WG21 ground truth without a perfect golden file.
+
+`whisker guard` additionally folds substring anchors (`anchors.py`,
+`<pid>.anchors.json`) and Lane 3 facts (`<pid>.facts.jsonl`) in CONJUNCTIVELY: a
+missed anchor or a failed VERIFIED fact is a hard fail even when the numeric
+slack holds. The shared micro-corpus layout lives in `packages/whisker/corpus/`.
+
 whisker is standalone. It depends on `paperstore`, `tomd`, `markitdown` (the
-reference oracle), `Levenshtein` (edit distance), `apted` + `lxml` (the verbatim
-PubTabNet/OmniDocBench TEDS), `pylatexenc` (inline-LaTeX folding in the text
-normalizer), and `numpy` + `scipy` (the block-matching cost matrix and Hungarian
-assignment). It edits no other package, reuses tomd's QA functions by import
-(read-only), and never modifies the paperstore/cli source.
+reference oracle), `rapidfuzz` (MIT edit distance), `apted` + `lxml` (the verbatim
+PubTabNet/OmniDocBench TEDS), `mistune` (heading-tree AST, shared with tomd QA),
+`grits-metric` (advisory GriTS-Con cell-F1 table axis), `pylatexenc` (inline-LaTeX
+folding in the text normalizer), and `numpy` + `scipy` (the block-matching cost
+matrix and Hungarian assignment). It edits no other package, reuses tomd's QA
+functions by import (read-only), and never modifies the paperstore/cli source.
 
 ## Usage (quickstart)
 
@@ -103,7 +136,10 @@ parameters, so the rendering is deterministic and unit-tested on plain text.
 - `metrics.py` - `teds` (tables): a VERBATIM port of PubTabNet/OmniDocBench TEDS
   (lxml DOM -> `apted`, char-token cells, xpath-descendant denominator), so table
   scores are comparable to the published leaderboards. `mhs` (heading hierarchy)
-  on a pure-Python Zhang-Shasha tree edit distance. `text_nid` (full-text
+  scores `apted` tree edit distance over a heading tree parsed from mistune's
+  CommonMark AST (the same engine tomd QA uses): ATX + setext headings, inline
+  markup flattened to prose, front matter stripped, top-level headings only
+  (nested `> ##` / `- ##` skipped, matching tomd QA). `text_nid` (full-text
   similarity). `normalized_text` = `clean_string(textblock2unicode(text))`, the
   OmniDocBench text-axis normalizer adopted verbatim: `textblock2unicode` folds
   inline LaTeX (`$...$`, `\(...\)`) to unicode via `pylatexenc` behind its
@@ -112,9 +148,10 @@ parameters, so the rendering is deterministic and unit-tested on plain text.
   text comparison measures CONTENT agreement, not tomd-style vs oracle-style
   formatting (front-matter, headings, pipe tables, emphasis, reflow all vanish).
   Note `clean_string` does NOT strip YAML front-matter keys; on real papers those
-  few tokens are negligible. The char-level edit distance uses the C-extension
-  `Levenshtein` package: a full-document compare is milliseconds, where a
-  pure-Python DP would hang for minutes. Deterministic.
+  few tokens are negligible. The char-level edit distance uses the MIT-licensed
+  `rapidfuzz` package (drop-in for the old GPL `levenshtein`, score-identical):
+  a full-document compare is milliseconds, where a pure-Python DP would hang for
+  minutes. Deterministic.
 - `match.py` - block-level text matching (OmniDocBench `match_quick` port): split
   prose into blocks, normalize, build a NED cost matrix, Hungarian-assign, accept
   at <= 0.70 NED, fuzzy-rescue embedded GT blocks at < 0.40. `block_text_nid`
@@ -136,8 +173,33 @@ parameters, so the rendering is deterministic and unit-tested on plain text.
   manufacture false advisory-review flags. Block matching is reserved for `bench`
   against well-formed labeled GT.
 - `bench.py` - `run_bench(pairs) -> [BenchRow]` + `aggregate`, the leaderboard.
-  `nid` is `block_text_nid` (reorder-robust); `reading_order` is reported as a
-  separate advisory axis and never folded into `overall`.
+  `nid` is `block_text_nid` (reorder-robust); `content_recall` is multiset
+  bag-of-words recall of GT content in the candidate (catches dropped sections
+  edit distance hides), a first-class gate (floor + per-paper guard) but NOT
+  folded into `overall` (strata stay separate); `reading_order` and `grits_con`
+  (GriTS-Con cell-content F1, complementary to `teds`) are reported as separate
+  ADVISORY axes, never folded into `overall` and never gated (`grits_con` until
+  it has its own calibration). `teds`/`mhs`/`grits_con` are `None` when the
+  reference lacks that modality (null-eligibility).
+- `golden.py` - Lane 1 stability. `diff_goldens(items)` exact-compares each
+  candidate's `normalize_for_exact_lane(...)` against a committed
+  `<pid>.expected.md` snapshot (stdlib `difflib`). Decoupled from metrics: bless
+  is a human reviewing the diff, never a metric threshold. Optional
+  `expected_failures` (in `golden.json`) flag known-imperfect snapshots that must
+  fail on silent change AND silent improvement.
+- `anchors.py` - per-paper substring/order tripwires. `check_anchors(md, spec)`
+  over `<pid>.anchors.json`: `must_contain` / `must_not_contain` / `ordered`
+  chains / regex `patterns`, on the `raw` or `normalized` surface. Conjunctive
+  hard fail in `whisker guard`.
+- `facts.py` - Lane 3 comprehension. `check_facts(md, facts)` evaluates
+  deterministic, human-verified assertions from `<pid>.facts.jsonl`: `present` /
+  `absent` (fuzzy within a `max_diffs` budget: rapidfuzz locates the window, then
+  an exact free-start/free-end substring DP measures the true edit count, since
+  rapidfuzz's Indel window can trim a boundary char), `order` (strictly
+  increasing positions), `table` (locate a cell, check `up`/`down`/`left`/`right`/
+  `heading` neighbors, the direct "row 3, column 2" test), `math` (presence on a
+  LaTeX-folded surface that KEEPS `^`/`_`/`=`). Only `checked: verified` facts
+  gate; drafts are reported but advisory. Macro-averaged per type. No LLM.
 - `report.py` - `build_report` / `render_report_md` / `render_summary`.
 - `__main__.py` - the `whisker` CLI. Owns all persistence and stdout.
 

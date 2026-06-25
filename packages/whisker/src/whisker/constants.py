@@ -57,6 +57,15 @@ TEDS_FLOOR = 0.80
 MHS_FLOOR = 0.80
 NID_FLOOR = 0.90
 
+# Content-recall floor (multiset bag-of-words recall of GT content present in the
+# candidate; see metrics.content_recall). PROVISIONAL, pre-calibration: a clean
+# conversion should preserve almost all reference word occurrences, so a recall
+# this far below 1.0 means a paragraph/section was dropped. Independent of
+# NID_FLOOR: recall catches missing CONTENT, NID catches sequence edits, and the
+# two are regressed separately (never averaged into overall), the Nougat/
+# Unstructured lesson that strata must not be merged into one gate.
+CONTENT_RECALL_FLOOR = 0.90
+
 # -- Reference-oracle agreement (ADVISORY) -----------------------------------
 # Cross-converter text agreement: tomd's markdown vs an independent converter's
 # markdown (the oracle, e.g. markitdown), both normalized with OmniDocBench's
@@ -79,6 +88,25 @@ REF_NID_ADVISORY_EDGE = 0.85
 
 # Allowed regression slack before `bench` fails against a committed baseline.
 BENCH_REGRESSION_SLACK = 0.03
+
+# -- Per-paper regression guard ----------------------------------------------
+# `whisker bench --baseline` only compares the corpus MEAN overall, so a single
+# paper can collapse while the mean holds (the "kein Kollateralschaden" blind
+# spot). The guard (whisker.guard) closes it by diffing EACH paper's EACH axis
+# against a committed baseline. The per-axis slack is the largest drop tolerated
+# before a paper is called a regression. It is tighter than BENCH_REGRESSION_SLACK
+# (a single paper, not a mean) and matches OpenDataloader-pdf's per-axis
+# check_regression tolerance (benchmark thresholds.json, 0.02). whisker's scoring
+# is deterministic (no LLM), so re-running tomd on unchanged code reproduces the
+# metrics exactly: the slack only absorbs intended, benign output changes, not
+# statistical noise.
+GUARD_AXIS_SLACK = 0.02
+
+# Axes diffed for regression vs the baseline (overall included so a broad,
+# sub-slack erosion across several axes still trips the gate). content_recall is
+# a first-class gate (a dropped section regresses it). Reading order is excluded:
+# advisory only, never gates content (see bench module docstring).
+GUARD_REGRESSION_AXES = ("nid", "teds", "mhs", "content_recall", "overall")
 
 # -- Block-matching thresholds (NID, adopted VERBATIM from OmniDocBench) ------
 # match_quick.py: a < 0.25 NED pre-locks a near-exact block pair, adjacent pred
@@ -126,4 +154,13 @@ REGION_DETAIL_CAP = 5
 REGION_SNIPPET_CHARS = 60
 
 # -- Sidecar / report schema -------------------------------------------------
-WHISKER_SCHEMA_VERSION = 1
+# Bumped 1 -> 2 when the guard baseline gained embedded ``tool_versions`` (A2).
+# Bumped 2 -> 3 for the scoring-v2 release (Phase B): a new ``content_recall``
+# axis, null-eligibility for ``teds``/``mhs`` (stored as JSON null when the
+# reference lacks the modality, so ``overall`` no longer averages synthetic
+# 1.0s), and mistune-parsed headings (setext + inline-markup-flattened) which
+# shift ``mhs`` on affected papers. A stale baseline at the old schema
+# hard-fails and must be regenerated with ``whisker guard --update``. The same
+# global version stamps every whisker artifact (sidecar, report, bench
+# leaderboard, guard baseline, calibration). See CHANGELOG.md.
+WHISKER_SCHEMA_VERSION = 3

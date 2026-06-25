@@ -33,8 +33,8 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
-import Levenshtein
 import numpy as np
+from rapidfuzz.distance import Levenshtein as _Lev
 from scipy.optimize import linear_sum_assignment
 
 from whisker import constants as C
@@ -104,7 +104,7 @@ def _ned(a: str, b: str) -> float:
     longest = max(len(a), len(b))
     if longest == 0:
         return 0.0
-    return Levenshtein.distance(a, b) / longest
+    return _Lev.distance(a, b) / longest
 
 
 def _ned_matrix(gt_lines: list[str], pred_lines: list[str]) -> np.ndarray:
@@ -129,7 +129,7 @@ def _sub_gt_fuzzy_matching(pred: str, gt: str) -> float:
         return 1.0
     best = 1.0
     for i in range(pred_len - gt_len + 1):
-        d = Levenshtein.distance(pred[i:i + gt_len], gt) / gt_len
+        d = _Lev.distance(pred[i:i + gt_len], gt) / gt_len
         if d < best:
             best = d
             if best == 0.0:
@@ -177,7 +177,7 @@ def match_blocks(
             gt_index=gt_idx[r],
             pred_indices=(pr_idx[c],),
             edit=edit,
-            edit_num=Levenshtein.distance(g, p),
+            edit_num=_Lev.distance(g, p),
             upper_len=max(len(g), len(p)),
         ))
         matched_gt.add(r)
@@ -292,4 +292,4 @@ def reading_order_ned(matches: list[BlockMatch]) -> float:
     denom = max(len(gt_seq), len(pred_seq))
     if denom == 0:
         return 0.0
-    return Levenshtein.distance(gt_seq, pred_seq) / denom
+    return _Lev.distance(gt_seq, pred_seq) / denom

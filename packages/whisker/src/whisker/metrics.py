@@ -18,30 +18,35 @@ no-ground-truth per-paper verdict.
 ``teds`` is a verbatim port of the PubTabNet/OmniDocBench TEDS implementation
 (``_bench_src/OmniDocBench/src/metrics/table_metric.py``): an lxml DOM walk into
 APTED with the xpath-descendant denominator, so scores are comparable to the
-published table leaderboards. ``mhs`` is tree-edit-distance based on the classic
-Zhang-Shasha algorithm in pure Python. All three return a similarity in [0, 1]
-where 1.0 means identical; they are deterministic functions of their inputs.
+published table leaderboards. ``mhs`` is APTED tree-edit-distance over a heading
+tree, the SAME backend as ``teds`` (one tree-edit engine for both axes; a prior
+hand-rolled Zhang-Shasha was retired after a 72/72 score-parity check). All three
+return a similarity in [0, 1] where 1.0 means identical; they are deterministic
+functions of their inputs.
 """
 
 from __future__ import annotations
 
 import logging
 import re
-from collections import deque
+from collections import Counter, deque
 from contextlib import contextmanager
-from dataclasses import dataclass, field
-from typing import Callable
 
-import Levenshtein
+import mistune
 from apted import APTED, Config
 from apted.helpers import Tree
 from lxml import etree
 from lxml import html as lxml_html
 from pylatexenc.latex2text import LatexNodes2Text
+from rapidfuzz.distance import Levenshtein as _Lev
+
+from whisker.gates import _split_front_matter
 
 __all__ = [
-    "TreeNode",
     "clean_string",
+    "content_recall",
+    "content_tokens",
+    "has_headings",
     "mhs",
     "normalized_edit_distance",
     "normalized_text",
@@ -50,120 +55,7 @@ __all__ = [
     "teds",
     "text_nid",
     "textblock2unicode",
-    "tree_edit_distance",
 ]
-
-
-# -- Generic ordered tree edit distance (Zhang-Shasha) -----------------------
-
-
-@dataclass
-class TreeNode:
-    """A node in an ordered, labeled tree.
-
-    ``label`` is opaque to the algorithm; the caller-supplied cost functions
-    interpret it. Children are ordered (sibling order is significant).
-    """
-
-    label: object
-    children: list["TreeNode"] = field(default_factory=list)
-
-
-def _annotate(root: TreeNode) -> tuple[list, list[int], list[int]]:
-    """Return (1-based postorder nodes, leftmost-descendant ids, keyroots).
-
-    Index 0 is a sentinel so the DP below can use 1-based indexing exactly as
-    the reference Zhang-Shasha formulation does.
-    """
-    nodes: list = [None]
-    lmd: list[int] = [0]
-
-    def rec(node: TreeNode) -> int:
-        if node.children:
-            first = 0
-            for idx, child in enumerate(node.children):
-                child_lmd = rec(child)
-                if idx == 0:
-                    first = child_lmd
-            nodes.append(node)
-            lmd.append(first)
-            return first
-        nodes.append(node)
-        cur = len(nodes) - 1
-        lmd.append(cur)
-        return cur
-
-    rec(root)
-    keyroot_for_lmd: dict[int, int] = {}
-    for i in range(1, len(nodes)):
-        keyroot_for_lmd[lmd[i]] = i
-    keyroots = sorted(keyroot_for_lmd.values())
-    return nodes, lmd, keyroots
-
-
-def tree_edit_distance(
-    root_a: TreeNode,
-    root_b: TreeNode,
-    relabel_cost: Callable[[object, object], float],
-    remove_cost: Callable[[object], float] = lambda _label: 1.0,
-    insert_cost: Callable[[object], float] = lambda _label: 1.0,
-) -> float:
-    """Ordered tree edit distance between two labeled trees.
-
-    Costs operate on node labels. ``relabel_cost(a_label, b_label)`` should
-    return 0.0 for an identical match. Deterministic.
-    """
-    a_nodes, a_lmd, a_keyroots = _annotate(root_a)
-    b_nodes, b_lmd, b_keyroots = _annotate(root_b)
-    n_a = len(a_nodes) - 1
-    n_b = len(b_nodes) - 1
-    treedists = [[0.0] * (n_b + 1) for _ in range(n_a + 1)]
-
-    def treedist(i: int, j: int) -> None:
-        rows = i - a_lmd[i] + 2
-        cols = j - b_lmd[j] + 2
-        fd = [[0.0] * cols for _ in range(rows)]
-        ioff = a_lmd[i] - 1
-        joff = b_lmd[j] - 1
-        for x in range(1, rows):
-            fd[x][0] = fd[x - 1][0] + remove_cost(a_nodes[x + ioff].label)
-        for y in range(1, cols):
-            fd[0][y] = fd[0][y - 1] + insert_cost(b_nodes[y + joff].label)
-        for x in range(1, rows):
-            for y in range(1, cols):
-                ax = x + ioff
-                by = y + joff
-                if a_lmd[i] == a_lmd[ax] and b_lmd[j] == b_lmd[by]:
-                    fd[x][y] = min(
-                        fd[x - 1][y] + remove_cost(a_nodes[ax].label),
-                        fd[x][y - 1] + insert_cost(b_nodes[by].label),
-                        fd[x - 1][y - 1]
-                        + relabel_cost(a_nodes[ax].label, b_nodes[by].label),
-                    )
-                    treedists[ax][by] = fd[x][y]
-                else:
-                    p = a_lmd[ax] - 1 - ioff
-                    q = b_lmd[by] - 1 - joff
-                    fd[x][y] = min(
-                        fd[x - 1][y] + remove_cost(a_nodes[ax].label),
-                        fd[x][y - 1] + insert_cost(b_nodes[by].label),
-                        fd[p][q] + treedists[ax][by],
-                    )
-
-    for i in a_keyroots:
-        for j in b_keyroots:
-            treedist(i, j)
-    return treedists[n_a][n_b]
-
-
-def _node_count(root: TreeNode) -> int:
-    total = 0
-    stack = [root]
-    while stack:
-        node = stack.pop()
-        total += 1
-        stack.extend(node.children)
-    return total
 
 
 # -- Normalized edit distance (Levenshtein) ----------------------------------
@@ -172,17 +64,18 @@ def _node_count(root: TreeNode) -> int:
 def normalized_edit_distance(a: str, b: str) -> float:
     """Levenshtein distance normalized to [0, 1] (0 = identical).
 
-    Uses the C-extension ``Levenshtein`` package and OmniDocBench's exact
-    normalization (``distance / max(len)``). The bit-parallel core is what
-    makes a full-document compare (tens of thousands of chars) finish in
-    milliseconds instead of the minutes a pure-Python DP would take, the same
-    library mature converter benchmarks (OmniDocBench, PubTabNet TEDS cells)
-    rely on. Deterministic.
+    Uses ``rapidfuzz.distance.Levenshtein`` (MIT) and OmniDocBench's exact
+    normalization (``distance / max(len)``). rapidfuzz is the MIT-licensed
+    sibling of the GPL ``levenshtein`` package this replaced (same maintainer,
+    same algorithm, score-identical: see tests/test_edit_distance_parity.py);
+    its SIMD core keeps a full-document compare (tens of thousands of chars) at
+    milliseconds instead of the minutes a pure-Python DP would take.
+    Deterministic.
     """
     if not a and not b:
         return 0.0
     longest = max(len(a), len(b))
-    return Levenshtein.distance(a, b) / longest if longest else 0.0
+    return _Lev.distance(a, b) / longest if longest else 0.0
 
 
 _WS_RE = re.compile(r"\s+")
@@ -457,6 +350,45 @@ def text_nid(a: str, b: str) -> float:
     return 1.0 - normalized_edit_distance(_normalize_text(a), _normalize_text(b))
 
 
+# -- Content recall (multiset bag-of-words) ----------------------------------
+
+_CONTENT_TOKEN_RE = re.compile(r"\w+", re.UNICODE)
+
+
+def content_tokens(text: str) -> list[str]:
+    """Bag-of-words tokens for multiset content recall.
+
+    Folds inline LaTeX and circled glyphs via ``textblock2unicode`` (the same
+    content alphabet as the text-NID axis), lowercases, then splits on the
+    Unicode word boundary so punctuation and whitespace separate tokens. Unlike
+    ``normalized_text`` (which is ``clean_string``-flattened and therefore has
+    NO word boundaries, collapsing a paragraph into a single token), this keeps
+    token granularity, which recall requires. CJK runs group as single tokens,
+    matching tomd's unigram tokenizer. Deterministic.
+    """
+    return _CONTENT_TOKEN_RE.findall(textblock2unicode(text).lower())
+
+
+def content_recall(candidate: str, reference: str) -> float:
+    """Multiset word recall of the reference content present in the candidate.
+
+    The Unstructured ``cct-%missing`` complement (1 - fraction missing): the
+    fraction of reference (ground-truth) word occurrences that also appear in
+    the candidate, counting multiplicity. 1.0 means no reference content is
+    missing. A dropped paragraph drives it down even when block-matched ``nid``
+    stays high on the surviving blocks, the exact "a converter dropped a
+    section" blind spot edit distance hides. Extra or duplicated candidate words
+    are NOT penalized (additive drift is a separate, score-path signal). An
+    empty reference yields 1.0 (nothing to recall). Deterministic.
+    """
+    ref = Counter(content_tokens(reference))
+    if not ref:
+        return 1.0
+    hyp = Counter(content_tokens(candidate))
+    matched = sum(min(count, hyp[token]) for token, count in ref.items())
+    return matched / sum(ref.values())
+
+
 # -- TEDS (tables) -----------------------------------------------------------
 #
 # Verbatim port of PubTabNet/OmniDocBench TEDS (Apache-2.0, IBM peter.zhong):
@@ -494,7 +426,7 @@ class _TedsConfig(Config):
         return max(map(len, sequences))
 
     def normalized_distance(self, *sequences):
-        return float(Levenshtein.distance(*sequences)) / self.maximum(*sequences)
+        return float(_Lev.distance(*sequences)) / self.maximum(*sequences)
 
     def rename(self, node1, node2):
         """Compares attributes of trees."""
@@ -621,32 +553,109 @@ def teds(html_a: str, html_b: str, *, structure_only: bool = False) -> float:
 
 # -- MHS (heading hierarchy) -------------------------------------------------
 
-_HEADING_RE = re.compile(r"^(#{1,6})\s+(.*?)\s*#*\s*$")
-_FENCE_RE = re.compile(r"^\s*(```|~~~)")
+# Shared with tomd QA (qa.py / check_content.py): the same CommonMark AST
+# engine, so whisker measures headings the way tomd defines them.
+_AST_RENDERER = mistune.create_markdown(renderer="ast", plugins=["table"])
+
+# Inline node types whose ``raw`` carries literal heading text. Block and
+# inline wrappers (heading, emphasis, strong, link, ...) recurse via children.
+_INLINE_TEXT_TYPES = frozenset({"text", "codespan", "linebreak", "softbreak"})
+
+
+def _collect_inline_text(node: dict, out: list[str]) -> None:
+    """Walk a heading node, appending literal inline text to ``out``."""
+    if node.get("type", "") in _INLINE_TEXT_TYPES:
+        raw = node.get("raw", "")
+        if raw:
+            out.append(raw)
+        return
+    for child in node.get("children", []) or []:
+        _collect_inline_text(child, out)
+
+
+def _inline_text(node: dict) -> str:
+    """Flatten a heading node's inline children to plain prose."""
+    parts: list[str] = []
+    _collect_inline_text(node, parts)
+    return "".join(parts)
 
 
 def _parse_headings(md_text: str) -> list[tuple[int, str]]:
-    """Return ordered (level, text) pairs, skipping fenced code blocks."""
+    """Return ordered (level, text) pairs from ATX and setext headings.
+
+    Parsed via mistune's CommonMark AST (the engine tomd QA uses), so setext
+    headings (``Title`` over ``=====``) count, inline markup in heading text is
+    flattened to prose (``## **Bold** [x](u)`` -> ``Bold x``), and fenced code
+    is suppressed by the parser. Front matter is stripped first (whisker's own
+    ``gates._split_front_matter``) so its ``---`` fences are never misread as
+    setext underlines. Only top-level headings are collected, matching tomd QA's
+    documented limitation (headings nested in lists/blockquotes are skipped).
+    """
+    _, body = _split_front_matter(md_text)
     headings: list[tuple[int, str]] = []
-    in_fence = False
-    for line in md_text.splitlines():
-        if _FENCE_RE.match(line):
-            in_fence = not in_fence
+    for token in _AST_RENDERER(body):
+        if token.get("type") != "heading":
             continue
-        if in_fence:
-            continue
-        m = _HEADING_RE.match(line)
-        if m:
-            headings.append((len(m.group(1)), _normalize_text(m.group(2))))
+        level = token.get("attrs", {}).get("level", 0)
+        text = _normalize_text(_inline_text(token))
+        if level and text:
+            headings.append((level, text))
     return headings
 
 
-def _build_heading_tree(md_text: str) -> TreeNode:
+class _HeadingTree(Tree):
+    """An ordered heading node for APTED (mirrors TEDS' ``_TableTree``).
+
+    ``label`` is ``{"level": int, "text": str}``; children are ordered by
+    document position. APTED's default ``Config.children`` reads ``.children``.
+    """
+
+    def __init__(self, label, *children):
+        self.label = label
+        self.children = list(children)
+
+
+class _MhsConfig(Config):
+    """APTED cost model for the heading tree.
+
+    Unit insert/delete and a fractional rename equal to the normalized edit
+    distance between heading texts: the exact cost model the retired
+    Zhang-Shasha implementation used, so scores are unchanged.
+    """
+
+    def __init__(self, structure_only: bool = False):
+        self.structure_only = structure_only
+
+    def delete(self, node):
+        return 1.0
+
+    def insert(self, node):
+        return 1.0
+
+    def rename(self, node1, node2):
+        if self.structure_only:
+            return 0.0
+        a = node1.label if isinstance(node1.label, dict) else {}
+        b = node2.label if isinstance(node2.label, dict) else {}
+        return normalized_edit_distance(a.get("text", ""), b.get("text", ""))
+
+
+def _node_count(root: _HeadingTree) -> int:
+    total = 0
+    stack = [root]
+    while stack:
+        node = stack.pop()
+        total += 1
+        stack.extend(node.children)
+    return total
+
+
+def _build_heading_tree(md_text: str) -> _HeadingTree:
     """Nest headings by level into a tree under a synthetic root."""
-    root = TreeNode(label={"level": 0, "text": "\x00root"})
-    stack: list[tuple[int, TreeNode]] = [(0, root)]
+    root = _HeadingTree({"level": 0, "text": "\x00root"})
+    stack: list[tuple[int, _HeadingTree]] = [(0, root)]
     for level, text in _parse_headings(md_text):
-        node = TreeNode(label={"level": level, "text": text})
+        node = _HeadingTree({"level": level, "text": text})
         while stack and stack[-1][0] >= level:
             stack.pop()
         parent = stack[-1][1] if stack else root
@@ -655,23 +664,23 @@ def _build_heading_tree(md_text: str) -> TreeNode:
     return root
 
 
-def _mhs_relabel(structure_only: bool) -> Callable[[object, object], float]:
-    def cost(a: object, b: object) -> float:
-        a_label = a if isinstance(a, dict) else {}
-        b_label = b if isinstance(b, dict) else {}
-        if structure_only:
-            return 0.0
-        return normalized_edit_distance(a_label.get("text", ""), b_label.get("text", ""))
+def has_headings(md_text: str) -> bool:
+    """True if the document has at least one heading (mhs eligibility signal).
 
-    return cost
+    The reference is authoritative: when the ground truth has no heading
+    hierarchy there is nothing for ``mhs`` to measure, so bench records the axis
+    as ineligible (``None``) rather than a synthetic 1.0 that would inflate the
+    corpus mean (the opendataloader-pdf null-eligibility rule).
+    """
+    return bool(_parse_headings(md_text))
 
 
 def mhs(md_a: str, md_b: str, *, structure_only: bool = False) -> float:
     """Markdown Heading Similarity between two documents.
 
-    Builds a heading tree nested by level and scores tree edit distance,
-    normalized like TEDS. The synthetic root is shared, so two documents with
-    no headings score 1.0.
+    Builds a heading tree nested by level and scores APTED tree edit distance
+    (the same engine as ``teds``), normalized like TEDS. The synthetic root is
+    shared, so two documents with no headings score 1.0.
     """
     tree_a = _build_heading_tree(md_a)
     tree_b = _build_heading_tree(md_b)
@@ -680,5 +689,5 @@ def mhs(md_a: str, md_b: str, *, structure_only: bool = False) -> float:
     denom = max(n_a, n_b)
     if denom <= 1:
         return 1.0
-    dist = tree_edit_distance(tree_a, tree_b, _mhs_relabel(structure_only))
+    dist = APTED(tree_a, tree_b, _MhsConfig(structure_only)).compute_edit_distance()
     return max(0.0, 1.0 - dist / denom)

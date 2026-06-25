@@ -9,7 +9,7 @@ from types import SimpleNamespace
 
 from tomd.lib.check_content import MisalignedRegion
 
-from whisker.constants import REGION_DETAIL_CAP
+from whisker.constants import REGION_DETAIL_CAP, WHISKER_SCHEMA_VERSION
 from whisker.score import (
     VERDICT_FAIL,
     VERDICT_PASS,
@@ -151,7 +151,7 @@ def test_to_dict_is_serializable_and_sorted():
     d = r.to_dict()
     assert d["soft_flags"] == sorted(d["soft_flags"])
     assert d["verdict"] == VERDICT_REVIEW
-    assert d["schema_version"] == 1
+    assert d["schema_version"] == WHISKER_SCHEMA_VERSION
 
 
 # -- reference-oracle agreement (ADVISORY overlay) --------------------------
