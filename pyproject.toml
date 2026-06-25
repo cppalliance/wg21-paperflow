@@ -15,6 +15,7 @@ dependencies = [
     "cli",
     "preview",
     "cpp-mcp",
+    "herald",
 ]
 
 [dependency-groups]
@@ -51,6 +52,7 @@ assay        = {workspace = true}
 cli          = {workspace = true}
 preview      = {workspace = true}
 cpp-mcp      = {workspace = true}
+herald       = {workspace = true}
 scrivener  = {git = "https://github.com/gregjkal/wg21-scrivener.git"}
 
 [tool.pytest.ini_options]
@@ -64,6 +66,7 @@ testpaths = [
     "packages/cli/tests",
     "packages/preview/tests",
     "packages/cpp-mcp/tests",
+    "packages/herald/tests",
     "tests",
 ]
 markers = [
