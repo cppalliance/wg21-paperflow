@@ -28,6 +28,8 @@ from assay.models import (
 )
 from assay.pipeline import _cross_chunk_decide
 
+_DECIDE_STEP = "5. Decide"
+
 
 class _StubAgent:
     """Agent stub: returns a pre-canned CrossChunkDecideOutput on run()."""
@@ -120,7 +122,7 @@ def test_cross_chunk_decide_flips_supported_using_global_id():
         ),
     ])
     ctx = _StubCtx({})
-    asyncio.run(_cross_chunk_decide(state, ctx, agent, max_output=8192, thinking=None))
+    asyncio.run(_cross_chunk_decide(state, ctx, agent, max_output=8192, thinking=None, step_name=_DECIDE_STEP))
 
     decisions = {d.claim_id: d for d in state.raw_decisions[0].decisions}
     assert decisions[0].supported is True
@@ -137,7 +139,7 @@ def test_cross_chunk_decide_logs_reconciliation_for_hallucinated_ids(caplog):
     ])
     ctx = _StubCtx({})
     with caplog.at_level(logging.WARNING, logger="assay.pipeline"):
-        asyncio.run(_cross_chunk_decide(state, ctx, agent, max_output=8192, thinking=None))
+        asyncio.run(_cross_chunk_decide(state, ctx, agent, max_output=8192, thinking=None, step_name=_DECIDE_STEP))
     text = " ".join(r.message for r in caplog.records)
     assert "missing" in text and "hallucinated" in text
 
@@ -152,7 +154,7 @@ def test_cross_chunk_decide_no_unsupported_skips_call():
     ]
     agent = _StubAgent([])
     ctx = _StubCtx({})
-    asyncio.run(_cross_chunk_decide(state, ctx, agent, max_output=8192, thinking=None))
+    asyncio.run(_cross_chunk_decide(state, ctx, agent, max_output=8192, thinking=None, step_name=_DECIDE_STEP))
     assert agent.calls == []
 
 
@@ -162,5 +164,5 @@ def test_cross_chunk_decide_no_evidence_skips_call():
     state.raw_extractions[1] = ChunkExtractOutput(chunk_index=2, items=[])
     agent = _StubAgent([])
     ctx = _StubCtx({})
-    asyncio.run(_cross_chunk_decide(state, ctx, agent, max_output=8192, thinking=None))
+    asyncio.run(_cross_chunk_decide(state, ctx, agent, max_output=8192, thinking=None, step_name=_DECIDE_STEP))
     assert agent.calls == []
