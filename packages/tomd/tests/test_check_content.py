@@ -30,7 +30,10 @@ from tomd.lib.check_content import (
     _strip_repeating_lines,
     _tokenize,
     check_paper_content,
+    compute_content_coverage,
 )
+
+_GOLDEN = Path(__file__).resolve().parent / "fixtures" / "golden"
 
 
 class TestNormalize:
@@ -307,6 +310,20 @@ class TestIntegrationCoverage:
         store.write_paper_md("P0004", "body\n")
         with pytest.raises(CheckContentArgError):
             check_paper_content("P0004", store)
+
+
+@pytest.mark.skipif(
+    not (_GOLDEN / "sources" / "p4228r0.html").is_file(),
+    reason="sources/p4228r0.html not staged",
+)
+def test_compute_content_coverage_p4228r0_ideal():
+    ideal = (_GOLDEN / "ideals" / "p4228r0.md").read_text(encoding="utf-8")
+    result = compute_content_coverage(_GOLDEN / "sources" / "p4228r0.html", ideal)
+    assert result.source_format == "html"
+    assert result.paper_id == "p4228r0"
+    # Empirically ~0.84 / ~0.11. Loose bounds, not pins.
+    assert 0.80 < result.coverage < 0.90
+    assert 0.05 < result.drift < 0.20
 
 
 class TestPerformanceBudget:

@@ -1,0 +1,40 @@
+# tomd golden QA workflow. Run from the repo root as `just tomd <verb>`.
+# Full SOP: docs/tomd-qa.md. Paper ids are case-insensitive (e.g. P4228R0).
+
+TOMD := "uv run --package tomd tomd"
+
+# List tomd recipes.
+default:
+    @just --list
+
+# Stage a source (download from wg21.link or copy a local path); render PDF pages.
+add paper *args:
+    {{TOMD}} add {{paper}} {{args}}
+
+# Seed a candidate ideal from tomd's own conversion (no LLM); correct by hand.
+generate paper:
+    {{TOMD}} generate {{paper}}
+
+# LLM punch-list of structural divergences vs the source (optional, the one LLM step).
+review paper:
+    {{TOMD}} review {{paper}}
+
+# Score tomd output vs the committed baseline (no id = every blessed paper).
+score paper="--all" *args:
+    {{TOMD}} score {{paper}} {{args}}
+
+# Validate a candidate ideal (fidelity gate) and record its baseline.
+bless paper:
+    {{TOMD}} bless {{paper}}
+
+# Draft ready-to-file GitHub issues from the gaps.
+issue paper:
+    {{TOMD}} issue {{paper}}
+
+# Ratchet baselines up after a verified improvement (no id = all; --force to lower).
+rebless paper="--all" *args:
+    {{TOMD}} rebless {{paper}} {{args}}
+
+# Run the tomd package test suite.
+test *args:
+    uv run --package tomd pytest {{source_directory()}}/tests {{args}}

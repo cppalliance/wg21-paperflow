@@ -1,0 +1,18 @@
+{
+  "cwg1": {
+    "code": 0.0,
+    "frontmatter": 1.0,
+    "heading": 0.67,
+    "list": 0.0,
+    "table": 1.0,
+    "text": 0.39
+  },
+  "p4228r0": {
+    "code": 1.0,
+    "frontmatter": 1.0,
+    "heading": 0.67,
+    "list": 1.0,
+    "table": 1.0,
+    "text": 0.96
+  }
+}
