@@ -17,7 +17,9 @@ _FITZ_OPEN_PATTERNS = ("fitz.open(", "fitz.Document(", "_fitz.open(", "_fitz.Doc
 
 
 def test_all_fitz_document_openers_acquire_lock():
-    for path in _PDF_LIB.rglob("*.py"):
+    for path in sorted(_PDF_LIB.rglob("*.py")):
+        if path.name.startswith("._"):
+            continue
         source = path.read_text(encoding="utf-8")
         if not any(p in source for p in _FITZ_OPEN_PATTERNS):
             continue
