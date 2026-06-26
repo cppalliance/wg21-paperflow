@@ -12,12 +12,12 @@ from __future__ import annotations
 import asyncio
 import sys
 
+from cli.jobs import run_download
+from cli.progress import make_progress_handler
+from paperstore.stages import STAGES
+
 
 def command(args, backend):
-    from cli.jobs import run_download
-    from cli.progress import make_progress_handler
-    from paperstore.stages import STAGES
-
     targets = args.targets
     force = getattr(args, "force", False)
     concurrency = getattr(args, "concurrency", None) or 4

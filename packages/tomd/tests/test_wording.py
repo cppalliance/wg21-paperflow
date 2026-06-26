@@ -72,6 +72,21 @@ class TestMatchStrikethrough:
         problems = classify_wording([block], narrow_drawings)
         assert all(s.wording_role is None for ln in block.lines for s in ln.spans)
 
+    def test_del_classified_with_fragmented_strikethrough(self):
+        """A strike drawn as several short collinear segments still confirms del.
+
+        WG21 renderers often emit one strike segment per sub-word, so no
+        single segment reaches the 30% coverage bar; merged coverage does.
+        """
+        span = Span(text="removed", color=_RED, bbox=(10, 50, 210, 60))
+        block = Block(lines=[Line(spans=[span])], page_num=0)
+        # Four 40px segments at the span center (y=55). Each is 40/200=0.2
+        # of the span width (< 0.3), but merged they cover 80%.
+        segs = [(55, 10, 50, (0.8, 0, 0)), (55, 50, 90, (0.8, 0, 0)),
+                (55, 90, 130, (0.8, 0, 0)), (55, 130, 170, (0.8, 0, 0))]
+        classify_wording([block], {0: segs})
+        assert span.wording_role == "del"
+
 
 class TestInsClassification:
     def test_ins_classified_without_drawing(self):
@@ -155,6 +170,63 @@ class TestForeignColorFilter:
         classify_wording([block], {})
         assert green.wording_role == "ins"
 
+    def test_confirmed_strikethrough_overrides_foreign_filter(self):
+        """A struck deletion inside syntax-highlighted code is still detected.
+
+        The block carries a foreign (olive) syntax color, which would
+        normally skip it, but a red span with a confirmed strikethrough is
+        an unambiguous deletion: detect it (and the paired insertion) even
+        though there are only two wording spans, below _MIN_WORDING_SPANS.
+        """
+        olive = Span(text="using", color=_color(130, 123, 0), bbox=(10, 50, 50, 60))
+        red = Span(text="native_simd", color=_RED, bbox=(60, 50, 160, 60))
+        green = Span(text="simd::vec", color=_GREEN, bbox=(160, 50, 240, 60))
+        line = Line(spans=[olive, red, green])
+        block = Block(lines=[line], page_num=0)
+        strike = {0: [(55, 60, 160, (0.8, 0, 0))]}
+        classify_wording([block], strike)
+        assert red.wording_role == "del"
+        assert green.wording_role == "ins"
+        assert olive.wording_role is None
+
+    def test_lone_struck_token_on_highlighted_line_classified(self):
+        """A single struck token amid syntax-highlighted code is detected.
+
+        The line is a minority edit (one red `2` struck, one green
+        insertion) sitting in olive/black code, so it fails both the
+        majority and partial-line gates; the confirmed strikethrough
+        qualifies the line on its own.
+        """
+        floatv = Span(text="floatv f(floatv x) { return x * ", color=0,
+                      bbox=(10, 50, 200, 60))
+        olive = Span(text="keyword", color=_color(130, 123, 0), bbox=(200, 50, 230, 60))
+        struck = Span(text="2", color=_RED, bbox=(230, 50, 234, 60))
+        green = Span(text="std::cw<2>", color=_GREEN, bbox=(234, 50, 320, 60))
+        tail = Span(text="; }", color=0, bbox=(320, 50, 340, 60))
+        line = Line(spans=[floatv, olive, struck, green, tail])
+        block = Block(lines=[line], page_num=0)
+        # 3px strike centered on the narrow `2` span (width 4).
+        strike = {0: [(55, 230.5, 233.5, (0.8, 0, 0))]}
+        classify_wording([block], strike)
+        assert struck.wording_role == "del"
+        assert green.wording_role == "ins"
+        assert olive.wording_role is None
+
+    def test_foreign_block_without_strikethrough_still_skipped(self):
+        """Foreign-color code with a red token but no strike stays unclassified.
+
+        Guards the exemption: only a confirmed strikethrough overrides the
+        filter. A red syntax token (no rule drawn through it) must not be
+        misread as a deletion.
+        """
+        olive = Span(text="using", color=_color(130, 123, 0), bbox=(10, 50, 50, 60))
+        red = Span(text="native_simd", color=_RED, bbox=(60, 50, 160, 60))
+        green = Span(text="simd::vec", color=_GREEN, bbox=(160, 50, 240, 60))
+        line = Line(spans=[olive, red, green])
+        block = Block(lines=[line], page_num=0)
+        classify_wording([block], {})
+        assert all(s.wording_role is None for ln in block.lines for s in ln.spans)
+
 
 class TestThreshold:
     def test_below_min_spans_no_classification(self):
@@ -204,10 +276,16 @@ class TestCollectLineDrawings:
         assert x1 == 200
 
     def test_short_line_filtered_out(self):
-        """Lines <= 5 px wide are discarded."""
-        drawing = self._make_drawing(10, 50, 14, 50)
+        """Lines <= 3 px wide are discarded as noise."""
+        drawing = self._make_drawing(10, 50, 12, 50)
         page = self._make_page([drawing])
         assert collect_line_drawings(page) == []
+
+    def test_single_glyph_strike_collected(self):
+        """A ~4px rule (a strikethrough over one narrow glyph) is kept."""
+        drawing = self._make_drawing(10, 50, 14.9, 50)
+        page = self._make_page([drawing])
+        assert len(collect_line_drawings(page)) == 1
 
     def test_diagonal_line_filtered_out(self):
         """Lines with |dy| >= 1 are not horizontal and are discarded."""
@@ -269,6 +347,63 @@ class TestTwoPassDeletion:
                 "red without strikethrough should NOT be classified "
                 "when no ins context exists"
             )
+
+
+class TestRedCommentNotDeletion:
+    """A red `//` code comment is syntax highlighting, never a deletion.
+
+    Reproduces P0876R22: a single red `// hypothetical API` comment in
+    an otherwise-black monospace listing was promoted to <del> once the
+    document carried enough green insertions (two-pass promotion),
+    flipping the whole code block into a wording diff.
+    """
+
+    def _ins_context_block(self):
+        green = [Span(text=f"added {i}", color=_GREEN, bbox=(10, 50, 200, 60))
+                 for i in range(6)]
+        return Block(lines=[Line(spans=[s]) for s in green], page_num=0)
+
+    def test_red_comment_line_not_promoted_to_deletion(self):
+        comment_spans = [
+            Span(text="// ", color=_RED, monospace=True, bbox=(10, 70, 30, 80)),
+            Span(text="hypothetical API", color=_RED, monospace=True,
+                 bbox=(30, 70, 200, 80)),
+        ]
+        code_block = Block(
+            lines=[
+                Line(spans=comment_spans),
+                Line(spans=[Span(text="fiber_context f4{[]{", color=0,
+                                 monospace=True, bbox=(10, 90, 200, 100))]),
+            ],
+            page_num=0,
+        )
+        classify_wording([self._ins_context_block(), code_block], {})
+        for s in comment_spans:
+            assert s.wording_role is None, (
+                "a red // comment must not be classified as a deletion"
+            )
+
+    def test_red_token_in_code_is_still_deletion(self):
+        # A red identifier amid black code (not a comment) is a genuine
+        # deletion and must still be promoted (p1068r11 / p2040r0).
+        line = Line(spans=[
+            Span(text="const size_t ", color=0, monospace=True,
+                 bbox=(10, 70, 90, 80)),
+            Span(text="__j", color=_RED, monospace=True, bbox=(90, 70, 110, 80)),
+            Span(text=" = i;", color=0, monospace=True, bbox=(110, 70, 160, 80)),
+        ])
+        block = Block(lines=[line], page_num=0)
+        classify_wording([self._ins_context_block(), block], {})
+        assert line.spans[1].wording_role == "del"
+
+    def test_struck_red_comment_is_still_deletion(self):
+        # A comment that is actually struck through is a real deletion;
+        # the comment guard only applies in the absence of a strike.
+        comment = Span(text="// old note", color=_RED, monospace=True,
+                       bbox=(10, 50, 200, 60))
+        block = Block(lines=[Line(spans=[comment])], page_num=0)
+        classify_wording([block], {0: [(55, 10, 200, (0.8, 0, 0))]})
+        assert comment.wording_role == "del"
 
 
 def _hsv_grid(step: int = 4):

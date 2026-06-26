@@ -102,7 +102,19 @@ TRUNCATION_MARKER_TEMPLATE = (
 # like "We discussed this in section 3.1, ..." and misattributed it
 # as alt text. Misattribution propagates into LLM prompts via
 # pipeline.tools.wrap_source, which is strictly worse than empty alt.
-_CAPTION_SEARCH_RADIUS_BELOW_PT = 60.0
+# Radius for the caption-proximity match. Bumped from 60pt to 100pt to
+# cover multi-sub-figure vector layouts where the overall ``Figure N: ...``
+# caption sits 60-100pt below the cluster (P3127R1 page 6: cluster ends
+# at y=284, "Figure 1:" caption at y=345 - 61pt below).
+#
+# This constant is also re-used by ``pipeline._line_in_caption_band`` as
+# the depth of the caption band used for section-level caption-shaped
+# drops and sub-caption capture. The two paths must read the same value,
+# or alt-text attribution can fire on a caption the body-drop refuses to
+# drop, leaving the caption duplicated as both alt-text and body. The
+# pipeline-side helper imports this constant directly to make the
+# dependency explicit.
+_CAPTION_SEARCH_RADIUS_BELOW_PT = 100.0
 _CAPTION_SEARCH_RADIUS_ABOVE_PT = 30.0
 
 # Table is intentionally NOT in this label list. tomd has its own
@@ -161,6 +173,14 @@ class ExtractedImage:
     stored_filename: str                            # "<pid>-fig{page}-{index}.{ext}"
     xref: int                                       # PDF xref; 0 for HTML
     source: ImageSource = "raster"                  # "raster" (embedded XObject) | "vector" (rasterised clusters)
+    # Sub-captions captured by ``pipeline._filter_sections_inside_vector_images``.
+    # Each entry is ``(letter, full_text)`` where ``letter`` is the
+    # ``_SUB_CAPTION_RE`` letter group (``"a"``, ``"b"``, ...) and
+    # ``full_text`` is the dropped section's full text (``Section.text``).
+    # Tuple, not list - this dataclass is frozen, and a mutable list
+    # default would invite hidden append-mutation. Empty for raster
+    # papers and any vector image without a captured sub-caption.
+    sub_captions: tuple[tuple[str, str], ...] = ()
 
 
 @dataclass(frozen=True)

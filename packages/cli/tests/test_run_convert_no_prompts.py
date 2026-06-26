@@ -51,7 +51,7 @@ def test_run_convert_write_prompts_gate(
     store, tmp_path: Path, monkeypatch, write_prompts: bool, expect_prompts_file: bool
 ):
     monkeypatch.setattr(
-        "cli.orchestrator.convert_one_paper", _stub_convert
+        "cli.jobs.convert_one_paper", _stub_convert
     )
 
     pid = _seed_paper_with_source(store)

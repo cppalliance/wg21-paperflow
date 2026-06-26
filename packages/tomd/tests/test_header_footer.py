@@ -124,6 +124,57 @@ def test_detect_repeating_page_number_pattern():
     assert (586.0, "__PAGE_NUM__") in result
 
 
+def test_detect_repeating_edge_band_varying_titles():
+    """A running footer band (varying section title + page number at a fixed
+    bottom-margin y) is classified as __EDGE_BAND__ via the recurring page
+    number."""
+    titles = ["Scope", "Normative references", "Terms and definitions", "§ 4.2"]
+    all_edges = []
+    for i, title in enumerate(titles):
+        pg = i + 1
+        all_edges.append([
+            PageEdgeItem(text=title, y=790.0, page_num=pg,
+                         bbox=(64, 790, 200, 800)),
+            PageEdgeItem(text=str(pg), y=790.0, page_num=pg,
+                         bbox=(525, 790, 535, 800)),
+        ])
+    result = detect_repeating(all_edges, total_pages=4, page_height=842.0)
+    # bbox center (790+800)/2 = 795, quantized to Y_TOLERANCE=2 -> 796.
+    assert (796.0, "__EDGE_BAND__") in result
+
+
+def test_detect_repeating_edge_band_only_in_bottom_margin():
+    """The footer-band rule must NOT fire on the top-of-page section-heading
+    band, whose bare section numbers ("1", "2", ...) also match PAGE_NUM_RE.
+    A recurring number band high on the page is left alone."""
+    # Heading band near the top: number + title at y~101 on each page.
+    titles = ["Scope", "Normative references", "Terms and definitions"]
+    all_edges = []
+    for i, title in enumerate(titles):
+        pg = i + 1
+        all_edges.append([
+            PageEdgeItem(text=str(pg), y=101.0, page_num=pg,
+                         bbox=(63, 101, 70, 110)),
+            PageEdgeItem(text=title, y=101.0, page_num=pg,
+                         bbox=(98, 101, 250, 110)),
+        ])
+    result = detect_repeating(all_edges, total_pages=3, page_height=842.0)
+    assert not any(p == "__EDGE_BAND__" for _, p in result)
+
+
+def test_detect_repeating_edge_band_needs_recurring_page_number():
+    """Without a recurring bare page number, a varying-text footer band is not
+    treated as chrome (falls through to the exact-text rule, which also misses
+    it) so unique edge content is preserved."""
+    titles = ["Scope", "Normative references", "Terms and definitions", "§ 4.2"]
+    all_edges = [
+        [PageEdgeItem(text=t, y=790.0, page_num=i + 1, bbox=(64, 790, 200, 800))]
+        for i, t in enumerate(titles)
+    ]
+    result = detect_repeating(all_edges, total_pages=4, page_height=842.0)
+    assert not any(p == "__EDGE_BAND__" for _, p in result)
+
+
 def test_detect_repeating_doc_number_pattern():
     """Running doc number at same y across pages is classified as __DOC_NUM__."""
     # Same paper, revision number varies line-by-line — not realistic, but exercises
@@ -137,6 +188,122 @@ def test_detect_repeating_doc_number_pattern():
     result = detect_repeating(all_edges, total_pages=4)
     # Bucket is derived from bbox center (30+42)/2 = 36, quantized to Y_TOLERANCE=2.
     assert (36.0, "__DOC_NUM__") in result
+
+
+# ---- detect_repeating: issue-180 regressions -----------------------------
+
+def test_detect_repeating_ignores_dual_path_doubling():
+    """A single-page body line counted twice (MuPDF + spatial) is NOT repeating.
+
+    Reproduces the issue-180 bug: each page's edge items are gathered from
+    both extraction paths, so a single-page line's text appears twice with the
+    SAME page_num. The stock Counter-of-occurrences path saw count=2 >= the
+    1.5 threshold on a 3-page doc and wrongly stripped genuine body. Counting
+    distinct PAGES (here 1) keeps it.
+
+    The bucket is made gate-passing by a genuine 2-page header so the body
+    line actually reaches the per-text test.
+    """
+    bbox = (0, 30, 100, 42)  # center 36 -> bucket 36.0
+
+    def header(pg):
+        return PageEdgeItem(text="Running Head", y=30.0,
+                            page_num=pg, bbox=bbox)
+
+    def body():
+        return PageEdgeItem(text="By embracing these practices", y=30.0,
+                            page_num=3, bbox=bbox)
+
+    all_edges = [
+        [header(1)],
+        [header(2)],
+        # Page 3: dual-path doubling — the SAME body line twice, page_num=3.
+        [body(), body()],
+    ]
+    result = detect_repeating(all_edges, total_pages=3)
+    assert (36.0, "Running Head") in result          # genuine 2/3-page header
+    assert (36.0, "By embracing these practices") not in result  # body kept
+
+
+def test_detect_repeating_alternating_header_coverage_union():
+    """Alternating recto/verso header (title + authors) is stripped via union.
+
+    Mirrors p3692r1/r2: title on odd pages, authors on even pages, each on
+    just under half the pages, so neither reaches threshold alone. The
+    coverage-union fallback strips both because their page union does. Red
+    against a plain distinct-page fix (neither variant reaches threshold),
+    green with the union branch.
+    """
+    bbox = (0, 30, 100, 42)
+
+    def title(pg):
+        return PageEdgeItem(text="Avoiding OOTA Surprises", y=30.0,
+                            page_num=pg, bbox=bbox)
+
+    def authors(pg):
+        return PageEdgeItem(text="A. Author, B. Author", y=30.0,
+                            page_num=pg, bbox=bbox)
+
+    # 6 pages, threshold 3.0. Title on 1,3 (2 pages); authors on 2,4 (2 pages).
+    # Neither reaches 3 alone; union {1,2,3,4} = 4 >= 3.
+    all_edges = [
+        [title(1)], [authors(2)], [title(3)], [authors(4)], [], [],
+    ]
+    result = detect_repeating(all_edges, total_pages=6)
+    assert (36.0, "Avoiding OOTA Surprises") in result
+    assert (36.0, "A. Author, B. Author") in result
+
+
+def test_detect_repeating_union_lower_boundary_keeps_oneoff_body():
+    """Distinct one-off body lines sharing a gated bucket are never stripped.
+
+    Locks the boundary the subset property depends on: each line appears on a
+    single page (< _MIN_RECUR_PAGES), so none enter `recurring` and the
+    coverage-union cannot fire, even though the bucket clears the page gate.
+    """
+    bbox = (0, 30, 100, 42)
+    lines = [
+        "First unique sentence on its page",
+        "Second distinct paragraph opener",
+        "Third one-off body line here",
+        "Fourth and final unique line",
+    ]
+    # 6 pages, threshold 3.0. Four DIFFERENT lines, one per page on pages 1-4.
+    all_edges = [
+        [PageEdgeItem(text=lines[i], y=30.0, page_num=i + 1, bbox=bbox)]
+        for i in range(4)
+    ] + [[], []]
+    result = detect_repeating(all_edges, total_pages=6)
+    assert all(text not in {p for _, p in result} for text in lines)
+
+
+def test_detect_repeating_union_variant_cap_blocks_multi_variant():
+    """The variant cap blocks the constructed >2-variant union counterexample.
+
+    Three distinct verbatim texts, each recurring on >= _MIN_RECUR_PAGES pages,
+    whose page union reaches threshold. Each alone is sub-threshold (so the
+    exact-hit path does not fire) and each clears _MIN_RECUR_PAGES (so the
+    _MIN_RECUR_PAGES floor does not block it) -- the ONLY thing that keeps these
+    out of the repeating set is `len(recurring) <= _MAX_HEADER_VARIANTS` (=2).
+    Locks the cap: raising it to >= 3 or deleting the guard makes this fail.
+    """
+    bbox = (0, 30, 100, 42)
+    variants = ["Variant alpha text", "Variant beta text", "Variant gamma text"]
+
+    def item(text, pg):
+        return PageEdgeItem(text=text, y=30.0, page_num=pg, bbox=bbox)
+
+    # 8 pages, threshold 4.0. Each variant on 2 distinct pages (>= _MIN_RECUR);
+    # none reaches 4 alone; union of all three = pages 1..6 = 6 >= 4. With the
+    # cap at 2, the 3-variant recurring set is rejected -> nothing stripped.
+    all_edges = [
+        [item(variants[0], 1)], [item(variants[0], 2)],
+        [item(variants[1], 3)], [item(variants[1], 4)],
+        [item(variants[2], 5)], [item(variants[2], 6)],
+        [], [],
+    ]
+    result = detect_repeating(all_edges, total_pages=8)
+    assert all(v not in {p for _, p in result} for v in variants)
 
 
 # ---- strip_repeating -----------------------------------------------------
@@ -160,6 +327,71 @@ def test_strip_repeating_removes_page_numbers():
     texts = [ln.text for ln in result[0].lines]
     assert "42" not in texts
     assert "Body line" in texts
+
+
+def test_strip_repeating_edge_band_strips_short_footer_keeps_body():
+    """__EDGE_BAND__ strips a short running-footer line at the band y but
+    preserves a long body line that happens to share the band y-bucket."""
+    body = "this is a genuine body sentence that runs the full width of the page"
+    b = _make_block_at_y([("Normative references 2", 790), (body, 790)])
+    repeating = {(796.0, "__EDGE_BAND__")}
+    result = strip_repeating([b], repeating)
+    texts = [ln.text for blk in result for ln in blk.lines]
+    assert "Normative references 2" not in texts
+    assert body in texts
+
+
+def test_strip_repeating_edge_band_keeps_short_body_line_in_tall_block():
+    """A short (<= word-cap) genuine body line landing in the footer band's
+    y-bucket must NOT be stripped when it belongs to a tall body block. The
+    band strip fires only inside small edge (footer) blocks; body flows in tall
+    blocks. Pins the fix for the silent short-body-line data loss."""
+    lines = [
+        _make_line("first body line of a full page", 120),
+        _make_line("more body text in the middle", 400),
+        _make_line("See annex B for details.", 790),   # 5 words, in the band
+    ]
+    block = Block(lines=lines, bbox=(50.0, 120.0, 550.0, 802.0), page_num=2)
+    repeating = {(796.0, "__EDGE_BAND__")}
+    result = strip_repeating([block], repeating)
+    texts = [ln.text for blk in result for ln in blk.lines]
+    assert "See annex B for details." in texts
+
+
+def test_strip_repeating_edge_band_still_strips_short_footer_block():
+    """Regression guard: a short footer in a small edge block at the band y is
+    still stripped after the edge-block gate."""
+    block = _make_block_at_y([("Normative references 2", 790)])  # top 790 > 700
+    repeating = {(796.0, "__EDGE_BAND__")}
+    result = strip_repeating([block], repeating)
+    assert result == []
+
+
+def test_strip_repeating_edge_band_does_not_shred_body_spans():
+    """A long (>word-cap) body line sharing the band y must keep all its
+    spans: the band rule matches whole short lines, never individual spans
+    (each short span would otherwise hit the word cap and be stripped)."""
+    words = ["this", "genuine", "body", "line", "has", "many", "short",
+             "spans", "that", "run", "wide"]
+    spans = [Span(text=w + " ", font_name="Body", font_size=11.0,
+                  bbox=(50.0 + i * 40, 790.0, 80.0 + i * 40, 802.0))
+             for i, w in enumerate(words)]
+    line = Line(spans=spans, bbox=(50.0, 790.0, 500.0, 802.0), page_num=0)
+    block = Block(lines=[line], bbox=line.bbox, page_num=0)
+    repeating = {(796.0, "__EDGE_BAND__")}
+    result = strip_repeating([block], repeating)
+    kept = [s.text.strip() for blk in result for ln in blk.lines for s in ln.spans]
+    assert kept == words
+
+
+def test_strip_repeating_edge_band_strips_roman_footer():
+    """The band strip also removes a footer using a roman page number
+    ("Contents ii") even though roman numerals aren't bare page numbers:
+    the band is identified elsewhere, and the whole short band is chrome."""
+    b = _make_block_at_y([("Contents ii", 790)])
+    repeating = {(796.0, "__EDGE_BAND__")}
+    result = strip_repeating([b], repeating)
+    assert result == []
 
 
 def test_strip_repeating_y_tolerance():

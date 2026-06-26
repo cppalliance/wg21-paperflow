@@ -11,27 +11,31 @@ Bump the version, tag, push, and create a GitHub release.
 
 ## Steps
 
-1. **Resolve the new version.**
-   - Run `git describe --tags --abbrev=0` to find the previous tag (e.g. `v0.2.1`).
-   - Read the current version from the root `pyproject.toml`.
-   - The argument is `major`, `minor`, `patch`, or an explicit `X.Y.Z`. If no argument was provided, ask the user.
-   - Compute the new version (no `v` prefix in `pyproject.toml`, `v` prefix on the git tag).
+1. **Resolve and preview the bump.** The argument is `major`, `minor`, `patch`, or an explicit `X.Y.Z` (ask the user if absent). Dry-run the bumper to see the before/after table for every `pyproject.toml`, the new version, the previous tag, and any drift warning:
+   ```bash
+   python3 "${CLAUDE_SKILL_DIR}/bump_versions.py" <arg>
+   ```
+   The script uses the latest git tag (`git describe --tags --abbrev=0`) as the previous version, so it also handles step 2's tag-vs-root drift check: if the root `pyproject.toml` disagrees with the latest tag, it prints a `DRIFT:` line and computes the bump from the tag. No `v` prefix in `pyproject.toml`; the `v` prefix goes on the git tag.
 
 2. **Sanity checks before touching anything.**
    - `git status --porcelain` must be empty. If not, stop and ask.
    - Determine the canonical remote: if `git remote get-url upstream` succeeds, use `upstream`; otherwise use `origin`. Use this remote for all push/fetch in this skill (the user's `origin` is often a personal fork).
    - Current branch should be `main` and up to date with `<remote>/main`. If not, stop and ask.
    - `git tag -l v<new>` must be empty. If the tag exists, stop.
-   - The root `pyproject.toml` version should match the previous tag. If they differ (e.g. root says `0.2.0` but the latest tag is `v0.2.1`), the root is stale: treat the **latest tag** as the previous version when computing the bump, and surface this drift to the user.
+   - Surface any `DRIFT:` warning from step 1 to the user.
 
-3. **Bump versions.** All packages should track the root version. Update `version = "..."` in:
-   - Root `pyproject.toml`.
-   - Every `packages/*/pyproject.toml`, regardless of current value. If a package was intentionally on a different track, the user will say so explicitly; otherwise sync everything. Show the user the before/after table before editing.
-
-4. **Run the workspace `uv sync`** to refresh `uv.lock`, then run tests per-package the way CI does (a single root `uv run pytest` collides on duplicate test module basenames):
+3. **Bump versions.** Show the user the before/after table from step 1, then apply it. The script rewrites `version = "..."` in the root `pyproject.toml` and every `packages/*/pyproject.toml`:
+   ```bash
+   python3 "${CLAUDE_SKILL_DIR}/bump_versions.py" <arg> --apply
    ```
-   for pkg in paperstore mailing tomd cli dissect pipeline agora preview; do
-     uv run pytest "packages/$pkg/tests" -q || exit 1
+   If a package was intentionally on a different track, the user will say so explicitly; otherwise everything syncs to the root version.
+
+4. **Run the workspace `uv sync`** to refresh `uv.lock`, then run tests per-package the way CI does (a single root `uv run pytest` collides on duplicate test module basenames). Discover packages from disk so the loop never drifts out of sync with `packages/` (a hardcoded list silently skips new packages):
+   ```
+   uv sync
+   for dir in packages/*/tests; do
+     [ -d "$dir" ] || continue
+     uv run pytest "$dir" -q || exit 1
    done
    uv run pytest tests -q
    ```

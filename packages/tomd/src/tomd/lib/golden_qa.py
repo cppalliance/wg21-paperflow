@@ -27,7 +27,7 @@ from tomd.lib.check_content import compute_content_coverage
 from tomd.lib.golden_compare import compare
 from tomd.lib.golden_gaps import draft_issues, locate_gaps
 from tomd.lib.html import convert_html
-from tomd.lib.pdf import convert_pdf
+from tomd.lib.pdf import run_pipeline
 
 
 # The golden fixtures are organized by role under the golden root.
@@ -140,7 +140,7 @@ def generate_ideal(stem: str, golden_dir: Path) -> Path:
     src = find_source(stem, golden_dir)
     if src is None:
         src = download_source(stem, golden_dir)
-    markdown = convert_pdf(src)[0] if src.suffix == ".pdf" else convert_html(src)[0]
+    markdown = run_pipeline(src).md if src.suffix == ".pdf" else convert_html(src)[0]
     dest = ideal_path(golden_dir, stem)
     dest.parent.mkdir(parents=True, exist_ok=True)
     dest.write_text(markdown, encoding="utf-8", newline="\n")
@@ -258,7 +258,7 @@ def tomd_markdown(stem: str, golden_dir: Path) -> str | None:
     if src is None:
         return None
     if src.suffix == ".pdf":
-        return convert_pdf(src)[0]
+        return run_pipeline(src).md
     return convert_html(src)[0]
 
 

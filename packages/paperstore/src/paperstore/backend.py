@@ -93,6 +93,7 @@ class PaperRow:
     dissect_path: str = ""
     agora_path: str = ""
     assay_path: str = ""
+    citations_extracted_at: str = ""
     line_count: int = 0
     status: int = 0
     error: str = ""
@@ -109,9 +110,10 @@ class ClearedSet:
 
     agora: bool = False
     assay: bool = False
+    citations: bool = False
 
     def __bool__(self) -> bool:
-        return self.agora or self.assay
+        return self.agora or self.assay or self.citations
 
     def names(self) -> list[str]:
         """Return the pipeline names that were cleared, in stable order."""
@@ -120,6 +122,8 @@ class ClearedSet:
             out.append("agora")
         if self.assay:
             out.append("assay")
+        if self.citations:
+            out.append("citations")
         return out
 
 
@@ -567,7 +571,15 @@ class StorageBackend(ABC):
 
     @abstractmethod
     def store_paper_citations(self, paper_id: str, citations) -> None:
-        """Replace paper citations for ``paper_id``."""
+        """Replace paper citations for ``paper_id`` and set ``citations_extracted_at``.
+
+        Implementations must atomically delete all existing rows for
+        ``paper_id``, insert the new rows (if any), and stamp
+        ``citations_extracted_at`` on the paper row — even when ``citations``
+        is empty. The stamp is the authoritative signal that extraction has
+        been attempted; row presence alone cannot distinguish a zero-citation
+        paper from one that has never been processed.
+        """
 
     @abstractmethod
     def store_external_citations(self, paper_id: str, externals) -> None:
@@ -602,6 +614,10 @@ class StorageBackend(ABC):
     @abstractmethod
     def get_paper_citations(self, paper_id: str) -> list[PaperCitationRow]:
         """Return all paper citations for ``paper_id``."""
+
+    @abstractmethod
+    def get_incoming_citations(self, cited_paper_id: str) -> list[PaperCitationRow]:
+        """Return all rows that cite ``cited_paper_id`` (reverse direction)."""
 
     @abstractmethod
     def get_external_citations(self, paper_id: str) -> list[ExternalCitationRow]:

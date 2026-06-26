@@ -513,8 +513,11 @@ version = "0.4.1"
 source = { editable = "packages/cli" }
 dependencies = [
     { name = "agora" },
+    { name = "assay" },
     { name = "mailing" },
     { name = "paperstore" },
+    { name = "pipeline" },
+    { name = "pydantic-ai" },
     { name = "rich" },
     { name = "tomd" },
 ]
@@ -522,8 +525,11 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "agora", editable = "packages/agora" },
+    { name = "assay", editable = "packages/assay" },
     { name = "mailing", editable = "packages/mailing" },
     { name = "paperstore", editable = "packages/paperstore" },
+    { name = "pipeline", editable = "packages/pipeline" },
+    { name = "pydantic-ai" },
     { name = "rich" },
     { name = "tomd", editable = "packages/tomd" },
 ]
@@ -3509,7 +3515,7 @@ wheels = [
 [[package]]
 name = "scrivener"
 version = "0.1.0"
-source = { git = "https://github.com/gregjkal/wg21-scrivener.git#583771026872e878320ec6d6237887dd1a1752ae" }
+source = { git = "https://github.com/gregjkal/wg21-scrivener.git#9bf01d60d0f4e7463b3e0e1baddef550b786da4b" }
 dependencies = [
     { name = "beautifulsoup4" },
     { name = "mistune" },
@@ -4162,6 +4168,7 @@ dependencies = [
     { name = "agora" },
     { name = "assay" },
     { name = "cli" },
+    { name = "cpp-mcp" },
     { name = "mailing" },
     { name = "paperstore" },
     { name = "pipeline" },
@@ -4171,6 +4178,7 @@ dependencies = [
 
 [package.dev-dependencies]
 dev = [
+    { name = "markdown-it-py" },
     { name = "pillow" },
     { name = "pyright" },
     { name = "pytest" },
@@ -4182,6 +4190,7 @@ requires-dist = [
     { name = "agora", editable = "packages/agora" },
     { name = "assay", editable = "packages/assay" },
     { name = "cli", editable = "packages/cli" },
+    { name = "cpp-mcp", editable = "packages/cpp-mcp" },
     { name = "mailing", editable = "packages/mailing" },
     { name = "paperstore", editable = "packages/paperstore" },
     { name = "pipeline", editable = "packages/pipeline" },
@@ -4191,6 +4200,7 @@ requires-dist = [
 
 [package.metadata.requires-dev]
 dev = [
+    { name = "markdown-it-py", specifier = "~=4.0" },
     { name = "pillow", specifier = ">=11.0" },
     { name = "pyright", specifier = ">=1.1" },
     { name = "pytest", specifier = "~=8.0" },

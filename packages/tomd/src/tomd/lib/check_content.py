@@ -37,31 +37,35 @@ import json
 import logging
 import os
 import re
-import sys
 import tempfile
-import time
 import unicodedata
-from concurrent.futures import ProcessPoolExecutor
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from hashlib import blake2b
 from pathlib import Path
-from typing import Iterable, Literal
+from collections.abc import Hashable, Sequence
+from typing import Iterable, Literal, TypeVar
 
 import mistune
-
 from paperstore import SqliteBackend
 from paperstore.backend import StorageBackend
 from paperstore.errors import MissingPaperMdError, MissingSourceError
+from paperstore.progress import ProgressCallback
 from tomd.errors import CheckContentArgError
+from tomd.lib.batch import run_parallel_batch
 from tomd.lib.html.extract import detect_generator, strip_boilerplate
+from tomd.lib.metadata_yaml.format import strip_front_matter
+from tomd.lib.wording_markup import WORDING_FENCE_RE, WORDING_TAG_RE
 
 __all__ = [
+    "ContentCheckBatchResult",
     "ContentCheckResult",
     "MisalignedRegion",
     "check_paper_content",
     "compute_content_coverage",
-    "run_content_check_report",
+    "format_content_check_report",
+    "run_content_check_batch",
+    "write_content_check_json_atomic",
 ]
 
 _log = logging.getLogger(__name__)
@@ -104,7 +108,9 @@ _WORKER_POLL_INTERVAL = 0.5
 
 # JSON schema version bump rules: increment when the per-paper fields,
 # constants block, or top-level keys change.
-_JSON_SCHEMA_VERSION = 1
+# v2: added per-paper unigram_coverage / unigram_drift. Schema-1 files stay
+# readable (_result_from_dict defaults the absent fields to 0.0).
+_JSON_SCHEMA_VERSION = 2
 
 
 # -- Data ---------------------------------------------------------------------
@@ -134,6 +140,14 @@ class ContentCheckResult:
     in the Markdown; ``drift`` is the share of *markdown* tokens whose
     shingles do not appear in the source. Both are in ``[0.0, 1.0]``.
 
+    ``unigram_coverage`` / ``unigram_drift`` are the same measures at the
+    single-token (word) level, ignoring order. They are a complementary
+    signal: a large ``unigram_coverage - coverage`` gap means the text is
+    present but locally reformatted (faithful, e.g. PDF reflow or stripped
+    furniture), whereas a low ``unigram_coverage`` means content is genuinely
+    missing. Trustworthy as "faithful" only alongside low drift; never a
+    pass/fail gate on its own.
+
     Coverage will never reach 1.0 in practice: tomd intentionally
     strips headers, footers, page numbers, and tables of contents, so
     the source extraction always carries content the Markdown cannot.
@@ -143,6 +157,13 @@ class ContentCheckResult:
     source_format: Literal["pdf", "html"]
     coverage: float
     drift: float
+    # Same metrics at the single-token level (order-insensitive). Placed
+    # among the non-default fields (before missing_regions/extra_regions,
+    # which carry defaults): a non-default field cannot follow a defaulted
+    # one. check_paper_content always supplies them; old JSON is handled in
+    # _result_from_dict.
+    unigram_coverage: float
+    unigram_drift: float
     source_token_count: int
     markdown_token_count: int
     missing_regions: tuple[MisalignedRegion, ...] = field(default_factory=tuple)
@@ -341,9 +362,6 @@ _SKIP_TYPES = frozenset({"thematic_break", "blank_line"})
 _TOMD_HTML_MARKER_RE = re.compile(
     r"<!--\s*tomd:[^>]*?-->", re.IGNORECASE | re.DOTALL,
 )
-_FRONT_MATTER_RE = re.compile(r"^---\n.+?\n---\n?", re.DOTALL)
-
-
 def _collect_node_text(node: dict, out: list[str]) -> None:
     """Walk a mistune AST node, appending text to ``out``."""
     ntype = node.get("type", "")
@@ -381,11 +399,24 @@ def _collect_node_text(node: dict, out: list[str]) -> None:
 def _extract_markdown_stream(md_text: str) -> tuple[str, ...]:
     """Return the normalized token stream for the converted Markdown.
 
-    Front matter and tomd-emitted ``<!-- tomd:* -->`` markers are
-    stripped before AST parsing so they do not appear as drift tokens.
+    Front matter, tomd-emitted ``<!-- tomd:* -->`` markers, and tomd
+    wording markup (``<ins>``/``<del>`` tags and ``:::wording*`` fenced-div
+    lines) are stripped before AST parsing so the markup syntax does not
+    appear as drift tokens. Wording *prose* (the inner text) is retained,
+    since it is present in the source document. The strip rules come from
+    ``lib.wording_markup``, the same module the emitters format from, so the
+    two cannot drift apart (see ``tests/test_wording_markup.py``).
+
+    Replacing with a space, not the empty string, prevents merging adjacent
+    tokens (``<ins>foo</ins>bar`` -> ``foo bar``). The fence strip is
+    deliberately pre-AST: removing the marker line leaves the wrapped wording
+    paragraphs to parse as ordinary prose, so their text counts toward
+    coverage.
     """
-    body = _FRONT_MATTER_RE.sub("", md_text, count=1)
+    body = strip_front_matter(md_text)
     body = _TOMD_HTML_MARKER_RE.sub(" ", body)
+    body = WORDING_TAG_RE.sub(" ", body)
+    body = WORDING_FENCE_RE.sub(" ", body)
     tokens_raw: list[str] = []
     for node in _AST_RENDERER(body):
         if isinstance(node, dict):
@@ -415,11 +446,18 @@ def _shingle_hashes(tokens: Iterable[str], width: int = _SHINGLE_WIDTH) -> list[
     return hashes
 
 
-def _multiset_coverage(source: list[int], target: list[int]) -> float:
-    """Fraction of ``source`` shingles also present in ``target`` (multiset)."""
+_H = TypeVar("_H", bound=Hashable)
+
+
+def _multiset_coverage(source: list[_H], target: list[_H]) -> float:
+    """Fraction of ``source`` items also present in ``target`` (multiset).
+
+    Generic over hashable items: shingle hashes (``int``) for the headline
+    coverage, or raw tokens (``str``) for the complementary unigram coverage.
+    """
     if not source:
         return 1.0
-    target_counts: dict[int, int] = {}
+    target_counts: dict[_H, int] = {}
     for h in target:
         target_counts[h] = target_counts.get(h, 0) + 1
     matched = 0
@@ -575,6 +613,14 @@ def compute_content_coverage(
     coverage = _multiset_coverage(src_hashes, md_hashes)
     drift = 1.0 - _multiset_coverage(md_hashes, src_hashes) if md_hashes else 0.0
 
+    # Complementary word-level (order-insensitive) signal. Computed on the raw
+    # token multisets to distinguish faithful-but-reformatted text (high
+    # unigram, low shingle) from genuinely missing content (low on both).
+    unigram_coverage = _multiset_coverage(src_tokens, md_tokens)
+    unigram_drift = (
+        1.0 - _multiset_coverage(md_tokens, src_tokens) if md_tokens else 0.0
+    )
+
     missing_regions: list[MisalignedRegion] = []
     extra_regions: list[MisalignedRegion] = []
 
@@ -639,6 +685,8 @@ def compute_content_coverage(
         source_format=src_stream.source_format,
         coverage=coverage,
         drift=drift,
+        unigram_coverage=unigram_coverage,
+        unigram_drift=unigram_drift,
         source_token_count=len(src_tokens),
         markdown_token_count=len(md_tokens),
         missing_regions=tuple(missing_regions),
@@ -722,6 +770,8 @@ def _result_to_dict(r: ContentCheckResult) -> dict:
         "source_format": r.source_format,
         "coverage": r.coverage,
         "drift": r.drift,
+        "unigram_coverage": r.unigram_coverage,
+        "unigram_drift": r.unigram_drift,
         "source_token_count": r.source_token_count,
         "markdown_token_count": r.markdown_token_count,
         "missing_regions": [asdict(reg) for reg in r.missing_regions],
@@ -729,102 +779,67 @@ def _result_to_dict(r: ContentCheckResult) -> dict:
     }
 
 
-def run_content_check_report(
+@dataclass(frozen=True)
+class ContentCheckBatchResult:
+    """Outcome of a batch content-coverage check."""
+
+    results: tuple[ContentCheckResult, ...]
+    skipped: tuple[tuple[str, str], ...]
+    errors: tuple[tuple[str, str], ...]
+    timed_out: tuple[str, ...]
+    elapsed_sec: float
+
+
+def run_content_check_batch(
     items: list[tuple[str, Path]],
-    json_path: Path | None = None,
+    *,
     workers: int = 1,
     timeout: int = _CHECK_BATCH_TIMEOUT_SEC,
-) -> None:
+    on_progress: ProgressCallback | None = None,
+) -> ContentCheckBatchResult:
     """Run check-content for each ``(paper_id, workspace_dir)`` pair.
 
-    Mirrors :func:`tomd.lib.pdf.qa.run_qa_report`: parallel workers,
-    straggler timeout, ranked stdout summary, optional atomic JSON
-    writer. The workspace path travels with each item so workers can
-    open their own backend (a ``StorageBackend`` does not survive
-    ``pickle``-based IPC reliably).
+    CLI-adjacent: callers format output via :func:`format_content_check_report`.
+
+    Parallel workers, straggler timeout, and ranked summary data. The
+    workspace path travels with each item so workers can open their own
+    backend (a ``StorageBackend`` does not survive ``pickle``-based IPC
+    reliably).
     """
-    total = len(items)
     results: list[ContentCheckResult] = []
     errors: list[tuple[str, str]] = []
     skipped: list[tuple[str, str]] = []
-    t0 = time.monotonic()
 
-    worker_payloads = [
-        {"paper_id": pid, "workspace_dir": str(workspace)} for pid, workspace in items
+    batch_items = [
+        (pid, {"paper_id": pid, "workspace_dir": str(workspace)})
+        for pid, workspace in items
     ]
 
-    if workers > 1:
-        done_count = 0
-        with ProcessPoolExecutor(max_workers=workers) as pool:
-            future_to_id = {
-                pool.submit(_check_one_from_paths, p): p["paper_id"]
-                for p in worker_payloads
-            }
-            pending = set(future_to_id.keys())
-            last_completion = time.monotonic()
-
-            while pending:
-                newly_done = {f for f in pending if f.done()}
-                if newly_done:
-                    last_completion = time.monotonic()
-                    for f in newly_done:
-                        pending.discard(f)
-                        done_count += 1
-                        pid = future_to_id[f]
-                        _emit_progress(done_count, total, pid, t0)
-                        try:
-                            d = f.result()
-                            _accumulate(d, results, skipped, errors)
-                        # Batch robustness: one bad paper must not crash the run
-                        except Exception as exc:  # noqa: BLE001
-                            errors.append((pid, str(exc)))
-                elif time.monotonic() - last_completion > timeout:
-                    timed_out: list[str] = []
-                    for f in pending:
-                        pid = future_to_id[f]
-                        timed_out.append(pid)
-                        f.cancel()
-                        errors.append((pid, f"timeout (no progress for {timeout}s)"))
-                    done_count += len(pending)
-                    print(
-                        f"\n  TIMEOUT: {len(timed_out)} files aborted: "
-                        f"{', '.join(timed_out)}",
-                        file=sys.stderr,
-                    )
-                    break
-                else:
-                    time.sleep(_WORKER_POLL_INTERVAL)
-            pool.shutdown(wait=False, cancel_futures=True)
-    else:
-        for i, payload in enumerate(worker_payloads, 1):
-            pid = payload["paper_id"]
-            _emit_progress(i, total, pid, t0)
-            d = _check_one_from_paths(payload)
-            _accumulate(d, results, skipped, errors)
-
-    wall = time.monotonic() - t0
-    avg = wall / total if total else 0.0
-    print(
-        f"\n  Finished in {wall/60:.1f} minutes ({avg:.1f}s/file avg)\n",
-        file=sys.stderr,
+    run = run_parallel_batch(
+        batch_items,
+        _check_one_from_paths,
+        workers=workers,
+        timeout_sec=timeout,
+        poll_interval_sec=_WORKER_POLL_INTERVAL,
+        on_progress=on_progress,
     )
 
-    _print_report(results, skipped, errors)
+    for item_id, outcome in run.outcomes:
+        if isinstance(outcome, Exception):
+            errors.append((item_id, str(outcome)))
+        else:
+            _accumulate(outcome, results, skipped, errors)
 
-    if json_path is not None:
-        _write_json(json_path, results)
+    for pid in run.timed_out:
+        errors.append((pid, f"timeout (no progress for {timeout}s)"))
 
-
-def _emit_progress(done: int, total: int, pid: str, t0: float) -> None:
-    elapsed = time.monotonic() - t0
-    rate = done / elapsed if elapsed > 0 else 0.0
-    eta = (total - done) / rate if rate > 0 else 0.0
-    print(
-        f"\r  [{done}/{total}] {pid:<40} {rate:.1f} files/s  ETA {eta/60:.0f}m",
-        end="",
-        file=sys.stderr,
+    return ContentCheckBatchResult(
+        results=tuple(results),
+        skipped=tuple(skipped),
+        errors=tuple(errors),
+        timed_out=tuple(run.timed_out),
+        elapsed_sec=run.elapsed_sec,
     )
-    sys.stderr.flush()
 
 
 def _accumulate(
@@ -847,6 +862,9 @@ def _result_from_dict(d: dict) -> ContentCheckResult:
         source_format=d["source_format"],
         coverage=d["coverage"],
         drift=d["drift"],
+        # Backward compat: schema-1 JSON predates these fields; default to 0.0.
+        unigram_coverage=d.get("unigram_coverage", 0.0),
+        unigram_drift=d.get("unigram_drift", 0.0),
         source_token_count=d["source_token_count"],
         markdown_token_count=d["markdown_token_count"],
         missing_regions=tuple(
@@ -866,29 +884,36 @@ _REPORT_PREAMBLE = (
     "achievable: tomd intentionally strips headers, footers, page\n"
     "numbers, and tables of contents, all of which appear in the source\n"
     "extraction but cannot appear in the markdown. Expect clean papers\n"
-    "to land between 0.90 and 0.97."
+    "to land between 0.90 and 0.97.\n"
+    "\n"
+    "UniCov is coverage at the single-token (word) level, ignoring order.\n"
+    "A large UniCov-Cov gap means the text is present but reformatted\n"
+    "(faithful); a low UniCov means content is genuinely missing."
 )
 
 
-def _print_report(
-    results: list[ContentCheckResult],
-    skipped: list[tuple[str, str]],
-    errors: list[tuple[str, str]],
-) -> None:
+def format_content_check_report(
+    results: Sequence[ContentCheckResult],
+    skipped: Sequence[tuple[str, str]],
+    errors: Sequence[tuple[str, str]],
+) -> str:
+    """Return the ranked content-check report text for stdout."""
     total = len(results)
-    print(f"\ntomd Content-Check Report: {total} files")
-    print("=" * 40)
-    print()
-    print(_REPORT_PREAMBLE)
-    print()
+    lines: list[str] = []
+
+    lines.append(f"\ntomd Content-Check Report: {total} files")
+    lines.append("=" * 40)
+    lines.append("")
+    lines.append(_REPORT_PREAMBLE)
+    lines.append("")
 
     if total == 0:
-        print("No papers were scored.")
+        lines.append("No papers were scored.")
         if skipped:
-            print(f"Skipped: {len(skipped)}")
+            lines.append(f"Skipped: {len(skipped)}")
         if errors:
-            print(f"Errors: {len(errors)}")
-        return
+            lines.append(f"Errors: {len(errors)}")
+        return "\n".join(lines) + "\n"
 
     high, mid, low = _COVERAGE_BUCKETS
     buckets = {
@@ -898,47 +923,58 @@ def _print_report(
         f"<{low:.2f}":              sum(1 for r in results if r.coverage < low),
     }
 
-    print("Coverage Distribution:")
+    lines.append("Coverage Distribution:")
     for label, count in buckets.items():
         pct = 100 * count / total if total else 0.0
-        print(f"  {label:<14} {count:>6}  ({pct:.1f}%)")
+        lines.append(f"  {label:<14} {count:>6}  ({pct:.1f}%)")
 
     if _COVERAGE_NEEDS_REVIEW is not None:
         threshold = _COVERAGE_NEEDS_REVIEW
         needs_review = sum(1 for r in results if r.coverage < threshold)
-        print()
-        print(f"Files needing review (coverage < {threshold:.2f}): {needs_review}")
-        print(
+        lines.append("")
+        lines.append(
+            f"Files needing review (coverage < {threshold:.2f}): {needs_review}"
+        )
+        lines.append(
             f"Files probably OK   (coverage >= {threshold:.2f}): "
             f"{total - needs_review}"
         )
 
     worst = sorted(results, key=lambda r: r.coverage)[:_WORST_FILES_DISPLAY_LIMIT]
-    print()
-    print(f"Worst {len(worst)} files (lowest coverage):")
-    print(f"  {'Cov':>5}  {'Drift':>5}  {'File':<12}  Top missing region")
-    print(f"  {'-' * 5}  {'-' * 5}  {'-' * 12}  {'-' * 41}")
+    lines.append("")
+    lines.append(f"Worst {len(worst)} files (lowest coverage):")
+    lines.append(
+        f"  {'Cov':>5}  {'UniCov':>6}  {'Drift':>5}  {'File':<12}  "
+        f"Top missing region"
+    )
+    lines.append(
+        f"  {'-' * 5}  {'-' * 6}  {'-' * 5}  {'-' * 12}  {'-' * 41}"
+    )
     for r in worst:
         sample = ""
         if r.missing_regions:
             top = r.missing_regions[0]
             page = f"p.{top.page}: " if top.page else ""
             sample = f'"{page}{top.sample}"'
-        print(
-            f"  {r.coverage:>5.2f}  {r.drift:>5.2f}  "
+        lines.append(
+            f"  {r.coverage:>5.2f}  {r.unigram_coverage:>6.2f}  {r.drift:>5.2f}  "
             f"{r.paper_id:<12}  {sample}"
         )
 
     if skipped:
-        print(f"\nSkipped: {len(skipped)} (no source or no markdown)")
+        lines.append(f"\nSkipped: {len(skipped)} (no source or no markdown)")
     if errors:
-        print(f"\nErrors: {len(errors)}")
+        lines.append(f"\nErrors: {len(errors)}")
         for pid, msg in errors[:10]:
-            print(f"  {pid}: {msg}")
+            lines.append(f"  {pid}: {msg}")
+
+    return "\n".join(lines) + "\n"
 
 
-def _write_json(json_path: Path, results: list[ContentCheckResult]) -> None:
-    """Atomic JSON dump matching the pattern in qa.py's run_qa_report."""
+def write_content_check_json_atomic(
+    json_path: Path, results: Sequence[ContentCheckResult],
+) -> None:
+    """Atomically write per-paper content-check metrics as JSON."""
     payload = {
         "schema_version": _JSON_SCHEMA_VERSION,
         "generated_at": datetime.now(timezone.utc).isoformat(),
@@ -968,4 +1004,3 @@ def _write_json(json_path: Path, results: list[ContentCheckResult]) -> None:
         with contextlib.suppress(OSError):
             os.unlink(tmp_path)
         raise
-    print(f"\nDetailed metrics written to {json_path}")

@@ -36,6 +36,10 @@ Selected for structural diversity:
 | p2040r0 | balanced (code, lists, headings), full 5-field front matter |
 | p3714r0 | minimal paper (2 headings, 1 code block) |
 | p1112r4 | uncertain regions, lists, italic |
+| p4174r0 | TOC-strip regression (#122): short paper, no real TOC; full body (title, abstract, sections) must survive |
+| p4004r1 | TOC-strip regression (#122): small partial-loss paper; mid-body sections must survive |
+| p4100r1 | leaked heading-kind TOC (#122 pt2): empty duplicate-heading TOC block removed; one heading per section |
+| p3968r0 | promotion-dedup guard (pt3): confident page doubled by a neighbour's promotion; each section must appear exactly once |
 
 ## Refreshing HTML baselines
 
@@ -69,12 +73,13 @@ From the `tomd/` directory, after intentionally changing PDF converter output:
 python -c "
 import json
 from pathlib import Path
-from tomd.lib.pdf import convert_pdf
+from tomd.lib.pdf import run_pipeline
 src = Path('tests/fixtures/golden/sources')
 snap = Path('tests/fixtures/golden/snapshots')
 for stem in ['p0533r9', 'p0957r8', 'p1068r11', 'p3556r0',
              'p1122r3', 'p2040r0', 'p3714r0', 'p1112r4']:
-    md, prompts = convert_pdf(src / f'{stem}.pdf')
+    r = run_pipeline(src / f'{stem}.pdf')
+    md, prompts = r.md, r.prompts
     (snap / f'{stem}.md').write_text(md, encoding='utf-8', newline='\n')
     ppath = snap / f'{stem}.prompts.json'
     if prompts:

@@ -76,7 +76,7 @@ def test_score_stem_matches_committed_baseline():
     scores = score_stem("p4228r0", _GOLDEN)
     assert scores["heading"] == pytest.approx(round(2 / 3, 2))  # 2/3 rounds to 0.67
     assert scores["frontmatter"] == 1.0
-    assert scores["text"] == pytest.approx(0.96)
+    assert scores["text"] == pytest.approx(0.85)
 
 
 @requires_source

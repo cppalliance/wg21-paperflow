@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 from collections import Counter
 from dataclasses import dataclass, field
-from enum import Enum
+from enum import Enum, StrEnum
 from typing import TYPE_CHECKING
 
 from tomd.lib import DOC_NUM_PATTERN, SECTION_NUM_PATTERN
@@ -20,6 +20,15 @@ class Confidence(Enum):
     MEDIUM = "medium"
     LOW = "low"
     UNCERTAIN = "uncertain"
+
+
+class SkipReason(StrEnum):
+    """Closed set of early-exit reasons for :class:`PipelineResult`."""
+
+    EMPTY_PDF = "empty pdf"
+    SLIDE_DECK = "slide deck"
+    STANDARDS_DRAFT = "standards draft"
+    UNREADABLE = "unreadable"
 
 
 @dataclass
@@ -62,6 +71,18 @@ class Line:
         text_spans = [s for s in self.spans if s.text.strip()]
         return bool(text_spans) and all(s.bold for s in text_spans)
 
+    @property
+    def is_monospace(self) -> bool:
+        text_spans = [s for s in self.spans if s.text.strip()]
+        return bool(text_spans) and all(s.monospace for s in text_spans)
+
+    def first_content_span(self) -> "Span | None":
+        """First span carrying non-whitespace text, or None if blank."""
+        for span in self.spans:
+            if span.text.strip():
+                return span
+        return None
+
 
 @dataclass
 class Block:
@@ -86,7 +107,6 @@ class Block:
 class SectionKind(Enum):
     """The structural role of a document section."""
     TITLE = "title"
-    METADATA = "metadata"
     HEADING = "heading"
     PARAGRAPH = "paragraph"
     LIST = "list"
@@ -97,6 +117,47 @@ class SectionKind(Enum):
     WORDING = "wording"
     WORDING_ADD = "wording-add"
     WORDING_REMOVE = "wording-remove"
+    FIGURE = "figure"
+
+
+@dataclass
+class FigureNode:
+    """A node (box) in a detected diagram graph."""
+    text: str
+    bbox: tuple[float, float, float, float]
+
+
+@dataclass
+class FigureEdge:
+    """A directed edge between two nodes in a diagram graph."""
+    source_idx: int
+    target_idx: int
+    bidirectional: bool = False
+    dashed: bool = False
+    label: str = ""
+    y_position: float = 0.0
+
+
+@dataclass
+class FigureGraph:
+    """Directed graph extracted from a vector-graphic diagram."""
+    nodes: list[FigureNode] = field(default_factory=list)
+    edges: list[FigureEdge] = field(default_factory=list)
+
+    @property
+    def is_linear(self) -> bool:
+        """True when the graph forms a single chain with no branches or cycles."""
+        if not self.edges:
+            return False
+        in_count = [0] * len(self.nodes)
+        out_count = [0] * len(self.nodes)
+        for e in self.edges:
+            out_count[e.source_idx] += 1
+            in_count[e.target_idx] += 1
+            if e.bidirectional:
+                out_count[e.target_idx] += 1
+                in_count[e.source_idx] += 1
+        return all(i <= 1 and o <= 1 for i, o in zip(in_count, out_count))
 
 
 @dataclass
@@ -115,13 +176,20 @@ class Section:
     columns: list[list[list[Span]]] = field(default_factory=list)
     fence_lang: str = "cpp"
     indent_level: int = 0
-    # Set only when kind == SectionKind.IMAGE. The image extractor in
-    # images.py is independent of the dual text-extraction paths (it
-    # reads the page's resource dictionary, not the rendered glyphs),
-    # so the canonical alt-text source is image_ref.suggested_alt, not
-    # Section.text. Consumers that legitimately want the alt content
-    # must route through image_ref, not text.
+    table_kind: str | None = None
+    table_strategy: str | None = None
+    table_source: str | None = None
+    table_continuation: bool = False
+    figure_graph: FigureGraph | None = None
     image_ref: "ExtractedImage | None" = None
+
+
+@dataclass
+class FigureRegion:
+    """A detected vector-graphic figure region on a page."""
+    page_num: int
+    bbox: tuple[float, float, float, float]
+    graph: FigureGraph | None = None
 
 
 @dataclass
@@ -145,6 +213,21 @@ Y_TOLERANCE = 2.0
 REPEATING_THRESHOLD = 0.5
 
 EDGE_ITEMS_PER_PAGE = 3
+
+# A running footer band recurs at a fixed bottom-margin y across pages but its
+# text varies per page (e.g. "Scope", "Normative references 2", "§ 6.9.2.2 6").
+# The band is identified by a bare page number recurring in it. The strip is
+# bounded two ways so it never drops body content: it fires only inside small
+# edge (footer) blocks, never tall body blocks, and only on lines this short or
+# shorter (running titles are short; a wide body line that shares the band's y
+# survives the word cap regardless).
+RUNNING_FOOTER_MAX_WORDS = 8
+
+# The varying-text footer-band rule only fires in the bottom page margin
+# (y > page_height * this fraction). Restricting it to the margin keeps it from
+# misfiring on the section-heading band at the top of body pages, whose bare
+# section numbers ("1", "2", ...) also look like recurring page numbers.
+EDGE_BAND_BOTTOM_FRACTION = 0.85
 
 # Similarity threshold for dual-path comparison (word-level)
 SIMILARITY_THRESHOLD = 0.82
@@ -181,7 +264,7 @@ PAGE_NUM_RE = re.compile(
     r"|^\d+\s+of\s+\d+",
 )
 
-BULLET_CHARS = frozenset("\u2022\u2023\u25cf\u25e6\u2043\u2219\u25aa\u25ab")
+BULLET_CHARS = frozenset("\u2022\u2023\u25cf\u25e6\u2043\u2219\u25aa\u25ab\u25cb")
 
 # Zero-width invisibles that str.strip() does not remove (ZWSP, ZWNJ,
 # ZWJ, ZWNBSP/BOM). A line carrying only these counts as empty for
@@ -220,11 +303,27 @@ KNOWN_SECTIONS = frozenset({
     "impact on the standard",
     "proposed changes",
     "poll results",
+    "polls",
     "changelog",
     "appendix",
     "bibliography",
     "summary",
     "conclusion",
+    "history",
+    "related work",
+    "prior art",
+    "proposal",
+    "discussion",
+    "rationale",
+    "open questions",
+    "straw polls",
+    "thanks",
+    "alternatives considered",
+    "alternatives",
+    "comparison",
+    "examples",
+    "faq",
+    "questions",
 })
 
 TERMINAL_PUNCTUATION = frozenset(".?!:")

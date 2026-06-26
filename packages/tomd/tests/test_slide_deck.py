@@ -6,7 +6,7 @@ from unittest.mock import MagicMock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from tomd.lib.pdf import _is_slide_deck, _is_standards_draft
+from tomd.lib.pdf.pipeline import _is_slide_deck, _is_standards_draft
 
 
 def _mock_doc(pages):

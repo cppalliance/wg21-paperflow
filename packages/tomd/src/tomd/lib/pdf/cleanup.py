@@ -1,21 +1,48 @@
 """Header/footer detection and text cleanup for PDF extraction."""
 
+import fitz
 import logging
 import re
-from collections import defaultdict, Counter
+from collections import defaultdict
 from dataclasses import replace
 
 from .. import strip_format_chars, DOC_NUM_RE
 from .types import (
     Block, Line, PageEdgeItem,
     Y_TOLERANCE, REPEATING_THRESHOLD, EDGE_ITEMS_PER_PAGE,
+    RUNNING_FOOTER_MAX_WORDS, EDGE_BAND_BOTTOM_FRACTION,
     TERMINAL_PUNCTUATION,
     PAGE_NUM_RE, COMPOUND_PREFIXES,
-    compute_bbox,
 )
 from .wg21 import _LABEL_RE as _WG21_LABEL_RE
 
 _log = logging.getLogger(__name__)
+
+_EDGE_BLOCK_MAX_HEIGHT = 30.0
+_EDGE_BLOCK_TOP_MAX_Y = 60.0
+_EDGE_BLOCK_BOTTOM_MIN_Y = 700.0
+
+# A text "recurs" once it appears at the same edge y-position on at least this
+# many distinct pages. Floor for the alternating-header coverage-union branch.
+_MIN_RECUR_PAGES = 2
+# Max distinct texts an alternating running header may have (title on recto,
+# authors on verso = 2). Bounds the coverage-union branch so it cannot fire on
+# many-variant edge recurrence (slide-title sets, recurring code-line clusters).
+_MAX_HEADER_VARIANTS = 2
+
+
+def _is_edge_block(block: Block) -> bool:
+    """Whether a block is a small assembly hugging the top or bottom page edge.
+
+    Header/footer chrome sits in short blocks at the page margins; body text
+    flows in tall blocks spanning the text column. The footer-band strip and
+    the co-location strip both use this to avoid touching body content.
+    """
+    blk_height = block.bbox[3] - block.bbox[1]
+    blk_top = block.bbox[1]
+    return (blk_height < _EDGE_BLOCK_MAX_HEIGHT
+            and (blk_top < _EDGE_BLOCK_TOP_MAX_Y
+                 or blk_top > _EDGE_BLOCK_BOTTOM_MIN_Y))
 
 
 def _y_bucket(bbox: tuple[float, float, float, float]) -> float:
@@ -30,8 +57,16 @@ def get_edge_items(blocks: list[Block], page_num: int) -> list[PageEdgeItem]:
     Deduplicates by (text, rounded y-position) to avoid counting the
     same visual item twice when blocks overlap edge regions.
     """
+    _COLUMNAR_X_GAP = 50.0
+
     items = []
     for block in blocks:
+        # Skip columnar blocks: 2+ lines at widely separated x-positions
+        # are table column headers, not repeating page headers/footers.
+        if len(block.lines) >= 2:
+            x0s = [ln.bbox[0] for ln in block.lines if ln.text.strip()]
+            if x0s and max(x0s) - min(x0s) > _COLUMNAR_X_GAP:
+                continue
         for line in block.lines:
             text = line.text.strip()
             if not text:
@@ -61,17 +96,35 @@ def get_edge_items(blocks: list[Block], page_num: int) -> list[PageEdgeItem]:
 
 
 def detect_repeating(all_edge_items: list[list[PageEdgeItem]],
-                     total_pages: int) -> set[tuple[float, str]]:
+                     total_pages: int,
+                     page_height: float = 0.0) -> set[tuple[float, str]]:
     """Identify header/footer items that repeat across pages.
 
     For each page, captures the top and bottom EDGE_ITEMS_PER_PAGE items
-    by y-coordinate. Items appearing at the same y-position on at least
-    half the pages are classified as repeating.
+    by y-coordinate. The unit of repetition is the distinct PAGE: a text is
+    a running header/footer when it appears at the same y-position on at
+    least half the pages (>= threshold distinct pages). The dual MuPDF +
+    spatial extraction paths each contribute one item per page, so distinct
+    pages, not raw item counts, are what cross the threshold.
+
+    Within a gated bucket where no single text reaches threshold, the
+    coverage-union fallback handles alternating headers (title on recto,
+    authors on verso): a set of at most _MAX_HEADER_VARIANTS verbatim texts,
+    each recurring on >= _MIN_RECUR_PAGES pages, whose page union covers
+    >= threshold pages, is stripped together.
+
+    page_height (the representative page height in points) gates the
+    varying-text footer-band rule to the bottom margin; pass 0.0 to
+    disable that rule (the exact-text, page-number, and doc-number rules
+    are unaffected).
 
     Returns a set of (y_region, text_or_pattern) tuples to strip.
     """
     if total_pages < 3:
         return set()
+
+    footer_band_min_y = (page_height * EDGE_BAND_BOTTOM_FRACTION
+                         if page_height > 0 else None)
 
     threshold = total_pages * REPEATING_THRESHOLD
     y_buckets: dict[float, list[PageEdgeItem]] = defaultdict(list)
@@ -97,15 +150,54 @@ def detect_repeating(all_edge_items: list[list[PageEdgeItem]],
             _log.debug("Repeating doc number at y=%.1f", y_key)
             continue
 
-        text_counts = Counter(it.text for it in items)
-        exact_hit = False
-        for text, count in text_counts.items():
-            if count >= threshold:
+        # Running footer band: the edge y recurs across pages but the text
+        # varies per page (a running section title plus its page number, e.g.
+        # "Normative references 2" or "§ 6.9.2.2 6"). Neither the exact-text
+        # nor the all-page-number rule catches a band of mixed text, but a
+        # bare page number recurring in the band on at least half the pages
+        # is a reliable signal that the whole band is page chrome. Gate to the
+        # bottom margin so the section-heading band at the top of body pages,
+        # whose bare section numbers also match PAGE_NUM_RE, is never stripped.
+        if footer_band_min_y is not None and y_key > footer_band_min_y:
+            page_num_pages = {
+                it.page_num for it in items if PAGE_NUM_RE.match(it.text)
+            }
+            if len(page_num_pages) >= threshold:
+                repeating.add((y_key, "__EDGE_BAND__"))
+                _log.debug("Repeating footer band at y=%.1f", y_key)
+                continue
+
+        # A running header/footer recurs across distinct PAGES. Count distinct
+        # pages per text: the dual MuPDF+spatial paths each contribute one item
+        # per page, so counting raw items double-counts (a single-page line
+        # reaches the old count threshold and is wrongly stripped).
+        text_pages: dict[str, set[int]] = defaultdict(set)
+        for it in items:
+            text_pages[it.text].add(it.page_num)
+        hit = False
+        for text, pages in text_pages.items():
+            if len(pages) >= threshold:
                 repeating.add((y_key, text))
                 _log.debug("Repeating exact: y=%.1f text=%r", y_key, text)
-                exact_hit = True
-        if exact_hit:
-            continue
+                hit = True
+        if not hit:
+            # Alternating header: no single text reaches threshold, but a small
+            # set of verbatim-repeating texts (each on >= _MIN_RECUR_PAGES
+            # pages) together covers >= threshold pages (title on recto, authors
+            # on verso). The variant cap keeps this from firing on many-variant
+            # recurrence (slide-title sets, code-line clusters); a real
+            # alternating header has at most _MAX_HEADER_VARIANTS distinct texts.
+            recurring = {t: pg for t, pg in text_pages.items()
+                         if len(pg) >= _MIN_RECUR_PAGES}
+            if 0 < len(recurring) <= _MAX_HEADER_VARIANTS:
+                covered: set[int] = set()
+                for pg in recurring.values():
+                    covered |= pg
+                if len(covered) >= threshold:
+                    for text in recurring:
+                        repeating.add((y_key, text))
+                        _log.debug("Repeating union: y=%.1f text=%r",
+                                   y_key, text)
 
     return repeating
 
@@ -142,18 +234,32 @@ def strip_repeating(blocks: list[Block], repeating: set[tuple[float, str]],
                 + patterns_by_y.get(y_key, [])
                 + patterns_by_y.get(y_key + Y_TOLERANCE, []))
 
-    def _matches(text: str, rpattern: str) -> bool:
+    def _matches(text: str, rpattern: str, whole_line: bool = False,
+                 is_edge_block: bool = True) -> bool:
         if rpattern == text:
             return True
         if rpattern == "__PAGE_NUM__" and PAGE_NUM_RE.match(text):
             return True
         if rpattern == "__DOC_NUM__" and DOC_NUM_RE.search(text):
             return True
+        # A footer band strips whole short lines (never individual spans:
+        # span-level matching would shred a long body line that happens to
+        # share the band's y) and only inside small edge blocks. The band is a
+        # varying-text heuristic, so without the edge-block gate a genuine
+        # short body line that lands in the band's y-bucket would be dropped.
+        if (rpattern == "__EDGE_BAND__" and whole_line and is_edge_block
+                and len(text.split()) <= RUNNING_FOOTER_MAX_WORDS):
+            return True
         return False
 
     result = []
     for block in blocks:
+        block_is_edge = _is_edge_block(block)
         kept_lines = []
+        # Track y-buckets of stripped lines so co-located sibling lines
+        # (variable header text like "3 Motivation" next to repeating
+        # "P3948R1") are also stripped.
+        stripped_y_buckets: set[float] = set()
         for line in block.lines:
             text = line.text.strip()
             if not text:
@@ -165,10 +271,12 @@ def strip_repeating(blocks: list[Block], repeating: set[tuple[float, str]],
                 kept_lines.append(line)
                 continue
 
-            if any(_matches(text, rp) for rp in line_patterns):
+            if any(_matches(text, rp, whole_line=True, is_edge_block=block_is_edge)
+                   for rp in line_patterns):
                 if block.page_num == 0 and line.bbox[1] < _page0_meta_y:
                     kept_lines.append(line)
                     continue
+                stripped_y_buckets.add(_y_bucket(line.bbox))
                 continue
 
             kept_spans = []
@@ -185,10 +293,26 @@ def strip_repeating(blocks: list[Block], repeating: set[tuple[float, str]],
                 kept_spans.append(span)
 
             if not any(sp.text.strip() for sp in kept_spans):
+                stripped_y_buckets.add(_y_bucket(line.bbox))
                 continue
 
             kept_lines.append(
                 replace(line, spans=kept_spans) if stripped_any else line)
+
+        # Second pass: strip lines co-located with stripped header lines.
+        # Only applies to small blocks at page edges (true header/footer
+        # assemblies). Body blocks in the middle of the page are never
+        # affected, even if they share a y-bucket with a stripped line.
+        # A long line is body, never header/footer chrome (the same
+        # word-count test the __EDGE_BAND__ rule uses), so it survives the
+        # co-location strip even when it shares a stripped y-bucket.
+        if stripped_y_buckets and kept_lines:
+            if block_is_edge:
+                kept_lines = [
+                    ln for ln in kept_lines
+                    if _y_bucket(ln.bbox) not in stripped_y_buckets
+                    or len(ln.text.split()) > RUNNING_FOOTER_MAX_WORDS
+                ]
 
         if kept_lines:
             result.append(replace(block, lines=kept_lines))
@@ -200,25 +324,39 @@ def _join_cross_page(blocks: list[Block]) -> list[Block]:
 
     When the last block on page N ends without terminal punctuation
     and the first block on page N+1 starts with a lowercase letter,
-    merge them into one block.
+    merge them into one block.  At most ONE block per page boundary
+    is merged; further blocks from the same source page are kept
+    separate so that ``compare_extractions`` (which groups by
+    ``page_num``) still sees them on their original page.
     """
     if len(blocks) < 2:
         return blocks
 
     result = [replace(blocks[0], lines=list(blocks[0].lines))]
+    merged_boundary: int | None = None
 
     for block in blocks[1:]:
         prev = result[-1]
         prev_text = prev.text.rstrip()
         cur_text = block.text.lstrip()
 
-        if (prev.page_num != block.page_num
+        cross_page = prev.page_num != block.page_num
+        if cross_page and block.page_num != merged_boundary:
+            merged_boundary = None
+
+        if (cross_page
+                and merged_boundary is None
                 and prev_text
                 and cur_text
+                and not PAGE_NUM_RE.match(prev_text)
                 and prev_text[-1] not in TERMINAL_PUNCTUATION
                 and cur_text[0].islower()):
             prev.lines.extend(block.lines)
-            prev.bbox = compute_bbox([ln.bbox for ln in prev.lines])
+            # Keep the original page's bbox: page coordinates are
+            # independent per page, so mixing y-values from page N+1
+            # into a page N bbox produces a nonsensical y_mid that
+            # breaks _column_aware_sort ordering.
+            merged_boundary = block.page_num
         else:
             result.append(replace(block, lines=list(block.lines)))
 
@@ -283,15 +421,26 @@ def find_hidden_regions(page, body_fonts: set[str] | None = None,
     return hidden_bboxes
 
 
-def strip_hidden_blocks(blocks: list[Block],
-                        hidden_bboxes: set[tuple[float, float, float, float]]) -> list[Block]:
-    """Remove blocks whose text is entirely within hidden regions."""
-    if not hidden_bboxes:
+def strip_hidden_blocks(
+    blocks: list[Block],
+    hidden_by_page: dict[int, set[tuple[float, float, float, float]]],
+) -> list[Block]:
+    """Remove blocks whose text is entirely within hidden regions.
+
+    *hidden_by_page* maps page numbers to sets of bboxes so that
+    hidden regions on one page cannot accidentally match visible
+    text on a different page that happens to share the same
+    coordinates.
+    """
+    if not hidden_by_page:
         return blocks
 
-    import fitz
     result = []
     for block in blocks:
+        page_hidden = hidden_by_page.get(block.page_num)
+        if not page_hidden:
+            result.append(block)
+            continue
         has_visible = False
         for line in block.lines:
             for span in line.spans:
@@ -300,7 +449,7 @@ def strip_hidden_blocks(blocks: list[Block],
                 span_rect = fitz.Rect(span.bbox)
                 is_hidden = any(
                     fitz.Rect(hb).intersects(span_rect)
-                    for hb in hidden_bboxes
+                    for hb in page_hidden
                 )
                 if not is_hidden:
                     has_visible = True

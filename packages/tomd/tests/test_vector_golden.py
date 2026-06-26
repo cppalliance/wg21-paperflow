@@ -53,6 +53,8 @@ _NOISE_PDF = _FIXTURES / "synth_noise_no_diagram.pdf"
 _NOISE_GOLDEN = _FIXTURES / "synth_noise_no_diagram.golden.md"
 _TABLE_PDF = _FIXTURES / "synth_table_with_cells.pdf"
 _TABLE_GOLDEN = _FIXTURES / "synth_table_with_cells.golden.md"
+_SUBFIG_PDF = _FIXTURES / "synth_sub_figure_merge.pdf"
+_SUBFIG_GOLDEN = _FIXTURES / "synth_sub_figure_merge.golden.md"
 
 # Recorded aHash of the diagram fixture's rasterised PNG. Stable
 # across pymupdf 1.27.x; refresh if a perceptual delta sneaks past
@@ -104,10 +106,16 @@ def _run_with_vector_extract(pdf: Path):
     """Run the full pipeline with the page-scan floor lifted so our small
     synthetic fixtures pass ``_MIN_PAGE_DRAWING_ITEMS`` even though they
     have only dozens of drawing items rather than the 250+ that a real
-    WG21 page produces. The threshold itself is unit-tested separately."""
+    WG21 page produces.
+
+    Also lifts ``_LOW_OVERLAP_ADMIT_MIN_ITEMS`` so the minimal synthetic
+    diagrams (intentionally < 30 items) admit via the low-overlap path
+    without needing items count typical of real WG21 figures. Both
+    thresholds are unit-tested separately."""
     from unittest.mock import patch
 
-    with patch.object(vector_images, "_MIN_PAGE_DRAWING_ITEMS", 1):
+    with patch.object(vector_images, "_MIN_PAGE_DRAWING_ITEMS", 1), \
+         patch.object(vector_images, "_LOW_OVERLAP_ADMIT_MIN_ITEMS", 1):
         return run_pipeline(pdf, extract_vector=True)
 
 
@@ -292,6 +300,74 @@ class TestSynthTableWithCells:
         assert "rejected=4" in result.md
 
 
+# Recorded aHash of the sub-figure-merge fixture's rasterised PNG (230x470 px
+# at 150 DPI for the 110x225pt merged cluster). Stable across pymupdf 1.27.x.
+_SUBFIG_AHASH_BASELINE = 0x64e67cffc03ce67c
+_SUBFIG_BBOX_PT = (110, 225)
+
+
+class TestSynthSubFigureMerge:
+    """End-to-end coverage for _merge_sub_figure_clusters (two vertically-stacked
+    panels merged when sub-caption text sits in the gap) and LIST-kind sub-caption
+    italic re-emission.
+
+    Asserts:
+      - exactly one merged vector image spanning both panels
+      - alt-text correctly attributed from the overall caption
+      - sub-captions captured and re-emitted as italic paragraphs
+      - golden markdown matches byte-for-byte
+      - rasterised PNG has stable perceptual hash
+    """
+
+    def test_markdown_matches_golden(self):
+        result = _run_with_vector_extract(_SUBFIG_PDF)
+        assert result.md == _SUBFIG_GOLDEN.read_text(), (
+            "synth_sub_figure_merge.golden.md is the source of truth. "
+            "If the PDF or pipeline behaviour deliberately changed, "
+            "rebuild the golden via the builder script and re-record."
+        )
+
+    def test_exactly_one_vector_image_extracted(self):
+        result = _run_with_vector_extract(_SUBFIG_PDF)
+        vector_images_ = [im for im in result.images if im.source == "vector"]
+        assert len(vector_images_) == 1
+
+    def test_image_carries_figure_caption_as_alt(self):
+        result = _run_with_vector_extract(_SUBFIG_PDF)
+        assert result.images[0].suggested_alt == "Figure 1: Multi-panel sub-figures"
+
+    def test_sub_captions_captured(self):
+        result = _run_with_vector_extract(_SUBFIG_PDF)
+        im = result.images[0]
+        assert im.sub_captions == (
+            ("a", "(a) Upper sub-figure"),
+            ("b", "(b) Lower sub-figure"),
+        ), f"sub_captions={im.sub_captions!r}"
+
+    def test_sub_captions_italic_in_markdown(self):
+        result = _run_with_vector_extract(_SUBFIG_PDF)
+        assert "*(a) Upper sub-figure*" in result.md
+        assert "*(b) Lower sub-figure*" in result.md
+
+    def test_png_dimensions_match_expected(self):
+        result = _run_with_vector_extract(_SUBFIG_PDF)
+        png = result.images[0].bytes
+        img = Image.open(io.BytesIO(png))
+        expected_w = int(round(_SUBFIG_BBOX_PT[0] * _RASTERISE_DPI / 72))
+        expected_h = int(round(_SUBFIG_BBOX_PT[1] * _RASTERISE_DPI / 72))
+        assert abs(img.width - expected_w) <= _PIXEL_TOLERANCE
+        assert abs(img.height - expected_h) <= _PIXEL_TOLERANCE
+
+    def test_perceptual_ahash_within_hamming_4_of_baseline(self):
+        result = _run_with_vector_extract(_SUBFIG_PDF)
+        actual = _ahash_8x8(result.images[0].bytes)
+        dist = _hamming(actual, _SUBFIG_AHASH_BASELINE)
+        assert dist <= 4, (
+            f"aHash Hamming distance {dist} exceeds tolerance 4. "
+            f"actual=0x{actual:016x} baseline=0x{_SUBFIG_AHASH_BASELINE:016x}"
+        )
+
+
 class TestVectorExtractionIsOptIn:
     """v2.0 default: ``extract_vector=False`` skips the vector path
     entirely. paper.md matches the raster-only path byte-for-byte and
@@ -357,6 +433,12 @@ class TestVectorCorpusAcceptanceCsvShape:
         pids = {row["pid"] for row in rows}
         assert "SYNTH_VECTOR_ONE_DIAGRAM" in pids
         assert "SYNTH_NOISE_NO_DIAGRAM" in pids
+        assert "SYNTH_SUB_FIGURE_MERGE" in pids
+
+    def test_synth_sub_figure_merge_expects_one_image(self, rows):
+        row = next(r for r in rows if r["pid"] == "SYNTH_SUB_FIGURE_MERGE")
+        assert int(row["expected_vector_count"]) == 1
+        assert int(row["allowed_min"]) <= 1 <= int(row["allowed_max"])
 
     def test_synth_diagram_expects_one_image(self, rows):
         row = next(r for r in rows if r["pid"] == "SYNTH_VECTOR_ONE_DIAGRAM")

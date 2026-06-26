@@ -9,7 +9,8 @@
 
 from __future__ import annotations
 
+from cli._process import run_process_command
+
 
 def command(args, backend):
-    from cli._process import run_process_command
     return run_process_command(args, backend, through=5)

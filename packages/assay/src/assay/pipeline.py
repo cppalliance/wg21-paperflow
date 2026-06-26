@@ -73,9 +73,12 @@ from assay.references import extract_references, extract_urls, verify_references
 from assay.blanking import blank_paper
 from assay.chunker import chunk_paper
 from assay.rag import (
-    build_cited_paper_index, build_single_paper_index,
+    build_cited_paper_index,
+    build_single_paper_index,
     query_index,
-    query_for_research, query_for_challenge, IndexStats,
+    query_for_research,
+    query_for_challenge,
+    IndexStats,
 )
 from assay.standard import StandardClient, from_service_config
 from assay.triage import should_analyze
@@ -136,28 +139,6 @@ def _load_cpp_mcp_client() -> StandardClient:
     return from_service_config(base_url=base_url, api_key=api_key)
 
 
-# -- Step name constants (must match assay.md headers) -----------------------
-
-_STEP_0_RECEIVE = "0. Receive"
-_STEP_1_REFERENCES = "1. References"
-_STEP_2_INDEX = "2. Index"
-_STEP_3_SURVEY = "3. Survey"
-_STEP_4_EXTRACT = "4. Extract"
-_STEP_5_DECIDE = "5. Decide"
-_STEP_6_CLASSIFY = "6. Classify"
-_STEP_7_COLLECT = "7. Collect"
-_STEP_8_DERIVE = "8. Derive"
-_STEP_9_VERIFY = "9. Verify"
-_STEP_10_RESEARCH = "10. Research"
-_STEP_11_PROBE = "11. Probe"
-_STEP_12_ANALYZE = "12. Analyze"
-_STEP_13_RATIONALE = "13. Rationale"
-_STEP_14_CHALLENGE = "14. Challenge"
-_STEP_15_COUPLE = "15. Couple"
-_STEP_16_SYNTHESIZE = "16. Synthesize"
-_STEP_17_REPORT = "17. Report"
-
-
 # -- Prompt helpers ----------------------------------------------------------
 
 
@@ -171,11 +152,23 @@ def _prompt_for(ctx: StepContext, step_name: str) -> str:
     return ctx.prompt.step_section(step_name).strip()
 
 
+def _step_slug(step_name: str) -> str:
+    """Short name from an assay.md header, e.g. ``'7. Collect'`` -> ``'collect'``."""
+    slug = step_name.lower()
+    if "." in slug:
+        slug = slug.split(".", 1)[1]
+    return slug.strip()
+
+
 # -- Tool factories ----------------------------------------------------------
 
 
 def _make_explore_paper_tool(
-    index, paper_id: str, paper_lines: list[str], embedder, ctx: StepContext,
+    index,
+    paper_id: str,
+    paper_lines: list[str],
+    embedder,
+    ctx: StepContext,
 ):
     """Create an explore tool scoped to one paper's RAG index.
 
@@ -183,6 +176,7 @@ def _make_explore_paper_tool(
     Each call runs query_index, slices the original lines for the
     top hits, formats with line numbers, and wraps via inject_untrusted.
     """
+
     def _explore(query: str) -> str:
         hits = query_index(index, query, embedder, top_k=5, max_per_paper=5)
         if not hits:
@@ -205,9 +199,11 @@ def _make_explore_paper_tool(
 # -- User message builders ---------------------------------------------------
 
 
-
 def _build_extract_user_message(
-    pid: str, chunk: ChunkEntry, paper_lines: list[str], ctx: StepContext,
+    pid: str,
+    chunk: ChunkEntry,
+    paper_lines: list[str],
+    ctx: StepContext,
 ) -> str:
     numbered = format_numbered_lines(paper_lines, chunk.start_line, chunk.end_line)
     parts = [
@@ -216,7 +212,6 @@ def _build_extract_user_message(
         f"{ctx.inject_untrusted(numbered)}\n",
     ]
     return "".join(parts)
-
 
 
 def _build_derive_user_message(state: PipelineState) -> str:
@@ -228,14 +223,16 @@ def _build_derive_user_message(state: PipelineState) -> str:
     parts = [f"# Paper: {state.paper_id}\n"]
     parts.append("## Claims\n")
     for c in claims:
-        parts.append(f"- [{c.id}] \"{c.quote}\" (line {c.line})\n")
+        parts.append(f'- [{c.id}] "{c.quote}" (line {c.line})\n')
     parts.append("\n## Evidence\n")
     for e in evidence:
-        parts.append(f"- [{e.id}] (tier: {e.quality_tier or ''}) \"{e.quote}\" (line {e.line})\n")
+        parts.append(
+            f"- [{e.id}] (tier: {e.quality_tier or ''}) \"{e.quote}\" (line {e.line})\n"
+        )
     if asks:
         parts.append("\n## Asks\n")
         for a in asks:
-            parts.append(f"- [{a.id}] \"{a.quote}\" (line {a.line})\n")
+            parts.append(f'- [{a.id}] "{a.quote}" (line {a.line})\n')
     return "".join(parts)
 
 
@@ -243,7 +240,7 @@ def _build_research_user_message(lens: str, state: PipelineState) -> str:
     derive = state.derive
     return (
         f"# Research for lens: {lens}\n\n"
-        f"Paper: {state.paper_id.upper()} - \"{state.paper_title}\"\n"
+        f'Paper: {state.paper_id.upper()} - "{state.paper_title}"\n'
         f"Authors: {', '.join(state.authors)}\n"
         f"Thesis: {derive.central_claim if derive else ''}\n"
         f"Scope: {derive.scope_boundary if derive else ''}\n"
@@ -251,7 +248,10 @@ def _build_research_user_message(lens: str, state: PipelineState) -> str:
 
 
 def _build_analyze_user_message(
-    pid: str, chunk: ChunkEntry, paper_lines: list[str], state: PipelineState,
+    pid: str,
+    chunk: ChunkEntry,
+    paper_lines: list[str],
+    state: PipelineState,
     ctx: StepContext,
 ) -> str:
     derive = state.derive
@@ -278,11 +278,13 @@ def _build_analyze_user_message(
         f"Ask calibration: {derive.ask_calibration if derive else ''}\n\n",
         "## Load-bearing claims\n\n",
     ]
-    for lb in (derive.load_bearing_claims if derive else []):
-        parts.append(f"- [{lb.id}] \"{lb.quote}\"\n")
+    for lb in derive.load_bearing_claims if derive else []:
+        parts.append(f'- [{lb.id}] "{lb.quote}"\n')
 
     if own_gaps:
-        parts.append("\n## Gaps already raised on THIS chunk (use as inputs; do not duplicate)\n\n")
+        parts.append(
+            "\n## Gaps already raised on THIS chunk (use as inputs; do not duplicate)\n\n"
+        )
         for b in own_gaps:
             parts.append(f"- [{b.id}] [{b.severity}] {b.gap} (line {b.line})\n")
     if other_gaps:
@@ -295,10 +297,12 @@ def _build_analyze_user_message(
             e for e in state.items.evidence if getattr(e, "source_pid", "")
         ][:10]
         if closed_evidence:
-            parts.append("\n## Companion paper evidence (already resolved by Verify)\n\n")
+            parts.append(
+                "\n## Companion paper evidence (already resolved by Verify)\n\n"
+            )
             for e in closed_evidence:
                 parts.append(
-                    f"- [{e.id}] ({e.source_pid}) \"{e.quote}\" (line {e.line})\n"
+                    f'- [{e.id}] ({e.source_pid}) "{e.quote}" (line {e.line})\n'
                 )
 
     if state.verify and state.verify.contradictions:
@@ -306,7 +310,7 @@ def _build_analyze_user_message(
         for c in state.verify.contradictions:
             suffix = f" (claim [{c.claim_id}])" if c.claim_id else ""
             parts.append(
-                f"- {c.source_pid} line {c.line}: \"{c.quote}\" refutes: {c.refutes}{suffix}\n"
+                f'- {c.source_pid} line {c.line}: "{c.quote}" refutes: {c.refutes}{suffix}\n'
             )
 
     if state.research:
@@ -317,7 +321,9 @@ def _build_analyze_user_message(
                 for rf in r.findings[:3]:
                     parts.append(f"- {rf.finding} (source: {rf.source})\n")
 
-    parts.append(f"\n## Chunk: {chunk.heading} (lines {chunk.start_line}-{chunk.end_line})\n\n")
+    parts.append(
+        f"\n## Chunk: {chunk.heading} (lines {chunk.start_line}-{chunk.end_line})\n\n"
+    )
     parts.append(f"{ctx.inject_untrusted(numbered)}\n")
 
     return "".join(parts)
@@ -334,7 +340,7 @@ def _build_rationale_user_message(state: PipelineState) -> str:
     parts.append(f"Ask calibration: {derive.ask_calibration if derive else ''}\n\n")
     parts.append(f"## Claims ({len(claims)})\n\n")
     for c in claims[:30]:
-        parts.append(f"- [{c.id}] \"{c.quote}\"\n")
+        parts.append(f'- [{c.id}] "{c.quote}"\n')
     parts.append(f"\n## Evidence ({len(evidence)})\n\n")
     for e in evidence[:30]:
         parts.append(f"- [{e.id}] ({e.quality_tier or ''}) \"{e.quote}\"\n")
@@ -352,7 +358,7 @@ def _build_cross_exam_user_message(
     paper_lines = state.paper_md.splitlines()
 
     chunk_by_line: dict[int, ChunkEntry] = {}
-    for ch in (state.chunk_map or []):
+    for ch in state.chunk_map or []:
         for ln in range(ch.start_line, ch.end_line + 1):
             chunk_by_line[ln] = ch
 
@@ -365,27 +371,29 @@ def _build_cross_exam_user_message(
     if concessions:
         parts.append("## Concessions\n\n")
         for c in concessions:
-            parts.append(f"- [{c.id}] \"{c.quote}\" (line {c.line})\n")
+            parts.append(f'- [{c.id}] "{c.quote}" (line {c.line})\n')
         parts.append("\n")
 
     if scope_items:
         parts.append("## Scope statements (function as concessions)\n\n")
         for s in scope_items:
-            parts.append(f"- \"{s.quote}\" (line {s.line})\n")
+            parts.append(f'- "{s.quote}" (line {s.line})\n')
         parts.append("\n")
 
     if state.verify and state.verify.closes:
         parts.append("## Already resolved by Verify (do not re-raise)\n\n")
         for r in state.verify.closes:
             parts.append(
-                f"- gap [{r.gap_id}]: \"{r.evidence_quote}\" (line {r.evidence_line})\n"
+                f'- gap [{r.gap_id}]: "{r.evidence_quote}" (line {r.evidence_line})\n'
             )
         parts.append("\n")
     if state.verify and state.verify.contradictions:
-        parts.append("## Companion-paper contradictions (Resolution may rely on these)\n\n")
+        parts.append(
+            "## Companion-paper contradictions (Resolution may rely on these)\n\n"
+        )
         for c in state.verify.contradictions:
             parts.append(
-                f"- {c.source_pid} line {c.line}: \"{c.quote}\" refutes: {c.refutes}\n"
+                f'- {c.source_pid} line {c.line}: "{c.quote}" refutes: {c.refutes}\n'
             )
         parts.append("\n")
 
@@ -395,7 +403,7 @@ def _build_cross_exam_user_message(
         parts.append(f"**Severity:** {f.severity}\n")
         parts.append(f"**Lens:** {f.lens}\n")
         if f.quote:
-            parts.append(f"**Quote:** \"{f.quote}\" (line {f.line})\n")
+            parts.append(f'**Quote:** "{f.quote}" (line {f.line})\n')
         parts.append(f"**Explanation:** {f.explanation}\n")
         if f.damage:
             parts.append(f"**Damage:** {f.damage}\n")
@@ -431,12 +439,15 @@ def _build_couple_user_message(state: PipelineState) -> str:
     for lens in sorted(by_lens.keys()):
         parts.append(f"## {lens}\n\n")
         for f in by_lens[lens]:
-            parts.append(f"- [{f.id}] **{f.title}** ({f.severity}): {f.explanation[:200]}\n")
+            parts.append(
+                f"- [{f.id}] **{f.title}** ({f.severity}): {f.explanation[:200]}\n"
+            )
         parts.append("\n")
     return "".join(parts)
 
 
 # -- Custom hooks ------------------------------------------------------------
+
 
 # Step 0
 async def _custom_receive(state: PipelineState, ctx: StepContext, spec) -> None:
@@ -457,6 +468,7 @@ async def _custom_receive(state: PipelineState, ctx: StepContext, spec) -> None:
     state.authors = meta.authors or []
     state.intent = meta.intent or ""
 
+
 # Step 1
 async def _custom_references(state: PipelineState, ctx: StepContext, spec) -> None:
     """Step 1: mechanical reference extraction."""
@@ -465,10 +477,12 @@ async def _custom_references(state: PipelineState, ctx: StepContext, spec) -> No
     state.ref_pids = refs
     state.ref_urls = extract_urls(state.paper_md)
 
+
 # Step2
 async def _custom_index(state: PipelineState, ctx: StepContext, spec) -> None:
     """Step 2: build ephemeral RAG index over cited papers."""
     import time
+
     if not state.ref_pids:
         return
     if ctx.embedder is None:
@@ -489,10 +503,15 @@ async def _custom_index(state: PipelineState, ctx: StepContext, spec) -> None:
             total_chunks=len(idx.chunks),
             embedding_dim=idx.embeddings.shape[1],
             embed_time_ms=elapsed_ms,
-            per_paper=[(pid, next(c.relationship for c in idx.chunks if c.paper_id == pid), n)
-                       for pid, n in by_paper.most_common()],
-            skipped=[r.paper_id for r in state.ref_pids
-                     if not r.in_paperstore or r.paper_id.upper() == state.paper_id.upper()],
+            per_paper=[
+                (pid, next(c.relationship for c in idx.chunks if c.paper_id == pid), n)
+                for pid, n in by_paper.most_common()
+            ],
+            skipped=[
+                r.paper_id
+                for r in state.ref_pids
+                if not r.in_paperstore or r.paper_id.upper() == state.paper_id.upper()
+            ],
         )
 
 
@@ -508,8 +527,13 @@ async def _custom_survey(state: PipelineState, ctx: StepContext, spec) -> None:
         max_chars=tokens_to_chars(chunk_tokens, agent=agent),
     )
     state.chunk_map = [
-        ChunkEntry(index=i, heading=s.heading, start_line=s.start_line,
-                   end_line=s.end_line, char_count=s.char_count)
+        ChunkEntry(
+            index=i,
+            heading=s.heading,
+            start_line=s.start_line,
+            end_line=s.end_line,
+            char_count=s.char_count,
+        )
         for i, s in enumerate(sections)
     ]
 
@@ -550,13 +574,16 @@ async def _custom_extract(state: PipelineState, ctx: StepContext, spec) -> None:
     thinking = spec.step.thinking_budget
     paper_lines = state.paper_md.splitlines()
 
-    system_prompt = _prompt_for(ctx, _STEP_4_EXTRACT)
+    system_prompt = _prompt_for(ctx, spec.step.name)
     chunks = state.chunk_map or []
 
     async def _extract_one(ci: int, chunk: ChunkEntry):
         local_log: list[str] | None = [] if ctx.debug else None
         user_msg = _build_extract_user_message(
-            state.paper_id, chunk, paper_lines, ctx,
+            state.paper_id,
+            chunk,
+            paper_lines,
+            ctx,
         )
         result = await agent.run(
             system_prompt=system_prompt,
@@ -602,7 +629,7 @@ async def _custom_decide(state: PipelineState, ctx: StepContext, spec) -> None:
     agent = ctx.agents[spec.step.model]
     max_output = spec.step.max_output_tokens or agent.max_tokens
     thinking = spec.step.thinking_budget
-    system_prompt = _prompt_for(ctx, _STEP_5_DECIDE)
+    system_prompt = _prompt_for(ctx, spec.step.name)
     chunks = state.chunk_map or []
     paper_lines = state.paper_md.splitlines()
 
@@ -618,8 +645,7 @@ async def _custom_decide(state: PipelineState, ctx: StepContext, spec) -> None:
         numbered = format_numbered_lines(paper_lines, chunk.start_line, chunk.end_line)
         claims = ext_by_chunk.get(chunk.index, [])
         claims_block = "\n".join(
-            f"- [{i}] (line {c.line}) {c.quote}"
-            for i, c in enumerate(claims)
+            f"- [{i}] (line {c.line}) {c.quote}" for i, c in enumerate(claims)
         )
         user_msg = (
             f"# Paper: {state.paper_id}\n\n"
@@ -656,7 +682,7 @@ async def _custom_decide(state: PipelineState, ctx: StepContext, spec) -> None:
             if local_log:
                 ctx.debug_log.extend(local_log)
 
-    await _cross_chunk_decide(state, ctx, agent, max_output, thinking)
+    await _cross_chunk_decide(state, ctx, agent, max_output, thinking, spec.step.name)
 
 
 async def _cross_chunk_decide(
@@ -665,6 +691,7 @@ async def _cross_chunk_decide(
     agent: AgentBackend,
     max_output: int,
     thinking: int | None,
+    step_name: str,
 ) -> None:
     """Cross-chunk Decide follow-up: re-judge per-chunk-unsupported claims.
 
@@ -680,7 +707,7 @@ async def _cross_chunk_decide(
         return
 
     section_by_line: dict[int, str] = {}
-    for ch in (state.chunk_map or []):
+    for ch in state.chunk_map or []:
         for ln in range(ch.start_line, ch.end_line + 1):
             section_by_line[ln] = ch.heading
 
@@ -726,7 +753,7 @@ async def _cross_chunk_decide(
 
     try:
         result = await agent.run(
-            system_prompt=_prompt_for(ctx, _STEP_5_DECIDE),
+            system_prompt=_prompt_for(ctx, step_name),
             user_message=user_msg,
             output_type=CrossChunkDecideOutput,
             max_tokens=max_output,
@@ -745,11 +772,13 @@ async def _cross_chunk_decide(
     if missing or hallucinated:
         logger.warning(
             "cross-chunk Decide reconciliation: %d missing, %d hallucinated",
-            len(missing), len(hallucinated),
+            len(missing),
+            len(hallucinated),
         )
 
     flips = {
-        d.claim_id: d for d in result.decisions
+        d.claim_id: d
+        for d in result.decisions
         if d.supported and d.claim_id in input_ids
     }
     if not flips:
@@ -762,12 +791,14 @@ async def _cross_chunk_decide(
             gid = state.claim_global_id_map.get((dec.chunk_index, d.claim_id))
             if gid in flips and not d.supported:
                 cc = flips[gid]
-                d = d.model_copy(update={
-                    "supported": True,
-                    "reason": (
-                        f"cross-chunk via lines {cc.supporting_evidence_lines}: {cc.reason}"
-                    ),
-                })
+                d = d.model_copy(
+                    update={
+                        "supported": True,
+                        "reason": (
+                            f"cross-chunk via lines {cc.supporting_evidence_lines}: {cc.reason}"
+                        ),
+                    }
+                )
             new_decs.append(d)
         new_decisions.append(dec.model_copy(update={"decisions": new_decs}))
     state.raw_decisions = new_decisions
@@ -800,11 +831,13 @@ async def _custom_classify(state: PipelineState, ctx: StepContext, spec) -> None
         for d in dec_output.decisions:
             if not d.supported and 0 <= d.claim_id < len(chunk_claims):
                 c = chunk_claims[d.claim_id]
-                unsupported_by_chunk.setdefault(dec_output.chunk_index, []).append({
-                    "quote": c.quote,
-                    "line": c.line,
-                    "reason": d.reason,
-                })
+                unsupported_by_chunk.setdefault(dec_output.chunk_index, []).append(
+                    {
+                        "quote": c.quote,
+                        "line": c.line,
+                        "reason": d.reason,
+                    }
+                )
 
     targets = [
         (ci, items_in)
@@ -819,7 +852,7 @@ async def _custom_classify(state: PipelineState, ctx: StepContext, spec) -> None
     agent = ctx.agents[spec.step.model]
     max_output = spec.step.max_output_tokens or agent.max_tokens
     thinking = spec.step.thinking_budget
-    system_prompt = _prompt_for(ctx, _STEP_6_CLASSIFY)
+    system_prompt = _prompt_for(ctx, spec.step.name)
     paper_lines = state.paper_md.splitlines()
 
     async def _classify_one(ci: int, items_in: list[dict]):
@@ -827,8 +860,7 @@ async def _custom_classify(state: PipelineState, ctx: StepContext, spec) -> None
         chunk = chunk_by_index[ci]
         numbered = format_numbered_lines(paper_lines, chunk.start_line, chunk.end_line)
         claims_block = "".join(
-            f"- (line {u['line']}) \"{u['quote']}\" - {u['reason']}\n"
-            for u in items_in
+            f"- (line {u['line']}) \"{u['quote']}\" - {u['reason']}\n" for u in items_in
         )
         user_msg = (
             f"# Paper: {state.paper_id}\n\n"
@@ -890,7 +922,8 @@ async def _custom_classify(state: PipelineState, ctx: StepContext, spec) -> None
 async def _custom_collect(state: PipelineState, ctx: StepContext, spec) -> None:
     """Step 7: aggregate and dedup (pure Python)."""
     items, gaps_by_lens, asks, active, inactive, next_id = collect(
-        state.raw_extractions or [], state.raw_scans or [],
+        state.raw_extractions or [],
+        state.raw_scans or [],
         start_id=state._next_id,
     )
     state._next_id = next_id
@@ -909,7 +942,7 @@ async def _custom_derive(state: PipelineState, ctx: StepContext, spec) -> None:
 
     user_msg = _build_derive_user_message(state)
     result = await agent.run(
-        system_prompt=_prompt_for(ctx, _STEP_8_DERIVE),
+        system_prompt=_prompt_for(ctx, spec.step.name),
         user_message=user_msg,
         output_type=DeriveOutput,
         max_tokens=max_output,
@@ -961,7 +994,11 @@ async def _verify_against_one_companion(
         return None
     paper_lines = md.splitlines()
     tool_fn = _make_explore_paper_tool(
-        index, companion.paper_id, paper_lines, ctx.embedder, ctx,
+        index,
+        companion.paper_id,
+        paper_lines,
+        ctx.embedder,
+        ctx,
     )
 
     gap_lines = [
@@ -1015,7 +1052,9 @@ def _merge_verify(a: VerifyOutput, b: VerifyOutput) -> VerifyOutput:
             seen_close.add(key)
 
     merged_contra = list(a.contradictions)
-    seen_contra = {(c.source_pid, c.line, c.quote.strip().lower()) for c in merged_contra}
+    seen_contra = {
+        (c.source_pid, c.line, c.quote.strip().lower()) for c in merged_contra
+    }
     for c in b.contradictions:
         key = (c.source_pid, c.line, c.quote.strip().lower())
         if key not in seen_contra:
@@ -1031,7 +1070,9 @@ def _merge_verify(a: VerifyOutput, b: VerifyOutput) -> VerifyOutput:
 
 
 def _apply_verify_closes(
-    state: PipelineState, verify: VerifyOutput, source_pid_default: str = "",
+    state: PipelineState,
+    verify: VerifyOutput,
+    source_pid_default: str = "",
 ) -> None:
     """Materialize Verify closes into state.items.evidence and gap closed_by lists."""
     if not verify.closes or state.items is None:
@@ -1041,13 +1082,15 @@ def _apply_verify_closes(
     for resolution in verify.closes:
         eid = state._next_id
         state._next_id += 1
-        new_evidence_items.append(CollectedItem(
-            type="evidence",
-            quote=resolution.evidence_quote,
-            line=resolution.evidence_line,
-            id=eid,
-            source_pid=source_pid_default,
-        ))
+        new_evidence_items.append(
+            CollectedItem(
+                type="evidence",
+                quote=resolution.evidence_quote,
+                line=resolution.evidence_line,
+                id=eid,
+                source_pid=source_pid_default,
+            )
+        )
         close_eid_by_gid.setdefault(resolution.gap_id, []).append(eid)
 
     state.items = CollectedItems(
@@ -1058,12 +1101,14 @@ def _apply_verify_closes(
         dependencies=state.items.dependencies,
         scope=state.items.scope,
     )
-    for lens in (state.gaps_by_lens or {}):
+    for lens in state.gaps_by_lens or {}:
         updated: list[GapOutput] = []
         for g in state.gaps_by_lens[lens]:
             new_ids = close_eid_by_gid.get(g.id)
             if new_ids:
-                merged = list(g.closed_by) + [i for i in new_ids if i not in g.closed_by]
+                merged = list(g.closed_by) + [
+                    i for i in new_ids if i not in g.closed_by
+                ]
                 updated.append(g.model_copy(update={"closed_by": merged}))
             else:
                 updated.append(g)
@@ -1089,19 +1134,27 @@ async def _custom_verify(state: PipelineState, ctx: StepContext, spec) -> None:
     agent = ctx.agents[spec.step.model]
     max_output = spec.step.max_output_tokens or agent.max_tokens
     thinking = spec.step.thinking_budget
-    system_prompt = _prompt_for(ctx, _STEP_9_VERIFY) or _DEFAULT_VERIFY_PROMPT
+    system_prompt = _prompt_for(ctx, spec.step.name) or _DEFAULT_VERIFY_PROMPT
 
     accumulated = VerifyOutput()
     for companion in candidates[:4]:
         if not _open_gaps_remain(state):
             break
         open_gaps = [
-            g for lens_list in (state.gaps_by_lens or {}).values()
-            for g in lens_list if not g.closed_by
+            g
+            for lens_list in (state.gaps_by_lens or {}).values()
+            for g in lens_list
+            if not g.closed_by
         ]
         partial = await _verify_against_one_companion(
-            state, ctx, agent, system_prompt, max_output, thinking,
-            companion, open_gaps,
+            state,
+            ctx,
+            agent,
+            system_prompt,
+            max_output,
+            thinking,
+            companion,
+            open_gaps,
         )
         if partial is None:
             continue
@@ -1119,16 +1172,27 @@ async def _custom_research(state: PipelineState, ctx: StepContext, spec) -> None
     max_output = spec.step.max_output_tokens or agent.max_tokens
     thinking = spec.step.thinking_budget
 
-    system_prompt = _prompt_for(ctx, _STEP_10_RESEARCH)
+    system_prompt = _prompt_for(ctx, spec.step.name)
     research_results: dict[str, ResearchLensOutput] = {}
-    for lens in ["Performance", "Design", "Specification", "Usability", "Ecosystem", "Rationale"]:
+    for lens in [
+        "Performance",
+        "Design",
+        "Specification",
+        "Usability",
+        "Ecosystem",
+        "Rationale",
+    ]:
         user_msg = _build_research_user_message(lens, state)
 
         if state.cited_paper_index is not None and ctx.embedder is not None:
             lens_bcs = (state.gaps_by_lens or {}).get(lens, [])
             thesis = state.derive.central_claim if state.derive else ""
             evidence = query_for_research(
-                state.cited_paper_index, ctx.embedder, lens, lens_bcs, thesis,
+                state.cited_paper_index,
+                ctx.embedder,
+                lens,
+                lens_bcs,
+                thesis,
             )
             if evidence:
                 user_msg += f"\n\n{evidence}"
@@ -1186,14 +1250,16 @@ async def _custom_analyze(state: PipelineState, ctx: StepContext, spec) -> None:
     thinking = spec.step.thinking_budget
     paper_lines = state.paper_md.splitlines()
 
-    system_prompt = _prompt_for(ctx, _STEP_12_ANALYZE)
+    system_prompt = _prompt_for(ctx, spec.step.name)
     all_findings: list[FindingOutput] = []
     all_strengths: list[StrengthOutput] = []
     chunks = state.chunk_map or []
 
     async def _analyze_one(ci: int, chunk: ChunkEntry):
         local_log: list[str] | None = [] if ctx.debug else None
-        user_msg = _build_analyze_user_message(state.paper_id, chunk, paper_lines, state, ctx)
+        user_msg = _build_analyze_user_message(
+            state.paper_id, chunk, paper_lines, state, ctx
+        )
         result = await agent.run(
             system_prompt=system_prompt,
             user_message=user_msg,
@@ -1238,7 +1304,7 @@ async def _custom_rationale(state: PipelineState, ctx: StepContext, spec) -> Non
 
     user_msg = _build_rationale_user_message(state)
     result = await agent.run(
-        system_prompt=_prompt_for(ctx, _STEP_13_RATIONALE),
+        system_prompt=_prompt_for(ctx, spec.step.name),
         user_message=user_msg,
         output_type=RationaleOutput,
         max_tokens=max_output,
@@ -1248,7 +1314,9 @@ async def _custom_rationale(state: PipelineState, ctx: StepContext, spec) -> Non
     )
 
     new_findings = dedupe_findings(
-        state.findings or [], list(result.findings), embedder=ctx.embedder,
+        state.findings or [],
+        list(result.findings),
+        embedder=ctx.embedder,
     )
     for i, f in enumerate(new_findings):
         new_findings[i] = f.model_copy(update={"id": state._next_id})
@@ -1277,7 +1345,7 @@ async def _custom_challenge(state: PipelineState, ctx: StepContext, spec) -> Non
     agent = ctx.agents[spec.step.model]
     max_output = spec.step.max_output_tokens or agent.max_tokens
     thinking = spec.step.thinking_budget
-    system_prompt = _prompt_for(ctx, _STEP_14_CHALLENGE)
+    system_prompt = _prompt_for(ctx, spec.step.name)
 
     findings = state.findings or []
     if not findings:
@@ -1295,12 +1363,14 @@ async def _custom_challenge(state: PipelineState, ctx: StepContext, spec) -> Non
     for lens in sorted(by_lens.keys()):
         lens_findings = by_lens[lens]
         for i in range(0, len(lens_findings), max_batch):
-            batch = lens_findings[i:i + max_batch]
+            batch = lens_findings[i : i + max_batch]
             user_msg = _build_cross_exam_user_message(batch, state, ctx)
 
             if state.cited_paper_index is not None and ctx.embedder is not None:
                 evidence_map = query_for_challenge(
-                    state.cited_paper_index, ctx.embedder, batch,
+                    state.cited_paper_index,
+                    ctx.embedder,
+                    batch,
                 )
                 if evidence_map:
                     parts = ["\n\n## Companion paper evidence\n"]
@@ -1311,10 +1381,10 @@ async def _custom_challenge(state: PipelineState, ctx: StepContext, spec) -> Non
                         user_msg += "".join(parts)
 
             if state.std_client is not None:
-                batch_text = "\n".join(
-                    f.explanation or f.title or "" for f in batch
+                batch_text = "\n".join(f.explanation or f.title or "" for f in batch)
+                mech_block = await state.std_client.prefetch_mechanism_verification(
+                    batch_text
                 )
-                mech_block = await state.std_client.prefetch_mechanism_verification(batch_text)
                 if mech_block:
                     user_msg += f"\n\n{mech_block}"
                 std_block = await state.std_client.prefetch_standard_context(batch_text)
@@ -1349,7 +1419,7 @@ async def _custom_couple(state: PipelineState, ctx: StepContext, spec) -> None:
 
     user_msg = _build_couple_user_message(state)
     result = await agent.run(
-        system_prompt=_prompt_for(ctx, _STEP_15_COUPLE),
+        system_prompt=_prompt_for(ctx, spec.step.name),
         user_message=user_msg,
         output_type=CoupleOutput,
         max_tokens=max_output,
@@ -1365,13 +1435,14 @@ async def _custom_synthesize(state: PipelineState, ctx: StepContext, spec) -> No
     state.synthesis = synthesize(
         state.surviving or [],
         state.compounds or [],
-        state.derive or DeriveOutput(central_claim="", problem_statement="", scope_boundary=""),
+        state.derive
+        or DeriveOutput(central_claim="", problem_statement="", scope_boundary=""),
     )
 
 
 async def _custom_report(state: PipelineState, ctx: StepContext, spec) -> None:
     """Step 17: render markdown report."""
-    section_text = _prompt_for(ctx, _STEP_17_REPORT)
+    section_text = _prompt_for(ctx, spec.step.name)
     state.report = render_report(state, section_text)
 
 
@@ -1386,62 +1457,105 @@ def _build_hooks() -> dict[str, StepHooks]:
     markdown's `**Model:**` declaration is the single source of truth.
     """
     return {
-        _STEP_0_RECEIVE: StepHooks(custom=_custom_receive),
-        _STEP_1_REFERENCES: StepHooks(custom=_custom_references),
-        _STEP_2_INDEX: StepHooks(custom=_custom_index),
-        _STEP_3_SURVEY: StepHooks(custom=_custom_survey),
-        _STEP_4_EXTRACT: StepHooks(custom=_custom_extract),
-        _STEP_5_DECIDE: StepHooks(custom=_custom_decide),
-        _STEP_6_CLASSIFY: StepHooks(custom=_custom_classify),
-        _STEP_7_COLLECT: StepHooks(custom=_custom_collect),
-        _STEP_8_DERIVE: StepHooks(custom=_custom_derive),
-        _STEP_9_VERIFY: StepHooks(custom=_custom_verify),
-        _STEP_10_RESEARCH: StepHooks(custom=_custom_research),
-        _STEP_11_PROBE: StepHooks(custom=_custom_probe),
-        _STEP_12_ANALYZE: StepHooks(custom=_custom_analyze),
-        _STEP_13_RATIONALE: StepHooks(custom=_custom_rationale),
-        _STEP_14_CHALLENGE: StepHooks(custom=_custom_challenge),
-        _STEP_15_COUPLE: StepHooks(custom=_custom_couple),
-        _STEP_16_SYNTHESIZE: StepHooks(custom=_custom_synthesize),
-        _STEP_17_REPORT: StepHooks(custom=_custom_report),
+        "0. Receive": StepHooks(custom=_custom_receive),
+        "1. References": StepHooks(custom=_custom_references),
+        "2. Index": StepHooks(custom=_custom_index),
+        "3. Survey": StepHooks(custom=_custom_survey),
+        "4. Extract": StepHooks(custom=_custom_extract),
+        "5. Decide": StepHooks(custom=_custom_decide),
+        "6. Classify": StepHooks(custom=_custom_classify),
+        "7. Collect": StepHooks(custom=_custom_collect),
+        "8. Derive": StepHooks(custom=_custom_derive),
+        "9. Verify": StepHooks(custom=_custom_verify),
+        "10. Research": StepHooks(custom=_custom_research),
+        "11. Probe": StepHooks(custom=_custom_probe),
+        "12. Analyze": StepHooks(custom=_custom_analyze),
+        "13. Rationale": StepHooks(custom=_custom_rationale),
+        "14. Challenge": StepHooks(custom=_custom_challenge),
+        "15. Couple": StepHooks(custom=_custom_couple),
+        "16. Synthesize": StepHooks(custom=_custom_synthesize),
+        "17. Report": StepHooks(custom=_custom_report),
     }
 
 
 # -- Persistence callback ----------------------------------------------------
 
 
+def _persist_step_references(_spec, state: PipelineState, ctx: StepContext) -> None:
+    _persist_pids(ctx.backend, ctx.pid, state.ref_pids)
+    _persist_urls(ctx.backend, ctx.pid, state.ref_urls)
+
+
+def _persist_step_collect(_spec, state: PipelineState, ctx: StepContext) -> None:
+    if state.items is None:
+        return
+    items = state.items
+    _persist_claims(ctx.backend, ctx.pid, items.claims)
+    _persist_evidence(ctx.backend, ctx.pid, items.evidence)
+    _persist_concessions(ctx.backend, ctx.pid, items.concessions)
+    _persist_gaps(ctx.backend, ctx.pid, state.gaps_by_lens or {})
+    _persist_asks(ctx.backend, ctx.pid, state.asks or [])
+
+
+def _persist_step_derive(_spec, state: PipelineState, ctx: StepContext) -> None:
+    if state.derive is None:
+        return
+    _persist_thesis(ctx.backend, ctx.pid, state.derive)
+
+
+def _persist_step_verify(_spec, state: PipelineState, ctx: StepContext) -> None:
+    _persist_gaps(ctx.backend, ctx.pid, state.gaps_by_lens or {})
+    if state.items is not None:
+        _persist_evidence(ctx.backend, ctx.pid, state.items.evidence)
+
+
+def _persist_step_analyze(_spec, state: PipelineState, ctx: StepContext) -> None:
+    _persist_strengths(ctx.backend, ctx.pid, state.strengths or [])
+
+
+def _persist_step_rationale(_spec, state: PipelineState, ctx: StepContext) -> None:
+    _persist_checklist(ctx.backend, ctx.pid, state.checklist or [])
+    _persist_strengths(ctx.backend, ctx.pid, state.strengths or [])
+
+
+def _persist_step_challenge(_spec, state: PipelineState, ctx: StepContext) -> None:
+    _persist_findings(
+        ctx.backend,
+        ctx.pid,
+        state.surviving or [],
+        state.killed or [],
+        state.synthesis,
+    )
+
+
+def _persist_step_couple(_spec, state: PipelineState, ctx: StepContext) -> None:
+    _persist_compounds(ctx.backend, ctx.pid, state.compounds or [])
+
+
+def _persist_step_synthesize(_spec, state: PipelineState, ctx: StepContext) -> None:
+    _persist_synthesis(ctx.backend, ctx.pid, state.synthesis)
+
+
+_PERSIST_BY_SLUG = {
+    "references": _persist_step_references,
+    "collect": _persist_step_collect,
+    "derive": _persist_step_derive,
+    "verify": _persist_step_verify,
+    "analyze": _persist_step_analyze,
+    "rationale": _persist_step_rationale,
+    "challenge": _persist_step_challenge,
+    "couple": _persist_step_couple,
+    "synthesize": _persist_step_synthesize,
+}
+
+
 def _persist_step(spec, state: PipelineState, ctx: StepContext) -> None:
     """Persist pipeline artifacts to the database after each producing step."""
     if ctx.backend is None:
         return
-    step_name = spec.step.name
-    if step_name == _STEP_1_REFERENCES:
-        _persist_pids(ctx.backend, ctx.pid, state.ref_pids)
-        _persist_urls(ctx.backend, ctx.pid, state.ref_urls)
-    elif step_name == _STEP_7_COLLECT and state.items is not None:
-        items = state.items
-        _persist_claims(ctx.backend, ctx.pid, items.claims)
-        _persist_evidence(ctx.backend, ctx.pid, items.evidence)
-        _persist_concessions(ctx.backend, ctx.pid, items.concessions)
-        _persist_gaps(ctx.backend, ctx.pid, state.gaps_by_lens or {})
-        _persist_asks(ctx.backend, ctx.pid, state.asks or [])
-    elif step_name == _STEP_8_DERIVE and state.derive is not None:
-        _persist_thesis(ctx.backend, ctx.pid, state.derive)
-    elif step_name == _STEP_9_VERIFY:
-        _persist_gaps(ctx.backend, ctx.pid, state.gaps_by_lens or {})
-        if state.items is not None:
-            _persist_evidence(ctx.backend, ctx.pid, state.items.evidence)
-    elif step_name == _STEP_12_ANALYZE:
-        _persist_strengths(ctx.backend, ctx.pid, state.strengths or [])
-    elif step_name == _STEP_13_RATIONALE:
-        _persist_checklist(ctx.backend, ctx.pid, state.checklist or [])
-        _persist_strengths(ctx.backend, ctx.pid, state.strengths or [])
-    elif step_name == _STEP_14_CHALLENGE:
-        _persist_findings(ctx.backend, ctx.pid, state.surviving or [], state.killed or [], state.synthesis)
-    elif step_name == _STEP_15_COUPLE:
-        _persist_compounds(ctx.backend, ctx.pid, state.compounds or [])
-    elif step_name == _STEP_16_SYNTHESIZE:
-        _persist_synthesis(ctx.backend, ctx.pid, state.synthesis)
+    handler = _PERSIST_BY_SLUG.get(_step_slug(spec.step.name))
+    if handler is not None:
+        handler(spec, state, ctx)
 
 
 def _persist_claims(backend, pid, claims: list):
@@ -1456,8 +1570,7 @@ def _persist_claims(backend, pid, claims: list):
         kind: str
         load_bearing: bool
 
-    rows = [_Row(c.id, c.line, c.quote, c.section, "", False)
-            for c in claims]
+    rows = [_Row(c.id, c.line, c.quote, c.section, "", False) for c in claims]
     backend.store_assay_claims(pid, rows)
 
 
@@ -1475,9 +1588,19 @@ def _persist_evidence(backend, pid, evidence: list):
         supports: str
         source_pid: str
 
-    rows = [_Row(e.id, e.line, e.quote, e.section, "", e.quality_tier or "", "[]",
-                 getattr(e, 'source_pid', ''))
-            for e in evidence]
+    rows = [
+        _Row(
+            e.id,
+            e.line,
+            e.quote,
+            e.section,
+            "",
+            e.quality_tier or "",
+            "[]",
+            getattr(e, "source_pid", ""),
+        )
+        for e in evidence
+    ]
     backend.store_assay_evidence(pid, rows)
 
 
@@ -1492,8 +1615,9 @@ def _persist_concessions(backend, pid, concessions: list):
         section: str
         subtype: str
 
-    rows = [_Row(i, c.line, c.quote, c.section, "")
-            for i, c in enumerate(concessions, 1)]
+    rows = [
+        _Row(i, c.line, c.quote, c.section, "") for i, c in enumerate(concessions, 1)
+    ]
     backend.store_assay_concessions(pid, rows)
 
 
@@ -1519,24 +1643,41 @@ def _persist_gaps(backend, pid, gaps_by_lens):
             if b.id in seen:
                 continue
             seen.add(b.id)
-            rows.append(_Row(b.id, b.chunk_index, b.line,
-                            b.gap, b.why_important,
-                            b.primary_lens or lens, b.secondary_lens or "",
-                            b.severity, list(b.closed_by)))
+            rows.append(
+                _Row(
+                    b.id,
+                    b.chunk_index,
+                    b.line,
+                    b.gap,
+                    b.why_important,
+                    b.primary_lens or lens,
+                    b.secondary_lens or "",
+                    b.severity,
+                    list(b.closed_by),
+                )
+            )
     backend.store_assay_gaps(pid, rows)
 
 
 def _persist_asks(backend, pid, asks: list):
-    rows = [{"target": a.target, "quote": a.quote, "type": a.type, "line": a.line}
-            for a in asks]
+    rows = [
+        {"target": a.target, "quote": a.quote, "type": a.type, "line": a.line}
+        for a in asks
+    ]
     backend.store_assay_asks(pid, rows)
 
 
 def _persist_pids(backend, pid, inventory: list):
     rows = [
-        {"raw_pid": r.raw_pid, "resolved_pid": r.paper_id, "url": r.url,
-         "mention_count": r.count, "in_paperstore": r.in_paperstore,
-         "stale": r.stale, "author_overlap": r.author_overlap}
+        {
+            "raw_pid": r.raw_pid,
+            "resolved_pid": r.paper_id,
+            "url": r.url,
+            "mention_count": r.count,
+            "in_paperstore": r.in_paperstore,
+            "stale": r.stale,
+            "author_overlap": r.author_overlap,
+        }
         for r in inventory
     ]
     backend.store_assay_pids(pid, rows)
@@ -1557,22 +1698,40 @@ def _persist_thesis(backend, pid, derive: DeriveOutput):
         scope_boundary: str
         ask_calibration: str
 
-    row = _Row(derive.central_claim, derive.problem_statement,
-               derive.scope_boundary, derive.ask_calibration)
+    row = _Row(
+        derive.central_claim,
+        derive.problem_statement,
+        derive.scope_boundary,
+        derive.ask_calibration,
+    )
     backend.store_assay_thesis(pid, row)
 
 
 def _persist_strengths(backend, pid, strengths: list):
-    rows = [{"title": s.title, "quote": s.quote, "line": s.line,
-             "explanation": s.explanation, "lens": s.lens}
-            for s in strengths]
+    rows = [
+        {
+            "title": s.title,
+            "quote": s.quote,
+            "line": s.line,
+            "explanation": s.explanation,
+            "lens": s.lens,
+        }
+        for s in strengths
+    ]
     backend.store_assay_strengths(pid, rows)
 
 
 def _persist_checklist(backend, pid, checklist: list):
-    rows = [{"id": c.id, "name": c.name, "passed": c.passed,
-             "location": c.location or "", "note": c.note or ""}
-            for c in checklist]
+    rows = [
+        {
+            "id": c.id,
+            "name": c.name,
+            "passed": c.passed,
+            "location": c.location or "",
+            "note": c.note or "",
+        }
+        for c in checklist
+    ]
     backend.store_assay_checklist(pid, rows)
 
 
@@ -1601,25 +1760,54 @@ def _persist_findings(backend, pid, surviving: list, killed: list, synthesis=Non
 
     rows = []
     for i, f in enumerate(surviving, 1):
-        rows.append(_Row(i, f.title, f.lens, f.severity,
-                        f.quote, f.line, f.explanation,
-                        f.test, True, f.title in major_set,
-                        "", "", list(getattr(f, "from_gap_ids", []) or [])))
+        rows.append(
+            _Row(
+                i,
+                f.title,
+                f.lens,
+                f.severity,
+                f.quote,
+                f.line,
+                f.explanation,
+                f.test,
+                True,
+                f.title in major_set,
+                "",
+                "",
+                list(getattr(f, "from_gap_ids", []) or []),
+            )
+        )
     offset = len(surviving)
     for i, k in enumerate(killed, offset + 1):
-        rows.append(_Row(i, k.finding_title, k.lens,
-                        "", "",
-                        0, "",
-                        "", False, False,
-                        k.challenge, k.reasoning, []))
+        rows.append(
+            _Row(
+                i,
+                k.finding_title,
+                k.lens,
+                "",
+                "",
+                0,
+                "",
+                "",
+                False,
+                False,
+                k.challenge,
+                k.reasoning,
+                [],
+            )
+        )
     backend.store_assay_findings(pid, rows)
 
 
 def _persist_compounds(backend, pid, compounds: list):
     rows = [
-        {"name": c.name, "constituents": list(c.constituents),
-         "mechanism": c.mechanism, "cross_lens": c.cross_lens,
-         "emergent_risk": c.emergent_risk or ""}
+        {
+            "name": c.name,
+            "constituents": list(c.constituents),
+            "mechanism": c.mechanism,
+            "cross_lens": c.cross_lens,
+            "emergent_risk": c.emergent_risk or "",
+        }
         for c in compounds
     ]
     backend.store_assay_compounds(pid, rows)
@@ -1717,7 +1905,9 @@ async def assay_paper(
             stop_after=stop_after,
             on_progress=on_progress,
             on_step_complete=lambda spec, st: _persist_step(spec, st, ctx),
-            render_trace_fn=lambda st, step: render_trace(st, step, step_durations=[m.duration_s for m in ctx.step_metrics]),
+            render_trace_fn=lambda st, step: render_trace(
+                st, step, step_durations=[m.duration_s for m in ctx.step_metrics]
+            ),
             trace_path=trace_path,
             debug_path=debug_path if debug else None,
         )
@@ -1746,8 +1936,10 @@ async def assay_since(
         pid = paper.paper_id
         try:
             report = await assay_paper(
-                pid, backend,
-                debug=debug, trace=trace,
+                pid,
+                backend,
+                debug=debug,
+                trace=trace,
                 on_progress=on_progress,
             )
             backend.write_assay_md(pid, report)

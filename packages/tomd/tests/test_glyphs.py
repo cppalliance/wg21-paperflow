@@ -41,7 +41,8 @@ from tomd.lib.pdf.mono import classify_monospace
 from tomd.lib.pdf.structure import _block_words
 from tomd.lib.pdf.qa import compute_metrics
 from tomd.lib.pdf.cleanup import _collapse_spaces, cleanup_text
-from tomd.lib.pdf.emit import _render_wording_section, emit_markdown
+from tomd.lib.pdf.emit import emit_markdown
+from tomd.lib.pdf.wording_emit import _render_wording_section
 from tomd.lib.pdf.mono import propagate_monospace
 
 # -- emoji property detection -------------------------------------------------

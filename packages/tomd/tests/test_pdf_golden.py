@@ -5,8 +5,7 @@ import json
 from pathlib import Path
 
 import pytest
-
-from tomd.lib.pdf import convert_pdf
+from tomd.lib.pdf import run_pipeline
 
 _GOLDEN = Path(__file__).resolve().parent / "fixtures" / "golden"
 
@@ -19,7 +18,69 @@ _GOLDEN_STEMS = (
     "p2040r0",
     "p3714r0",
     "p1112r4",
+    # TOC-stripping regression guards: p4174r0 = total-loss bug paper
+    # (body must survive), p4004r1 = partial-loss bug paper (sensitive mid-body
+    # guard). The "TOC stays stripped" direction is covered by the synthetic
+    # test_toc.py cases, not a golden: no corpus paper cleanly strips its
+    # visible (space-separated dot-leader) TOC, so a golden would only enshrine
+    # a pre-existing leak.
+    # Both are also issue-180 affected: header/footer detection counts distinct
+    # pages (not doubled dual-path occurrences), so p4174r0 keeps its recovered
+    # "There isn't a standard library tool ... any_of" body line, and p4004r1
+    # keeps its two bare "- N -" page-number lines. The page numbers are an
+    # accepted chrome residual (another ticket should track the per-item
+    # page-number strip that will remove them); they are never body.
+    "p4174r0",
+    "p4004r1",
+    # Leaked heading-kind TOC guard: p4100r1 shipped a front block of
+    # empty duplicate headings (its Table of Contents leaked as headings without
+    # a dot-leader page number). The dedup post-pass removes them (35 -> 0). Pure
+    # Population A: no doubled body, so "body intact and not doubled" is real.
+    "p4100r1",
+    # Population-B promotion-dedup guard: a confident page paired into a
+    # promotion was emitted twice. p3968r0's sole defect was this double-emit
+    # (sections 6 and 7 doubled at the tail); the golden pins that each section
+    # appears exactly once. One uncertain region covers the front-page
+    # metadata/TOC block (L12-L114); sections 2-8 are all confident and each
+    # appears exactly once. Not a zero-uncertain-markers specimen.
+    "p3968r0",
+    # Mixed-kind leaked-TOC guard: p4094r0's Table of Contents leaked
+    # as a *mix* of empty headings (## 3.7 Summary, ## 6.4 The Two Framings) and
+    # title-like LIST/PARAGRAPH entries (4./5./7. ...) between the title block
+    # and the Abstract; pt2 caught only the heading-kind ones and stranded the
+    # rest. The unified detector removes the whole block: the golden front is
+    # title -> metadata -> Abstract with no stray pre-Abstract sections and no
+    # Table of Contents remnant. dup_body == 0 (no body duplication), so the
+    # body below is untouched. p4100r1 above is the byte-identical guard that
+    # the pass does not over-reach on an already-clean heading-kind TOC.
+    "p4094r0",
+    # Fragmented leaked-TOC guard (relaxed bridging): p4016r0's ~146-entry
+    # Table of Contents leaks before the Abstract as a single block fragmented by
+    # non-recurring stragglers (title-like appendix paragraphs whose body heading
+    # carries a trailing "(Informative)" the leaked line lacks, plus once-only
+    # empty headings like "1.2 Motivating example"). The relaxed-bridging pass
+    # coalesces and removes the whole block: the golden front is title ->
+    # metadata -> Abstract, and Appendices A-Q each appear exactly once, later,
+    # with bodies. Pins that paragraph stragglers are removed only when they
+    # forward-reference a later heading and that the real single-line Abstract
+    # prose immediately after the TOC survives (the trailing rule).
+    "p4016r0",
+    # Issue-180 reported paper: P4024R0's closing paragraph ("By embracing
+    # these practices ...") sits alone at the top of page 3, sharing y-buckets
+    # with the page-1/2 headers. The old raw-occurrence count (doubled by the
+    # dual extraction path) stripped it as a phantom header on this 3-page doc.
+    # Distinct-page counting keeps it. The golden pins the full body; the
+    # explicit closing-sentence assertion below is the focused guard.
+    "p4024r0",
+    # Code-block extraction regression guards (issue #128).
+    "p4012r0-codeblock",
+    "p4012r0-page-10",
+    "p4012r0-page-6",
+    "p0876r22-page-14",
 )
+
+# Issue-180 reported symptom: this sentence is P4024R0's final paragraph.
+_P4024R0_CLOSING = "By embracing these practices"
 
 
 def _normalize_newlines(text: str) -> str:
@@ -30,19 +91,30 @@ def _diff_head(actual: str, golden: str, limit: int = 120) -> str:
     a_lines = _normalize_newlines(actual).splitlines(keepends=True)
     b_lines = _normalize_newlines(golden).splitlines(keepends=True)
     diff = difflib.unified_diff(
-        b_lines, a_lines, fromfile="golden", tofile="actual", n=3,
+        b_lines,
+        a_lines,
+        fromfile="golden",
+        tofile="actual",
+        n=3,
     )
     return "".join(list(diff)[:limit])
 
 
 @pytest.mark.parametrize("stem", _GOLDEN_STEMS)
 def test_convert_pdf_matches_golden(stem: str):
+    # Original 8 stems use sources/; newer stems live flat in the golden root.
     pdf_path = _GOLDEN / "sources" / f"{stem}.pdf"
     if not pdf_path.is_file():
-        pytest.skip(f"missing PDF fixture: {pdf_path}")
+        pdf_path = _GOLDEN / f"{stem}.pdf"
+    if not pdf_path.is_file():
+        pytest.skip(f"missing PDF fixture: {stem}.pdf")
 
-    md, prompts = convert_pdf(pdf_path)
+    result = run_pipeline(pdf_path)
+    md, prompts = result.md, result.prompts
+    # Originals use snapshots/<stem>.md; newer stems use <stem>.golden.md.
     snapshot_md = _GOLDEN / "snapshots" / f"{stem}.md"
+    if not snapshot_md.is_file():
+        snapshot_md = _GOLDEN / f"{stem}.golden.md"
     assert snapshot_md.is_file(), f"missing snapshot: {snapshot_md}"
     expected_md = snapshot_md.read_text(encoding="utf-8")
     got_md = _normalize_newlines(md)
@@ -53,6 +125,8 @@ def test_convert_pdf_matches_golden(stem: str):
         )
 
     snapshot_prompts = _GOLDEN / "snapshots" / f"{stem}.prompts.json"
+    if not snapshot_prompts.is_file():
+        snapshot_prompts = _GOLDEN / f"{stem}.golden.prompts.json"
     if snapshot_prompts.is_file():
         assert prompts is not None, f"expected prompts for {stem}"
         expected = json.loads(snapshot_prompts.read_text(encoding="utf-8"))
@@ -67,3 +141,17 @@ def test_convert_pdf_matches_golden(stem: str):
             )
     else:
         assert prompts is None, f"unexpected prompts for {stem}: {prompts}"
+
+
+def test_p4024r0_closing_paragraph_present():
+    """Issue-180 focused guard: the reported closing paragraph survives.
+
+    Pairs with the manual ``uv run preview P4024R0`` check. Independent of the
+    full golden so a future golden regeneration can never silently drop the
+    sentence the bug removed.
+    """
+    pdf_path = _GOLDEN / "p4024r0.pdf"
+    if not pdf_path.is_file():
+        pytest.skip(f"missing PDF fixture: {pdf_path}")
+    md = run_pipeline(pdf_path).md
+    assert _P4024R0_CLOSING in md

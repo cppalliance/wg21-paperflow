@@ -24,9 +24,12 @@ import pytest
 
 from paperstore import SqliteBackend
 from preview.render import (
+    _fix_split_ol_numbering,
     _image_data_url,
     _image_data_url_cached,
+    _render_blockquote_tables,
     _rewrite_paper_image_refs,
+    render_markdown,
 )
 
 
@@ -141,6 +144,216 @@ def test_rewrite_pid_case_insensitive(backend: SqliteBackend):
     md = "![cap](p3556r0-fig3-1.png)"
     out = _rewrite_paper_image_refs(md, backend, "P3556R0")
     assert "<img src=\"data:image/png;base64," in out
+
+
+# ---- _render_blockquote_tables ----------------------------------------------
+
+
+def test_bq_table_converted_to_html():
+    """The whole point: a pipe table inside a blockquote becomes a raw
+    HTML <table> (still ``> ``-prefixed) so scrivener passes it through
+    instead of collapsing the rows into one literal paragraph."""
+    md = (
+        "> **POLL**: Forward to LWG.\n"
+        ">\n"
+        "> | SF | F | N | SA | SA |\n"
+        "> | --- | --- | --- | --- | --- |\n"
+        "> | 7 | 13 | 1 | 0 | 1 |\n"
+    )
+    out = _render_blockquote_tables(md)
+    assert "> <table>" in out
+    assert "> <tr><th>SF</th><th>F</th><th>N</th><th>SA</th><th>SA</th></tr>" in out
+    assert "> <tr><td>7</td><td>13</td><td>1</td><td>0</td><td>1</td></tr>" in out
+    assert "> </table>" in out
+    assert "| SF |" not in out
+    # Non-table blockquote lines survive untouched.
+    assert "> **POLL**: Forward to LWG.\n" in out
+
+
+def test_top_level_table_untouched():
+    """Tables outside blockquotes render natively in scrivener and must
+    not be rewritten."""
+    md = (
+        "| SF | F |\n"
+        "| --- | --- |\n"
+        "| 7 | 13 |\n"
+    )
+    assert _render_blockquote_tables(md) == md
+
+
+def test_bq_pipe_lines_without_separator_untouched():
+    """Pipe-ish lines that are not a GFM table (no separator row) stay
+    literal - no phantom tables."""
+    md = (
+        "> | just some | text |\n"
+        "> | more | text |\n"
+    )
+    assert _render_blockquote_tables(md) == md
+
+
+def test_bq_separator_column_mismatch_untouched():
+    """GFM requires separator and header column counts to match;
+    a mismatch means the block is not a table."""
+    md = (
+        "> | a | b | c |\n"
+        "> | --- | --- |\n"
+        "> | 1 | 2 | 3 |\n"
+    )
+    assert _render_blockquote_tables(md) == md
+
+
+def test_bq_table_cells_html_escaped():
+    """Cell payloads like ``<=>`` must not inject markup."""
+    md = (
+        "> | op | result |\n"
+        "> | --- | --- |\n"
+        "> | <=> | a & b |\n"
+    )
+    out = _render_blockquote_tables(md)
+    assert "<td>&lt;=&gt;</td>" in out
+    assert "<td>a &amp; b</td>" in out
+
+
+def test_bq_table_escaped_pipe_in_cell():
+    r"""``\|`` inside a cell is a literal pipe, not a cell boundary."""
+    md = (
+        "> | expr | desc |\n"
+        "> | --- | --- |\n"
+        r"> | a \| b | or |" + "\n"
+    )
+    out = _render_blockquote_tables(md)
+    assert "<td>a | b</td>" in out
+    assert "<td>or</td>" in out
+
+
+def test_bq_table_ragged_rows_normalized():
+    """Data rows are padded/truncated to the header width (GFM behavior)."""
+    md = (
+        "> | a | b |\n"
+        "> | --- | --- |\n"
+        "> | 1 |\n"
+        "> | 1 | 2 | 3 |\n"
+    )
+    out = _render_blockquote_tables(md)
+    assert "<tr><td>1</td><td></td></tr>" in out
+    assert "<tr><td>1</td><td>2</td></tr>" in out
+    assert "<td>3</td>" not in out
+
+
+def test_bq_header_only_table_no_tbody():
+    """Header + separator with no data rows emits no empty <tbody>."""
+    md = (
+        "> | a | b |\n"
+        "> | --- | --- |\n"
+    )
+    out = _render_blockquote_tables(md)
+    assert "<thead>" in out
+    assert "<tbody>" not in out
+
+
+def test_fenced_code_block_untouched():
+    """A markdown example inside a fenced code block (with or without
+    blockquote prefix on the fence) is a code sample, not a table."""
+    md = (
+        "```md\n"
+        "> | SF | F |\n"
+        "> | --- | --- |\n"
+        "> | 7 | 13 |\n"
+        "```\n"
+        "> ```\n"
+        "> | a | b |\n"
+        "> | --- | --- |\n"
+        "> ```\n"
+    )
+    assert _render_blockquote_tables(md) == md
+
+
+def test_bq_nested_quote_row_not_absorbed():
+    """A pipe row at deeper quote nesting ends the run instead of being
+    pulled into the outer table at the wrong nesting level."""
+    md = (
+        "> | a | b |\n"
+        "> | --- | --- |\n"
+        "> | 1 | 2 |\n"
+        "> > | quoted | row |\n"
+    )
+    out = _render_blockquote_tables(md)
+    assert "<tr><td>1</td><td>2</td></tr>" in out
+    assert "> > | quoted | row |" in out
+    assert "<td>quoted</td>" not in out
+
+
+def test_image_ref_in_bq_table_cell_inlined(backend: SqliteBackend):
+    """Pass ordering: the table pass html-escapes cell text, so it must
+    run before the image pass. An image ref inside a cell survives the
+    escape (no markup chars) and is then inlined as a raw <img> by the
+    image pass instead of becoming a visible base64 blob."""
+    backend.write_paper_image("P1", 1, 1, "png", _PNG_BYTES)
+    md = (
+        "> | desc | fig |\n"
+        "> | --- | --- |\n"
+        "> | one | ![fig](p1-fig1-1.png) |\n"
+    )
+    out = render_markdown(md, backend=backend, pid="P1")
+    assert '<td><img src="data:image/png;base64,' in out
+    assert "&lt;img" not in out
+
+
+# ---- _fix_split_ol_numbering -------------------------------------------------
+
+
+def test_split_ol_gets_start_attribute():
+    """Scrivener splits an <ol> around a table without start= on the
+    continuation; the post-pass adds it so numbering continues."""
+    html_text = (
+        "<ol><li>a</li><li>b</li></ol>"
+        "<table><tr><td>x</td></tr></table>"
+        "<ol><li>c</li></ol>"
+    )
+    out = _fix_split_ol_numbering(html_text)
+    assert '<ol start="3"><li>c</li></ol>' in out
+
+
+def test_split_ol_respects_existing_start():
+    """A preceding <ol start=N> shifts the continuation's base."""
+    html_text = (
+        '<ol start="5"><li>a</li></ol>'
+        "<table><tr><td>x</td></tr></table>"
+        "<ol><li>b</li></ol>"
+    )
+    out = _fix_split_ol_numbering(html_text)
+    assert '<ol start="6"><li>b</li></ol>' in out
+
+
+def test_split_ol_chained_splits_accumulate():
+    """Two tables splitting the same list: the second continuation must
+    build on the start= added to the first, not restart from the
+    original fragment (iterative replacement, not one re.sub pass)."""
+    html_text = (
+        "<ol><li>a</li><li>b</li></ol>"
+        "<table><tr><td>x</td></tr></table>"
+        "<ol><li>c</li></ol>"
+        "<table><tr><td>y</td></tr></table>"
+        "<ol><li>d</li></ol>"
+    )
+    out = _fix_split_ol_numbering(html_text)
+    assert '<ol start="3"><li>c</li></ol>' in out
+    assert '<ol start="4"><li>d</li></ol>' in out
+
+
+def test_table_between_unrelated_lists_untouched():
+    """No preceding <ol> before the match means nothing to continue;
+    the fragment stays unchanged."""
+    html_text = (
+        "</ol><table><tr><td>x</td></tr></table><ol><li>a</li></ol>"
+    )
+    out = _fix_split_ol_numbering(html_text)
+    assert out == html_text
+
+
+def test_html_without_split_ol_unchanged():
+    html_text = "<ol><li>a</li></ol><p>text</p><table></table>"
+    assert _fix_split_ol_numbering(html_text) == html_text
 
 
 # ---- cache invalidation -----------------------------------------------------

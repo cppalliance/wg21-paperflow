@@ -45,7 +45,8 @@ What we deliberately do NOT do here:
 from __future__ import annotations
 
 import logging
-from collections.abc import Sequence
+import re
+from collections.abc import Mapping, Sequence
 from typing import TYPE_CHECKING
 
 import pymupdf
@@ -73,10 +74,15 @@ _log = logging.getLogger(__name__)
 # _MAX_TEXT_OVERLAP_FRACTION, _MAX_CLUSTER_AREA_FRACTION) and the
 # pipeline-level structural-overlap filter that drops vectors covering
 # TABLE/CODE regions. Real diagrams can be quite sparse: P3556R0's
-# page-3 flowchart clocks only ~115 items (boxes + arrowheads + labels).
-# 100 admits sparse flowcharts while still skipping pages whose entire
-# vector content is page chrome (running rules, header underlines).
-_MIN_PAGE_DRAWING_ITEMS = 100
+# page-3 flowchart clocks ~115 items (boxes + arrowheads + labels);
+# P3127R1's page-10 Figure 4 with three sub-panels only adds up to 98
+# items total. 50 admits multi-panel sub-figure pages while still
+# skipping pages whose entire vector content is page chrome (running
+# rules, header underlines - typically 4-20 items). False positives
+# on pages in the 50-99 range are blocked downstream by the per-
+# cluster tiny-cov gate (corpus scan: only P3127R1 page 10 admits
+# anything in this range).
+_MIN_PAGE_DRAWING_ITEMS = 50
 
 # Single-linkage clustering distance: drawings whose bboxes are within
 # this many pt of each other are merged. Calibrated against the corpus
@@ -117,8 +123,12 @@ _MAX_TEXT_OVERLAP_FRACTION = 0.35
 # the cluster is a real diagram whose own boxes/nodes enclose the
 # labels.
 #
-# Two paths, both requiring _DIAGRAM_MIN_AREA_PT2 to rule out small
-# annotation boxes:
+# Four paths to is_diagram. Paths 1 and 2 share the area gate
+# (_DIAGRAM_MIN_AREA_PT2 rules out small annotation boxes) and differ on
+# items / density / overlap. Paths 3 and 4 (compact-cov and tiny-cov)
+# drop the area and overlap gates and instead use sum-of-drawing-
+# coverage as the orthogonal "this is a layered drawing, not body
+# prose" signal; they differ on the items / cov_sum tradeoff.
 #
 # 1. Dense path (P3556R0 page 3 "Process" flowchart style, where a
 #    flowchart packs many strokes into its bbox and labels inside the
@@ -134,13 +144,39 @@ _MAX_TEXT_OVERLAP_FRACTION = 0.35
 #      items >= _DIAGRAM_SPARSE_MIN_ITEMS
 #      AND overlap < _DIAGRAM_SPARSE_MAX_OVERLAP
 #
-# Calibration: against the full P4003R1 + P3556R0 + P3127R1 corpus,
-# the dense path admits P3556R0 Fig 2 (114 items / 39kpt^2 / d=0.0029
-# / ov=0.56) and the sparse path admits P3127R1 Fig 1 (58 items /
-# 78kpt^2 / d=0.00074 / ov=0.46) while neither admits the P4003R1
-# code-block-background false positives (typically items < 50 once
-# area >= 30kpt^2, or overlap > 0.8). Loosen any threshold only
-# after re-validating against the calibration corpus (see
+# 3. Compact-cov path (P3127R1 page 11 Figure 5 right half style:
+#    adjacency tables and lists pack hundreds of small rectangles
+#    into a small bbox, and the figure-internal cell numbers drive
+#    the spatial-path text overlap to ~1.0 - which is the wrong
+#    signal here because the "overlapping text" IS the figure's
+#    content). The distinguishing feature is the drawing-coverage
+#    SUM: real data-table figures have layered drawings (cell
+#    borders + arrows + fills overlapping in space), so the sum of
+#    drawing-rect intersections with the cluster exceeds 2x the
+#    cluster area. Code-block-style false positives where one
+#    drawing covers one region stay near 1.0:
+#      items >= _DIAGRAM_COMPACT_MIN_ITEMS
+#      AND coverage_sum >= _DIAGRAM_COMPACT_MIN_COVERAGE
+#
+# Calibration: against the P4003R1 + P3556R0 + P3127R1 + P2583R1 +
+# P4007R0 corpus, all three paths together admit:
+#   - P3556R0 Fig 2 via dense (114 / 39kpt^2 / d=0.0029 / ov=0.56 /
+#     cov_sum=0.34 - low cov_sum for a flowchart is fine because
+#     dense admits it via area+density).
+#   - P3127R1 Fig 1 via sparse (158 / 136kpt^2 / ov=0.66 /
+#     cov_sum=1.93 - high enough that the dense path also admits).
+#   - P3127R1 Figure 5 right half via compact-cov (140 / 18.5kpt^2
+#     / ov=0.997 / cov_sum=3.27). Neither the dense (area gate)
+#     nor sparse (overlap gate) path admits this geometry; only
+#     compact-cov does.
+#   - P3127R1 Figure 3 page-8 adjacency-list via compact-cov (132 /
+#     8kpt^2 / ov=1.00 / cov_sum=3.04).
+# And rejects every P4003R1 inline-code-decoration false positive
+# (max cov_sum=1.86 against the compact-cov 2.0 floor). The 2.0
+# threshold gives a 0.07 absolute margin to both the worst real
+# figure (Fig 1's main cluster at 1.93) and the worst false positive
+# (P4003R1 page 57 at 1.86). Loosen any threshold only after
+# re-validating against the calibration corpus (see
 # notes/preview-tool-abstract-images-vector-images-plan.md §7.1).
 _DIAGRAM_MIN_AREA_PT2 = 30_000.0
 _DIAGRAM_DENSE_MIN_DENSITY = 0.0010
@@ -148,6 +184,52 @@ _DIAGRAM_DENSE_MIN_ITEMS = 100
 _DIAGRAM_DENSE_MAX_OVERLAP = 0.70
 _DIAGRAM_SPARSE_MIN_ITEMS = 50
 _DIAGRAM_SPARSE_MAX_OVERLAP = 0.50
+_DIAGRAM_COMPACT_MIN_ITEMS = 100
+_DIAGRAM_COMPACT_MIN_COVERAGE = 2.0
+
+# Tiny-cov bypass: a SUB-FIGURE-sized cluster (smaller than the
+# regular min-dim floor) is admitted when it carries the layered-
+# drawing signature (cov_sum >= 3.0, even higher than the regular
+# compact-cov 2.0 to compensate for the lower item count). Calibrated
+# against the WG21 multi-panel-figure pattern - e.g. P3127R1 Figure 2
+# has four sub-panels (a)(b)(c)(d) at widths 34-130pt and heights
+# 58-90pt, each 22-206 items with cov_sum 3.27-3.94. Each sub-panel
+# is a real figure; emitting them as separate PNGs sharing the same
+# "Figure N:" alt-text is the practical outcome (merging would
+# require widening _CLUSTER_LINK_DISTANCE_PT past the 30pt gap, which
+# chains code-block decorations on P4003R1).
+#
+# The sub-floor at _DIAGRAM_TINY_SUB_FLOOR_PT (30pt) is the key
+# distinguishing geometry: the corpus's font-as-paths false
+# positives (P4003R0/R1/P4007R0) have one dimension at body-line
+# height (9-13pt), while real sub-figures have minimum dimension
+# >= 30pt. The 30pt floor cleanly separates these without affecting
+# any known real figure.
+#
+# Tiny-cov participates in two places:
+# - Min-dim gate: bypasses _MIN_CLUSTER_DIM_PT when the cluster is
+#   tiny-cov substantial (and both dims >= the sub-floor).
+# - is_diagram check: provides a fourth diagram path so sub-figures
+#   aren't subsequently dropped by the text-overlap gate.
+_DIAGRAM_TINY_MIN_ITEMS = 20
+_DIAGRAM_TINY_MIN_COVERAGE = 3.0
+_DIAGRAM_TINY_SUB_FLOOR_PT = 30.0
+
+# Minimum item count for the low-overlap admit path (clusters that
+# pass because text overlap < _MAX_TEXT_OVERLAP_FRACTION but don't
+# meet any is_diagram path). Without this floor, a low-density
+# background fill (ToC body, code-block background, structured
+# callout) with items 8-24 lands in the markdown unannotated. The
+# floor of 30 matches the lower-bound real-figure shape: P3127R1 Fig
+# 5 left half (items=38, cs=2.29, ovl=0.30) passes the floor. The
+# corpus FPs from the _MIN_PAGE_DRAWING_ITEMS=50 fast-path widening
+# (P4003R1/P4007R0 pages 1/77/19 ToC + code-block fills) all carry
+# items 12-24, well below the floor.
+#
+# Clusters admitted via the dense/sparse/compact-cov/tiny-cov diagram
+# paths bypass this floor; their is_diagram=True is the stronger
+# structural signal.
+_LOW_OVERLAP_ADMIT_MIN_ITEMS = 30
 
 # Per-constituent thresholds for the post-clustering merge pass
 # (:func:`_merge_close_clusters`). Both clusters being merged must
@@ -158,6 +240,35 @@ _DIAGRAM_SPARSE_MAX_OVERLAP = 0.50
 # decoration fragments (typically 20-40 items / <10kpt^2 each).
 _MERGE_MIN_ITEMS = 30
 _MERGE_MIN_AREA_PT2 = 20_000.0
+
+# Sub-figure merge: maximum vertical gap (pt) between two clusters that
+# may be connected by (a)/(b)/(c) sub-caption text.
+_SUB_FIGURE_MAX_GAP_PT = 120.0
+
+# Prefix-only match: checks that a gap text line starts with a
+# sub-caption label such as "(a) " or "(b) ". Does not anchor at
+# end-of-line or require content after the label -- the intent is a
+# gap-membership existence check, not structural capture. The similar
+# _SUB_CAPTION_RE in pipeline.py uses (.+)$ and is anchored differently;
+# they serve different purposes and are not the same pattern.
+_SUB_FIGURE_SUB_CAPTION_RE = re.compile(r"^\s*\(([a-z])\)\s+")
+
+# Horizontal row merge: maximum x-gap (pt) between two same-height clusters.
+_SUB_FIGURE_MAX_X_GAP_PT = 120.0
+# How far below the combined cluster bottom (pt) to look for a confirming
+# sub-caption line before accepting a horizontal merge.
+_SUB_FIGURE_CAPTION_OFFSET_PT = 100.0
+
+# Matches figure-caption lines in the vertical gap between two clusters.
+# A caption in the gap means the clusters belong to different logical figures
+# and must not be merged. Mirrors the label set of images._CAPTION_LABEL_RE
+# (Figure, Fig., Listing, Diagram, Image, Source code), case-insensitive, but
+# requires only label + number -- no separator -- so "Figure 1" without a
+# colon still acts as a split signal.
+_FIGURE_CAPTION_RE = re.compile(
+    r"^\s*(Figure|Fig\.?|Listing|Diagram|Image|Source\s+code)\s+\d+",
+    re.IGNORECASE,
+)
 
 # Minimum number of drawing items inside a surviving cluster. Single
 # items are almost always rules or one-stroke decorations. Real
@@ -638,6 +749,48 @@ def _text_overlap_fraction(
     return min(total_overlap / cluster_area, 1.0)
 
 
+def _drawing_coverage_sum(
+    cluster_bbox: tuple[float, float, float, float],
+    drawings: Sequence[Mapping[str, object]],
+) -> float:
+    """Sum of drawing-rect intersection-with-cluster areas / cluster area.
+
+    Allows overlap (a region covered by N drawings contributes N times),
+    so the result can exceed 1.0. Used by the compact-cov diagram path
+    as the orthogonal "layered drawings" signal: real data-table
+    figures pack cell borders + arrows + fills that overlap in space,
+    driving cov_sum above 2.0. Code-block-style false positives - one
+    drawing per region - stay near 1.0 (the calibration corpus's
+    worst false positive sits at 1.86, the worst real figure at 1.93).
+
+    NOT clamped to 1.0 (deliberately, unlike :func:`_text_overlap_fraction`):
+    the layered-vs-flat distinction is exactly what the unclamped sum
+    measures. Drawings outside the cluster contribute 0 (their
+    intersection with the cluster bbox is empty).
+
+    O(N) over ``drawings``; called at most once per surviving cluster
+    in :func:`extract_page_vector_images`. Drawings without a ``rect``
+    field are skipped.
+    """
+    cx0, cy0, cx1, cy1 = cluster_bbox
+    cluster_area = (cx1 - cx0) * (cy1 - cy0)
+    if cluster_area <= 0:
+        return 0.0
+    total = 0.0
+    for drawing in drawings:
+        rect = drawing.get("rect")
+        if rect is None:
+            continue
+        ix0 = max(cx0, rect.x0)
+        iy0 = max(cy0, rect.y0)
+        ix1 = min(cx1, rect.x1)
+        iy1 = min(cy1, rect.y1)
+        if ix1 <= ix0 or iy1 <= iy0:
+            continue
+        total += (ix1 - ix0) * (iy1 - iy0)
+    return total / cluster_area
+
+
 # ---- Pre-clustering ins/del-coloured drop ---------------------------------
 
 
@@ -852,6 +1005,195 @@ def _merge_close_clusters(
     return work
 
 
+def _merge_row_clusters(
+    clusters: list[tuple[tuple[float, float, float, float], int]],
+    page_blocks: Sequence["Block"],
+    *,
+    max_merged_area: float,
+) -> list[tuple[tuple[float, float, float, float], int]]:
+    """Merge horizontally-adjacent clusters that share the same y-band.
+
+    Two clusters i and j are merged when ALL of:
+
+    1. Their y-ranges overlap: min(bb_i[3], bb_j[3]) > max(bb_i[1], bb_j[1]).
+    2. The horizontal gap between them is within _SUB_FIGURE_MAX_X_GAP_PT:
+       max(0, max(bb_i[0], bb_j[0]) - min(bb_i[2], bb_j[2])) <= threshold.
+       Clusters that overlap in x also satisfy this condition.
+    3. At least one text line whose y-range falls in
+       [tentative_bb[3], tentative_bb[3] + _SUB_FIGURE_CAPTION_OFFSET_PT]
+       AND whose x-range overlaps [tentative_bb[0], tentative_bb[2]]
+       matches _SUB_FIGURE_SUB_CAPTION_RE. ``tentative_bb`` is the union of
+       the current accumulated bb_i and bb_j (not the original cluster i).
+       The x-overlap guard prevents a sub-caption from an unrelated column
+       or figure on the same horizontal band from triggering a merge.
+    4. The area of tentative_bb does not exceed max_merged_area.
+
+    Iterates until stable (no merge in the last pass).
+
+    Accumulator-corruption invariant: bb_i must not be mutated until all four
+    checks pass. Criteria 1 and 2 use bb_i and bb_j directly; criteria 3 and 4
+    use tentative_bb. On a successful merge four mutations happen together:
+    bb_i = tentative_bb, ic_i += ic_j, used[j] = True, changed = True.
+    """
+    changed = True
+    while changed:
+        changed = False
+        merged: list[tuple[tuple[float, float, float, float], int]] = []
+        used = [False] * len(clusters)
+        for i in range(len(clusters)):
+            if used[i]:
+                continue
+            bb_i, ic_i = clusters[i]
+            for j in range(i + 1, len(clusters)):
+                if used[j]:
+                    continue
+                bb_j, ic_j = clusters[j]
+                # Criterion 1: y-ranges must overlap.
+                if min(bb_i[3], bb_j[3]) <= max(bb_i[1], bb_j[1]):
+                    continue
+                # Criterion 2: horizontal gap must be within threshold.
+                x_gap = max(0.0, max(bb_i[0], bb_j[0]) - min(bb_i[2], bb_j[2]))
+                if x_gap > _SUB_FIGURE_MAX_X_GAP_PT:
+                    continue
+                # Tentative merged bbox for criteria 3 and 4.
+                tentative_bb = (
+                    min(bb_i[0], bb_j[0]),
+                    min(bb_i[1], bb_j[1]),
+                    max(bb_i[2], bb_j[2]),
+                    max(bb_i[3], bb_j[3]),
+                )
+                # Criterion 3: at least one sub-caption line below the merged row.
+                caption_top = tentative_bb[3]
+                caption_bot = tentative_bb[3] + _SUB_FIGURE_CAPTION_OFFSET_PT
+                found_caption = False
+                for block in page_blocks:
+                    if block.bbox[1] > caption_bot or block.bbox[3] < caption_top:
+                        continue
+                    for line in block.lines:
+                        if line.bbox[3] < caption_top or line.bbox[1] > caption_bot:
+                            continue
+                        if (
+                            _SUB_FIGURE_SUB_CAPTION_RE.match(line.text.strip())
+                            and line.bbox[0] < tentative_bb[2]
+                            and line.bbox[2] > tentative_bb[0]
+                        ):
+                            found_caption = True
+                            break
+                    if found_caption:
+                        break
+                if not found_caption:
+                    continue
+                # Criterion 4: area cap.
+                if (tentative_bb[2] - tentative_bb[0]) * (tentative_bb[3] - tentative_bb[1]) \
+                        > max_merged_area:
+                    continue
+                # All checks passed -- mutate together.
+                bb_i = tentative_bb
+                ic_i = ic_i + ic_j
+                used[j] = True
+                changed = True
+            merged.append((bb_i, ic_i))
+        clusters = merged
+    return clusters
+
+
+def _merge_sub_figure_clusters(
+    clusters: list[tuple[tuple[float, float, float, float], int]],
+    page_blocks: Sequence["Block"],
+    *,
+    max_merged_area: float,
+) -> list[tuple[tuple[float, float, float, float], int]]:
+    """Merge vertically-stacked clusters separated only by sub-caption text.
+
+    Two clusters i (above) and j (below) are merged when ALL of:
+
+    1. Vertical gap between i and j is <= _SUB_FIGURE_MAX_GAP_PT.
+    2. Their x-ranges overlap.
+    3. At least one non-empty text line in the gap matches
+       _SUB_FIGURE_SUB_CAPTION_RE, AND no line in the gap matches
+       _FIGURE_CAPTION_RE (Figure/Fig./Listing/Diagram/Image/Source code +
+       number, case-insensitive). A figure-caption line in the gap means
+       the clusters belong to different logical figures.
+    4. The merged bbox area does not exceed max_merged_area.
+
+    Iterates until stable (no merge occurred in the last pass).
+
+    The above/below assignment uses local `top_bb`/`bot_bb` variables rather
+    than mutating `bb_i` in place. Mutating `bb_i` before all checks pass
+    would corrupt the outer accumulator: if the swap fires but a subsequent
+    check fails with `continue`, `bb_i` would hold j's data for all remaining
+    j' iterations in the inner loop.
+    """
+    changed = True
+    while changed:
+        changed = False
+        merged: list[tuple[tuple[float, float, float, float], int]] = []
+        used = [False] * len(clusters)
+        for i in range(len(clusters)):
+            if used[i]:
+                continue
+            bb_i, ic_i = clusters[i]
+            for j in range(i + 1, len(clusters)):
+                if used[j]:
+                    continue
+                bb_j, ic_j = clusters[j]
+                # Determine which cluster is above WITHOUT mutating bb_i.
+                # Mutating bb_i here (via a swap) before checks pass would
+                # corrupt the outer accumulator if any subsequent check
+                # fires `continue` -- bb_i would silently hold j's data for
+                # all remaining j' iterations.
+                if bb_i[1] <= bb_j[1]:
+                    top_bb, top_ic, bot_bb, bot_ic = bb_i, ic_i, bb_j, ic_j
+                else:
+                    top_bb, top_ic, bot_bb, bot_ic = bb_j, ic_j, bb_i, ic_i
+                # Reject vertically overlapping clusters. After this guard,
+                # top_bb[3] <= bot_bb[1], so y_gap >= 0 is guaranteed.
+                if top_bb[3] > bot_bb[1]:
+                    continue
+                gap_top = top_bb[3]
+                gap_bot = bot_bb[1]
+                y_gap = gap_bot - gap_top
+                if y_gap > _SUB_FIGURE_MAX_GAP_PT:
+                    continue
+                # x-ranges must overlap.
+                if top_bb[0] >= bot_bb[2] or bot_bb[0] >= top_bb[2]:
+                    continue
+                # Collect text lines whose y-range falls inside the gap.
+                gap_lines: list[str] = []
+                for block in page_blocks:
+                    if block.bbox[1] > gap_bot or block.bbox[3] < gap_top:
+                        continue
+                    for line in block.lines:
+                        if line.bbox[3] < gap_top or line.bbox[1] > gap_bot:
+                            continue
+                        text = line.text.strip()
+                        if text:
+                            gap_lines.append(text)
+                if not gap_lines:
+                    continue
+                if not any(_SUB_FIGURE_SUB_CAPTION_RE.match(t) for t in gap_lines):
+                    continue
+                if any(_FIGURE_CAPTION_RE.match(t) for t in gap_lines):
+                    continue
+                # Area cap. Only mutate bb_i after all checks pass.
+                merged_bb = (
+                    min(top_bb[0], bot_bb[0]),
+                    top_bb[1],
+                    max(top_bb[2], bot_bb[2]),
+                    bot_bb[3],
+                )
+                if (merged_bb[2] - merged_bb[0]) * (merged_bb[3] - merged_bb[1]) \
+                        > max_merged_area:
+                    continue
+                bb_i = merged_bb
+                ic_i = top_ic + bot_ic
+                used[j] = True
+                changed = True
+            merged.append((bb_i, ic_i))
+        clusters = merged
+    return clusters
+
+
 # ---- Rasterisation + whiteout helpers --------------------------------------
 
 
@@ -1026,6 +1368,18 @@ def extract_page_vector_images(
     clusters = _merge_close_clusters(
         clusters, max_merged_area=_MAX_CLUSTER_AREA_FRACTION * page_area,
     )
+    # Step 1: merge same-row sub-panels (same y-band, small x-gap) confirmed
+    # by a sub-caption line below the combined bbox.
+    clusters = _merge_row_clusters(
+        clusters, page_blocks,
+        max_merged_area=_MAX_CLUSTER_AREA_FRACTION * page_area,
+    )
+    # Step 2: merge vertically-stacked rows confirmed by sub-caption text in
+    # the gap, blocking on figure-caption lines to avoid cross-figure merges.
+    clusters = _merge_sub_figure_clusters(
+        clusters, page_blocks,
+        max_merged_area=_MAX_CLUSTER_AREA_FRACTION * page_area,
+    )
 
     # Container detection: identify thin frame drawings that enclose
     # smaller clusters (canonical horizontal-flow-diagram shape) and
@@ -1044,10 +1398,23 @@ def extract_page_vector_images(
         # Min-dim floor: virtual clusters get the lower
         # _VIRTUAL_MIN_CLUSTER_DIM_PT so an intentionally thin
         # container (e.g. a labels-in-one-row flow diagram) survives.
+        # Tiny-cov bypass: a small cluster with very layered drawings
+        # (cov_sum >= _DIAGRAM_TINY_MIN_COVERAGE) bypasses the regular
+        # floor, dropping to _DIAGRAM_TINY_SUB_FLOOR_PT. Calibrated
+        # against WG21 multi-panel sub-figures (P3127R1 Figure 2/3/4)
+        # where each panel is 34-130pt wide / 47-115pt tall but
+        # carries a clearly-layered drawing signature.
         min_dim = _VIRTUAL_MIN_CLUSTER_DIM_PT if is_virtual else _MIN_CLUSTER_DIM_PT
         if width < min_dim or height < min_dim:
-            reasons[REASON_TOO_SMALL] = reasons.get(REASON_TOO_SMALL, 0) + 1
-            continue
+            if not (
+                width >= _DIAGRAM_TINY_SUB_FLOOR_PT
+                and height >= _DIAGRAM_TINY_SUB_FLOOR_PT
+                and item_count >= _DIAGRAM_TINY_MIN_ITEMS
+                and _drawing_coverage_sum(cluster_bbox, after_edge)
+                    >= _DIAGRAM_TINY_MIN_COVERAGE
+            ):
+                reasons[REASON_TOO_SMALL] = reasons.get(REASON_TOO_SMALL, 0) + 1
+                continue
         if page_area > 0 and width * height >= _MAX_CLUSTER_AREA_FRACTION * page_area:
             # Single-linkage chaining symptom: a page-frame stroke or
             # margin marker pulled the cluster bbox out to span the
@@ -1056,35 +1423,87 @@ def extract_page_vector_images(
             # extent.
             reasons[REASON_BBOX_TOO_LARGE] = reasons.get(REASON_BBOX_TOO_LARGE, 0) + 1
             continue
+        aspect_bypassed = False
         if max(width / height, height / width) >= _MAX_CLUSTER_ASPECT_RATIO:
-            # Strip-shaped cluster - code-block background fill or
-            # shaded callout spanning the page width. Real figures
-            # stay under 3.5:1 in the calibration corpus.
-            # Virtual clusters with dense content (>= _VIRTUAL_MIN_ITEM_COUNT
-            # items) bypass: they represent a populated flow diagram
-            # whose container is intentionally extreme-aspect.
-            if not (is_virtual and item_count >= _VIRTUAL_MIN_ITEM_COUNT):
+            # Strip-shaped cluster: code-block background fill or shaded
+            # callout spanning the page width.
+            #
+            # Safety floor: ``item_count >= _VIRTUAL_MIN_ITEM_COUNT`` (50)
+            # is the LOAD-BEARING threshold. Corpus calibration:
+            #   - Code-block backgrounds and shaded callouts: 1-10 items.
+            #   - Real diagram clusters (merged sub-panel rows produced by
+            #     _merge_row_clusters, populated frame containers from
+            #     container detection): >=50 items.
+            # The 50-item floor applies to ALL extreme-aspect clusters,
+            # not only virtual ones from container detection.
+            #
+            # ``aspect_bypassed`` suppresses TWO gates at line ~1473:
+            #   1. The overlap check (_MAX_TEXT_OVERLAP_FRACTION): merging
+            #      sub-panels into one wide bbox inflates overlap because
+            #      internal labels now lie inside the combined bbox,
+            #      making is_diagram unreliable. The item count is the
+            #      reliable structural signal for these clusters.
+            #   2. The low-overlap item floor (_LOW_OVERLAP_ADMIT_MIN_ITEMS):
+            #      already satisfied (item_count >= 50 >> 30).
+            if item_count < _VIRTUAL_MIN_ITEM_COUNT:
                 reasons[REASON_ASPECT_EXTREME] = reasons.get(REASON_ASPECT_EXTREME, 0) + 1
                 continue
+            aspect_bypassed = True
         if item_count < _MIN_CLUSTER_ITEM_COUNT:
             reasons[REASON_TOO_FEW_ITEMS] = reasons.get(REASON_TOO_FEW_ITEMS, 0) + 1
             continue
         cluster_area = width * height
         overlap = _text_overlap_fraction(cluster_bbox, page_blocks)
-        is_diagram = cluster_area >= _DIAGRAM_MIN_AREA_PT2 and (
-            (
-                item_count >= _DIAGRAM_DENSE_MIN_ITEMS
-                and item_count / cluster_area >= _DIAGRAM_DENSE_MIN_DENSITY
-                and overlap < _DIAGRAM_DENSE_MAX_OVERLAP
+        is_diagram = (
+            cluster_area >= _DIAGRAM_MIN_AREA_PT2 and (
+                (
+                    item_count >= _DIAGRAM_DENSE_MIN_ITEMS
+                    and item_count / cluster_area >= _DIAGRAM_DENSE_MIN_DENSITY
+                    and overlap < _DIAGRAM_DENSE_MAX_OVERLAP
+                )
+                or (
+                    item_count >= _DIAGRAM_SPARSE_MIN_ITEMS
+                    and overlap < _DIAGRAM_SPARSE_MAX_OVERLAP
+                )
             )
-            or (
-                item_count >= _DIAGRAM_SPARSE_MIN_ITEMS
-                and overlap < _DIAGRAM_SPARSE_MAX_OVERLAP
-            )
+        ) or (
+            # Compact-cov bypass: drops the area gate AND the overlap
+            # gate. The sum-of-drawing-coverage signal distinguishes a
+            # data-table figure (whose internal cell numbers inflate
+            # text overlap to ~1.0) from a code-block-style false
+            # positive: real figures have layered drawings (cov_sum
+            # >= 2.0), false positives stay near 1.0. ``after_edge`` is
+            # the page-level drawing list - cov_sum naturally returns
+            # 0 for drawings whose rects don't intersect the cluster.
+            item_count >= _DIAGRAM_COMPACT_MIN_ITEMS
+            and _drawing_coverage_sum(cluster_bbox, after_edge)
+                >= _DIAGRAM_COMPACT_MIN_COVERAGE
+        ) or (
+            # Tiny-cov bypass: same shape as compact-cov but with a
+            # lower item floor (20) and a stricter cov_sum floor (3.0).
+            # Calibrated for sub-figures of multi-panel WG21 figures
+            # (each panel has 22-66 items with cov_sum 3.27-3.96). The
+            # higher cov_sum compensates for the lower item count;
+            # font-as-paths false positives (P4003R1) sit at cov_sum
+            # ~1.3-1.9, well below this floor. The earlier min-dim
+            # sub-floor (30pt) keeps body-text-height font-as-paths
+            # decorations (height 9-13pt) out of contention.
+            item_count >= _DIAGRAM_TINY_MIN_ITEMS
+            and _drawing_coverage_sum(cluster_bbox, after_edge)
+                >= _DIAGRAM_TINY_MIN_COVERAGE
         )
-        if not is_diagram and overlap >= _MAX_TEXT_OVERLAP_FRACTION:
-            reasons[REASON_TEXT_OVERLAP] = reasons.get(REASON_TEXT_OVERLAP, 0) + 1
-            continue
+        if not is_diagram and not aspect_bypassed:
+            if overlap >= _MAX_TEXT_OVERLAP_FRACTION:
+                reasons[REASON_TEXT_OVERLAP] = reasons.get(REASON_TEXT_OVERLAP, 0) + 1
+                continue
+            # Low-overlap admit gate: require enough drawing items to
+            # distinguish a real (but sparse) figure from a low-density
+            # background fill that happens to have low text overlap
+            # (ToC body, code-block background). Clusters that meet
+            # any is_diagram path skip this gate.
+            if item_count < _LOW_OVERLAP_ADMIT_MIN_ITEMS:
+                reasons[REASON_TOO_FEW_ITEMS] = reasons.get(REASON_TOO_FEW_ITEMS, 0) + 1
+                continue
         surviving_clusters.append((cluster_bbox, item_count))
 
     # Page-cluster cap: keep top-of-page survivors, drop the rest.

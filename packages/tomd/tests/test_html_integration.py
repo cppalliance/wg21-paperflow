@@ -1,5 +1,6 @@
 """Integration tests for lib.html.convert_html."""
 
+import re
 from pathlib import Path
 
 from tomd.lib.html import convert_html
@@ -47,6 +48,31 @@ def test_convert_html_unknown_generator_prompts(tmp_path):
     assert "Only content" in md
 
 
+def test_convert_html_body_headings_start_at_h2(tmp_path):
+    # H1-rooted body sections are shifted to H2 (title is the only H1), and a
+    # leading body heading that duplicates the title is dropped even though it
+    # now arrives as H2 rather than H1.
+    html = """<!DOCTYPE html><html><head></head><body>
+<header id="title-block-header">
+<h1 class="title">My Great Paper</h1>
+<table><tr><td>Document #:</td><td>P7R0</td></tr></table>
+</header>
+<h1>My Great Paper</h1>
+<p>Intro.</p>
+<h1>Section One</h1>
+<p>Body.</p>
+<h2>Subsection</h2>
+</body></html>"""
+    path = _write(tmp_path, "shift.html", html)
+    md, _ = convert_html(path)
+    body = md.split("---", 2)[-1]
+    assert not re.search(r"(?m)^# ", body)
+    assert "## Section One" in md
+    assert "### Subsection" in md
+    assert "## My Great Paper" not in md
+    assert md.count("My Great Paper") == 1
+
+
 def test_convert_html_unicode_preserved(tmp_path):
     html = """<!DOCTYPE html><html><body>
 <header id="title-block-header">
@@ -73,6 +99,32 @@ def test_convert_html_metadata_only_empty_body(tmp_path):
     assert prompts is None
     assert md.startswith("---")
     assert "Solo" in md or "solo" in md.lower()
+
+
+def test_convert_html_title_with_embedded_dashes(tmp_path):
+    html = """<!DOCTYPE html>
+<html><head><meta charset="utf-8"/></head><body>
+<header id="title-block-header">
+<h1 class="title">Before --- After</h1>
+<table>
+<tr><td>Document #:</td><td>P8888R0</td></tr>
+<tr><td>Date:</td><td>2026-04-01</td></tr>
+</table>
+</header>
+<p>Paragraph after title.</p>
+</body></html>"""
+    path = _write(tmp_path, "dashes.html", html)
+    md, prompts = convert_html(path)
+    assert prompts is None
+    assert "Before --- After" in md
+    assert "Paragraph after title." in md
+    body_start = md.find("---", 4)
+    assert body_start >= 0
+    body = md[body_start:]
+    closing = body.find("\n---", 1)
+    assert closing >= 0
+    body_text = body[closing + 4 :]
+    assert "# Before --- After" not in body_text
 
 
 def test_convert_html_front_matter_then_body_separator(tmp_path):

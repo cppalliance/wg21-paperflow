@@ -14,17 +14,39 @@ _log = logging.getLogger(__name__)
 
 _TRAILING_PAGE_NUM_RE = re.compile(r"\s+\d{1,4}\s*$")
 _DOT_LEADER_RE = re.compile(r"\s*[.·]{2,}[\s.·]*")
+_SPACED_DOT_LEADER_RE = re.compile(r"(?:\. ){2,}\.")
+# Tighter threshold for TOC *detection* (vs stripping in normalization).
+# 5+ consecutive dots avoids false positives on ellipsis (...) and
+# C++ variadic syntax (Args...) that appear heavily in WG21 papers.
+_DOT_LEADER_DETECT_RE = re.compile(r"[.·]{5,}")
+
+# Canonical Table-of-Contents line shape: a dot leader followed by a trailing
+# page number ("Foo .......... 7"). A bare trailing number is intentionally
+# not sufficient: body headings like "Step 1" / "Phase 2" carry one and must
+# never be treated as TOC entries.
+_TOC_LINE_RE = re.compile(r"[.·]{2,}\s*\d{1,4}\s*$")
 
 _TOC_LABELS = frozenset({
     "table of contents",
+    "table of content",
     "contents",
 })
 
 _WHITESPACE_RE = re.compile(r"\s+")
 
-_MIN_TOC_RUN = 3
+# Minimum length of a contiguous run that counts as a Table of Contents.
+# Public because `pdf/structure.py:drop_leaked_toc_entries` (the
+# companion pass that removes leaked TOC entries that `find_toc_indices`
+# deliberately stops matching, #122) gates on the same run length. Shared
+# so the two "what is a TOC" definitions cannot drift.
+MIN_TOC_RUN = 3
 _MAX_GAP = 3
 _MAX_FUZZY_HEADINGS = 200
+
+# A non-matching gap section is bridged into a TOC run only if its first line
+# is trivial (a short label, a bare number, blank). A real prose paragraph
+# exceeds this and breaks the run instead of being swallowed.
+_MAX_BRIDGE_ENTRY_WORDS = 6
 
 
 def _first_line(text: str) -> str:
@@ -32,7 +54,16 @@ def _first_line(text: str) -> str:
     return text.split("\n")[0].strip()
 
 
-def _normalize_toc_entry(text: str) -> str:
+def has_dot_leader(text: str) -> bool:
+    """Check for dot leaders in any form (compact or spaced).
+
+    Uses _DOT_LEADER_DETECT_RE (5+ dots) instead of _DOT_LEADER_RE (2+)
+    to avoid false positives on ellipsis and C++ variadic syntax.
+    """
+    return bool(_DOT_LEADER_DETECT_RE.search(text) or _SPACED_DOT_LEADER_RE.search(text))
+
+
+def normalize_toc_entry(text: str) -> str:
     """Normalize text for TOC comparison.
 
     Strips trailing page numbers, dot leaders, section number prefixes.
@@ -40,43 +71,103 @@ def _normalize_toc_entry(text: str) -> str:
     """
     text = _first_line(text)
     text = _DOT_LEADER_RE.sub(" ", text)
+    text = _SPACED_DOT_LEADER_RE.sub(" ", text)
     text = _TRAILING_PAGE_NUM_RE.sub("", text)
     text = SECTION_NUM_PREFIX_RE.sub("", text)
     text = _WHITESPACE_RE.sub(" ", text).strip().lower()
     return text
 
 
-def _is_toc_label(text: str) -> bool:
+def is_toc_label(text: str) -> bool:
     """Check if text is a TOC heading label."""
     normalized = text.strip().lower()
     normalized = _WHITESPACE_RE.sub(" ", normalized)
     return normalized in _TOC_LABELS
 
 
+def _toc_structured(text: str) -> bool:
+    """True if the first line is shaped like a TOC line (dot leader + page number).
+
+    This is the one shape that lets a heading-kind section still count as a TOC
+    entry: a genuine numbered TOC line such as "2.1 Foo .......... 7" that
+    section numbering pushed into HEADING classification. A bare trailing
+    number ("Step 1") does not qualify.
+    """
+    return bool(_TOC_LINE_RE.search(_first_line(text)))
+
+
+def _bridgeable(text: str) -> bool:
+    """True if a non-matching gap section is trivial enough to bridge a TOC run.
+
+    Trivial means: blank, or (after stripping any section-number prefix) at most
+    _MAX_BRIDGE_ENTRY_WORDS words with no sentence-terminal punctuation. A real
+    prose paragraph fails this test and breaks the run rather than being
+    swallowed into it.
+    """
+    line = _first_line(text)
+    if not line:
+        return True
+    stripped = SECTION_NUM_PREFIX_RE.sub("", line).strip()
+    if not stripped:
+        return True
+    if stripped[-1] in ".!?":
+        return False
+    return len(stripped.split()) <= _MAX_BRIDGE_ENTRY_WORDS
+
+
 def find_toc_indices(
     texts: list[str],
     headings: set[str],
     structural_hints: list[bool] | None = None,
+    full_texts: list[str] | None = None,
+    is_heading: list[bool] | None = None,
 ) -> set[int]:
     """Return indices of entries that form a Table of Contents.
 
-    texts: ordered list of section texts from the document
+    texts: ordered list of section first-line texts from the document
     headings: set of known heading texts to match against
     structural_hints: optional per-section booleans marking entries that
         look like TOC entries by structure (standalone page number on the
         second line at a consistent x position). Used as a fallback when
         headings is empty, e.g. in headingless wording-only papers.
+    full_texts: optional full section texts (multi-line). When provided,
+        dot-leader detection checks the full text, catching leaders on
+        lines beyond the first.
+    is_heading: optional per-section booleans marking which sections are
+        themselves headings in the body. A heading cannot count as a TOC
+        *match* (it would match itself against the heading set and the
+        gap-fill would then swallow the prose between body headings, deleting
+        the body of short papers) UNLESS its own text is shaped like a TOC
+        line (see _toc_structured), which preserves stripping of a genuine
+        numbered TOC entry that section numbering classified as a heading.
+
+    Production contract: any caller that passes a non-empty `headings` set
+    derived from the document's own headings MUST also pass `is_heading`.
+    Omitting it resurrects the body-deletion bug (every heading self-matches).
+    A debug line is logged when the likely-misuse shape is seen.
 
     Both texts and headings are normalized before comparison. Detects runs
-    of 3+ consecutive matches. Also includes any "Table of Contents" label
-    immediately preceding a run.
+    of MIN_TOC_RUN+ consecutive matches, bridging only trivial gap sections
+    (see _bridgeable). Also includes any "Table of Contents" label immediately
+    preceding a run.
+
+    Companion pass: a heading-kind TOC whose entries lack the dot-leader shape
+    is deliberately *not* matched here (the is_heading guard), so it leaks as
+    empty duplicate headings; `pdf/structure.py:drop_leaked_toc_entries`
+    removes those, gating on the same shared `MIN_TOC_RUN`. The two functions
+    are the structural and the post-structure halves of one "what is a TOC"
+    definition; keep them in sync.
     """
     if not texts:
         return set()
     if not headings and not structural_hints:
         return set()
 
-    norm_headings = {_normalize_toc_entry(h) for h in headings}
+    if headings and is_heading is None:
+        _log.debug("no is_heading supplied; heading self-match guard inactive "
+                   "(%d headings)", len(headings))
+
+    norm_headings = {normalize_toc_entry(h) for h in headings}
     norm_headings.discard("")
 
     # Fast exact-match set covers the common case; fuzzy matching only
@@ -85,7 +176,7 @@ def find_toc_indices(
     _exact_set = frozenset(norm_headings)
 
     def _matches_heading(text: str) -> bool:
-        norm = _normalize_toc_entry(text)
+        norm = normalize_toc_entry(text)
         if not norm:
             return False
         if norm in _exact_set:
@@ -97,15 +188,48 @@ def find_toc_indices(
                 return True
         return False
 
+    # Bare section-number line: digits/dots or single uppercase letter.
+    # When the first line is just a number, try joining with line 2
+    # for heading comparison (handles multi-line TOC entries where
+    # MuPDF splits section number and title onto separate lines).
+    _BARE_NUM_RE = re.compile(r"^(?:[A-Z]|\d+(?:\.\d+)*\.?)$")
+
+    def _multi_line_match(ft_text: str) -> bool:
+        lines = ft_text.split("\n")
+        if len(lines) < 2:
+            return False
+        first = lines[0].strip()
+        if not _BARE_NUM_RE.match(first):
+            return False
+        joined = first + " " + lines[1].strip()
+        return _matches_heading(joined)
+
     matches = []
     for i, text in enumerate(texts):
+        ft = full_texts[i] if full_texts else text
+        # Check dot-leaders per line to avoid false positives on body
+        # paragraphs that happen to contain 5+ dots (ASCII art, code).
+        has_dot = any(has_dot_leader(ln) for ln in ft.split("\n"))
         if norm_headings:
-            matches.append(_matches_heading(_first_line(text)))
+            # A body heading would match itself in the heading set; exclude it
+            # unless its own text is shaped like a TOC line (a genuine numbered
+            # TOC entry classified as a heading).
+            if (is_heading
+                    and i < len(is_heading)
+                    and is_heading[i]
+                    and not _toc_structured(text)):
+                matches.append(False)
+            else:
+                first_match_ok = _matches_heading(_first_line(text))
+                if not first_match_ok and not has_dot:
+                    first_match_ok = _multi_line_match(ft)
+                matches.append(has_dot or first_match_ok)
         else:
             matches.append(
-                bool(structural_hints
-                     and i < len(structural_hints)
-                     and structural_hints[i])
+                has_dot
+                or bool(structural_hints
+                        and i < len(structural_hints)
+                        and structural_hints[i])
             )
 
     # Find the first match - everything before it is pre-TOC (title, metadata)
@@ -134,13 +258,17 @@ def find_toc_indices(
             gap = 0
             run_indices.append(i)
         else:
+            # Only trivial gap sections bridge a run; a real prose paragraph
+            # breaks it rather than being swallowed in as phantom TOC content.
+            if not _bridgeable(texts[i]):
+                break
             gap += 1
             if gap > _MAX_GAP:
                 break
 
     match_count = sum(1 for i in run_indices if matches[i])
     toc_indices: set[int] = set()
-    if match_count >= _MIN_TOC_RUN:
+    if match_count >= MIN_TOC_RUN:
         toc_indices = set(run_indices)
         _log.debug("TOC block: %d entries (%d matched)",
                     len(run_indices), match_count)
@@ -149,7 +277,7 @@ def find_toc_indices(
     if toc_indices:
         first = min(toc_indices)
         prev = first - 1
-        if prev >= 0 and _is_toc_label(_first_line(texts[prev])):
+        if prev >= 0 and is_toc_label(_first_line(texts[prev])):
             toc_indices.add(prev)
             _log.debug("TOC label at index %d", prev)
 

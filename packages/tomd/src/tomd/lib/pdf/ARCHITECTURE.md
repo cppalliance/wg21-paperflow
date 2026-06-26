@@ -52,11 +52,13 @@ Enums:
 
 ### Layer 1: Extraction (8 techniques)
 
-**T0. Document-type early exits**
-- `__init__.py:_is_slide_deck`, `__init__.py:_is_standards_draft`
-- Slide-deck detection: landscape (width > height) AND small (width < 600pt) on 80%+ of pages. Catches presentation PDFs whose navigation sidebars confuse the dual-path extractor.
+**T0. Document-type and readability early exits**
+- `pipeline.py:_is_slide_deck`, `pipeline.py:_is_standards_draft`, `types.py:is_readable`
+- Four skip kinds, all via `PipelineResult.for_skip(SkipReason, ...)`: empty PDF (`page_count == 0`), slide deck, standards draft (page count >= 200), and unreadable extracted text.
+- Slide-deck detection: landscape (width > height) AND small (width < 600pt) on 80%+ of pages, or every page landscape. Catches presentation PDFs whose navigation sidebars confuse the dual-path extractor.
 - Standards-draft detection: page count >= 200. Catches C++ standard drafts (2000+ pages) that are not technical papers.
-- Both return `PipelineResult` with `skipped=True`, empty markdown, and a prompts message identifying the document type.
+- Unreadable gate: after hidden-text stripping, joined MuPDF text must pass `is_readable` (minimum length, alphanumeric ratio, slash density).
+- `_enforce_skip_contract` validates skip invariants on every `run_pipeline` return.
 - Named constants: `_SLIDE_DECK_MAX_WIDTH`, `_SLIDE_DECK_LANDSCAPE_FRACTION`, `_STANDARDS_DRAFT_MIN_PAGES`
 
 **T1. MuPDF dict-path extraction**
@@ -185,7 +187,7 @@ Enums:
 - Removes spatial blocks whose y-center falls within detected table y-ranges (5-unit margin)
 
 **T16. Table section insertion**
-- `__init__.py:convert_pdf`
+- `pipeline.py:run_pipeline`
 - Tables inserted into the section list by page number and y-position ordering
 
 ### Layer 5: Wording Detection (3 techniques)
@@ -218,8 +220,8 @@ Enums:
 - `structure.py:compare_extractions`
 - Stage 1: Per-page word-level multiset similarity. Threshold 0.85.
 - Stage 2: NFC normalization fallback. If word similarity fails, NFC-normalize joined words and compare. Catches Unicode normalization differences.
-- Stage 3: Page-pair window. For uncertain pages, combine with next page and re-check similarity. Catches content shifted across page boundaries.
-- Stage 4: Document-level pool. Combine all remaining uncertain pages and check total similarity. Catches systematic page-assignment differences.
+- Stage 3: Page-pair window. For uncertain pages, combine with next page and re-check similarity. Catches content shifted across page boundaries. When the pair clears the threshold both pages are promoted, but blocks are re-emitted as paragraphs only for pages that actually carried an UNCERTAIN section: a confident pairing partner already has its first-pass PARAGRAPH sections, so re-emitting it would duplicate every block on that page.
+- Stage 4: Document-level pool. Combine all remaining uncertain pages and check total similarity. Catches systematic page-assignment differences. Same uncertain-only re-emission rule as stage 3 (a no-op here, since pooled pages are all uncertain by construction).
 - Stage 5: Tiny-region demotion. Uncertain sections with fewer than 10 words in the shorter version -> demoted to PARAGRAPH with LOW confidence.
 
 ### Layer 6: WG21 Metadata (2 techniques)
@@ -277,16 +279,25 @@ Enums:
 - Body size: most common font size by character count (fallback 11.0)
 - Font ranking: sizes > body * 1.05 ranked descending (rank 1 = largest = shallowest heading)
 
-### Layer 8: TOC Detection (1 technique)
+### Layer 8: TOC Detection (2 techniques)
 
 **T29. TOC detection with exact-match + fuzzy fallback**
 - `toc.py:find_toc_indices`
 - Normalizes entries: strips dot leaders, page numbers, section prefixes, collapses whitespace
 - Fast path: exact-match set lookup (`_exact_set`) against normalized headings. O(1) per section.
 - Fuzzy fallback: only when heading count is below `_MAX_FUZZY_HEADINGS` (200). Uses dual-algorithm OR-gate (SequenceMatcher >= 0.75 OR Jaccard >= 0.65). Without this guard, large documents (2000+ pages, 40k sections) hang on O(sections * headings) fuzzy comparisons.
-- Requires 3+ consecutive matches. Bridges gaps up to 3 non-matching entries.
+- Requires 3+ consecutive matches. Bridges gaps up to 3 non-matching entries, but only when each bridged entry is trivial (`_bridgeable`: blank, a bare/numeric label, or <= `_MAX_BRIDGE_ENTRY_WORDS` words with no terminal punctuation). A real prose paragraph breaks the run instead of being swallowed.
+- A section that is itself a body heading (`is_heading[i]`) is excluded from matching, *unless* its own text is shaped like a TOC line (`_TOC_LINE_RE`: a dot leader followed by a page number, e.g. `Foo .... 7`). Without this, every body heading matched itself in the reference set and the gap-fill deleted the prose between headings, destroying the body of short papers. The shipped predicate keys on the dot-leader-then-page-number shape, not a bare trailing number, so body headings like `Step 1` / `Phase 2` are never eligible.
 - Stops on duplicate first-line (second occurrence = real heading, not TOC entry)
 - Includes preceding "Table of Contents" / "Contents" label
+
+**T29b. Leaked mixed-kind TOC removal**
+- `structure.py:drop_leaked_toc_entries`, run after the T29 strip and the IMAGE filter, before emit
+- T29 deliberately does not match a heading-kind TOC entry that lacks the dot-leader shape (the `is_heading` guard, to avoid the body-deletion class). Such a TOC therefore leaks, and it leaks as a *mix* of kinds: some entries survive as empty duplicate `HEADING`s, others as short title-like `PARAGRAPH`/`LIST` sections (`3. The Rationale for Unification`). The heading-only predecessor caught only the heading-kind entries; this pass removes the whole block.
+- The single discriminator across both *entry* kinds is **recurrence as a later heading**. A `HEADING` is an entry when it is empty and its normalized title recurs later; a `PARAGRAPH`/`LIST` is an entry when it is title-like (at most `_TOC_ENTRY_MAX_LINES` text lines, derived from `sec.text`) and its first-line title recurs later. A heading's emptiness bridges trivial fragments *and* title-like non-headings, so `## 3.7 Summary` sitting over a `LIST`-kind entry still counts as empty.
+- Removal is a run of entries of length at least `MIN_TOC_RUN` (shared with `toc.py`) that clears the **heading anchor** (at least one empty-heading entry). A run whose heading subsequence strictly deepens is rejected (`15`/`15.1`/`15.1.1` clause-container stack; applies to all-heading and mixed runs alike). Also drops in-span trivial fragments and a preceding `Table of Contents` label whether paragraph-kind or heading-kind (P4003R1's leaked `### Table of Contents`).
+- **Relaxed bridging.** A real leaked TOC is often *fragmented* by non-recurring **stragglers**: title-like paragraph/list lines whose body heading text drifted, and once-only empty headings. The strict variant broke its run at each; this pass bridges stragglers as in-span run members so the block coalesces and removes whole (P4016R0's ~146-entry appendix dump, P4007R0's once-only `8.1`-`8.4` objections, both previously left as a residual). The relaxation is gated by five interacting layers, and the body-safety is the *conjunction*, not any single layer: (1) the **heading anchor** above; (2) a **front-region bound** (`body_start` = the first non-recurring, non-trivial, `>= 2`-line `PARAGRAPH`) so straggler bridging fires only in the front matter, never in the body where repeated spec boilerplate forms dense false runs (this is the guard against p2846r6's `Effects:` wording loss); (3) a **recurrence-density floor** (`_TOC_RUN_MIN_RECUR_FRACTION`, fraction of counted members that recur as headings); (4) the **in-span / trailing rule** (only stragglers strictly between the first and last *entry* are removed; trailing stragglers the scan bridged are kept, protecting a real section and real single-line abstract prose right after the TOC, e.g. P4016R0's idx150/151); (5) a **forward-reference gate** on paragraph/list stragglers only (`_straggler_forward_references`: removed only if the normalized title appears as a later heading via bidirectional containment, so a unique body sentence is never deleted; empty-heading stragglers are exempt because heading text drifts between TOC and body and a hard gate there regresses P4007R0).
+- The gates are decomposed into independently unit-tested predicates (`_is_title_like_straggler`, `_is_empty_heading`, `_straggler_forward_references`, `_run_recurrence_density`, `_compute_body_start`) so a refactor cannot silently drop one layer's contribution. Not body-safe by construction for the empty-heading-straggler class (heading-level loss only), which the corpus anchor/density/front/in-span gates plus a standing manual heading review cover; the paragraph-straggler (prose) class is gated automatically by forward-reference. `_TOC_ENTRY_MAX_BODY_CHARS`, `_TOC_ENTRY_MAX_LINES`, `_TOC_RUN_MIN_RECUR_FRACTION`, `_TOC_STRAGGLER_MIN_TITLE_LEN`, and `MIN_TOC_RUN` are corpus-tuned; under-removal leaves a cosmetic remnant (a forward-ref-failing paragraph straggler is bridged-but-kept, leaving at most one stray line). Recall limit: an entry whose body counterpart is *not* a recurrence-matching heading carries no signal and is left in place.
 
 ### Layer 9: Emission (8 techniques)
 
@@ -330,10 +341,10 @@ Enums:
 ### Layer 10: Pipeline Orchestration (1 technique)
 
 **T38. Pipeline execution**
-- `__init__.py:convert_pdf`
-- Strict ordering of all 13 steps. Early exit on empty PDF or unreadable text.
+- `pipeline.py:run_pipeline`
+- Strict ordering of all pipeline steps. Early exit via `SkipReason` on empty PDF, slide deck, standards draft, or unreadable text.
 - Metadata merging: `{**structure_metadata, **wg21_metadata}` - WG21 metadata takes precedence.
-- TOC heading collection: only HEADING sections used as the reference set for TOC matching.
+- TOC heading collection: only HEADING sections used as the reference set for TOC matching. The per-section `is_heading` flags are also passed to `find_toc_indices` so a body heading cannot match itself out of existence.
 
 ### Layer 11: Quality Assurance (1 technique)
 
@@ -342,14 +353,15 @@ Enums:
 - Design constraint: takes ONLY a Markdown string. No page count, no file format, no pipeline internals. Every signal is derived from the text via mistune AST parsing. This keeps scoring format-agnostic and decoupled from the converter. Do not add parameters that leak converter state.
 - Signals: heading count, code block count, list/table count, front-matter field count, uncertain region markers (`<!-- tomd:uncertain -->`), unfenced code lines (C++ syntax patterns in paragraphs), paragraph count, structural variety
 - "Long document" threshold (`_LONG_DOC_PARAGRAPHS = 10`) gates penalties that only make sense for substantial documents (no-headings, low-variety)
-- `run_qa_report` handles batch execution with parallel workers and straggler timeout
+- `run_qa_batch` handles batch execution via `lib/batch.run_parallel_batch` with parallel workers and straggler timeout; `format_qa_report` formats stdout output (CLI-owned)
 
 ## Module Map
 
 | Module | Responsibility | Public API | Lines |
 |--------|---------------|------------|------:|
-| `__init__.py` | Pipeline orchestration, slide-deck detection | `convert_pdf`, `run_pipeline`, `PipelineResult`, `ExtractedImage` | ~295 |
-| `types.py` | Data model, enums, constants | Span, Line, Block, Section, SectionKind, Confidence, is_readable + shared constants | ~252 |
+| `pipeline.py` | Pipeline orchestration, skip contract, slide-deck detection | `run_pipeline`, `PipelineResult`, `ExtractedImage` | ~1100 |
+| `__init__.py` | Re-exports | `run_pipeline`, `PipelineResult`, `SkipReason`, `ExtractedImage` | ~25 |
+| `types.py` | Data model, enums, constants | Span, Line, Block, Section, SectionKind, Confidence, SkipReason, is_readable + shared constants | ~280 |
 | `extract.py` | Dual-path text extraction | `extract_mupdf`, `extract_spatial`, `collect_links`, `attach_links` | ~249 |
 | `images.py` | Resource-Dictionary path: embedded raster extraction | `ExtractedImage`, `ExtractionResult`, `extract_page_images`, `finalize_extraction` | ~250 |
 | `mono.py` | Monospace font detection | `classify_monospace`, `propagate_monospace` | ~222 |
@@ -360,7 +372,7 @@ Enums:
 | `structure.py` | Comparison, heading/list/code classification | `compare_extractions`, `structure_sections` | ~939 |
 | `emit.py` | Markdown and prompts generation | `emit_markdown`, `emit_prompts` | ~401 |
 | `wg21.py` | WG21 metadata extraction | `extract_metadata_from_blocks` | ~199 |
-| `qa.py` | Markdown QA scoring (mistune AST) | `compute_metrics`, `run_qa_report` | ~326 |
+| `qa.py` | Markdown QA scoring (mistune AST) | `compute_metrics`, `run_qa_batch`, `format_qa_report` | ~326 |
 | `similarity.py` | Fuzzy string comparison | `similar` | ~66 |
 | `toc.py` | TOC detection and removal | `find_toc_indices` | ~159 |
 | **Total** | | **24 public functions** | **~4132** |

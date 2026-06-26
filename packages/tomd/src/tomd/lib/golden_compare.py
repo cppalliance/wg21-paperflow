@@ -23,7 +23,7 @@ from dataclasses import dataclass, field
 
 import mistune
 
-from tomd.lib.shared import FRONT_MATTER_ORDER
+from tomd.lib.metadata_yaml.format import FRONT_MATTER_ORDER
 from tomd.lib.similarity import word_jaccard
 
 _AST = mistune.create_markdown(renderer="ast", plugins=["table"])

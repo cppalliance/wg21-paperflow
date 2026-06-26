@@ -495,6 +495,17 @@ def test_store_and_get_paper_citations(store: SqliteBackend):
     assert rows[1].count == 2
 
 
+def test_get_incoming_citations(store: SqliteBackend):
+    store.store_paper_citations("P1", [_make_paper_citation("P9", 3)])
+    store.store_paper_citations("P2", [_make_paper_citation("P9", 1)])
+    store.store_paper_citations("P3", [_make_paper_citation("P8", 2)])
+
+    rows = store.get_incoming_citations("P9")
+    assert [(r.paper_id, r.count) for r in rows] == [("P1", 3), ("P2", 1)]
+
+    assert store.get_incoming_citations("P-missing") == []
+
+
 def test_store_replaces_previous(store: SqliteBackend):
     store.store_claims("P1", [_make_claim(text="old", uid=1)])
     assert len(store.get_claims("P1")) == 1
@@ -788,3 +799,69 @@ def test_clear_downstream_outputs_no_op_for_unknown_paper(
 
     for table in _ASSAY_TABLES:
         assert _count(store, table, "P1") == 1
+
+
+def test_clear_downstream_outputs_wipes_citations(store: SqliteBackend):
+    """``clear_downstream_outputs`` deletes paper_citations rows and resets
+    ``citations_extracted_at`` when the stamp is set."""
+    store.upsert_year("2026", [{"paper_id": "P1"}, {"paper_id": "P2"}])
+    store.write_paper_md("P1", "Cites P2000R0.\n")
+    store.write_paper_md("P2", "Cites P3000R0.\n")
+
+    class _Ref:
+        def __init__(self, pid, count=1):
+            self.paper_id = pid
+            self.count = count
+
+    store.store_paper_citations("P1", [_Ref("P2000R0")])
+    store.store_paper_citations("P2", [_Ref("P3000R0")])
+
+    assert store.get_meta("P1").citations_extracted_at != ""
+    assert store.get_paper_citations("P1") != []
+
+    cleared = store.clear_downstream_outputs("P1")
+    assert cleared.citations is True
+
+    assert store.get_meta("P1").citations_extracted_at == ""
+    assert store.get_paper_citations("P1") == []
+
+    # Unrelated paper must be untouched.
+    assert store.get_paper_citations("P2") != []
+
+
+def test_clear_downstream_outputs_no_citations_no_stamp_is_noop(
+    store: SqliteBackend,
+):
+    """A paper with no citation rows and no stamp reports citations=False."""
+    store.upsert_year("2026", [{"paper_id": "P1"}])
+
+    cleared = store.clear_downstream_outputs("P1")
+    assert cleared.citations is False
+
+
+def test_clear_downstream_outputs_clears_orphan_citation_rows(
+    store: SqliteBackend,
+):
+    """Rows present but stamp empty (migration scenario) are still cleared.
+
+    Databases migrated from before ``citations_extracted_at`` was added have
+    ``paper_citations`` rows with an empty stamp.  ``clear_downstream_outputs``
+    must catch these via the ``has_citation_rows`` path so that a re-convert
+    does not leave stale graph edges behind.
+    """
+    store.upsert_year("2026", [{"paper_id": "P1"}])
+    # Insert rows directly, bypassing store_paper_citations, so the stamp
+    # stays empty — exactly the state a pre-migration database is in.
+    with store._conn:
+        store._conn.execute(
+            "INSERT INTO paper_citations (paper_id, cited_paper_id, count) "
+            "VALUES ('P1', 'P9999R0', 1)"
+        )
+
+    assert store.get_meta("P1").citations_extracted_at == ""
+    assert store.get_paper_citations("P1") != []
+
+    cleared = store.clear_downstream_outputs("P1")
+    assert cleared.citations is True
+    assert store.get_paper_citations("P1") == []
+    assert store.get_meta("P1").citations_extracted_at == ""
