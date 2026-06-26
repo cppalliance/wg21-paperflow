@@ -24,6 +24,30 @@ after this first data-model/skeleton PR; it is not a backlog mirror.
   CLI, blob sync, and an end-to-end SQLite -> Postgres round-trip test.
 - Mechanical person observation and observability (structlog + prometheus).
 
+## Contracts to pin when those milestones land (avoid later rework)
+
+These foundation contracts are intentionally not frozen in the data-model PR; each must be
+honored by the milestone that builds the corresponding behavior, so emitters/consumers and
+persisted data do not drift:
+
+- **Event payloads (events/outbox milestone):** pin the per-kind payload keys verbatim from
+  [1-collection.md](../foundation/1-collection.md) (e.g. `content_changed` ->
+  `url_id`/`old_hash`/`new_hash`) and the `origin` key (`live`/`backfill`) from
+  [ADR 0007](../decisions/0007-backfill-event-provenance.md), via typed builders, before any
+  events are emitted.
+- **Cross-source identity (dedup milestone):** pin the `canonical_id` namespace set and the
+  `fingerprint = sha256(canonical_url || normalized_title || first_500_chars)` formula in a
+  builder; populate `ContentRow.content_hash_fuzzy` (the fuzzy near-exact dedup hash).
+- **Change detection (orchestrator/change milestone):** implement the foundation's
+  cosmetic-vs-real distinction (cosmetic -> update timestamps only, no `url_content_versions`
+  row, no event; real -> new version + events). `ChangeKind` is an in-process, non-persisted
+  enum today and may be reconciled then.
+- **Cursor resync (reflector adapter milestone):** extend `ByteOffset` with optional resync
+  fields (additive defaults so persisted `cursor_json` stays backward-compatible).
+- **Deferred people-store rows/fields:** `person_alias_resolution` (merge/split audit) and
+  the dossier-side `person.tsv`/`nationality`/`location` are intelligence/people-store
+  concerns; add them when those layers land.
+
 ## Beyond collection (downstream layers)
 
 Added later as sibling subpackages under `herald.`, each specified in the foundation docs and

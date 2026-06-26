@@ -409,6 +409,7 @@ class Identity:
 
     content_hash_text: str
     content_hash_raw: str
+    content_hash_fuzzy: str | None = None
     canonical_id: str | None = None
     fingerprint: str | None = None
 
@@ -516,10 +517,13 @@ class UrlRow:
 @dataclass(frozen=True)
 class ContentRow:
     """A `contents` row, keyed by the sha256 of the extracted text. Extended with the
-    cross-source identity fields ``canonical_id`` and ``fingerprint``."""
+    cross-source identity fields ``canonical_id`` and ``fingerprint``. ``content_hash_text``
+    is the strict text hash; ``content_hash_fuzzy`` is the fuzzy near-exact dedup hash
+    (1-collection.md Deduplication)."""
 
     content_hash_text: str
     content_hash_raw: str
+    content_hash_fuzzy: str | None = None
     title: str | None = None
     byline: str | None = None
     publish_date: str | None = None
@@ -619,6 +623,16 @@ class PersonHandleRow:
 
 
 @dataclass(frozen=True)
+class PersonEmailDomainRow:
+    """A person's known email domain. The mechanical observer treats an email-domain +
+    exact family-name match as a strong identity signal (2-people.md)."""
+
+    person_id: str
+    domain: str
+    id: int | None = None
+
+
+@dataclass(frozen=True)
 class PersonPendingCandidateRow:
     observed_name: str
     observed_context: str | None = None
@@ -642,6 +656,17 @@ class PersonEventRow:
     article_id: int | None = None
     created_at: str | None = None
     event_id: int | None = None
+
+
+@dataclass(frozen=True)
+class OrganizationRow:
+    """An organization a person can be affiliated with (FK target of
+    ``PersonAffiliationRow.organization_id``; 2-people.md)."""
+
+    name: str
+    canonical_name: str | None = None
+    kind: str | None = None
+    id: int | None = None
 
 
 @dataclass(frozen=True)
@@ -729,8 +754,10 @@ __all__ = [
     "PersonRow",
     "PersonNameVariantRow",
     "PersonHandleRow",
+    "PersonEmailDomainRow",
     "PersonPendingCandidateRow",
     "PersonEventRow",
+    "OrganizationRow",
     "PersonAffiliationRow",
     "PersonCommitteeRoleRow",
     "WatchRow",

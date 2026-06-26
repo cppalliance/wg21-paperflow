@@ -59,10 +59,10 @@ class ChangeKind(StrEnum):
 class SourceKind(StrEnum):
     """Pollable source adapter kinds (the clean adapter vocabulary).
 
-    ``web``/``rss``/``sitemap``/``mbox``/``mcp``/``reflector`` are the spec set; the API
-    adapters (``github``/``discourse``/``discord``/``reddit``) extend it for the sources
-    the principal collects (recorded as a deviation). Group container kinds are NOT here -
-    see :class:`GroupKind`.
+    ``web``/``rss``/``sitemap``/``mbox``/``mcp``/``reflector``/``slack`` are the spec set;
+    the API adapters (``github``/``discourse``/``discord``/``reddit``) extend it for the
+    sources the principal collects (recorded as a deviation). Group container kinds are NOT
+    here - see :class:`GroupKind`.
     """
 
     WEB = "web"
@@ -71,6 +71,7 @@ class SourceKind(StrEnum):
     MBOX = "mbox"
     REFLECTOR = "reflector"
     MCP = "mcp"
+    SLACK = "slack"
     GITHUB = "github"
     DISCOURSE = "discourse"
     DISCORD = "discord"

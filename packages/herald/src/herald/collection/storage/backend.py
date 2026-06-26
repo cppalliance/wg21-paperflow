@@ -35,6 +35,11 @@ from herald.collection.records import (
     Cursor,
     EventRow,
     MetricSnapshotRow,
+    OrganizationRow,
+    PersonAffiliationRow,
+    PersonCommitteeRoleRow,
+    PersonEmailDomainRow,
+    PersonEventRow,
     PersonHandleRow,
     PersonNameVariantRow,
     PersonPendingCandidateRow,
@@ -169,8 +174,10 @@ class StorageBackend(ABC):
 
     @abstractmethod
     def emit_events(self, events: Sequence[EventRow]) -> list[int]:
-        """Append events to the outbox outside an item commit (e.g. ``source_added``);
-        return the assigned ids."""
+        """Append events to the outbox outside an item commit (e.g. a batch reprocess
+        emitting ``content_re_extracted``); return the assigned ids. The seven canonical
+        ``EventKind``s are fixed; source-registry changes are ``sources`` row mutations
+        (e.g. ``set_source_state``), not outbox events."""
 
     @abstractmethod
     def read_events(self, *, after_id: int = 0, limit: int = 1000) -> list[EventRow]:
@@ -217,6 +224,27 @@ class StorageBackend(ABC):
     @abstractmethod
     def find_name_variants(self, variant_text_normalized: str) -> list[PersonNameVariantRow]:
         """Return person name variants whose normalized text matches."""
+
+    @abstractmethod
+    def find_persons_by_email_domain(self, domain: str) -> list[PersonEmailDomainRow]:
+        """Return the person/email-domain links for a domain (a strong-match input for the
+        mechanical observer: email-domain + exact family name)."""
+
+    @abstractmethod
+    def upsert_organization(self, org: OrganizationRow) -> int:
+        """Insert or update an organization (FK target for affiliations); return its id."""
+
+    @abstractmethod
+    def record_person_event(self, event: PersonEventRow) -> int:
+        """Append a person event after identity resolution confirms the match; return its id."""
+
+    @abstractmethod
+    def update_affiliation(self, affiliation: PersonAffiliationRow) -> None:
+        """Insert or update a person's organizational affiliation."""
+
+    @abstractmethod
+    def update_committee_role(self, role: PersonCommitteeRoleRow) -> None:
+        """Insert or update a person's committee role."""
 
     # -- cross-instance interchange seam (implemented in the migration PR) --
 

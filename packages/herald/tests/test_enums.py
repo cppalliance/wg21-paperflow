@@ -100,6 +100,7 @@ def test_full_member_sets_are_pinned() -> None:
         "mbox",
         "reflector",
         "mcp",
+        "slack",
         "github",
         "discourse",
         "discord",

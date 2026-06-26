@@ -11,6 +11,7 @@ cursor, window) is stable.
 | `rss`        | Discovered | conditional-GET   | OpaqueToken     | CurrentOnly            | public     |
 | `mbox`       | Fetched    | mbox byte-offset  | ByteOffset      | ByteRange (10MB/sweep) | public     |
 | `reflector`  | Fetched    | mbox byte-offset  | ByteOffset      | ByteRange (10MB/sweep) | private    |
+| `slack`      | Fetched    | api-native        | Timestamp       | Temporal (since=today) | restricted |
 | `github`     | Fetched    | api-native        | Composite       | Temporal (since=-90d)  | public     |
 | `discourse`  | Fetched    | api-native        | Timestamp       | Temporal (since=-90d)  | public     |
 | `discord`    | Fetched    | api-native        | MonotonicId     | Temporal (since=today) | private    |

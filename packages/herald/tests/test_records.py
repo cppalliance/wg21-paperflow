@@ -234,3 +234,20 @@ def test_result_types_construct() -> None:
     assert fr.outcome == "ok"
     assert er.text == "body"
     assert idn.canonical_id == "gh:x/y#1"
+
+
+# -- person/organization rows + fuzzy hash --------------------------------
+
+
+def test_organization_and_email_domain_rows() -> None:
+    org = r.OrganizationRow(name="Example Corp")
+    dom = r.PersonEmailDomainRow(person_id="p1", domain="example.org")
+    assert org.canonical_name is None and org.kind is None and org.id is None
+    assert dom.person_id == "p1" and dom.domain == "example.org" and dom.id is None
+
+
+def test_fuzzy_text_hash_defaults_none() -> None:
+    content = r.ContentRow(content_hash_text="a" * 64, content_hash_raw="b" * 64)
+    idn = r.Identity(content_hash_text="a" * 64, content_hash_raw="b" * 64)
+    assert content.content_hash_fuzzy is None
+    assert idn.content_hash_fuzzy is None

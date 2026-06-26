@@ -57,9 +57,12 @@ class SourceAdapter(Protocol):
         self,
         cursor: Cursor | None,
         *,
-        window: CollectionWindow,
+        window: CollectionWindow | None = None,
     ) -> AsyncIterator[PolledItem]:
-        """Yield items newer than ``cursor``, bounded by ``window``."""
+        """Yield items newer than ``cursor``, bounded by ``window``.
+
+        ``window=None`` means "use the source's stored window" (ADR-0005).
+        """
         ...
 
 
