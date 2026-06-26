@@ -1,0 +1,321 @@
+#
+# Copyright (c) 2026 Vinnie Falco (vinnie.falco@gmail.com)
+#
+# Distributed under the Boost Software License, Version 1.0. (See accompanying
+# file LICENSE_1_0.txt or copy at http://www.boost.org/LICENSE_1_0.txt)
+#
+
+"""Stage 3: hypothesis catalog and scoring."""
+
+from __future__ import annotations
+
+import re
+from dataclasses import dataclass
+
+from pipeline.classifier_backends import ClassifierBackend, NliCrossEncoderBackend
+from pipeline.nli_batch import NLI_ENTAILMENT_THRESHOLD, score_entailment_pairs
+from pipeline.paper_routing.sections import line_section_map, section_for_sentence
+from pipeline.paper_routing.split import split_sentences
+from pipeline.paper_routing.types import Sentence
+
+_D1_RE = re.compile(r"<\s*[a-z_][a-z0-9_]*\s*>")
+_D2_RE = re.compile(r"\b\d{1,2}\.\d+(?:\.\d+)*\s+\[[\w.]+\]")
+_D3_RE = re.compile(
+    r"\bstd::|"
+    r"\b\w+_v\b|\b\w+_t\b|"
+    r"\b(is_same|is_convertible|tuple_size|decay_t|enable_if|type_traits)\b",
+    re.IGNORECASE,
+)
+_D4_RE = re.compile(r"(?i)\bnamespace\s+std\b|standard\s+library\s+should\s+be\s+updated")
+_D8_RE = re.compile(
+    r"\[(?:expr|dcl|class|stmt|decl|basic|conv|temp|cpp|lex)\.[\w.]+\]|"
+    r"\b(?:[1-9]|1[0-6])\.\d+(?:\.\d+)*\s+\[",
+    re.IGNORECASE,
+)
+_D9_RE = re.compile(
+    r"(?i)\b(concepts?|modules?|coroutines?|structured\s+bindings?|constexpr|"
+    r"variable\s+templates?|ranges?|attributes?|lambdas?)\b",
+)
+_M1_RE = re.compile(
+    r"(?i)\b(proposal\s+to\s+add|we\s+propose|this\s+paper\s+introduces?|this\s+proposal\s+adds?)\b",
+)
+_M2_RE = re.compile(
+    r"(?i)\b(should\s+be\s+changed|we\s+modify|updated\s+accordingly)\b",
+)
+_M5_RE = re.compile(r"(?i)\b(_v\s+suffix|_t\s+suffix|naming\s+convention)\b")
+_M6_RE = re.compile(r"(?i)\b(superior\s+to|compared\s+to|alternative\s+approach)\b")
+_M7_RE = re.compile(
+    r"(?i)\b(simple\s+to\s+learn|less\s+verbose|easier\s+to|unintuitive)\b",
+)
+_M9_RE = re.compile(r"(?i)\b(pure\s+extension|no\s+breaking\s+changes?|backward\s+compatible)\b")
+_M10_RE = re.compile(
+    r"(?i)\b(does(?:n't| not)\s+(?:touch|affect)|limited\s+to|out\s+of\s+scope)\b",
+)
+_M13_RE = re.compile(
+    r"(?i)\b(zero\s+overhead|compile[- ]time\s+cost|no\s+runtime\s+penalty)\b",
+)
+_W1_RE = re.compile(
+    r"(?i)\b(shall\b|Effects:|Returns:|Mandates:|Preconditions:)\b",
+)
+_W2_RE = re.compile(
+    r"(?i)\b(add\s+the\s+following|modify\s+paragraph|strike\b|insert\s+before)\b|(?:,\s*)?add:\s*$",
+)
+_W3_RE = re.compile(r"\b\d{1,2}\.\d+(?:\.\d+)*\s+\[[\w.]+\].*(?:modify|add)", re.IGNORECASE)
+_S3_RE = re.compile(
+    r"(?i)\b(does(?:n't| not)\s+affect\s+existing\s+user\s+code|migration\s+path)\b",
+)
+
+
+@dataclass(frozen=True)
+class Hypothesis:
+    """One binary routing hypothesis."""
+
+    id: str
+    name: str
+    axis: str
+    regex: re.Pattern[str] | None
+    nli_text: str | None
+
+    def matches_regex(self, sentence: str) -> bool:
+        return self.regex is not None and self.regex.search(sentence) is not None
+
+
+def _h(
+    hid: str,
+    name: str,
+    axis: str,
+    *,
+    regex: re.Pattern[str] | None = None,
+    nli_text: str | None = None,
+) -> Hypothesis:
+    return Hypothesis(id=hid, name=name, axis=axis, regex=regex, nli_text=nli_text)
+
+
+CATALOG: tuple[Hypothesis, ...] = (
+    _h("D1", "REFERENCES_LIBRARY_HEADER", "library_domain", regex=_D1_RE),
+    _h("D2", "REFERENCES_LIBRARY_SECTION", "library_domain", regex=_D2_RE),
+    _h("D3", "NAMES_STD_ENTITY", "library_domain", regex=_D3_RE),
+    _h("D4", "NAMESPACE_STD_MUTATION", "library_domain", regex=_D4_RE),
+    _h(
+        "D5",
+        "REFERENCES_LWG_LEWG",
+        "library_domain",
+        nli_text="The sentence references an LWG or LEWG issue, defect report, or prior library paper.",
+    ),
+    _h(
+        "D6",
+        "REFERENCES_LIBRARY_CONCEPT",
+        "library_domain",
+        nli_text="The sentence discusses a standard library concept or named requirement.",
+    ),
+    _h(
+        "D7",
+        "REFERENCES_LIBRARY_CUSTOMIZATION",
+        "library_domain",
+        nli_text="The sentence discusses customization points, ADL-based extension, or trait specialization.",
+    ),
+    _h("D8", "REFERENCES_CORE_SECTION", "language_domain", regex=_D8_RE),
+    _h("D9", "NAMES_LANGUAGE_FEATURE", "language_domain", regex=_D9_RE),
+    _h(
+        "D10",
+        "GRAMMAR_PRODUCTION",
+        "language_domain",
+        nli_text="The sentence contains or proposes a grammar production in BNF style.",
+    ),
+    _h(
+        "D11",
+        "OVERLOAD_RESOLUTION",
+        "language_domain",
+        nli_text="The sentence discusses overload resolution, ADL, or name lookup rules.",
+    ),
+    _h(
+        "D12",
+        "TEMPLATE_INSTANTIATION",
+        "language_domain",
+        nli_text="The sentence discusses template instantiation, specialization rules, or SFINAE.",
+    ),
+    _h(
+        "D13",
+        "LIFETIME_SEMANTICS",
+        "language_domain",
+        nli_text="The sentence discusses object lifetime, storage duration, or destruction order.",
+    ),
+    _h(
+        "D14",
+        "REFERENCES_EWG_CWG",
+        "language_domain",
+        nli_text="The sentence references an EWG or CWG issue, defect report, or prior language paper.",
+    ),
+    _h(
+        "D15",
+        "TYPE_SYSTEM_RULES",
+        "language_domain",
+        nli_text="The sentence discusses type deduction, conversion sequences, or type relationships.",
+    ),
+    _h("M1", "PROPOSES_ADDITION", "design_mode", regex=_M1_RE),
+    _h("M2", "PROPOSES_MODIFICATION", "design_mode", regex=_M2_RE),
+    _h(
+        "M3",
+        "PROPOSES_REMOVAL",
+        "design_mode",
+        nli_text="The sentence proposes deprecating or removing something from the standard.",
+    ),
+    _h(
+        "M4",
+        "DESIGN_RATIONALE",
+        "design_mode",
+        nli_text="The sentence explains why a design choice was made.",
+    ),
+    _h("M5", "NAMING_CONVENTION", "design_mode", regex=_M5_RE),
+    _h("M6", "COMPARATIVE_EVALUATION", "design_mode", regex=_M6_RE),
+    _h("M7", "USER_ERGONOMICS", "design_mode", regex=_M7_RE),
+    _h(
+        "M8",
+        "API_SURFACE_DESCRIPTION",
+        "design_mode",
+        nli_text="The sentence describes the shape of a proposed interface or API.",
+    ),
+    _h("M9", "PURE_EXTENSION_CLAIM", "design_mode", regex=_M9_RE),
+    _h("M10", "SCOPE_BOUNDARY", "design_mode", regex=_M10_RE),
+    _h(
+        "M11",
+        "IMPLEMENTATION_EVIDENCE",
+        "design_mode",
+        nli_text="The sentence reports implementation experience or successful compilation.",
+    ),
+    _h(
+        "M12",
+        "EXISTING_PRACTICE",
+        "design_mode",
+        nli_text="The sentence appeals to existing practice in real-world codebases or other languages.",
+    ),
+    _h("M13", "PERFORMANCE_ARGUMENT", "design_mode", regex=_M13_RE),
+    _h("W1", "NORMATIVE_SPECIFICATION", "wording_mode", regex=_W1_RE),
+    _h("W2", "WORDING_DIRECTIVE", "wording_mode", regex=_W2_RE),
+    _h("W3", "STABLE_NAME_EDIT", "wording_mode", regex=_W3_RE),
+    _h(
+        "W4",
+        "TABLE_MODIFICATION",
+        "wording_mode",
+        nli_text="The sentence proposes changes to a table in the standard.",
+    ),
+    _h(
+        "W5",
+        "FEATURE_TEST_MACRO",
+        "wording_mode",
+        nli_text="The sentence proposes or modifies a feature-test macro.",
+    ),
+    _h("S1", "AUDIENCE_METADATA", "structural"),
+    _h(
+        "S2",
+        "CROSS_REFERENCE_PAPER",
+        "structural",
+        nli_text="The sentence references another WG21 paper by document number.",
+    ),
+    _h("S3", "BACKWARD_COMPATIBILITY", "structural", regex=_S3_RE),
+    _h(
+        "S4",
+        "ABI_DISCUSSION",
+        "structural",
+        nli_text="The sentence discusses ABI stability or binary compatibility.",
+    ),
+    _h(
+        "S5",
+        "POLL_RESULT",
+        "structural",
+        nli_text="The sentence reports the result of a committee poll or straw poll.",
+    ),
+)
+
+LIBRARY_DOMAIN = frozenset(h.id for h in CATALOG if h.axis == "library_domain")
+LANGUAGE_DOMAIN = frozenset(h.id for h in CATALOG if h.axis == "language_domain")
+DESIGN_MODE = frozenset(h.id for h in CATALOG if h.axis == "design_mode")
+WORDING_MODE = frozenset(h.id for h in CATALOG if h.axis == "wording_mode")
+PERFORMANCE_HYPOTHESIS = "M13"
+AUDIENCE_HYPOTHESIS = "S1"
+
+_NLI_HYPOTHESES: tuple[Hypothesis, ...] = tuple(
+    h for h in CATALOG if h.nli_text is not None and h.regex is None
+)
+
+
+def score_hypotheses(
+    paper_md: str,
+    *,
+    audience: list[str] | None = None,
+    classifier: ClassifierBackend | None = None,
+    debug_log: list[str] | None = None,
+) -> list[Sentence]:
+    """Run Stage 1-3: split, section-detect, and score all hypotheses."""
+    raw_units = split_sentences(paper_md)
+    line_sections = line_section_map(paper_md)
+
+    sentences: list[Sentence] = []
+    for idx, raw in enumerate(raw_units):
+        section = section_for_sentence(raw, line_sections)
+        hits: set[str] = set()
+        for hyp in CATALOG:
+            if hyp.matches_regex(raw.text):
+                hits.add(hyp.id)
+        if re.search(r"(?i)\baudience:\s*", raw.text):
+            hits.add(AUDIENCE_HYPOTHESIS)
+        sentences.append(
+            Sentence(
+                text=raw.text,
+                section=section,
+                index=idx,
+                hypothesis_hits=frozenset(hits),
+            ),
+        )
+
+    if classifier is not None and isinstance(classifier, NliCrossEncoderBackend):
+        _apply_nli_scores(sentences, classifier, debug_log)
+
+    return sentences
+
+
+def _apply_nli_scores(
+    sentences: list[Sentence],
+    classifier: NliCrossEncoderBackend,
+    debug_log: list[str] | None,
+) -> None:
+    pairs: list[tuple[str, str]] = []
+    pair_map: list[tuple[int, str]] = []
+    for sent in sentences:
+        for hyp in _NLI_HYPOTHESES:
+            assert hyp.nli_text is not None
+            pairs.append((sent.text, hyp.nli_text))
+            pair_map.append((sent.index, hyp.id))
+
+    if not pairs:
+        return
+
+    if debug_log is not None:
+        debug_log.append("### paper-routing NLI batch\n")
+        debug_log.append(f"pairs: {len(pairs)}\n")
+
+    fired, scores = score_entailment_pairs(
+        classifier,
+        pairs,
+        threshold=NLI_ENTAILMENT_THRESHOLD,
+    )
+
+    if debug_log is not None:
+        for i, ((premise, _), score) in enumerate(zip(pairs, scores, strict=True)):
+            debug_log.append(
+                f"- [{i}] entailment={score.get('entailment', 0):.4f} "
+                f"hyp={pair_map[i][1]} text={premise[:120]!r}\n",
+            )
+
+    updated: dict[int, set[str]] = {s.index: set(s.hypothesis_hits) for s in sentences}
+    for (sent_idx, hyp_id), hit in zip(pair_map, fired, strict=True):
+        if hit:
+            updated[sent_idx].add(hyp_id)
+
+    for i, sent in enumerate(sentences):
+        sentences[i] = Sentence(
+            text=sent.text,
+            section=sent.section,
+            index=sent.index,
+            hypothesis_hits=frozenset(updated[sent.index]),
+        )

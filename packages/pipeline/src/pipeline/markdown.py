@@ -30,6 +30,30 @@ from pathlib import Path
 _PREAMBLE_KEY = "_preamble"
 _CODE_SPAN_RE = re.compile(r'``.+?``|`[^`]+`')
 
+YAML_FENCE_RE = re.compile(r"^---\s*$")
+
+
+def front_matter_end_index(lines: list[str]) -> int:
+    """Index of the first body line after YAML front matter.
+
+    Returns 0 when the document does not begin with a ``---`` fence
+    (first non-blank line is not a fence). When the opening fence has
+    no closing fence, returns ``len(lines)`` so the entire document is
+    treated as front matter, matching assay blanking Pass 1.
+    """
+    saw_open = False
+    for i, line in enumerate(lines):
+        stripped = line.lstrip()
+        if YAML_FENCE_RE.match(stripped):
+            if saw_open:
+                return i + 1
+            saw_open = True
+        elif not saw_open and stripped:
+            return 0
+    if saw_open:
+        return len(lines)
+    return 0
+
 
 # -- Section splitter ---------------------------------------------------------
 
