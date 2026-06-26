@@ -691,22 +691,6 @@ def render_trace(state: PipelineState, step: int, *, step_durations: list[float]
             if state.synthesis is not None and state.synthesis.verdict_label == "Skipped":
                 lines.append(f"triage: skipped ({state.synthesis.skip_reason})")
                 lines.append("")
-            if state.routing is not None:
-                rt = state.routing
-                lines.append("### Routing")
-                for label in ("LEWG", "LWG", "EWG", "CWG"):
-                    score = rt.quadrant_scores.get(label, 0.0)
-                    sustained = rt.sustained_counts.get(label, 0)
-                    lines.append(f"- {label}: score={score:.4f}, sustained={sustained}")
-                if rt.groups:
-                    group_parts = [f"{k}={v:.4f}" for k, v in sorted(rt.groups.items())]
-                    lines.append(f"- groups: {', '.join(group_parts)}")
-                else:
-                    lines.append("- groups: (none)")
-                lines.append(f"- is_administrative: {rt.is_administrative}")
-                lines.append(f"- is_performance_focused: {rt.is_performance_focused}")
-                lines.append(f"- sentence_count: {rt.sentence_count}")
-                lines.append("")
 
         elif i == 4:
             if state.raw_extractions is not None:

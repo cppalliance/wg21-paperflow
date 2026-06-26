@@ -257,5 +257,8 @@ default = "minilm"
 # C++ standard MCP server. Required by assay for normative text lookups,
 # mechanism verification, and specification analysis grounding.
 [mcp.cpp-standard]
-base_url = "https://mcpserver1.cpp.al/mcp"
-api_key = "$CPP_MCP_API_KEY"
+# base_url = "https://mcpserver1.cpp.al/mcp"
+# api_key = "$CPP_MCP_API_KEY"
+# Local
+base_url = "http://127.0.0.1:8001/mcp"
+api_key = "123"

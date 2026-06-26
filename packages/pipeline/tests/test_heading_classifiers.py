@@ -8,29 +8,11 @@ from __future__ import annotations
 
 from pipeline.heading_classifiers import (
     HeadingKind,
-    classify_routing_section,
     is_acknowledgment_heading,
     is_appendix_heading_line,
     is_reference_heading,
     is_revision_heading,
 )
-from pipeline.paper_routing.types import SectionType
-
-
-def test_classify_routing_section_motivation():
-    assert classify_routing_section("Motivation and Scope") == SectionType.MOTIVATION
-
-
-def test_classify_routing_section_wording():
-    assert classify_routing_section("Proposed Wording") == SectionType.WORDING
-
-
-def test_classify_routing_section_design_default():
-    assert classify_routing_section("Technical Details") == SectionType.DESIGN
-
-
-def test_classify_routing_section_appendix():
-    assert classify_routing_section("References") == SectionType.APPENDIX
 
 
 def test_is_revision_heading_yes():

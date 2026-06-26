@@ -14,7 +14,7 @@ import pytest
 from pipeline.paper_routing import route_paper
 from pipeline.paper_routing.hypotheses import CATALOG, Hypothesis
 from pipeline.paper_routing.split import split_sentences
-from pipeline.heading_classifiers import classify_routing_section
+from pipeline.paper_routing.headings import classify_routing_section
 from pipeline.paper_routing.types import SectionType
 from pipeline.paper_routing.aggregate import (
     LABEL_CWG,

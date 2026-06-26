@@ -5,7 +5,7 @@
 # file LICENSE_1_0.txt or copy at http://www.boost.org/LICENSE_1_0.txt)
 #
 
-"""Shared heading classifiers for blanking and paper routing."""
+"""Shared heading classifiers for blanking and survey signals."""
 
 from __future__ import annotations
 
@@ -13,7 +13,6 @@ import re
 from enum import Enum, auto
 
 from pipeline.markdown_patterns import HEADING_RE
-from pipeline.paper_routing.types import SectionType
 
 # ---------------------------------------------------------------------------
 # Blanking tri-state
@@ -21,6 +20,8 @@ from pipeline.paper_routing.types import SectionType
 
 
 class HeadingKind(Enum):
+    """Tri-state result for blanking heading classifiers."""
+
     YES = auto()
     NO = auto()
     UNKNOWN = auto()
@@ -86,32 +87,7 @@ _ACKNOWLEDGMENT_HEADING_RE = re.compile(
     re.IGNORECASE,
 )
 
-# ---------------------------------------------------------------------------
-# Routing section typing
-# ---------------------------------------------------------------------------
-
-_MOTIVATION_HEADING_RE = re.compile(
-    r"(?i)\b(introduction|motivation|background|problem\s+statement|scope)\b",
-)
-_DESIGN_HEADING_RE = re.compile(
-    r"(?i)\b(design|api|interface|proposal|rationale)\b",
-)
-_WORDING_HEADING_RE = re.compile(
-    r"(?i)\b(wording|standardese|proposed\s+changes|modifications?\s+to\s+the\s+standard)\b",
-)
-_IMPACT_HEADING_RE = re.compile(
-    r"(?i)\b(impact|compatibility|abi|feature\s+test\s+macro)\b",
-)
-_IMPLEMENTATION_HEADING_RE = re.compile(
-    r"(?i)\b(implementation|reference\s+implementation)\b",
-)
-_APPENDIX_HEADING_RE = re.compile(
-    r"(?i)\b(acknowledg|references?|appendix|examples?|revision\s+history)\b",
-)
-
-# Survey wording signal (assay Step 3). Kept separate from routing's
-# _WORDING_HEADING_RE: survey matches proposed resolution; routing
-# matches standardese and modifications-to-the-standard.
+# Survey wording signal (assay Step 3).
 SURVEY_WORDING_HEADING_RE = re.compile(
     r"(?i)\bwording\b|\bproposed\s+changes\b|\bproposed\s+resolution\b",
 )
@@ -173,13 +149,7 @@ def is_appendix_heading_line(
     *,
     overrides: set[str] | frozenset[str] = frozenset(),
 ) -> bool:
-    """True when *line* opens a non-prose appendix block.
-
-    For standalone ``route_paper`` on unblanked markdown. In assay,
-    ``blank_paper`` blanks revision history, references, and
-    acknowledgments before routing, so only ``appendix`` / ``examples``
-    headings typically reach the in-pipeline classifier.
-    """
+    """True when *line* opens a non-prose appendix block."""
     if is_revision_heading(line, overrides) is HeadingKind.YES:
         return True
     if is_reference_heading(line) is HeadingKind.YES:
@@ -190,20 +160,3 @@ def is_appendix_heading_line(
     if m and _APPENDIX_KEYWORD_RE.search(m.group(2)):
         return True
     return False
-
-
-def classify_routing_section(heading: str) -> SectionType:
-    """Map a markdown heading title to a routing section type."""
-    if _MOTIVATION_HEADING_RE.search(heading):
-        return SectionType.MOTIVATION
-    if _WORDING_HEADING_RE.search(heading):
-        return SectionType.WORDING
-    if _DESIGN_HEADING_RE.search(heading):
-        return SectionType.DESIGN
-    if _IMPACT_HEADING_RE.search(heading):
-        return SectionType.IMPACT
-    if _IMPLEMENTATION_HEADING_RE.search(heading):
-        return SectionType.IMPLEMENTATION
-    if _APPENDIX_HEADING_RE.search(heading):
-        return SectionType.APPENDIX
-    return SectionType.DESIGN
