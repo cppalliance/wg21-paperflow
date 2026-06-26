@@ -9,7 +9,7 @@
 
 from __future__ import annotations
 
-from pipeline.heading_classifiers import classify_routing_section
+from pipeline.paper_routing.headings import classify_routing_section
 from pipeline.markdown import front_matter_end_index
 from pipeline.markdown_patterns import HEADING_RE
 from pipeline.paper_routing.split import RawSentence
