@@ -319,10 +319,54 @@ step (label 30-50 papers, pick max recall at FPR <= 10%, commit fitted edges wit
 recorded TPR/FPR/precision) would replace these with measured operating points;
 until then review beats a false pass.
 
+## Comprehension corpus + one-time LLM read-back (Lane 3 in CI)
+
+Lane 3 now runs in CI against a real corpus member, not just engine unit tests.
+`tests/test_comprehension_corpus.py` is the hermetic gate: it reads the committed
+`corpus/<pid>.expected.md` (the substrate) and `corpus/<pid>.facts.jsonl`, runs
+`check_facts`, and asserts every `checked: verified` fact holds, that at least one
+verified fact exists (no vacuous green), and that a deliberately scrambled
+snapshot FAILS (a canary, so the gate has teeth). It needs no backend and no
+`data/`, so it gates in CI where the `whisker facts` CLI cannot: the CLI reads the
+candidate from the paperstore backend (`backend.get_paper_md`), which is absent in
+CI. whisker is now in the `.github/workflows/tests.yml` package matrix (it was
+missing); the hermetic suite passes with no `WG21_DATA_DIR`.
+
+First corpus member: **P4182R0** (8 verified facts: 4 `present`, 1 `absent`,
+1 `order`, 2 `table`; `math` is honestly N/A, the paper has no formulas). Its
+`corpus/P4182R0.expected.md` is byte-identical to `run_pipeline`'s output (diff 0,
+no uncertain regions), so the snapshot is exactly the converter output.
+
+The deterministic facts are a human PROXY for what a downstream LLM must recover.
+That proxy is validated ONCE, empirically and out of band: hand a fresh LLM ONLY
+the converted markdown plus the fact questions, let it answer blind, compare to
+the verified facts. P4182R0 passed 3x 8/8 including the two table cells (recorded
+in `corpus/P4182R0.validation.md`). This read-back is NEVER in CI (determinism,
+cost, model-sovereignty); it is the one-time anchor that justifies trusting the
+LLM-free gate. A "regenerate similar text" round-trip is the WRONG test (LLMs
+paraphrase, so resemblance measures fidelity, not comprehension); the test is
+question answering ("row X, column Y reads what?").
+
+Authoring and blessing stay separate (provenance): a fact ships as
+`checked: draft`, a human verifies it against the SOURCE pdf/html, then flips it to
+`checked: verified`; only verified facts gate. The full POC writeup (goal, every
+command, evidence) is `research/comprehension-poc-report.md`.
+
+Note on reading whisker numbers for a clean paper: trust `uni` (content recall)
+and `qa`; `teds`/`mhs` against the markitdown oracle are structurally near-zero
+(different formatting, not bad tables) and never gate; `ovr` is only a display
+composite. The LLM read-back, not the oracle's `teds`, is the comprehension proof.
+
 ## Tests
 
 whisker is not in the root `testpaths` (standalone). Run it directly:
 
 ```bash
 uv run --package whisker pytest packages/whisker/tests
+```
+
+The Lane 3 comprehension corpus gate is hermetic (no `WG21_DATA_DIR`, no backend):
+
+```bash
+uv run --package whisker pytest packages/whisker/tests/test_comprehension_corpus.py
 ```
