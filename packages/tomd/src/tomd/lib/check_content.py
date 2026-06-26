@@ -60,6 +60,7 @@ __all__ = [
     "ContentCheckResult",
     "MisalignedRegion",
     "check_paper_content",
+    "compute_content_coverage",
     "run_content_check_report",
 ]
 
@@ -538,23 +539,22 @@ def _page_for(
 # -- Public entry point -------------------------------------------------------
 
 
-def check_paper_content(
-    pid: str,
-    backend: StorageBackend,
+def compute_content_coverage(
+    source_path: Path,
+    md_text: str,
+    paper_id: str | None = None,
 ) -> ContentCheckResult:
-    """Run the content-coverage check for one paper.
+    """Content-coverage of ``md_text`` against ``source_path``, source agnostic.
 
-    Reads source and Markdown through the backend. Library function:
-    returns data, never persists. The CLI module owns reporting.
+    The path-and-string core of :func:`check_paper_content`. Used by the
+    golden-QA fidelity gate to score a candidate ideal against its source
+    without staging it in a backend.
 
     Raises:
-        paperstore.MissingSourceError: if ``<pid>.pdf|.html`` not staged.
-        paperstore.MissingPaperMdError: if ``<pid>.md`` not written.
         tomd.CheckContentArgError: if the source suffix is neither
             ``.pdf`` nor ``.html``.
     """
-    source_path = backend.get_source_path(pid)
-    md_text = backend.get_paper_md(pid)
+    pid = paper_id if paper_id is not None else source_path.stem
 
     suffix = source_path.suffix.lower()
     if suffix == ".pdf":
@@ -643,6 +643,27 @@ def check_paper_content(
         markdown_token_count=len(md_tokens),
         missing_regions=tuple(missing_regions),
         extra_regions=tuple(extra_regions),
+    )
+
+
+def check_paper_content(
+    pid: str,
+    backend: StorageBackend,
+) -> ContentCheckResult:
+    """Run the content-coverage check for one paper.
+
+    Reads source and Markdown through the backend, then delegates to
+    :func:`compute_content_coverage`. Library function: returns data,
+    never persists. The CLI module owns reporting.
+
+    Raises:
+        paperstore.MissingSourceError: if ``<pid>.pdf|.html`` not staged.
+        paperstore.MissingPaperMdError: if ``<pid>.md`` not written.
+        tomd.CheckContentArgError: if the source suffix is neither
+            ``.pdf`` nor ``.html``.
+    """
+    return compute_content_coverage(
+        backend.get_source_path(pid), backend.get_paper_md(pid), paper_id=pid,
     )
 
 
