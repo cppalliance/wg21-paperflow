@@ -10,11 +10,9 @@ from pathlib import Path
 
 import asyncio
 
-import pytest
-
 from assay.models import PipelineState
 from assay.pipeline import _apply_survey_skip, _custom_survey, _run_paper_routing
-from assay.render import render_trace
+from assay.render import render_report, render_trace
 from pipeline import StepContext, dispatch
 from pipeline.prompt import StepHooks, StepPrompt, StepSpec
 
@@ -53,6 +51,25 @@ def test_administrative_fixture_sets_skipped():
     assert state.skipped
     assert state.synthesis is not None
     assert state.synthesis.verdict_label == "Skipped"
+
+
+def test_skipped_survey_produces_report():
+    state = PipelineState(
+        paper_md=_read("n5044_excerpt.md"),
+        audience=["WG21"],
+        chunk_map=[],
+    )
+    ctx = StepContext(classifiers={})
+    spec = StepSpec(
+        step=StepPrompt(name="3. Survey", number=3, model="none", execution="main"),
+        hooks=StepHooks(),
+    )
+    asyncio.run(_custom_survey(state, ctx, spec))
+    assert state.skipped
+    state.report = render_report(state, "")
+    assert state.report
+    assert "## Classification" in state.report
+    assert "Administrative" in state.report
 
 
 def test_apply_survey_skip_sets_synthesis():

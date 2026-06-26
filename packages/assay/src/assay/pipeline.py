@@ -16,7 +16,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import re
 from collections import Counter
 
 from paperstore import StorageBackend
@@ -1954,6 +1953,16 @@ async def assay_paper(
             trace_path=trace_path,
             debug_path=debug_path if debug else None,
         )
+
+        if (
+            stop_after is None
+            and getattr(state, "skipped", False)
+            and state.synthesis is not None
+        ):
+            if ctx.backend is not None:
+                _persist_synthesis(ctx.backend, pid, state.synthesis)
+            if not state.report:
+                state.report = render_report(state, "")
 
         if stop_after is not None:
             return render_trace(state, stop_after)

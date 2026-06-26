@@ -9,6 +9,8 @@
 
 from __future__ import annotations
 
+import re
+
 from pipeline.paper_routing.axis_hits import (
     axis_density,
     design_hits,
@@ -104,24 +106,35 @@ def aggregate_quadrant_scores(
     return scores
 
 
+def _audience_blob(audience: list[str] | None) -> str:
+    return " ".join(audience or []).upper()
+
+
+def _audience_has_phrase(blob: str, phrase: str) -> bool:
+    pattern = r"\b" + r"\s+".join(re.escape(w) for w in phrase.split()) + r"\b"
+    return re.search(pattern, blob) is not None
+
+
 def _apply_metadata_bonus(
     scores: dict[str, float],
     sentences: list[Sentence],
     audience: list[str] | None,
 ) -> None:
     s1_fired = any(AUDIENCE_HYPOTHESIS in s.hypothesis_hits for s in sentences)
-    blob = " ".join(audience or []).upper()
+    blob = _audience_blob(audience)
     if not s1_fired and not blob:
         return
 
-    if "LIBRARY EVOLUTION" in blob or "LEWG" in blob:
+    if _audience_has_phrase(blob, "LIBRARY EVOLUTION") or _audience_has_phrase(blob, "LEWG"):
         scores[LABEL_LEWG] += _METADATA_BONUS_LIBRARY_EVOLUTION_LEWG
-    elif "LIBRARY" in blob or "LWG" in blob:
+    elif _audience_has_phrase(blob, "LIBRARY") or _audience_has_phrase(blob, "LWG"):
         scores[LABEL_LEWG] += _METADATA_BONUS_LIBRARY_LEWG
         scores[LABEL_LWG] += _METADATA_BONUS_LIBRARY_LWG
 
-    if "CORE" in blob or "CWG" in blob:
+    if _audience_has_phrase(blob, "CORE") or _audience_has_phrase(blob, "CWG"):
         scores[LABEL_CWG] += _METADATA_BONUS_CORE_CWG
         scores[LABEL_EWG] += _METADATA_BONUS_CORE_EWG
-    elif "EVOLUTION" in blob or "EWG" in blob:
+    elif (
+        _audience_has_phrase(blob, "EVOLUTION") or _audience_has_phrase(blob, "EWG")
+    ) and not _audience_has_phrase(blob, "LIBRARY EVOLUTION"):
         scores[LABEL_EWG] += _METADATA_BONUS_EVOLUTION_EWG

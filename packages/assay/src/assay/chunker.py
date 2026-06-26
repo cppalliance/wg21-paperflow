@@ -13,7 +13,6 @@ parameters are in characters; the caller converts from tokens.
 
 from __future__ import annotations
 
-import re
 from dataclasses import dataclass, field
 
 from pipeline.markdown_patterns import BOLD_SUBSECTION_RE, HEADING_RE

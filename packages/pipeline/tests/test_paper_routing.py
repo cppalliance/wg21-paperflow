@@ -15,10 +15,16 @@ from pipeline.paper_routing import route_paper
 from pipeline.paper_routing.hypotheses import CATALOG, Hypothesis
 from pipeline.paper_routing.split import split_sentences
 from pipeline.heading_classifiers import classify_routing_section
-from pipeline.paper_routing.sections import line_section_map
 from pipeline.paper_routing.types import SectionType
-from pipeline.paper_routing.aggregate import aggregate_quadrant_scores
-from pipeline.paper_routing.sustained import min_sustained_threshold, sustained_counts
+from pipeline.paper_routing.aggregate import (
+    LABEL_CWG,
+    LABEL_EWG,
+    LABEL_LEWG,
+    LABEL_LWG,
+    _apply_metadata_bonus,
+    aggregate_quadrant_scores,
+)
+from pipeline.paper_routing.sustained import min_sustained_threshold
 from pipeline.paper_routing.threshold import apply_thresholds, THRESHOLD_LEWG
 
 _FIXTURES = Path(__file__).resolve().parents[3] / "tests" / "fixtures" / "routing"
@@ -47,6 +53,11 @@ def test_stray_language_no_ewg():
     result = route_paper(_read("stray_language.md"), audience=["LEWG"])
     assert "EWG" not in result.groups
     assert "CWG" not in result.groups
+
+
+def test_performance_focused_flag():
+    result = route_paper(_read("performance_focused.md"), classifier=None)
+    assert result.is_performance_focused is True
 
 
 def test_route_without_classifier():
@@ -90,6 +101,28 @@ def test_d1_matches_library_header():
 def test_sustained_min_floor():
     assert min_sustained_threshold(10) == 3
     assert min_sustained_threshold(500) == 10
+
+
+def _zeroed_scores() -> dict[str, float]:
+    return {LABEL_LEWG: 0.0, LABEL_LWG: 0.0, LABEL_EWG: 0.0, LABEL_CWG: 0.0}
+
+
+@pytest.mark.parametrize(
+    ("audience", "expected"),
+    [
+        (["LEWG"], {LABEL_LEWG: 0.20, LABEL_LWG: 0.0, LABEL_EWG: 0.0, LABEL_CWG: 0.0}),
+        (["LWG"], {LABEL_LEWG: 0.15, LABEL_LWG: 0.10, LABEL_EWG: 0.0, LABEL_CWG: 0.0}),
+        (
+            ["Library Evolution"],
+            {LABEL_LEWG: 0.20, LABEL_LWG: 0.0, LABEL_EWG: 0.0, LABEL_CWG: 0.0},
+        ),
+        (["EWG"], {LABEL_LEWG: 0.0, LABEL_LWG: 0.0, LABEL_EWG: 0.20, LABEL_CWG: 0.0}),
+    ],
+)
+def test_metadata_bonus_audience_tokens(audience: list[str], expected: dict[str, float]):
+    scores = _zeroed_scores()
+    _apply_metadata_bonus(scores, [], audience)
+    assert scores == expected
 
 
 def test_threshold_requires_sustained_signal():
