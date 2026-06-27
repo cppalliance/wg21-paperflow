@@ -24,6 +24,8 @@ golden fixtures directory, never the paperstore workspace:
     tomd issue <paper_id>          draft ready-to-file issues from the gaps
                                     --create  file them via gh CLI
     tomd rebless <paper_id> | --all ratchet baselines up after a tomd improvement
+    tomd fact <paper_id>           create or edit comprehension fact assertions
+    tomd anchor <paper_id>         create or edit structural anchor tripwires
 
 Every verb takes the same first argument, a `paper_id` (the WG21 id including
 revision, `P4228R0`), normalized to the lowercase fixture stem at parse time.
@@ -33,13 +35,18 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
 
 from tomd.lib.golden_qa import (
+    _ANCHORS_TEMPLATE,
+    _FACTS_TEMPLATE,
+    anchors_path,
     bless_stem,
     download_source,
+    facts_path,
     fidelity_verdict,
     find_source,
     generate_ideal,
@@ -49,7 +56,10 @@ from tomd.lib.golden_qa import (
     render_pdf_pages,
     review_ideal,
     score_report,
+    score_result,
     stage_source,
+    validate_anchors_json,
+    validate_facts_jsonl,
 )
 
 # The golden fixtures live beside the package: packages/tomd/tests/fixtures/golden.
@@ -83,6 +93,45 @@ def _format_rows(stem: str, rows: list) -> str:
         detail = f"  ({r.detail})" if r.detail else ""
         lines.append(f"  {r.axis:<12}{r.current:>9.3f}{base:>10}{delta:>9}{detail}")
     return "\n".join(lines)
+
+
+def _format_whisker_panel(w: dict) -> str:
+    """Format the whisker metrics second panel for human output."""
+    lines = ["  --- whisker metrics (ideal as ground truth) ---",
+             f"  {'metric':<16}{'value':>8}"]
+    for key, label in [("ref_nid", "NID"), ("ref_teds", "TEDS"),
+                        ("ref_mhs", "MHS"), ("content_recall", "content_recall")]:
+        val = w.get(key)
+        if val is not None:
+            lines.append(f"  {label:<16}{val:>8.4f}")
+    lines.append(f"  {'verdict':<16}{'':>3}{w.get('verdict', '?')}")
+    for flag in w.get("hard_flags", []):
+        lines.append(f"  FAIL  {flag}")
+    for flag in w.get("soft_flags", []):
+        lines.append(f"  soft  {flag}")
+    return "\n".join(lines)
+
+
+def _format_comprehension_panel(c: dict) -> str:
+    """Format the comprehension assertions third panel for human output."""
+    lines = ["  --- comprehension assertions ---"]
+    facts = c.get("facts")
+    anchors = c.get("anchors")
+    if facts:
+        checks = facts.get("checks", [])
+        passed = sum(1 for ch in checks if ch["passed"])
+        lines.append(f"  facts    {passed}/{len(checks)} pass")
+        for ch in checks:
+            if not ch["passed"]:
+                lines.append(f"  FAIL  [{ch['type']}] {ch.get('detail') or ''}")
+    if anchors:
+        checks = anchors.get("checks", [])
+        passed = sum(1 for ch in checks if ch["passed"])
+        lines.append(f"  anchors  {passed}/{len(checks)} pass")
+        for ch in checks:
+            if not ch["passed"]:
+                lines.append(f"  FAIL  {ch.get('detail') or ''}")
+    return "\n".join(lines) if len(lines) > 1 else ""
 
 
 def _cmd_add(args: argparse.Namespace) -> int:
@@ -169,16 +218,25 @@ def _cmd_score(args: argparse.Namespace) -> int:
     missing: list[str] = []
     for stem in stems:
         try:
-            rows = score_report(stem, golden, manifest)
+            sr = score_result(stem, golden, manifest)
         except FileNotFoundError:
             missing.append(stem)
             continue
         payload[stem] = {
-            r.axis: {"current": r.current, "baseline": r.baseline,
+            "axes": {r.axis: {"current": r.current, "baseline": r.baseline,
                      "delta": r.delta, "detail": r.detail, "sub": r.sub}
-            for r in rows
+                     for r in sr.axes},
+            "whisker": sr.whisker,
+            "comprehension": sr.comprehension,
         }
-        chunks.append(_format_rows(stem, rows))
+        text_parts = [_format_rows(stem, sr.axes)]
+        if sr.whisker:
+            text_parts.append(_format_whisker_panel(sr.whisker))
+        if sr.comprehension:
+            panel = _format_comprehension_panel(sr.comprehension)
+            if panel:
+                text_parts.append(panel)
+        chunks.append("\n\n".join(text_parts))
     for stem in missing:
         print(f"score: no staged source for {stem}", file=sys.stderr)
     if args.as_json:
@@ -275,6 +333,76 @@ def _cmd_rebless(args: argparse.Namespace) -> int:
                    if outcome.old.get(ax) != outcome.new[ax]}
         print(f"reblessed {outcome.stem}: {len(changed)} axis change(s) "
               f"{json.dumps(changed, sort_keys=True)}")
+        if outcome.whisker_verdict and outcome.whisker_verdict != "pass":
+            print(f"  whisker: {outcome.whisker_verdict} — review structural quality",
+                  file=sys.stderr)
+    return 0
+
+
+def _cmd_fact(args: argparse.Namespace) -> int:
+    golden, pid = args.golden_dir, args.paper_id
+    path = facts_path(golden, pid)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    is_new = not path.exists()
+    if is_new:
+        path.write_text(_FACTS_TEMPLATE.format(pid=pid), encoding="utf-8")
+        print(f"created {path}")
+    else:
+        count = sum(1 for line in path.read_text(encoding="utf-8").splitlines()
+                    if line.strip() and not line.strip().startswith("#"))
+        print(f"editing {path} ({count} existing fact(s))")
+    editor = os.environ.get("VISUAL") or os.environ.get("EDITOR") or "vi"
+    try:
+        subprocess.run([editor, str(path)], check=True)
+    except subprocess.CalledProcessError as exc:
+        print(f"fact: editor exited {exc.returncode}", file=sys.stderr)
+        return exc.returncode
+    except FileNotFoundError:
+        print(f"fact: editor {editor!r} not found; edit {path} manually", file=sys.stderr)
+        return 1
+    errors = validate_facts_jsonl(path.read_text(encoding="utf-8"))
+    if errors:
+        for e in errors:
+            print(f"fact: {e}", file=sys.stderr)
+        return 1
+    count = sum(1 for line in path.read_text(encoding="utf-8").splitlines()
+                if line.strip() and not line.strip().startswith("#"))
+    print(f"validated {path} ({count} fact(s))")
+    print(f"Next: `tomd score {pid}` to see the comprehension panel.")
+    return 0
+
+
+def _cmd_anchor(args: argparse.Namespace) -> int:
+    golden, pid = args.golden_dir, args.paper_id
+    path = anchors_path(golden, pid)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    is_new = not path.exists()
+    if is_new:
+        path.write_text(_ANCHORS_TEMPLATE.format(pid=pid), encoding="utf-8")
+        print(f"created {path}")
+    else:
+        print(f"editing {path}")
+    editor = os.environ.get("VISUAL") or os.environ.get("EDITOR") or "vi"
+    try:
+        subprocess.run([editor, str(path)], check=True)
+    except subprocess.CalledProcessError as exc:
+        print(f"anchor: editor exited {exc.returncode}", file=sys.stderr)
+        return exc.returncode
+    except FileNotFoundError:
+        print(f"anchor: editor {editor!r} not found; edit {path} manually", file=sys.stderr)
+        return 1
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        print(f"anchor: invalid JSON: {exc}", file=sys.stderr)
+        return 1
+    errors = validate_anchors_json(data)
+    if errors:
+        for e in errors:
+            print(f"anchor: {e}", file=sys.stderr)
+        return 1
+    print(f"validated {path}")
+    print(f"Next: `tomd score {pid}` to see the comprehension panel.")
     return 0
 
 
@@ -339,6 +467,14 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--force", action="store_true",
                    help="Allow lowering a baseline (records a regression; off by default).")
     p.set_defaults(func=_cmd_rebless)
+
+    p = sub.add_parser("fact", help="Create or edit comprehension fact assertions for a paper.")
+    _paper_id(p)
+    p.set_defaults(func=_cmd_fact)
+
+    p = sub.add_parser("anchor", help="Create or edit structural anchor tripwires for a paper.")
+    _paper_id(p)
+    p.set_defaults(func=_cmd_anchor)
 
     args = parser.parse_args(argv)
     return args.func(args)

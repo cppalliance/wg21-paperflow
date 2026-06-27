@@ -57,9 +57,9 @@ def test_cli_issue_create_calls_gh(monkeypatch, capsys):
     monkeypatch.setattr(cli.subprocess, "run", fake_run)
     rc = main(["--golden-dir", str(_GOLDEN), "issue", "p4228r0", "--create"])
     assert rc == 0
-    assert calls, "gh should have been called at least once"
-    assert all("gh" in cmd[0] for cmd in calls)
-    assert all("--title" in cmd for cmd in calls)
+    gh_calls = [cmd for cmd in calls if cmd and "gh" in cmd[0]]
+    assert gh_calls, "gh should have been called at least once"
+    assert all("--title" in cmd for cmd in gh_calls)
     assert "https://github.com" in capsys.readouterr().out
 
 

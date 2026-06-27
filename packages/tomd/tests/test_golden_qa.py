@@ -3,6 +3,7 @@
 import json
 import shutil
 from pathlib import Path
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -19,9 +20,12 @@ from tomd.lib.golden_qa import (
     render_pdf_pages,
     review_ideal,
     score_report,
+    score_result,
     score_stem,
     stage_source,
     tomd_markdown,
+    validate_anchors_json,
+    validate_facts_jsonl,
 )
 
 _GOLDEN = Path(__file__).resolve().parent / "fixtures" / "golden"
@@ -307,3 +311,264 @@ def test_review_ideal_requires_candidate(tmp_path):
     (tmp_path / "sources" / "p9999r0.html").write_text("<html></html>", encoding="utf-8")
     with pytest.raises(FileNotFoundError, match="candidate"):
         review_ideal("p9999r0", tmp_path, runner=lambda *a: "")
+
+
+# --- Task 2: whisker gate tests ---
+
+_GATE_PASS_RESPONSE = {
+    "pid": "p4228r0",
+    "verdict": "pass",
+    "hard_flags": [],
+    "soft_flags": [],
+    "gates": [
+        {"name": "front_matter_valid", "passed": True, "detail": ""},
+        {"name": "non_empty", "passed": True, "detail": ""},
+        {"name": "heading_monotone", "passed": True, "detail": ""},
+    ],
+    "ref_nid": None, "ref_teds": None, "ref_mhs": None,
+    "ref_overall": None, "content_recall": None,
+    "missing_regions": [], "extra_regions": [],
+}
+
+_GATE_FAIL_RESPONSE = {
+    "pid": "p4228r0",
+    "verdict": "fail",
+    "hard_flags": ["gate:front_matter_valid:missing keys: title"],
+    "soft_flags": [],
+    "gates": [
+        {"name": "front_matter_valid", "passed": False,
+         "detail": "missing keys: title"},
+        {"name": "non_empty", "passed": True, "detail": ""},
+    ],
+    "ref_nid": None, "ref_teds": None, "ref_mhs": None,
+    "ref_overall": None, "content_recall": None,
+    "missing_regions": [], "extra_regions": [],
+}
+
+
+@requires_source
+def test_bless_stem_rejects_failed_gate(tmp_path):
+    manifest = _stage(tmp_path)
+    manifest.write_text("{}\n", encoding="utf-8")
+    mock_result = MagicMock()
+    mock_result.returncode = 5
+    mock_result.stdout = json.dumps(_GATE_FAIL_RESPONSE)
+    with patch("tomd.lib.golden_qa.subprocess.run", return_value=mock_result):
+        with pytest.raises(ValueError, match="structural gates"):
+            bless_stem("p4228r0", tmp_path, manifest)
+
+
+@requires_source
+def test_bless_stem_passes_when_whisker_unavailable(tmp_path):
+    manifest = _stage(tmp_path)
+    manifest.write_text("{}\n", encoding="utf-8")
+    mock_result = MagicMock()
+    mock_result.returncode = 127
+    mock_result.stdout = ""
+    with patch("tomd.lib.golden_qa.subprocess.run", return_value=mock_result):
+        row = bless_stem("p4228r0", tmp_path, manifest)
+    assert isinstance(row, dict)
+
+
+@requires_source
+def test_bless_stem_passes_when_all_gates_pass(tmp_path):
+    manifest = _stage(tmp_path)
+    manifest.write_text("{}\n", encoding="utf-8")
+    mock_result = MagicMock()
+    mock_result.returncode = 0
+    mock_result.stdout = json.dumps(_GATE_PASS_RESPONSE)
+    with patch("tomd.lib.golden_qa.subprocess.run", return_value=mock_result):
+        row = bless_stem("p4228r0", tmp_path, manifest)
+    assert isinstance(row, dict)
+
+
+# --- Task 3: whisker metrics panel tests ---
+
+_WHISKER_METRICS_RESPONSE = {
+    "pid": "p4228r0",
+    "verdict": "pass",
+    "hard_flags": [],
+    "soft_flags": [],
+    "gates": [],
+    "ref_nid": 0.91,
+    "ref_teds": 0.88,
+    "ref_mhs": 0.83,
+    "ref_overall": 0.8733,
+    "content_recall": 0.96,
+    "missing_regions": [],
+    "extra_regions": [],
+}
+
+
+@requires_source
+def test_score_result_includes_whisker_panel(tmp_path):
+    from tomd.lib.golden_qa import score_result
+    manifest = _stage(tmp_path)
+    shutil.copy(_GOLDEN / "baselines.json", manifest)
+    mock_result = MagicMock()
+    mock_result.returncode = 0
+    mock_result.stdout = json.dumps(_WHISKER_METRICS_RESPONSE)
+    with patch("tomd.lib.golden_qa.subprocess.run", return_value=mock_result):
+        sr = score_result("p4228r0", tmp_path, manifest)
+    assert sr.whisker is not None
+    assert sr.whisker["ref_nid"] == 0.91
+    assert sr.axes  # structural axes still present
+
+
+@requires_source
+def test_score_result_whisker_none_when_unavailable(tmp_path):
+    from tomd.lib.golden_qa import score_result
+    manifest = _stage(tmp_path)
+    shutil.copy(_GOLDEN / "baselines.json", manifest)
+    with patch("tomd.lib.golden_qa.subprocess.run", side_effect=FileNotFoundError):
+        sr = score_result("p4228r0", tmp_path, manifest)
+    assert sr.whisker is None
+    assert sr.axes  # structural axes unaffected
+
+
+@requires_source
+def test_score_result_no_comprehension_without_facts(tmp_path):
+    from tomd.lib.golden_qa import score_result
+    manifest = _stage(tmp_path)
+    shutil.copy(_GOLDEN / "baselines.json", manifest)
+    mock_result = MagicMock()
+    mock_result.returncode = 0
+    mock_result.stdout = json.dumps(_WHISKER_METRICS_RESPONSE)
+    with patch("tomd.lib.golden_qa.subprocess.run", return_value=mock_result):
+        sr = score_result("p4228r0", tmp_path, manifest)
+    assert sr.comprehension is None
+
+
+# --- Task 4: rebless whisker verdict tests ---
+
+@requires_source
+def test_rebless_includes_whisker_verdict(tmp_path):
+    manifest = _stage(tmp_path)
+    shutil.copy(_GOLDEN / "baselines.json", manifest)
+    whisker_response = {
+        "verdict": "pass", "hard_flags": [], "soft_flags": [],
+        "gates": [], "ref_nid": 0.91,
+    }
+    mock_result = MagicMock()
+    mock_result.returncode = 0
+    mock_result.stdout = json.dumps(whisker_response)
+    with patch("tomd.lib.golden_qa.subprocess.run", return_value=mock_result):
+        outcomes = rebless_stems(["p4228r0"], tmp_path, manifest, force=True)
+    assert outcomes[0].whisker_verdict == "pass"
+
+
+@requires_source
+def test_rebless_whisker_verdict_none_when_unavailable(tmp_path):
+    manifest = _stage(tmp_path)
+    shutil.copy(_GOLDEN / "baselines.json", manifest)
+    with patch("tomd.lib.golden_qa.subprocess.run", side_effect=FileNotFoundError):
+        outcomes = rebless_stems(["p4228r0"], tmp_path, manifest, force=True)
+    assert outcomes[0].whisker_verdict is None
+
+
+# --- Task 5: issue region localization tests ---
+
+@requires_source
+def test_issue_for_stem_appends_regions(tmp_path):
+    """issue_for_stem appends whisker region snippets to the first draft."""
+    _stage(tmp_path)
+    whisker_response = {
+        "verdict": "review", "hard_flags": [], "soft_flags": [],
+        "gates": [],
+        "missing_regions": [
+            {"page": 3, "token_start": 100, "token_end": 120,
+             "sample": "expected content missing here"}
+        ],
+        "extra_regions": [],
+        "ref_nid": None, "ref_teds": None, "ref_mhs": None,
+        "ref_overall": None, "content_recall": None,
+    }
+    mock_result = MagicMock()
+    mock_result.returncode = 3
+    mock_result.stdout = json.dumps(whisker_response)
+    with patch("tomd.lib.golden_qa.subprocess.run", return_value=mock_result):
+        drafts = issue_for_stem("p4228r0", tmp_path)
+    assert any("Localized gaps" in d for d in drafts)
+    assert any("expected content missing here" in d for d in drafts)
+
+
+@requires_source
+def test_issue_for_stem_no_regions_when_whisker_unavailable(tmp_path):
+    """issue_for_stem returns normal drafts (without regions) when whisker fails."""
+    _stage(tmp_path)
+    with patch("tomd.lib.golden_qa.subprocess.run", side_effect=FileNotFoundError):
+        drafts = issue_for_stem("p4228r0", tmp_path)
+    assert drafts
+    assert not any("Localized gaps" in d for d in drafts)
+
+
+# --- Task 7: validate_facts_jsonl ---
+
+def test_validate_facts_jsonl_valid():
+    text = (
+        '{"type": "present", "text": "the rule", "checked": "verified"}\n'
+        '{"type": "order", "sequence": ["A", "B"], "checked": "draft"}\n'
+    )
+    errors = validate_facts_jsonl(text)
+    assert errors == []
+
+
+def test_validate_facts_jsonl_bad_type():
+    text = '{"type": "unknown", "text": "x", "checked": "verified"}\n'
+    errors = validate_facts_jsonl(text)
+    assert any("unknown type" in e for e in errors)
+
+
+def test_validate_facts_jsonl_missing_text():
+    text = '{"type": "present", "checked": "verified"}\n'
+    errors = validate_facts_jsonl(text)
+    assert any("requires 'text'" in e for e in errors)
+
+
+def test_validate_facts_jsonl_bad_checked():
+    text = '{"type": "present", "text": "x", "checked": "maybe"}\n'
+    errors = validate_facts_jsonl(text)
+    assert any("checked must be" in e for e in errors)
+
+
+def test_validate_facts_jsonl_comments_ignored():
+    text = "# this is a comment\n\n"
+    assert validate_facts_jsonl(text) == []
+
+
+def test_validate_facts_jsonl_bad_json():
+    errors = validate_facts_jsonl("{bad json}\n")
+    assert any("invalid JSON" in e for e in errors)
+
+
+# --- Task 8: validate_anchors_json ---
+
+def test_validate_anchors_json_valid():
+    data = {
+        "pid": "p0001r0",
+        "surface": "normalized",
+        "must_contain": ["section 3"],
+        "must_not_contain": [],
+        "ordered": ["Abstract", "References"],
+        "patterns": [{"id": "docnum", "regex": "P0001R0"}]
+    }
+    errors = validate_anchors_json(data)
+    assert errors == []
+
+
+def test_validate_anchors_json_bad_surface():
+    data = {"surface": "invalid"}
+    errors = validate_anchors_json(data)
+    assert any("surface" in e for e in errors)
+
+
+def test_validate_anchors_json_bad_must_contain():
+    data = {"must_contain": "not-a-list"}
+    errors = validate_anchors_json(data)
+    assert any("must_contain" in e for e in errors)
+
+
+def test_validate_anchors_json_bad_pattern():
+    data = {"patterns": [{"id": "x"}]}  # missing regex
+    errors = validate_anchors_json(data)
+    assert any("regex" in e for e in errors)

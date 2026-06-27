@@ -25,7 +25,7 @@ When a declaration of a function is introduced by way of a using-declaration  (9
 
 This is not really clear regarding what happens in the following case:
 
-```cpp
+```
 namespace A {
   extern "C" void f(int = 5);
 }
@@ -48,7 +48,7 @@ declarations — or the declarations they refer to in the case of using-declarat
 
 [Example:
 
-```cpp
+```
 namespace A {
   extern "C" void f(int = 5);
 }

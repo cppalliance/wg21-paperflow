@@ -17,6 +17,7 @@ from __future__ import annotations
 import json
 import shutil
 import subprocess
+import tempfile
 import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
@@ -299,6 +300,116 @@ class AxisReport:
     sub: dict[str, float]
 
 
+@dataclass(frozen=True)
+class ScoreResult:
+    """Full score output: structural axes plus optional whisker and comprehension panels."""
+    axes: list[AxisReport]
+    whisker: dict | None  # whisker score-file JSON, or None if unavailable
+    comprehension: dict | None  # whisker check-facts JSON, or None if no facts/anchors
+
+
+# Subdirectory names for comprehension artifacts alongside ideals.
+_FACTS_SUBDIR = "facts"
+_ANCHORS_SUBDIR = "anchors"
+
+
+def facts_path(golden_dir: Path, stem: str) -> Path:
+    """Path to the facts JSONL for `stem` (facts/<stem>.facts.jsonl)."""
+    return golden_dir / _FACTS_SUBDIR / f"{stem}.facts.jsonl"
+
+
+def anchors_path(golden_dir: Path, stem: str) -> Path:
+    """Path to the anchors JSON for `stem` (anchors/<stem>.anchors.json)."""
+    return golden_dir / _ANCHORS_SUBDIR / f"{stem}.anchors.json"
+
+
+_VALID_FACT_TYPES = frozenset({"present", "absent", "order", "table", "math"})
+_VALID_CHECKED_VALUES = frozenset({"verified", "draft"})
+
+_FACTS_TEMPLATE = """\
+# Facts for {pid}
+# One JSON object per line. type: present | absent | order | table | math
+# checked: "verified" (gates in tomd score) or "draft" (advisory only)
+#
+# Examples:
+# {{"type": "present", "text": "the as-if rule", "checked": "draft"}}
+# {{"type": "order", "sequence": ["Abstract", "Motivation"], "checked": "draft"}}
+# {{"type": "table", "cell": "int", "right": "signed", "checked": "draft"}}
+"""
+
+
+def validate_facts_jsonl(text: str) -> list[str]:
+    """Validate JSONL fact assertions. Returns list of error strings (empty = valid)."""
+    errors = []
+    for lineno, line in enumerate(text.splitlines(), 1):
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        try:
+            record = json.loads(line)
+        except json.JSONDecodeError as exc:
+            errors.append(f"line {lineno}: invalid JSON: {exc}")
+            continue
+        if not isinstance(record, dict):
+            errors.append(f"line {lineno}: expected JSON object")
+            continue
+        fact_type = record.get("type")
+        if fact_type not in _VALID_FACT_TYPES:
+            errors.append(
+                f"line {lineno}: unknown type {fact_type!r}; "
+                f"expected one of {sorted(_VALID_FACT_TYPES)}")
+        checked = record.get("checked")
+        if checked not in _VALID_CHECKED_VALUES:
+            errors.append(
+                f"line {lineno}: checked must be 'verified' or 'draft', got {checked!r}")
+        if fact_type in {"present", "absent", "math"} and "text" not in record:
+            errors.append(f"line {lineno}: type={fact_type!r} requires 'text' field")
+        if fact_type == "order" and "sequence" not in record:
+            errors.append(f"line {lineno}: type='order' requires 'sequence' list")
+        if fact_type == "table" and "cell" not in record:
+            errors.append(f"line {lineno}: type='table' requires 'cell' field")
+    return errors
+
+
+_VALID_ANCHOR_SURFACES = frozenset({"normalized", "raw"})
+
+_ANCHORS_TEMPLATE = """\
+{{
+  "pid": "{pid}",
+  "surface": "normalized",
+  "must_contain": [],
+  "must_not_contain": [],
+  "ordered": [],
+  "patterns": []
+}}
+"""
+
+
+def validate_anchors_json(data: dict) -> list[str]:
+    """Validate an anchor spec dict. Returns list of error strings (empty = valid)."""
+    if not isinstance(data, dict):
+        return ["root must be a JSON object"]
+    errors = []
+    surface = data.get("surface", "normalized")
+    if surface not in _VALID_ANCHOR_SURFACES:
+        errors.append(
+            f"surface must be one of {sorted(_VALID_ANCHOR_SURFACES)}, got {surface!r}")
+    for key in ("must_contain", "must_not_contain", "ordered"):
+        val = data.get(key, [])
+        if not isinstance(val, list):
+            errors.append(f"{key!r} must be a list")
+        elif not all(isinstance(s, str) for s in val):
+            errors.append(f"{key!r} must be a list of strings")
+    patterns = data.get("patterns", [])
+    if not isinstance(patterns, list):
+        errors.append("'patterns' must be a list of objects")
+    else:
+        for i, p in enumerate(patterns):
+            if not isinstance(p, dict) or "regex" not in p:
+                errors.append(f"patterns[{i}]: must have 'regex' key")
+    return errors
+
+
 def score_report(stem: str, golden_dir: Path, manifest: Path) -> list[AxisReport]:
     """Per-axis current score vs committed baseline, with deltas and sub-signals.
 
@@ -321,6 +432,17 @@ def score_report(stem: str, golden_dir: Path, manifest: Path) -> list[AxisReport
     return rows
 
 
+def _format_region_snippets(whisker_data: dict) -> list[str]:
+    """Format whisker missing/extra region snippets as bullet lines."""
+    lines = []
+    for reg in whisker_data.get("missing_regions", []):
+        page = f" (p.{reg['page']})" if reg.get("page") else ""
+        lines.append(f"- Missing{page}: `{reg['sample']}`")
+    for reg in whisker_data.get("extra_regions", []):
+        lines.append(f"- Extra: `{reg['sample']}`")
+    return lines
+
+
 def issue_for_stem(stem: str, golden_dir: Path) -> list[str]:
     """Locate gaps for `stem` and draft one ready-to-file issue per defect axis."""
     md = tomd_markdown(stem, golden_dir)
@@ -329,7 +451,17 @@ def issue_for_stem(stem: str, golden_dir: Path) -> list[str]:
     ideal = ideal_path(golden_dir, stem).read_text(encoding="utf-8")
     gaps = locate_gaps(md, ideal)
     scores = {name: ax.score for name, ax in compare(md, ideal).axes.items()}
-    return draft_issues(stem, gaps, scores)
+    drafts = draft_issues(stem, gaps, scores)
+    if not drafts:
+        return drafts
+    src = find_source(stem, golden_dir)
+    whisker_data = _call_whisker_score_file(md, ref_md=ideal, source_path=src)
+    if whisker_data:
+        snippets = _format_region_snippets(whisker_data)
+        if snippets:
+            drafts[0] = (drafts[0].rstrip() + "\n\n### Localized gaps\n\n"
+                         + "\n".join(snippets))
+    return drafts
 
 
 # Coverage-vs-source is a coarse "not gutted" guard, not a paraphrase detector
@@ -339,6 +471,102 @@ def issue_for_stem(stem: str, golden_dir: Path) -> list[str]:
 # Recalibrate as the blessed set grows.
 _MIN_IDEAL_COVERAGE = 0.75
 _MAX_IDEAL_DRIFT = 0.20
+
+# Timeout for whisker subprocess calls. 60s is generous; gates alone take < 1s.
+_WHISKER_TIMEOUT_S = 60
+
+
+def _call_whisker_score_file(
+    md_text: str,
+    *,
+    ref_md: str | None = None,
+    source_path: Path | None = None,
+    timeout: int = _WHISKER_TIMEOUT_S,
+) -> dict | None:
+    """Call ``whisker score-file --json`` and return parsed JSON, or None on failure.
+
+    Whisker unavailability (not installed, subprocess error, non-JSON output) is
+    non-fatal: callers treat None as "whisker not available" and degrade gracefully.
+    Only exit codes 0, 3, 5 (pass/review/fail) are accepted as valid responses.
+    """
+    cmd = ["whisker", "score-file", "--json"]
+    try:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp = Path(tmpdir)
+            md_file = tmp / "candidate.md"
+            md_file.write_text(md_text, encoding="utf-8")
+            cmd = ["whisker", "score-file", "--json", "--md", str(md_file)]
+            if ref_md is not None:
+                ref_file = tmp / "reference.md"
+                ref_file.write_text(ref_md, encoding="utf-8")
+                cmd.extend(["--ref", str(ref_file)])
+            if source_path is not None:
+                cmd.extend(["--source", str(source_path)])
+            result = subprocess.run(
+                cmd, capture_output=True, text=True, timeout=timeout,
+            )
+            if result.returncode not in {0, 3, 5}:
+                return None
+            return json.loads(result.stdout)
+    except (subprocess.SubprocessError, FileNotFoundError, json.JSONDecodeError, OSError):
+        return None
+
+
+def _call_whisker_check_facts(
+    stem: str, golden_dir: Path, md_text: str, *, timeout: int = _WHISKER_TIMEOUT_S,
+) -> dict | None:
+    """Call ``whisker check-facts --json`` if facts/anchors files exist for `stem`.
+
+    Returns parsed JSON or None. None means either no facts/anchors files exist
+    (normal for new papers) or whisker is unavailable.
+    """
+    fp = facts_path(golden_dir, stem)
+    ap = anchors_path(golden_dir, stem)
+    if not fp.exists() and not ap.exists():
+        return None
+    try:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp = Path(tmpdir)
+            md_file = tmp / "candidate.md"
+            md_file.write_text(md_text, encoding="utf-8")
+            cmd = ["whisker", "check-facts", "--json", "--md", str(md_file)]
+            if fp.exists():
+                cmd.extend(["--facts", str(fp)])
+            if ap.exists():
+                cmd.extend(["--anchors", str(ap)])
+            result = subprocess.run(
+                cmd, capture_output=True, text=True, timeout=timeout,
+            )
+            if result.returncode not in {0, 5}:
+                return None
+            return json.loads(result.stdout)
+    except (subprocess.SubprocessError, FileNotFoundError, json.JSONDecodeError, OSError):
+        return None
+
+
+def score_result(stem: str, golden_dir: Path, manifest: Path) -> ScoreResult:
+    """Full score: structural axes, whisker metrics panel, comprehension panel.
+
+    Superset of :func:`score_report`. The whisker and comprehension panels are
+    None when whisker is unavailable or no facts/anchors files exist. The
+    structural axes are always present.
+    """
+    md = tomd_markdown(stem, golden_dir)
+    if md is None:
+        raise FileNotFoundError(f"no staged source for {stem}")
+    ideal_text = ideal_path(golden_dir, stem).read_text(encoding="utf-8")
+    score = compare(md, ideal_text)
+    base = (json.loads(manifest.read_text(encoding="utf-8")).get(stem, {})
+            if manifest.exists() else {})
+    axes = []
+    for name, ax in score.axes.items():
+        b = base.get(name)
+        delta = (ax.score - b) if b is not None else None
+        axes.append(AxisReport(name, ax.score, b, delta, ax.detail, ax.sub))
+    src = find_source(stem, golden_dir)
+    whisker = _call_whisker_score_file(md, ref_md=ideal_text, source_path=src)
+    comprehension = _call_whisker_check_facts(stem, golden_dir, md)
+    return ScoreResult(axes=axes, whisker=whisker, comprehension=comprehension)
 
 
 @dataclass(frozen=True)
@@ -388,6 +616,14 @@ def bless_stem(
             f"{stem}: ideal is byte-identical to tomd's output (an uncorrected "
             "`generate` seed). Correct its structure against the source before "
             "blessing.")
+    whisker_data = _call_whisker_score_file(ideal)
+    if whisker_data is not None:
+        failed_gates = [g for g in whisker_data.get("gates", []) if not g["passed"]]
+        if failed_gates:
+            details = ", ".join(
+                f"{g['name']}: {g['detail'] or 'failed'}" for g in failed_gates
+            )
+            raise ValueError(f"{stem} failed structural gates: {details}")
     row = score_stem(stem, golden_dir)
     data = json.loads(manifest.read_text(encoding="utf-8")) if manifest.exists() else {}
     data[stem] = row
@@ -407,6 +643,7 @@ class ReblessOutcome:
     old: dict[str, float]
     new: dict[str, float]
     lowered: dict[str, tuple[float, float]]  # axis -> (old, new) where new < old
+    whisker_verdict: str | None = None  # "pass"/"review"/"fail", or None if unavailable
 
 
 def rebless_stems(
@@ -428,7 +665,16 @@ def rebless_stems(
         new = score_stem(stem, golden_dir)
         lowered = {ax: (old[ax], new[ax]) for ax in new
                    if ax in old and new[ax] < old[ax] - _SCORE_EPSILON}
-        outcomes.append(ReblessOutcome(stem, old, new, lowered))
+        md = tomd_markdown(stem, golden_dir)
+        whisker_verdict: str | None = None
+        if md is not None:
+            src = find_source(stem, golden_dir)
+            ideal_text = ideal_path(golden_dir, stem).read_text(encoding="utf-8")
+            w = _call_whisker_score_file(md, ref_md=ideal_text, source_path=src)
+            if w is not None:
+                whisker_verdict = w.get("verdict")
+        outcomes.append(ReblessOutcome(stem, old, new, lowered,
+                                       whisker_verdict=whisker_verdict))
         updated[stem] = new
     if not force:
         offenders = {o.stem: o.lowered for o in outcomes if o.lowered}

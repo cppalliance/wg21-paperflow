@@ -11,12 +11,14 @@ Commands:
 
     whisker [PID ...] [--all] [--json] [--no-write] [--gate {pass,review,fail}]
             [--reference ENGINE | --no-reference]
-    whisker bench     --corpus DIR [--baseline FILE] [--out FILE]
-    whisker guard     --corpus DIR --baseline FILE [--update] [--slack F]
-                      [--fail-on-new] [--out FILE]
-    whisker golden    --corpus DIR [--update] [--fail-on-new] [--out FILE]
-    whisker facts     --corpus DIR [--strict] [--out FILE]
-    whisker calibrate --labels FILE [--target-fpr F] [--out FILE]
+    whisker bench       --corpus DIR [--baseline FILE] [--out FILE]
+    whisker guard       --corpus DIR --baseline FILE [--update] [--slack F]
+                        [--fail-on-new] [--out FILE]
+    whisker golden      --corpus DIR [--update] [--fail-on-new] [--out FILE]
+    whisker facts       --corpus DIR [--strict] [--out FILE]
+    whisker calibrate   --labels FILE [--target-fpr F] [--out FILE]
+    whisker score-file  --md FILE [--ref FILE] [--source FILE] [--json]
+    whisker check-facts --md FILE [--facts FILE] [--anchors FILE] [--json]
 
 The three lanes: ``golden`` is Lane 1 STABILITY (did the normalized markdown
 change vs a committed ``<pid>.expected.md`` snapshot); ``bench``/``guard`` are
@@ -33,8 +35,9 @@ each paper's normalized markdown against a committed ``<pid>.expected.md``
 snapshot (refresh with ``--update``); ``facts`` is the Lane 3 comprehension gate
 (only ``checked: verified`` facts gate; ``--strict`` also gates drafts);
 ``calibrate`` fits the coverage edges from labeled data and reports
-TPR/FPR/precision. Typed exit codes (CI contract): 0 ok, 1 error, 3 review,
-5 fail.
+TPR/FPR/precision. ``score-file`` and ``check-facts`` are file-based entry points
+(no paperstore backend required) used by ``tomd score`` / ``tomd bless`` via
+subprocess. Typed exit codes (CI contract): 0 ok, 1 error, 3 review, 5 fail.
 """
 
 from __future__ import annotations
@@ -68,6 +71,7 @@ from whisker.reference import REFERENCE_ENGINES
 from whisker.report import build_report, render_report_md, render_summary
 from whisker.score import (
     VERDICT_FAIL,
+    VERDICT_PASS,
     VERDICT_REVIEW,
     WhiskerResult,
     score_paper,
@@ -265,6 +269,151 @@ def _score_main(argv: list[str]) -> int:
         ))
 
     return _verdict_exit_code([r.verdict for r in results], args.gate)
+
+
+def _print_score_file_result(payload: dict) -> None:
+    """Human-readable summary of a score-file result."""
+    verdict = payload["verdict"]
+    mark = {"pass": "PASS", "review": "REVIEW", "fail": "FAIL"}.get(verdict, verdict.upper())
+    print(f"{payload['pid']}: {mark}")
+    for flag in payload.get("hard_flags", []):
+        print(f"  FAIL  {flag}")
+    for flag in payload.get("soft_flags", []):
+        print(f"  soft  {flag}")
+    for g in payload.get("gates", []):
+        status = "ok  " if g["passed"] else "FAIL"
+        detail = f": {g['detail']}" if g.get("detail") else ""
+        print(f"  gate {status}  {g['name']}{detail}")
+    ref_nid = payload.get("ref_nid")
+    if ref_nid is not None:
+        print(f"  ref_nid={ref_nid:.4f}  "
+              f"ref_teds={payload.get('ref_teds', 0):.4f}  "
+              f"ref_mhs={payload.get('ref_mhs', 0):.4f}  "
+              f"ref_overall={payload.get('ref_overall', 0):.4f}")
+    if payload.get("content_recall") is not None:
+        print(f"  content_recall={payload['content_recall']:.4f}")
+    if payload.get("unigram_coverage") is not None:
+        print(f"  unigram_coverage={payload['unigram_coverage']:.4f}  "
+              f"unigram_drift={payload.get('unigram_drift', 0):.4f}")
+
+
+def _score_file_main(argv: list[str]) -> int:
+    """whisker score-file: score a markdown file against an optional reference.
+
+    whisker score-file --md FILE [--ref FILE] [--source FILE] [--json]
+
+    Gates always run on --md. Reference NID/TEDS/MHS require --ref.
+    Source coverage and region detail require --source.
+    Exit codes: 0 pass, 1 error, 3 review, 5 fail.
+    """
+    parser = argparse.ArgumentParser(prog="whisker score-file")
+    parser.add_argument("--md", required=True, type=Path, metavar="FILE",
+                        help="Candidate markdown file to score")
+    parser.add_argument("--ref", type=Path, metavar="FILE",
+                        help="Reference/ideal markdown for NID/TEDS/MHS/content_recall")
+    parser.add_argument("--source", type=Path, metavar="FILE",
+                        help="Source PDF or HTML for content-coverage and region detail")
+    parser.add_argument("--json", action="store_true", dest="json_out",
+                        help="Emit JSON to stdout")
+    args = parser.parse_args(argv)
+
+    if not args.md.is_file():
+        print(f"score-file: {args.md} not found", file=sys.stderr)
+        return C.EXIT_ERROR
+
+    md_text = args.md.read_text(encoding="utf-8")
+    pid = args.md.stem
+
+    from whisker.gates import run_gates
+    gates = run_gates(md_text)
+
+    ref_nid = ref_teds = ref_mhs = ref_overall = ref_content_recall = None
+    if args.ref is not None:
+        if not args.ref.is_file():
+            print(f"score-file: --ref {args.ref} not found", file=sys.stderr)
+            return C.EXIT_ERROR
+        ref_md = args.ref.read_text(encoding="utf-8")
+        from whisker.bench import table_score
+        from whisker.metrics import content_recall, mhs, normalized_text, text_nid
+        ref_nid = text_nid(normalized_text(md_text), normalized_text(ref_md))
+        ref_teds = table_score(md_text, ref_md)
+        ref_mhs = mhs(md_text, ref_md)
+        ref_overall = (ref_nid + ref_teds + ref_mhs) / 3.0
+        ref_content_recall = content_recall(md_text, ref_md)
+
+    cov = drift = u_cov = u_drift = None
+    missing_regions: list[dict] = []
+    extra_regions: list[dict] = []
+    source_format: str | None = None
+    if args.source is not None:
+        if not args.source.is_file():
+            print(f"score-file: --source {args.source} not found", file=sys.stderr)
+            return C.EXIT_ERROR
+        try:
+            from tomd.lib.check_content import compute_content_coverage
+            r = compute_content_coverage(args.source, md_text, paper_id=pid)
+        except Exception as exc:
+            print(f"score-file: content coverage failed: {exc}", file=sys.stderr)
+            return C.EXIT_ERROR
+        cov, drift = r.coverage, r.drift
+        u_cov, u_drift = r.unigram_coverage, r.unigram_drift
+        source_format = r.source_format
+
+        def _reg(reg) -> dict:
+            return {"page": reg.page, "token_start": reg.token_start,
+                    "token_end": reg.token_end, "sample": reg.sample}
+
+        missing_regions = [_reg(reg) for reg in r.missing_regions[:C.REGION_DETAIL_CAP]]
+        extra_regions = [_reg(reg) for reg in r.extra_regions[:C.REGION_DETAIL_CAP]]
+
+    hard: list[str] = []
+    soft: list[str] = []
+    for g in gates:
+        if not g.passed:
+            hard.append(f"gate:{g.name}:{g.detail or 'failed'}")
+    if u_cov is not None:
+        if u_cov < C.UNIGRAM_COVERAGE_FAIL_EDGE:
+            hard.append(f"unigram coverage {u_cov:.3f} < {C.UNIGRAM_COVERAGE_FAIL_EDGE}")
+        elif u_cov < C.UNIGRAM_COVERAGE_REVIEW_EDGE:
+            soft.append(f"unigram coverage {u_cov:.3f} in review band")
+    if u_drift is not None and u_drift > C.DRIFT_SOFT_EDGE:
+        soft.append(f"unigram drift {u_drift:.3f} > {C.DRIFT_SOFT_EDGE}")
+    if ref_nid is not None and ref_nid < C.REF_NID_ADVISORY_EDGE:
+        soft.append(f"ref nid {ref_nid:.3f} low (advisory)")
+
+    verdict = VERDICT_FAIL if hard else VERDICT_REVIEW if soft else VERDICT_PASS
+    exit_code = C.EXIT_FAIL if hard else C.EXIT_REVIEW if soft else C.EXIT_OK
+
+    def _r(v: float | None) -> float | None:
+        return round(v, 4) if v is not None else None
+
+    payload = {
+        "pid": pid,
+        "verdict": verdict,
+        "hard_flags": sorted(hard),
+        "soft_flags": sorted(soft),
+        "gates": [{"name": g.name, "passed": g.passed, "detail": g.detail}
+                  for g in gates],
+        "ref_nid": _r(ref_nid),
+        "ref_teds": _r(ref_teds),
+        "ref_mhs": _r(ref_mhs),
+        "ref_overall": _r(ref_overall),
+        "content_recall": _r(ref_content_recall),
+        "coverage": _r(cov),
+        "drift": _r(drift),
+        "unigram_coverage": _r(u_cov),
+        "unigram_drift": _r(u_drift),
+        "source_format": source_format,
+        "missing_regions": missing_regions,
+        "extra_regions": extra_regions,
+    }
+
+    if args.json_out:
+        print(json.dumps(payload))
+        return exit_code
+
+    _print_score_file_result(payload)
+    return exit_code
 
 
 def _load_corpus_pairs(corpus: Path, backend) -> list[tuple[str, str, str]]:
@@ -750,6 +899,83 @@ def _render_facts_summary(reports) -> str:
     return "\n".join(lines)
 
 
+def _check_facts_main(argv: list[str]) -> int:
+    """whisker check-facts: validate fact and anchor assertions on a markdown file.
+
+    whisker check-facts --md FILE [--facts FILE] [--anchors FILE] [--json]
+
+    Exit codes: 0 all assertions pass, 1 error, 5 one or more failures.
+    """
+    parser = argparse.ArgumentParser(prog="whisker check-facts")
+    parser.add_argument("--md", required=True, type=Path, metavar="FILE",
+                        help="Markdown file to validate assertions against")
+    parser.add_argument("--facts", type=Path, metavar="FILE",
+                        help="JSONL facts file (whisker-facts format)")
+    parser.add_argument("--anchors", type=Path, metavar="FILE",
+                        help="JSON anchors file (whisker-anchors format)")
+    parser.add_argument("--strict", action="store_true",
+                        help="Also gate on draft facts (default: verified only)")
+    parser.add_argument("--json", action="store_true", dest="json_out")
+    args = parser.parse_args(argv)
+
+    if not args.md.is_file():
+        print(f"check-facts: {args.md} not found", file=sys.stderr)
+        return C.EXIT_ERROR
+
+    md_text = args.md.read_text(encoding="utf-8")
+    pid = args.md.stem
+
+    fact_report = None
+    if args.facts is not None:
+        if not args.facts.is_file():
+            print(f"check-facts: --facts {args.facts} not found", file=sys.stderr)
+            return C.EXIT_ERROR
+        facts = parse_facts_jsonl(args.facts.read_text(encoding="utf-8"), pid=pid)
+        fact_report = check_facts(md_text, facts, pid=pid)
+
+    anchor_report = None
+    if args.anchors is not None:
+        if not args.anchors.is_file():
+            print(f"check-facts: --anchors {args.anchors} not found", file=sys.stderr)
+            return C.EXIT_ERROR
+        spec = anchor_spec_from_dict(
+            json.loads(args.anchors.read_text(encoding="utf-8")), pid=pid
+        )
+        anchor_report = check_anchors(md_text, spec)
+
+    failed = False
+    if fact_report is not None:
+        for c in fact_report.failures():
+            if args.strict or c.verified:
+                failed = True
+                break
+    if anchor_report is not None and not anchor_report.passed:
+        failed = True
+
+    payload = {
+        "pid": pid,
+        "verdict": "fail" if failed else "pass",
+        "facts": fact_report.to_dict() if fact_report is not None else None,
+        "anchors": anchor_report.to_dict() if anchor_report is not None else None,
+    }
+
+    if args.json_out:
+        print(json.dumps(payload))
+        return C.EXIT_FAIL if failed else C.EXIT_OK
+
+    if fact_report is not None:
+        print(f"facts: {len(fact_report.checks)} checked")
+        for c in fact_report.checks:
+            mark = "ok  " if c.passed else "FAIL"
+            print(f"  {mark}  [{c.type}] {c.detail or ''}")
+    if anchor_report is not None:
+        status = "pass" if anchor_report.passed else "FAIL"
+        print(f"anchors: {status}")
+        for c in anchor_report.failures():
+            print(f"  FAIL  {c.detail or ''}")
+    return C.EXIT_FAIL if failed else C.EXIT_OK
+
+
 _LABEL_FAIL = "fail"
 _LABEL_REVIEW = "review"
 _VALID_LABELS = {"pass", _LABEL_REVIEW, _LABEL_FAIL}
@@ -898,6 +1124,10 @@ def main(argv: list[str] | None = None) -> int:
         return _facts_main(argv[1:])
     if argv and argv[0] == "calibrate":
         return _calibrate_main(argv[1:])
+    if argv and argv[0] == "score-file":
+        return _score_file_main(argv[1:])
+    if argv and argv[0] == "check-facts":
+        return _check_facts_main(argv[1:])
     return _score_main(argv)
 
 
