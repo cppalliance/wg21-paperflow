@@ -17,7 +17,16 @@ import json
 import pytest
 
 from herald.collection import records as r
-from herald.collection.enums import ContentType, GroupKind, SourceKind, SourceRole, SourceState
+from herald.collection.enums import (
+    ContentType,
+    FetchOutcome,
+    GroupKind,
+    MetricKind,
+    PersonEventKind,
+    SourceKind,
+    SourceRole,
+    SourceState,
+)
 
 # -- Cursor ---------------------------------------------------------------
 
@@ -108,6 +117,7 @@ def test_default_windows_are_kind_appropriate() -> None:
     assert isinstance(r.default_window_for_kind(SourceKind.MBOX).range, r.ByteRangeWindow)
     assert isinstance(r.default_window_for_kind(SourceKind.RSS).range, r.CurrentOnlyWindow)
     assert isinstance(r.default_window_for_kind(SourceKind.SITEMAP).range, r.CurrentOnlyWindow)
+    assert isinstance(r.default_window_for_kind(SourceKind.SLACK).range, r.TemporalWindow)
     # every default survives a round-trip
     for kind in SourceKind:
         w = r.default_window_for_kind(kind)
@@ -196,7 +206,11 @@ def test_source_uid_for_group_uses_group_kind() -> None:
 
 
 def test_source_row_defaults() -> None:
-    row = r.SourceRow(source_uid="source:github:abc", name="boostorg/beast", kind=SourceKind.GITHUB)
+    identity = r.SourceIdentity(
+        source_uid="source:github:abc", name="boostorg/beast", kind=SourceKind.GITHUB
+    )
+    row = r.SourceRow(identity=identity)
+    assert row.source_uid == "source:github:abc"
     assert row.role == SourceRole.SOURCE
     assert row.group_kind is None
     assert row.parent_id is None
@@ -207,28 +221,71 @@ def test_source_row_defaults() -> None:
 
 
 def test_group_row_is_expressible() -> None:
-    group = r.SourceRow(
+    group_id = r.SourceIdentity(
         source_uid="group:github_org:xyz",
         name="boostorg",
         role=SourceRole.GROUP,
         group_kind=GroupKind.GITHUB_ORG,
     )
-    child = r.SourceRow(
+    child_id = r.SourceIdentity(
         source_uid="source:github:abc",
         name="boostorg/beast",
         kind=SourceKind.GITHUB,
         parent_id=7,
         window_inherited=True,
     )
+    group = r.SourceRow(identity=group_id)
+    child = r.SourceRow(identity=child_id)
     assert group.role == SourceRole.GROUP and group.kind is None
     assert child.parent_id == 7 and child.window_inherited is True
+
+
+# -- SourceIdentity validation --------------------------------------------
+
+
+def test_source_identity_rejects_source_without_kind() -> None:
+    with pytest.raises(ValueError, match="role=source requires a kind"):
+        r.SourceIdentity(source_uid="x", name="x")
+
+
+def test_source_identity_rejects_source_with_group_kind() -> None:
+    with pytest.raises(ValueError, match="role=source must not set group_kind"):
+        r.SourceIdentity(
+            source_uid="x", name="x", kind=SourceKind.GITHUB, group_kind=GroupKind.GITHUB_ORG
+        )
+
+
+def test_source_identity_rejects_group_without_group_kind() -> None:
+    with pytest.raises(ValueError, match="role=group requires a group_kind"):
+        r.SourceIdentity(source_uid="x", name="x", role=SourceRole.GROUP)
+
+
+def test_source_identity_rejects_group_with_kind() -> None:
+    with pytest.raises(ValueError, match="role=group must not set kind"):
+        r.SourceIdentity(
+            source_uid="x", name="x", role=SourceRole.GROUP,
+            group_kind=GroupKind.GITHUB_ORG, kind=SourceKind.GITHUB,
+        )
+
+
+# -- compute_source_uid validation ----------------------------------------
+
+
+def test_source_uid_rejects_group_without_group_kind() -> None:
+    with pytest.raises(ValueError, match="requires group_kind"):
+        r.compute_source_uid(role=SourceRole.GROUP, identity={"org": "x"})
+
+
+def test_source_uid_rejects_source_without_kind() -> None:
+    with pytest.raises(ValueError, match="requires kind"):
+        r.compute_source_uid(role=SourceRole.SOURCE, identity={"repo": "x"})
 
 
 # -- result seam types ----------------------------------------------------
 
 
 def test_result_types_construct() -> None:
-    fr = r.FetchResult(outcome=r.FetchOutcome.OK, status_code=200, raw=b"<html>")
+    fr = r.FetchResult(outcome=FetchOutcome.OK, status_code=200, raw=b"<html>")
     er = r.ExtractResult(text="body", title="t")
     idn = r.Identity(content_hash_text="a" * 64, content_hash_raw="b" * 64, canonical_id="gh:x/y#1")
     assert fr.outcome == "ok"
@@ -251,3 +308,73 @@ def test_fuzzy_text_hash_defaults_none() -> None:
     idn = r.Identity(content_hash_text="a" * 64, content_hash_raw="b" * 64)
     assert content.content_hash_fuzzy is None
     assert idn.content_hash_fuzzy is None
+
+
+# -- serializer exhaustiveness --------------------------------------------
+
+
+def test_cursor_to_json_rejects_unknown_type() -> None:
+    @dataclasses.dataclass(frozen=True)
+    class FakeCursor:
+        value: int = 0
+
+    with pytest.raises(AssertionError, match="unhandled cursor type"):
+        r.cursor_to_json(FakeCursor())  # type: ignore[arg-type]
+
+
+def test_range_to_json_rejects_unknown_type() -> None:
+    @dataclasses.dataclass(frozen=True)
+    class FakeRange:
+        pass
+
+    with pytest.raises(AssertionError, match="unhandled range type"):
+        r._range_to_json(FakeRange())  # type: ignore[arg-type]
+
+
+def test_candidate_to_json_rejects_unknown_type() -> None:
+    @dataclasses.dataclass(frozen=True)
+    class FakeCandidate:
+        url: str = "x"
+
+    with pytest.raises(AssertionError, match="unhandled candidate type"):
+        r.candidate_to_json(FakeCandidate())  # type: ignore[arg-type]
+
+
+# -- mapping defaults are immutable ---------------------------------------
+
+
+def test_mapping_defaults_are_immutable() -> None:
+    d = r.Discovered(url="https://example.org")
+    with pytest.raises(TypeError):
+        d.hint["x"] = 1  # type: ignore[index]
+
+
+# -- new enum-typed fields ------------------------------------------------
+
+
+def test_person_event_row_uses_enum() -> None:
+    row = r.PersonEventRow(
+        person_id="p1",
+        occurred_on="2026-06-01",
+        event_kind=PersonEventKind.MENTION,
+    )
+    assert row.event_kind == "mention"
+    assert isinstance(row.event_kind, PersonEventKind)
+
+
+def test_metric_snapshot_row_uses_enum() -> None:
+    row = r.MetricSnapshotRow(
+        content_hash_text="a" * 64,
+        metric_kind=MetricKind.STARS,
+        value=42,
+        taken_at="2026-06-01T00:00:00Z",
+    )
+    assert row.metric_kind == "stars"
+    assert isinstance(row.metric_kind, MetricKind)
+
+
+# -- IsoTimestamp ---------------------------------------------------------
+
+
+def test_iso_timestamp_is_str() -> None:
+    assert r.IsoTimestamp is str

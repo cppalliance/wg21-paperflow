@@ -11,6 +11,7 @@ dist/
 build/
 .venv_min/
 study/*
+.coverage
 
 # macOS / Finder / AppleDouble
 .DS_Store

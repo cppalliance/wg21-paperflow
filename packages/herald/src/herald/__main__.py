@@ -20,12 +20,16 @@ without any backend or network. A raised :class:`HeraldError` is mapped to
 from __future__ import annotations
 
 import argparse
+import logging
 import sys
+from collections.abc import Callable
 
 from herald import __version__
 
+log = logging.getLogger("herald")
 
-def _not_yet(name: str):
+
+def _not_yet(name: str) -> Callable[[argparse.Namespace], int]:
     def _handler(args: argparse.Namespace) -> int:  # pragma: no cover - needs later milestones
         from herald.collection.errors import HeraldError
 
@@ -39,7 +43,7 @@ def _not_yet(name: str):
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="herald", description="Herald collection layer")
 
-    def _help_handler(p: argparse.ArgumentParser):
+    def _help_handler(p: argparse.ArgumentParser) -> Callable[[argparse.Namespace], int]:
         def _handler(_args: argparse.Namespace) -> int:
             p.print_help()
             return 0
@@ -90,12 +94,17 @@ def main(argv: list[str] | None = None) -> int:
     if handler is None:
         parser.print_help()
         return 0
+    if not log.hasHandlers():
+        h = logging.StreamHandler(stream=sys.stderr)
+        h.setFormatter(logging.Formatter("%(levelname)s: %(message)s"))
+        log.addHandler(h)
+        log.setLevel(logging.WARNING)
     from herald.collection.errors import HeraldError
 
     try:
         return int(handler(args) or 0)
     except HeraldError as exc:
-        print(f"error: {exc}", file=sys.stderr)
+        log.error("%s", exc)
         return 1
 
 

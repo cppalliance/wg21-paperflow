@@ -20,10 +20,13 @@ natural key across instances.
 Add the remaining **enablers** to the data model + contract (the exporter/importer + CLI are
 a dedicated later PR):
 
-1. `SourceRow.source_uid` - a deterministic UNIQUE natural key derived from
-   `role` + (`kind`/`group_kind`) + a stable hash of identity-bearing config. Now every
-   migration-relevant table has a natural key, so an importer upserts and remaps surrogate
-   FKs (`urls.source_id`, `parent_id`, event payload ids).
+1. `SourceIdentity.source_uid` (exposed on `SourceRow` via a read-through property) - a
+   deterministic UNIQUE natural key derived from `role` + (`kind`/`group_kind`) + a stable
+   hash of identity-bearing config. Now every migration-relevant table has a natural key,
+   so an importer upserts and remaps surrogate FKs (`urls.source_id`, `parent_id`, event
+   payload ids). The `SourceIdentity`/`SourceRow` split (ADR
+   [0009](0009-source-identity-split.md)) guarantees that `source_uid` is stable across
+   scheduling state changes by construction.
 2. `StorageBackend.export_table(name)` / `import_rows(name, rows, *, on_conflict)` - an
    abstract interchange seam so both backends implement one shape.
 3. The interchange contract (documented, not built): content-addressed blob sync (copy the

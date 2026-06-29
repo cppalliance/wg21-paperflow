@@ -100,6 +100,21 @@ def test_complete_subclass_can_instantiate() -> None:
     assert isinstance(instance, StorageBackend)
 
 
+def test_backend_supports_context_manager() -> None:
+    namespace = {name: (lambda self, *a, **k: None) for name in StorageBackend.__abstractmethods__}
+    closed: list[bool] = []
+
+    def _close(self: object) -> None:
+        closed.append(True)
+
+    namespace["close"] = _close
+    concrete = type("StubBackend", (StorageBackend,), namespace)
+    instance = concrete()
+    with instance:
+        pass
+    assert closed == [True]
+
+
 def test_source_adapter_poll_window_is_keyword_only() -> None:
     sig = inspect.signature(SourceAdapter.poll)
     assert sig.parameters["window"].kind is inspect.Parameter.KEYWORD_ONLY

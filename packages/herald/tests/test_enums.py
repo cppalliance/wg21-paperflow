@@ -153,13 +153,36 @@ def test_person_vocabularies_are_pinned() -> None:
 
 
 def test_fetch_outcome_is_pinned() -> None:
-    # FetchOutcome lives in records.py (tightly coupled to FetchResult) but is wire-ish.
-    from herald.collection.records import FetchOutcome
-
-    assert {v.value for v in FetchOutcome} == {
+    assert {v.value for v in enums.FetchOutcome} == {
         "ok",
         "not-modified",
         "not-found",
         "blocked",
         "error",
+    }
+
+
+def test_person_event_kind_pinned() -> None:
+    assert {v.value for v in enums.PersonEventKind} == {
+        "role_change",
+        "affiliation_change",
+        "publication",
+        "mention",
+    }
+
+
+def test_resolution_status_pinned() -> None:
+    assert {v.value for v in enums.ResolutionStatus} == {
+        "pending",
+        "resolved",
+        "rejected",
+    }
+
+
+def test_metric_kind_pinned() -> None:
+    assert {v.value for v in enums.MetricKind} == {
+        "reactions",
+        "upvotes",
+        "stars",
+        "views",
     }

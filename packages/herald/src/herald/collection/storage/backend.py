@@ -25,15 +25,16 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from collections.abc import Iterable, Iterator, Mapping, Sequence
-from typing import Any
+from typing import Any, Literal
 
-from herald.collection.enums import AccessState, HandlePlatform, SourceKind, SourceRole, SourceState
+from herald.collection.enums import AccessState, HandlePlatform, MetricKind, SourceKind, SourceRole, SourceState
 from herald.collection.records import (
     CandidateSourceRow,
     ConsumerCursorRow,
     ContentRow,
     Cursor,
     EventRow,
+    IsoTimestamp,
     MetricSnapshotRow,
     OrganizationRow,
     PersonAffiliationRow,
@@ -47,6 +48,30 @@ from herald.collection.records import (
     UrlContentVersionRow,
     UrlRow,
 )
+
+TableName = Literal[
+    "sources",
+    "urls",
+    "contents",
+    "url_content_versions",
+    "collection_events",
+    "consumer_cursors",
+    "metric_snapshots",
+    "candidate_sources",
+    "persons",
+    "person_name_variants",
+    "person_handles",
+    "person_email_domains",
+    "person_pending_candidates",
+    "person_events",
+    "organizations",
+    "person_affiliations",
+    "person_committee_roles",
+    "watches",
+    "watch_snapshots",
+]
+
+ConflictStrategy = Literal["natural_key", "replace", "skip"]
 
 
 class _Unset:
@@ -109,11 +134,11 @@ class StorageBackend(ABC):
     # -- scheduling --------------------------------------------------------
 
     @abstractmethod
-    def due_sources(self, *, now: str, limit: int | None = None) -> list[SourceRow]:
+    def due_sources(self, *, now: IsoTimestamp, limit: int | None = None) -> list[SourceRow]:
         """Return enabled, active sources whose ``next_run_at`` is due at ``now``."""
 
     @abstractmethod
-    def set_next_run_at(self, source_id: int, next_run_at: str | None) -> None:
+    def set_next_run_at(self, source_id: int, next_run_at: IsoTimestamp | None) -> None:
         """Set a source's next scheduled poll time."""
 
     @abstractmethod
@@ -121,7 +146,7 @@ class StorageBackend(ABC):
         self,
         source_id: int,
         *,
-        swept_at: str,
+        swept_at: IsoTimestamp,
         access_state: AccessState | None = None,
         error: str | None = None,
     ) -> None:
@@ -193,7 +218,7 @@ class StorageBackend(ABC):
         consumer_name: str,
         *,
         last_processed_event_id: int,
-        last_processed_at: str | None = None,
+        last_processed_at: IsoTimestamp | None = None,
     ) -> None:
         """Advance a consumer's cursor after it has processed events."""
 
@@ -208,7 +233,7 @@ class StorageBackend(ABC):
         """Persist one periodic snapshot of a cumulative engagement metric."""
 
     @abstractmethod
-    def latest_metric(self, content_hash_text: str, metric_kind: str) -> MetricSnapshotRow | None:
+    def latest_metric(self, content_hash_text: str, metric_kind: MetricKind) -> MetricSnapshotRow | None:
         """Return the most recent snapshot of a metric for a content item, or ``None``."""
 
     # -- person observation ------------------------------------------------
@@ -249,16 +274,16 @@ class StorageBackend(ABC):
     # -- cross-instance interchange seam (implemented in the migration PR) --
 
     @abstractmethod
-    def export_table(self, name: str) -> Iterator[Mapping[str, Any]]:
+    def export_table(self, name: TableName) -> Iterator[Mapping[str, Any]]:
         """Yield a table's rows as JSON-safe dicts for logical (cross-engine) export."""
 
     @abstractmethod
     def import_rows(
         self,
-        name: str,
+        name: TableName,
         rows: Iterable[Mapping[str, Any]],
         *,
-        on_conflict: str = "natural_key",
+        on_conflict: ConflictStrategy = "natural_key",
     ) -> int:
         """Upsert exported rows into a table (by natural key), remapping surrogate FKs;
         return the number of rows written."""
@@ -269,5 +294,11 @@ class StorageBackend(ABC):
     def close(self) -> None:
         """Release any resources held by the backend."""
 
+    def __enter__(self) -> StorageBackend:
+        return self
 
-__all__ = ["StorageBackend", "UNSET"]
+    def __exit__(self, exc_type: object, exc_val: object, exc_tb: object) -> None:
+        self.close()
+
+
+__all__ = ["StorageBackend", "UNSET", "TableName", "ConflictStrategy"]

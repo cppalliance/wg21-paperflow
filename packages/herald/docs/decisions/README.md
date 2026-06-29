@@ -14,3 +14,6 @@ Each ADR cites only the foundation documents as authority.
 | [0006-cross-instance-migration.md](0006-cross-instance-migration.md) | Cross-instance migration and the logical interchange contract |
 | [0007-backfill-event-provenance.md](0007-backfill-event-provenance.md) | Backfill event provenance (`EventOrigin`) |
 | [0008-carried-extensions.md](0008-carried-extensions.md) | `SourceKind` extension, cross-source identity, snapshot metrics, scheduling fields |
+| [0009-source-identity-split.md](0009-source-identity-split.md) | `SourceRow`/`SourceIdentity` two-layer identity split |
+| [0010-exception-hierarchy.md](0010-exception-hierarchy.md) | Typed exception hierarchy |
+| [0011-person-observation-model.md](0011-person-observation-model.md) | Person observation model (two-phase identity resolution) |

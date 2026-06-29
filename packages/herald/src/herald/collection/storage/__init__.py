@@ -15,6 +15,6 @@ Postgres/Django backend in production.
 
 from __future__ import annotations
 
-from herald.collection.storage.backend import UNSET, StorageBackend
+from herald.collection.storage.backend import UNSET, ConflictStrategy, StorageBackend, TableName
 
-__all__ = ["StorageBackend", "UNSET"]
+__all__ = ["StorageBackend", "UNSET", "TableName", "ConflictStrategy"]

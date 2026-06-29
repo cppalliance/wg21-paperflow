@@ -31,8 +31,8 @@ import hashlib
 import json
 from collections.abc import Mapping
 from dataclasses import dataclass, field
-from enum import StrEnum
-from typing import Any
+from types import MappingProxyType
+from typing import Any, TypeAlias
 
 from herald.collection.enums import (
     AccessState,
@@ -41,9 +41,13 @@ from herald.collection.enums import (
     ContentType,
     CursorKind,
     EventKind,
+    FetchOutcome,
     GroupKind,
     HandlePlatform,
+    MetricKind,
+    PersonEventKind,
     PersonStatus,
+    ResolutionStatus,
     SourceKind,
     SourceRole,
     SourceState,
@@ -51,6 +55,15 @@ from herald.collection.enums import (
     Visibility,
     WindowKind,
 )
+
+IsoTimestamp: TypeAlias = str
+"""An ISO-8601 timestamp string (e.g. ``"2026-06-25T00:00:00Z"``)."""
+
+
+def _empty_mapping() -> Mapping[str, Any]:
+    """Return a runtime-immutable empty mapping for dataclass defaults."""
+    return MappingProxyType({})
+
 
 # ---------------------------------------------------------------------------
 # Cursor: typed union for the single forward resume position
@@ -89,7 +102,7 @@ class OpaqueToken:
 class Composite:
     """A cursor with independent sub-axes (e.g. GitHub issues vs commits in one repo)."""
 
-    parts: dict[str, "Cursor"]
+    parts: Mapping[str, "Cursor"]
 
 
 Cursor = Timestamp | MonotonicId | ByteOffset | OpaqueToken | Composite
@@ -111,22 +124,25 @@ def cursor_to_json(cursor: Cursor) -> dict[str, Any]:
                 "kind": CursorKind.COMPOSITE.value,
                 "parts": {name: cursor_to_json(sub) for name, sub in parts.items()},
             }
+        case _:
+            raise AssertionError(f"unhandled cursor type: {type(cursor)}")
 
 
 def cursor_from_json(data: Mapping[str, Any]) -> Cursor:
     """Reconstruct a :data:`Cursor`; an unknown ``kind`` raises ``ValueError``."""
-    kind = data["kind"]
-    if kind == CursorKind.TIMESTAMP:
-        return Timestamp(str(data["value"]))
-    if kind == CursorKind.MONOTONIC_ID:
-        return MonotonicId(int(data["value"]))
-    if kind == CursorKind.BYTE_OFFSET:
-        return ByteOffset(int(data["offset"]))
-    if kind == CursorKind.OPAQUE_TOKEN:
-        return OpaqueToken(str(data["token"]))
-    if kind == CursorKind.COMPOSITE:
-        return Composite({name: cursor_from_json(sub) for name, sub in data["parts"].items()})
-    raise ValueError(f"unknown cursor kind: {kind!r}")
+    match data["kind"]:
+        case CursorKind.TIMESTAMP:
+            return Timestamp(str(data["value"]))
+        case CursorKind.MONOTONIC_ID:
+            return MonotonicId(int(data["value"]))
+        case CursorKind.BYTE_OFFSET:
+            return ByteOffset(int(data["offset"]))
+        case CursorKind.OPAQUE_TOKEN:
+            return OpaqueToken(str(data["token"]))
+        case CursorKind.COMPOSITE:
+            return Composite({name: cursor_from_json(sub) for name, sub in data["parts"].items()})
+        case _:
+            raise ValueError(f"unknown cursor kind: {data['kind']!r}")
 
 
 # ---------------------------------------------------------------------------
@@ -194,17 +210,20 @@ def _range_to_json(rng: RangeBound) -> dict[str, Any]:
             return {"kind": WindowKind.BYTE_RANGE.value, "max_bytes_per_sweep": max_bytes}
         case CurrentOnlyWindow():
             return {"kind": WindowKind.CURRENT_ONLY.value}
+        case _:
+            raise AssertionError(f"unhandled range type: {type(rng)}")
 
 
 def _range_from_json(data: Mapping[str, Any]) -> RangeBound:
-    kind = data["kind"]
-    if kind == WindowKind.TEMPORAL:
-        return TemporalWindow(data.get("since"), data.get("until"))
-    if kind == WindowKind.BYTE_RANGE:
-        return ByteRangeWindow(int(data["max_bytes_per_sweep"]))
-    if kind == WindowKind.CURRENT_ONLY:
-        return CurrentOnlyWindow()
-    raise ValueError(f"unknown window kind: {kind!r}")
+    match data["kind"]:
+        case WindowKind.TEMPORAL:
+            return TemporalWindow(data.get("since"), data.get("until"))
+        case WindowKind.BYTE_RANGE:
+            return ByteRangeWindow(int(data["max_bytes_per_sweep"]))
+        case WindowKind.CURRENT_ONLY:
+            return CurrentOnlyWindow()
+        case _:
+            raise ValueError(f"unknown window kind: {data['kind']!r}")
 
 
 def window_to_json(window: CollectionWindow) -> dict[str, Any]:
@@ -267,7 +286,7 @@ def default_window_for_kind(kind: SourceKind) -> CollectionWindow:
             range=ByteRangeWindow(max_bytes_per_sweep=10 * 1024 * 1024),
             throttle=ThrottleCeilings(max_age_seconds=None),
         )
-    if kind == SourceKind.DISCORD:
+    if kind in {SourceKind.DISCORD, SourceKind.SLACK}:
         return CollectionWindow(
             range=TemporalWindow(since="today", until=None),
             throttle=ThrottleCeilings(max_items=5000),
@@ -291,7 +310,7 @@ class Discovered:
     """A cheap listing entry - a URL (and a hint) to be fetched by the pipeline."""
 
     url: str
-    hint: Mapping[str, Any] = field(default_factory=dict)
+    hint: Mapping[str, Any] = field(default_factory=_empty_mapping)
     canonical_id: str | None = None
 
 
@@ -303,9 +322,9 @@ class Fetched:
     raw: bytes | None = None
     text: str | None = None
     content_type: ContentType | None = None
-    metadata: Mapping[str, Any] = field(default_factory=dict)
+    metadata: Mapping[str, Any] = field(default_factory=_empty_mapping)
     canonical_id: str | None = None
-    fetched_at: str | None = None
+    fetched_at: IsoTimestamp | None = None
 
 
 Candidate = Discovered | Fetched
@@ -324,7 +343,8 @@ def candidate_to_json(candidate: Candidate) -> dict[str, Any]:
                 "hint": dict(hint),
                 "canonical_id": canonical_id,
             }
-        case Fetched(url, raw, text, content_type, metadata, canonical_id, fetched_at):
+        case Fetched(url=url, raw=raw, text=text, content_type=content_type,
+                     metadata=metadata, canonical_id=canonical_id, fetched_at=fetched_at):
             return {
                 "kind": CandidateKind.FETCHED.value,
                 "url": url,
@@ -335,45 +355,38 @@ def candidate_to_json(candidate: Candidate) -> dict[str, Any]:
                 "canonical_id": canonical_id,
                 "fetched_at": fetched_at,
             }
+        case _:
+            raise AssertionError(f"unhandled candidate type: {type(candidate)}")
 
 
 def candidate_from_json(data: Mapping[str, Any]) -> Candidate:
     """Reconstruct a :data:`Candidate`; an unknown ``kind`` raises ``ValueError``."""
-    kind = data["kind"]
-    if kind == CandidateKind.DISCOVERED:
-        return Discovered(
-            url=str(data["url"]),
-            hint=dict(data.get("hint") or {}),
-            canonical_id=data.get("canonical_id"),
-        )
-    if kind == CandidateKind.FETCHED:
-        raw_b64 = data.get("raw")
-        content_type = data.get("content_type")
-        return Fetched(
-            url=str(data["url"]),
-            raw=base64.b64decode(raw_b64) if raw_b64 is not None else None,
-            text=data.get("text"),
-            content_type=ContentType(content_type) if content_type is not None else None,
-            metadata=dict(data.get("metadata") or {}),
-            canonical_id=data.get("canonical_id"),
-            fetched_at=data.get("fetched_at"),
-        )
-    raise ValueError(f"unknown candidate kind: {kind!r}")
+    match data["kind"]:
+        case CandidateKind.DISCOVERED:
+            return Discovered(
+                url=str(data["url"]),
+                hint=dict(data.get("hint") or {}),
+                canonical_id=data.get("canonical_id"),
+            )
+        case CandidateKind.FETCHED:
+            raw_b64 = data.get("raw")
+            content_type = data.get("content_type")
+            return Fetched(
+                url=str(data["url"]),
+                raw=base64.b64decode(raw_b64) if raw_b64 is not None else None,
+                text=data.get("text"),
+                content_type=ContentType(content_type) if content_type is not None else None,
+                metadata=dict(data.get("metadata") or {}),
+                canonical_id=data.get("canonical_id"),
+                fetched_at=data.get("fetched_at"),
+            )
+        case _:
+            raise ValueError(f"unknown candidate kind: {data['kind']!r}")
 
 
 # ---------------------------------------------------------------------------
 # Injected-seam result types
 # ---------------------------------------------------------------------------
-
-
-class FetchOutcome(StrEnum):
-    """Classification of a fetch attempt (drives change detection + access_state)."""
-
-    OK = "ok"
-    NOT_MODIFIED = "not-modified"
-    NOT_FOUND = "not-found"
-    BLOCKED = "blocked"
-    ERROR = "error"
 
 
 @dataclass(frozen=True)
@@ -385,7 +398,7 @@ class FetchResult:
     raw: bytes | None = None
     content_type: str | None = None
     etag: str | None = None
-    last_modified: str | None = None
+    last_modified: IsoTimestamp | None = None
     final_url: str | None = None
     error: str | None = None
 
@@ -397,10 +410,10 @@ class ExtractResult:
     text: str
     title: str | None = None
     byline: str | None = None
-    publish_date: str | None = None
+    publish_date: IsoTimestamp | None = None
     language: str | None = None
     content_type: ContentType | None = None
-    metadata: Mapping[str, Any] = field(default_factory=dict)
+    metadata: Mapping[str, Any] = field(default_factory=_empty_mapping)
 
 
 @dataclass(frozen=True)
@@ -452,46 +465,77 @@ def compute_source_uid(
 
 
 @dataclass(frozen=True)
-class SourceRow:
-    """A registry row - a pollable source (``role=source``) or a group container
-    (``role=group``). Extends the spec ``sources`` table with the role discriminator, the
-    window/range model, the group hierarchy, scheduling fields, and the ``source_uid``
-    natural key (all recorded as deviations)."""
+class SourceIdentity:
+    """Immutable identity and configuration of a source or group container."""
 
     source_uid: str
     name: str
     role: SourceRole = SourceRole.SOURCE
     kind: SourceKind | None = None
     group_kind: GroupKind | None = None
-    config_json: Mapping[str, Any] = field(default_factory=dict)
+    config_json: Mapping[str, Any] = field(default_factory=_empty_mapping)
+    parent_id: int | None = None
+    window_inherited: bool = False
+
+    def __post_init__(self) -> None:
+        if self.role is SourceRole.SOURCE:
+            if self.kind is None:
+                raise ValueError("SourceIdentity with role=source requires a kind")
+            if self.group_kind is not None:
+                raise ValueError("SourceIdentity with role=source must not set group_kind")
+        elif self.role is SourceRole.GROUP:
+            if self.group_kind is None:
+                raise ValueError("SourceIdentity with role=group requires a group_kind")
+            if self.kind is not None:
+                raise ValueError("SourceIdentity with role=group must not set kind")
+
+
+@dataclass(frozen=True)
+class SourceRow:
+    """A full source row: identity + scheduling + lifecycle state. Convenience properties
+    delegate to ``identity`` for the most commonly accessed fields."""
+
+    identity: SourceIdentity
     enabled: bool = True
     state: SourceState = SourceState.PENDING
     access_state: AccessState = AccessState.OPEN
     cadence_kind: CadenceKind = CadenceKind.FIXED
     poll_interval_seconds: int | None = None
-    parent_id: int | None = None
     window_json: Mapping[str, Any] | None = None
-    window_inherited: bool = False
-    last_swept_at: str | None = None
-    next_run_at: str | None = None
+    last_swept_at: IsoTimestamp | None = None
+    next_run_at: IsoTimestamp | None = None
     last_error: str | None = None
     consecutive_failures: int = 0
     id: int | None = None
-    created_at: str | None = None
+    created_at: IsoTimestamp | None = None
 
-    def __post_init__(self) -> None:
-        # Enforce the role/kind discriminator (ADR 0003): a pollable source carries a
-        # SourceKind and no GroupKind; a group container carries a GroupKind and no SourceKind.
-        if self.role is SourceRole.SOURCE:
-            if self.kind is None:
-                raise ValueError("SourceRow with role=source requires a kind")
-            if self.group_kind is not None:
-                raise ValueError("SourceRow with role=source must not set group_kind")
-        elif self.role is SourceRole.GROUP:
-            if self.group_kind is None:
-                raise ValueError("SourceRow with role=group requires a group_kind")
-            if self.kind is not None:
-                raise ValueError("SourceRow with role=group must not set kind")
+    @property
+    def source_uid(self) -> str:
+        return self.identity.source_uid
+
+    @property
+    def name(self) -> str:
+        return self.identity.name
+
+    @property
+    def role(self) -> SourceRole:
+        return self.identity.role
+
+    @property
+    def kind(self) -> SourceKind | None:
+        return self.identity.kind
+
+    @property
+    def group_kind(self) -> GroupKind | None:
+        return self.identity.group_kind
+
+    @property
+    def parent_id(self) -> int | None:
+        return self.identity.parent_id
+
+    @property
+    def window_inherited(self) -> bool:
+        return self.identity.window_inherited
 
 
 @dataclass(frozen=True)
@@ -501,15 +545,15 @@ class UrlRow:
     url_syntactic: str
     url_canonical: str
     source_id: int | None = None
-    first_seen_at: str | None = None
-    last_fetched_at: str | None = None
-    last_checked_at: str | None = None
+    first_seen_at: IsoTimestamp | None = None
+    last_fetched_at: IsoTimestamp | None = None
+    last_checked_at: IsoTimestamp | None = None
     etag: str | None = None
-    last_modified: str | None = None
+    last_modified: IsoTimestamp | None = None
     fetch_count: int = 0
     change_count: int = 0
     status_last: int | None = None
-    revisit_after: str | None = None
+    revisit_after: IsoTimestamp | None = None
     robots_allowed: bool | None = None
     id: int | None = None
 
@@ -526,13 +570,13 @@ class ContentRow:
     content_hash_fuzzy: str | None = None
     title: str | None = None
     byline: str | None = None
-    publish_date: str | None = None
+    publish_date: IsoTimestamp | None = None
     language: str | None = None
     content_type: ContentType | None = None
     extracted_text_blob_key: str | None = None
     raw_blob_key: str | None = None
     source_kind: SourceKind | None = None
-    first_seen_at: str | None = None
+    first_seen_at: IsoTimestamp | None = None
     visibility: Visibility = Visibility.PUBLIC
     canonical_id: str | None = None
     fingerprint: str | None = None
@@ -544,7 +588,7 @@ class UrlContentVersionRow:
 
     url_id: int
     content_hash_text: str
-    seen_at: str | None = None
+    seen_at: IsoTimestamp | None = None
     id: int | None = None
 
 
@@ -554,7 +598,7 @@ class EventRow:
 
     kind: EventKind
     payload: Mapping[str, Any]
-    created_at: str | None = None
+    created_at: IsoTimestamp | None = None
     id: int | None = None
 
 
@@ -564,7 +608,7 @@ class ConsumerCursorRow:
 
     consumer_name: str
     last_processed_event_id: int = 0
-    last_processed_at: str | None = None
+    last_processed_at: IsoTimestamp | None = None
 
 
 @dataclass(frozen=True)
@@ -573,9 +617,9 @@ class MetricSnapshotRow:
     row per increment). Modeled here to pin the policy into the data model."""
 
     content_hash_text: str
-    metric_kind: str
+    metric_kind: MetricKind
     value: int
-    taken_at: str
+    taken_at: IsoTimestamp
     source_id: int | None = None
     id: int | None = None
 
@@ -586,7 +630,7 @@ class CandidateSourceRow:
 
     candidate_url: str
     observed_in_content_hash: str
-    first_observed_at: str | None = None
+    first_observed_at: IsoTimestamp | None = None
     observation_count: int = 1
     id: int | None = None
 
@@ -600,7 +644,7 @@ class PersonRow:
     canonical_name: str
     preferred_prose_name: str | None = None
     status: PersonStatus = PersonStatus.UNKNOWN
-    deceased_on: str | None = None
+    deceased_on: IsoTimestamp | None = None
     primary_domain: str | None = None
     one_line_summary: str | None = None
 
@@ -636,25 +680,25 @@ class PersonEmailDomainRow:
 class PersonPendingCandidateRow:
     observed_name: str
     observed_context: str | None = None
-    observed_handles: Mapping[str, Any] = field(default_factory=dict)
+    observed_handles: Mapping[str, Any] = field(default_factory=_empty_mapping)
     observed_email_domain: str | None = None
     content_id: str | None = None
-    first_seen: str | None = None
-    last_seen: str | None = None
-    resolution_status: str = "pending"
+    first_seen: IsoTimestamp | None = None
+    last_seen: IsoTimestamp | None = None
+    resolution_status: ResolutionStatus = ResolutionStatus.PENDING
     candidate_id: int | None = None
 
 
 @dataclass(frozen=True)
 class PersonEventRow:
     person_id: str
-    occurred_on: str
-    event_kind: str
+    occurred_on: IsoTimestamp
+    event_kind: PersonEventKind
     headline: str | None = None
     body_md: str | None = None
     content_id: str | None = None
     article_id: int | None = None
-    created_at: str | None = None
+    created_at: IsoTimestamp | None = None
     event_id: int | None = None
 
 
@@ -674,8 +718,8 @@ class PersonAffiliationRow:
     person_id: str
     organization_id: int
     role: str | None = None
-    started_on: str | None = None
-    ended_on: str | None = None
+    started_on: IsoTimestamp | None = None
+    ended_on: IsoTimestamp | None = None
     content_id: str | None = None
     id: int | None = None
 
@@ -685,8 +729,8 @@ class PersonCommitteeRoleRow:
     person_id: str
     group_code: str
     role: str | None = None
-    started_on: str | None = None
-    ended_on: str | None = None
+    started_on: IsoTimestamp | None = None
+    ended_on: IsoTimestamp | None = None
     content_id: str | None = None
     id: int | None = None
 
@@ -694,21 +738,23 @@ class PersonCommitteeRoleRow:
 @dataclass(frozen=True)
 class WatchRow:
     person_id: str
-    query_terms_json: Mapping[str, Any] = field(default_factory=dict)
+    query_terms_json: Mapping[str, Any] = field(default_factory=_empty_mapping)
     cadence: str | None = None
-    last_run_at: str | None = None
+    last_run_at: IsoTimestamp | None = None
     id: int | None = None
 
 
 @dataclass(frozen=True)
 class WatchSnapshotRow:
     watch_id: int
-    taken_at: str
-    content_hashes_json: Mapping[str, Any] = field(default_factory=dict)
+    taken_at: IsoTimestamp
+    content_hashes_json: Mapping[str, Any] = field(default_factory=_empty_mapping)
     id: int | None = None
 
 
 __all__ = [
+    # types
+    "IsoTimestamp",
     # cursor
     "Timestamp",
     "MonotonicId",
@@ -736,13 +782,13 @@ __all__ = [
     "candidate_to_json",
     "candidate_from_json",
     # results
-    "FetchOutcome",
     "FetchResult",
     "ExtractResult",
     "Identity",
     # natural key
     "compute_source_uid",
     # rows
+    "SourceIdentity",
     "SourceRow",
     "UrlRow",
     "ContentRow",

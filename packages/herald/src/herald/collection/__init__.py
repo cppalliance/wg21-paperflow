@@ -30,9 +30,13 @@ from herald.collection.enums import (
     CursorKind,
     EventKind,
     EventOrigin,
+    FetchOutcome,
     GroupKind,
     HandlePlatform,
+    MetricKind,
+    PersonEventKind,
     PersonStatus,
+    ResolutionStatus,
     SourceKind,
     SourceRole,
     SourceState,
@@ -43,6 +47,7 @@ from herald.collection.enums import (
 from herald.collection.errors import HeraldError
 from herald.collection.records import (
     BackfillState,
+    IsoTimestamp,
     ByteOffset,
     ByteRangeWindow,
     Candidate,
@@ -57,7 +62,6 @@ from herald.collection.records import (
     EventRow,
     ExtractResult,
     Fetched,
-    FetchOutcome,
     FetchResult,
     Identity,
     MetricSnapshotRow,
@@ -73,6 +77,7 @@ from herald.collection.records import (
     PersonPendingCandidateRow,
     PersonRow,
     RangeBound,
+    SourceIdentity,
     SourceRow,
     TemporalWindow,
     ThrottleCeilings,
@@ -93,6 +98,7 @@ from herald.collection.records import (
 
 __all__ = [
     "HeraldError",
+    "IsoTimestamp",
     # records: framework unions + codecs
     "Timestamp",
     "MonotonicId",
@@ -123,6 +129,7 @@ __all__ = [
     "Identity",
     "compute_source_uid",
     # records: common rows
+    "SourceIdentity",
     "SourceRow",
     "UrlRow",
     "ContentRow",
@@ -152,7 +159,10 @@ __all__ = [
     "EventOrigin",
     "GroupKind",
     "HandlePlatform",
+    "MetricKind",
+    "PersonEventKind",
     "PersonStatus",
+    "ResolutionStatus",
     "SourceKind",
     "SourceRole",
     "SourceState",

@@ -15,7 +15,8 @@ pollable `SourceKind` vocabulary would break the source -> candidate abstraction
 
 ## Decision
 
-Model groups as first-class **registry rows** distinguished by `SourceRow.role`:
+Model groups as first-class **registry rows** distinguished by a `role` discriminator on the
+immutable `SourceIdentity` sidecar (see ADR [0009](0009-source-identity-split.md)):
 
 - `role=source` rows carry a `SourceKind` and are pollable.
 - `role=group` rows carry a `GroupKind` (`github_org` / `reflector_host` / `discord_guild`),
@@ -23,6 +24,10 @@ Model groups as first-class **registry rows** distinguished by `SourceRow.role`:
   step (separate from `poll`) expands a group into child `role=source` rows linked by
   `parent_id`; subset selection lives in the group's `config_json`.
 - `window_inherited` lets a child resolve its window from the parent, composing ranges x groups.
+
+The identity fields (`role`, `kind`, `group_kind`, `parent_id`, `window_inherited`) and the
+discriminator enforcement (`__post_init__`) live on `SourceIdentity`. `SourceRow` exposes
+them as read-through `@property` accessors for convenience.
 
 New children land as `candidate`/`pending` for curation
 ([residue.md](../foundation/residue.md)); vanished children are demoted.

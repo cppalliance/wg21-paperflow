@@ -59,10 +59,10 @@ class ChangeKind(StrEnum):
 class SourceKind(StrEnum):
     """Pollable source adapter kinds (the clean adapter vocabulary).
 
-    ``web``/``rss``/``sitemap``/``mbox``/``mcp``/``reflector``/``slack`` are the spec set;
-    the API adapters (``github``/``discourse``/``discord``/``reddit``) extend it for the
-    sources the principal collects (recorded as a deviation). Group container kinds are NOT
-    here - see :class:`GroupKind`.
+    The spec DDL lists ``web``/``rss``/``sitemap``/``mbox``/``mcp``/``reflector`` as generic
+    adapter kinds; the spec narrative and tooling tables also enumerate ``slack``/``github``/
+    ``discourse``/``discord``/``reddit`` as concrete sources the principal collects. All are
+    spec-intended (ADR 0008). Group container kinds are NOT here - see :class:`GroupKind`.
     """
 
     WEB = "web"
@@ -199,6 +199,42 @@ class HandlePlatform(StrEnum):
     WEBSITE = "website"
 
 
+class PersonEventKind(StrEnum):
+    """Kind of person event (2-people.md)."""
+
+    ROLE_CHANGE = "role_change"
+    AFFILIATION_CHANGE = "affiliation_change"
+    PUBLICATION = "publication"
+    MENTION = "mention"
+
+
+class ResolutionStatus(StrEnum):
+    """Status of a pending person candidate resolution."""
+
+    PENDING = "pending"
+    RESOLVED = "resolved"
+    REJECTED = "rejected"
+
+
+class MetricKind(StrEnum):
+    """Kind of engagement metric snapshot."""
+
+    REACTIONS = "reactions"
+    UPVOTES = "upvotes"
+    STARS = "stars"
+    VIEWS = "views"
+
+
+class FetchOutcome(StrEnum):
+    """Classification of a fetch attempt (drives change detection + access_state)."""
+
+    OK = "ok"
+    NOT_MODIFIED = "not-modified"
+    NOT_FOUND = "not-found"
+    BLOCKED = "blocked"
+    ERROR = "error"
+
+
 __all__ = [
     "EventKind",
     "EventOrigin",
@@ -217,4 +253,8 @@ __all__ = [
     "PersonStatus",
     "VariantKind",
     "HandlePlatform",
+    "PersonEventKind",
+    "ResolutionStatus",
+    "MetricKind",
+    "FetchOutcome",
 ]
