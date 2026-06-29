@@ -1,0 +1,34 @@
+# 01 - The Metrologist
+
+**Verdict:** usable-with-conditions — the reference-free hard gate (`unigram_coverage` + structural gates) targets a defensible construct (source-token recall + artifact well-formedness), but the operational score path is dominated by uncalibrated thresholds and soft flags that measure expected conversion artifacts, not quality defects; treat pass/fail on content as provisional and treat review as low-precision triage until calibrated.
+**Confidence:** high
+
+## Findings
+
+- [HIGH] **The review tier measures "expected stripping noise," not conversion defects, so it cannot rank papers for human attention.** Evidence: `00-EVIDENCE-BASELINE.md` §3a — 205/382 (53.7%) land in `review`; 186 of those carry soft flag `misaligned region(s)`. `constants.py:47` sets `REGION_SOFT_COUNT = 1` (a single region triggers review). `CLAUDE.md:233-235` declares misaligned regions "expected on clean papers." Impact: the majority bucket is structurally guaranteed to fire on benign furniture stripping; `review` is not a meaningful ordinal of "how broken," only "something differed from source alignment."
+
+- [HIGH] **Hard-gate thresholds are borrowed proxies with zero measured operating characteristics on this corpus.** Evidence: `constants.py:11-15` ("PROVISIONAL … not yet a value fitted on a labeled corpus"); `00-EVIDENCE-BASELINE.md` §5 ("No measured TPR / FPR / precision exists for any threshold"). Edges `UNIGRAM_COVERAGE_FAIL_EDGE=0.85`, `UNIGRAM_COVERAGE_REVIEW_EDGE=0.95` cite DP-Bench/Docling norms, not WG21-paperfit data. Impact: the only content hard fail (`unigram_coverage < 0.85`, `score.py:156-160`) has unknown false-pass and false-fail rates; the tool cannot claim a known error budget.
+
+- [HIGH] **`unigram_coverage` is multiset recall, not semantic fidelity — it is blind to order-sensitive semantic errors that preserve the word bag.** Evidence: `check_content.py:621-624` computes `_multiset_coverage(src_tokens, md_tokens)`; runtime experiment on synthetic table swap (same four words, permuted cells) yielded `verdict=pass`, `uni=1.0`. `CLAUDE.md:37-39` explicitly states Lane 2 fidelity and Lane 3 facts catch table-cell and comprehension errors metrics miss; `00-EVIDENCE-BASELINE.md` §4 — zero real Lane 3 corpus. Impact: a conversion can pass the content gate while scrambling table semantics, list-to-cell assignment, or clause order when vocabulary is unchanged.
+
+- [HIGH] **`heading_monotone` hard-fails on heading typography, not missing content — 64% of corpus fails are this gate alone.** Evidence: `00-EVIDENCE-BASELINE.md` §3c — 9/14 ref-free fails are `heading_monotone` (H2→H4 jumps); examples `P3941R2/R3/R4` fail with `uni=0.999, drift=0.001` solely on heading jump. Runtime: `whisker P3941R2 --no-reference --no-write` → `uni=0.999 cov=0.997 drift=0.002 qa=95`, hard flag `gate:heading_monotone:heading level jumps H2 -> H4` (`gates.py:96-112`). Impact: the fail construct mixes "broken artifact" with "valid markdown that skipped H3," inflating false-fail rate on otherwise faithful conversions.
+
+- [HIGH] **`ref_overall` (displayed as `ovr=`) is a construct-invalid composite against the markitdown oracle and diverges from bench null-eligibility rules.** Evidence: `score.py:212-215` always sets `ref_overall = (ref_nid + ref_teds + ref_mhs) / 3.0`; `bench.py:223-228` nulls `teds`/`mhs` when the reference lacks the modality; `bench.py:150-155` / `table_score` returns `1.0` when neither side has pipe tables (never `None` on the score path). `CLAUDE.md:250-253`: against the oracle, "teds/mhs carry no reliable signal." `report.py:72-76` leads terminal lines with `ovr=`. Impact: operators sorting or eyeballing `ovr=` are reading a number whose denominator and included axes are not the same construct as `BenchRow.overall`; informational axes can inflate `ovr=` while only `ref_nid` (advisory) affects verdict.
+
+- [MED] **Oracle advisory edge `REF_NID_ADVISORY_EDGE=0.85` is miscalibrated for cross-converter agreement on real papers.** Evidence: `00-EVIDENCE-BASELINE.md` §3b — with oracle on, `ref_nid` mean=0.836 across 382 papers; 147/382 (38%) trip `ref_nid < 0.85`. `constants.py:85-87` adopts 0.85 from edgeparse's NID CI floor, a different construct (block-matched GT NID, not whole-document markitdown agreement). Impact: the advisory overlay adds review noise correlated with converter disagreement, not labeled incorrectness; default runs push ~38% extra papers toward review for a signal the spec itself says is not ground truth.
+
+- [MED] **Bench `overall` is an unweighted mean of heterogeneous structural axes and excludes the missing-content axis that defines a separate construct.** Evidence: `bench.py:238-243` — `overall = mean(nid, eligible teds, eligible mhs)`; `content_recall` is "deliberately NOT folded into Overall" (`bench.py:229-232`). Floors are equal-weight per axis in `aggregate` below_floor (`bench.py:285-291`). Impact: `overall` answers "mean structural resemblance on eligible modalities," not "conversion quality"; a dropped section can leave `overall` high while `content_recall` tanks — correctly gated separately, but misleading if read as one quality number.
+
+- [LOW] **Text-axis normalization (`normalized_text` / `clean_string`) erases punctuation and formatting before NID, shrinking the measurable construct.** Evidence: `metrics.py:118-126` keeps only `\w` and CJK after stripping whitespace; `metrics.py:338-340` applies this before `text_nid`. Impact: agreement scores cannot detect errors visible only in punctuation, emphasis, or inline markup — acceptable if labeled "content agreement," but easy to over-read as full-text fidelity.
+
+## False-pass hypothesis
+
+Swap two table cell values while preserving the word multiset (e.g., `| one | two |` → `| two | one |` with source tokens `{one, two, three, four}`): synthetic `score_markdown` with `unigram_coverage=1.0` and clean gates yields **`pass`** — confirmed by runtime experiment. Real papers with permuted table semantics but intact vocabulary would slip the content hard gate.
+
+## False-fail hypothesis
+
+**P3941R2** (and R3/R4 per baseline): `uni=0.999`, `drift=0.002`, `qa=95`, yet **`fail`** solely on `heading_monotone` H2→H4 (`gates.py:105-109`) — confirmed at runtime with `--no-reference --no-write`. Content is present; heading-level pedantry drives the fail construct.
+
+## What would change my mind
+
+A labeled holdout of ≥30 WG21 papers (`{pid, human_label}`) run through `whisker calibrate --labels`, producing committed edges with measured TPR/FPR/precision at the chosen operating point (`00-EVIDENCE-BASELINE.md` §5; `constants.py:14-15`) — especially demonstrating that `unigram_coverage` at the fitted fail edge catches real content loss without the current heading-monotone and misaligned-region false-positive rates.

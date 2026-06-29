@@ -1,0 +1,8 @@
+{"id": "title-survives", "type": "present", "text": "A Citable Inventory of Platforms, Operating Systems, and Compiler Toolchains", "checked": "verified"}
+{"id": "edg-frontend", "type": "present", "text": "Edison Design Group supplies a commercial C++", "checked": "verified"}
+{"id": "pmr-term", "type": "present", "text": "polymorphic memory resources", "checked": "verified"}
+{"id": "pigweed-coro", "type": "present", "text": "Pigweed provides C++20 coroutines", "checked": "verified"}
+{"id": "docnumber-label-consumed", "type": "absent", "text": "Document Number", "checked": "verified"}
+{"id": "section-flow", "type": "order", "sequence": ["Every mailing repeats the same deployment background", "consolidates a single, citeable inventory", "The schema below states baseline capabilities", "The table lists toolchain families", "The author thanks Vinnie Falco"], "checked": "verified"}
+{"id": "tableA-gpu-coro-no", "type": "table", "cell": "GPU device code (CUDA, SYCL)", "neighbors": {"right": "No", "heading": "Category"}, "checked": "verified"}
+{"id": "tableB-console-alloc", "type": "table", "cell": "Arenas common", "neighbors": {"left": "Often off", "heading": "Alloc"}, "checked": "verified"}
