@@ -1,9 +1,8 @@
 # herald.collection - Agent Rules
 
-The collection layer: the pure-Python, no-LLM ingestion engine. See
-[`../../../docs/foundation/1-collection.md`](../../../docs/foundation/1-collection.md) for the
-authoritative spec and the package-root [`../CLAUDE.md`](../CLAUDE.md) for package-wide and
-cross-layer rules. This file holds the collection-layer invariants.
+The collection layer (pure Python, no LLM). Spec:
+[`1-collection.md`](../../../docs/foundation/1-collection.md); package-wide rules:
+[`../CLAUDE.md`](../CLAUDE.md). This file holds the collection-layer invariants.
 
 ## Module map
 
@@ -69,9 +68,9 @@ layers, not built in this package. Delivery is at-least-once, so consumers must 
 | finetune_export | content_first_seen, content_re_extracted | all origins |
 | writer (generation) | (derives from intelligence topics / catalog) | live only |
 
-## What this PR contains
+## What exists today
 
-Types + contracts + skeleton only: enums, records (incl. the Window/range model and the
+Types + contracts + skeleton: enums, records (incl. the Window/range model and the
 group-source + migration fields), the `SourceAdapter` Protocol seam, and the `StorageBackend`
 ABC. No adapters, orchestrator body, scheduler, registry validation, or group-expansion logic
-yet - those land in later milestones without changing these types.
+yet; those land in later milestones without changing these types.

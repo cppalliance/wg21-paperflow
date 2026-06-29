@@ -1,17 +1,13 @@
 # herald
 
-The C++ ecosystem ingestion + generation pipeline. Herald is a multi-layer system - a
-collection layer, people tracking, intelligence, and a writer/editorial/research-desk layer
-(see [`docs/foundation`](docs/foundation)). Each layer is a subpackage under `herald.`.
+C++ ecosystem ingestion + generation pipeline. Collection, people tracking, intelligence,
+writer, and editorial, each a subpackage under `herald.`. Only the collection layer is built
+today; the rest is specified in [`docs/foundation`](docs/foundation) and will land as sibling
+subpackages.
 
-The first implemented layer is the **collection layer**, under
-[`src/herald/collection`](src/herald/collection) - its README documents what it does, its
-status, and its layout. The top-level `herald` package is a thin namespace so sibling layers
-(intelligence, writer, editorial) can be added later.
-
-- Specification of record: [`docs/foundation`](docs/foundation)
-- Design decisions / deviations: [`docs/decisions`](docs/decisions)
-- Getting started: [`docs/onboarding`](docs/onboarding)
+- Spec: [`docs/foundation`](docs/foundation)
+- ADRs: [`docs/decisions`](docs/decisions)
+- Onboarding: [`docs/onboarding`](docs/onboarding)
 
 ## Development
 

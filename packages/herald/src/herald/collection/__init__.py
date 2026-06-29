@@ -7,16 +7,11 @@
 # Official repository: https://github.com/cppalliance/wg21-paperflow
 #
 
-"""Herald collection layer.
+"""Herald collection layer: the pure-Python, no-LLM ingestion engine.
 
-The pure-Python, no-LLM ingestion layer: it discovers sources, polls them on a
-per-source cadence, fetches politely, normalizes/extracts/dedups content, observes
-people mechanically, and records everything through a transactional outbox
-(`collection_events`) for downstream layers to consume.
-
-Public vocabulary (enums, frozen row/result types, the Candidate/Cursor/Window unions)
-is re-exported here. Heavier machinery (backends, adapters, the orchestrator) lives in
-subpackages and is imported explicitly to keep `import herald.collection` cheap.
+Public vocabulary (enums, frozen row/result types, framework unions) is re-exported here.
+Heavier machinery (backends, adapters, the orchestrator) lives in subpackages and is
+imported explicitly to keep ``import herald.collection`` cheap.
 """
 
 from __future__ import annotations

@@ -9,10 +9,9 @@
 
 """Herald - C++ ecosystem ingestion + generation pipeline.
 
-This top-level package is a thin namespace. The first implemented layer is the
-collection layer under :mod:`herald.collection`; future layers (intelligence, writer,
-editorial) are added as sibling subpackages. Importing :mod:`herald` is deliberately
-cheap - no heavy optional dependencies are pulled in at import time.
+Each layer (collection, intelligence, writer, editorial) is a subpackage under ``herald.``;
+only :mod:`herald.collection` is built today. This top-level namespace is deliberately cheap
+to import.
 """
 
 from __future__ import annotations

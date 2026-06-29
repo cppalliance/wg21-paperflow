@@ -17,5 +17,5 @@ production later), plus a content-addressed blob store.
   `content_hash_text`, `url_syntactic`, `(platform, handle)`); the `export_table` /
   `import_rows` seam exists so cross-instance interchange upserts by natural key and
   remaps surrogate FKs.
-- This PR ships the ABC (and `errors.py`) only; the concrete `SqliteBackend`, `BlobStore`,
+- Only the ABC (and `errors.py`) exist today; the concrete `SqliteBackend`, `BlobStore`,
   and schema DDL land in a later milestone.

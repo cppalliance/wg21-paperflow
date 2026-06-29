@@ -1,6 +1,6 @@
 # herald.collection.sources - Agent Rules
 
-Source adapters. This PR ships the `SourceAdapter` Protocol seam only; concrete adapters
+Source adapters. Only the `SourceAdapter` Protocol seam exists today; concrete adapters
 (RSS, reflector mbox, GitHub) land in later milestones. See `SOURCES.md` for the matrix.
 
 ## Invariants

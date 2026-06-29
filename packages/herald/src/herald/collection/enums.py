@@ -9,12 +9,12 @@
 
 """Contract vocabularies for the collection layer.
 
-Every value here is part of a wire/storage contract, so they are :class:`enum.StrEnum`
-members whose *value* is the stored string (e.g. ``AccessState.BLOCKED_BY_ROBOTS ==
-"blocked-by-robots"``). The event/source/content/state vocabularies mirror
-``docs/foundation/1-collection.md`` verbatim; the additions (``SourceRole``, ``GroupKind``,
-``WindowKind``, ``CursorKind``, ``SourceState.CANDIDATE``, ``EventOrigin``) are recorded as
-deviations in ``docs/decisions``.
+Every value is a wire/storage contract: :class:`enum.StrEnum` members whose *value* is the
+stored string (e.g. ``AccessState.BLOCKED_BY_ROBOTS == "blocked-by-robots"``). Most mirror
+``docs/foundation/1-collection.md`` verbatim; additions and deviations (``SourceRole``,
+``GroupKind``, ``WindowKind``, ``CursorKind``, ``SourceState.CANDIDATE``, ``EventOrigin``,
+``PersonEventKind``, ``ResolutionStatus``, ``MetricKind``, ``FetchOutcome``) are recorded in
+``docs/decisions``.
 """
 
 from __future__ import annotations

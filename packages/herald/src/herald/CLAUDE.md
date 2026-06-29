@@ -2,16 +2,14 @@
 
 ## What this is
 
-Herald is the C++ ecosystem ingestion + generation pipeline: it continuously ingests
-everything relevant to C++ (public and private), tracks the people involved, and generates
-publishable article drafts for a human editor to curate. It is a **multi-layer system** -
-each layer is (or will be) a subpackage under `herald.`. The authoritative specification for
-every layer lives in [`docs/foundation`](../../docs/foundation); design deviations are
-recorded in [`docs/decisions`](../../docs/decisions).
+Herald is the C++ ecosystem ingestion + generation pipeline: it ingests everything relevant
+to C++ (public and private), tracks the people involved, and generates publishable article
+drafts for a human editor. Each layer is a subpackage under `herald.`; spec in
+[`docs/foundation`](../../docs/foundation), deviations in
+[`docs/decisions`](../../docs/decisions). Only the collection layer is implemented today.
 
-Only the **collection layer** is implemented today. The other layers are specified in the
-foundation docs and added later as sibling subpackages. This file holds the **package-wide**
-and **cross-layer** rules; each layer keeps its own `CLAUDE.md` for layer-specific invariants.
+This file holds **package-wide** and **cross-layer** rules; each layer keeps its own
+`CLAUDE.md` for layer-specific invariants.
 
 ## Layers
 

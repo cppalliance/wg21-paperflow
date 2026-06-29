@@ -1,11 +1,12 @@
 # Roadmap
 
 A forward roadmap derived from the capabilities described in the
-[foundation documents](../foundation). It is focused on the **collection layer** (the only
-layer implemented) and ends with the downstream layers that follow. It tracks what remains
-after this first data-model/skeleton PR; it is not a backlog mirror.
+[foundation documents](../foundation). Herald is a multi-layer system; only the collection
+layer is built today but all layers will eventually land in this package. This roadmap starts
+with the remaining collection milestones and continues through the downstream layers. It is
+not a backlog mirror.
 
-## Landed (this PR)
+## Landed
 
 - Package skeleton under `herald/collection/`, the contract vocabulary (enums, frozen
   row/result types, the `Candidate` and `Cursor` unions), the typed `Window`/range model,
