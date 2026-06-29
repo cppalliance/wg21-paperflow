@@ -20,7 +20,6 @@ from tomd.lib.golden_qa import (
     render_pdf_pages,
     review_ideal,
     score_report,
-    score_result,
     score_stem,
     stage_source,
     tomd_markdown,

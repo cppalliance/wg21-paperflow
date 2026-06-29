@@ -55,7 +55,6 @@ from tomd.lib.golden_qa import (
     rebless_stems,
     render_pdf_pages,
     review_ideal,
-    score_report,
     score_result,
     stage_source,
     validate_anchors_json,
