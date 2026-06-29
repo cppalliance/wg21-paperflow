@@ -15,6 +15,11 @@ from tomd.lib.pdf.structure import (
     _is_title_like_straggler, _is_empty_heading, _straggler_forward_references,
     _run_recurrence_density, _compute_body_start,
     _classify_wording_sections, _split_embedded_code,
+    _coalesce_code_paragraphs,
+    _line_is_mono_code, _absorb_mono_code_orphans,
+    _classify_code_line, _is_narrative_continuation, _trim_narrative_from_code,
+    _absorb_trailing_label_into_code, _is_tail_prose,
+    _peel_trailing_prose_from_code,
 )
 
 
@@ -2174,3 +2179,531 @@ class TestSplitEmbeddedCode:
         sec.kind = SectionKind.CODE
         out = _split_embedded_code([sec])
         assert out == [sec]
+
+
+class TestCoalesceCodeParagraphs:
+    """`_coalesce_code_paragraphs` merges adjacent short code-like paragraphs.
+
+    Regression guard for the text/lines desync (P3181R1): the merged
+    section must carry the lines of every run member, not just run[0].
+    Emit renders CODE from sec.lines, so a desync silently drops content.
+    """
+
+    @staticmethod
+    def _para(*texts):
+        lines = [Line(spans=[Span(text=t)]) for t in texts]
+        return Section(
+            kind=SectionKind.PARAGRAPH,
+            text="\n".join(texts),
+            lines=lines,
+        )
+
+    def test_merged_lines_match_merged_text(self):
+        # Two short code-like paragraphs that satisfy _COALESCE_CODE_RE.
+        a = self._para("fence(release);", "a1: a->store(1, relaxed);")
+        b = self._para("b1: r1 = a->load(acquire);", "b2: delete a;")
+        out = _coalesce_code_paragraphs([a, b])
+        assert len(out) == 1
+        merged = out[0]
+        # text and lines must stay in sync: no silent content loss.
+        assert len(merged.lines) == len(a.lines) + len(b.lines)
+        assert [ln.text for ln in merged.lines] == merged.text.split("\n")
+        # the run[1:] content survives in the rendered (lines) channel.
+        rendered = "\n".join(ln.text for ln in merged.lines)
+        assert "b2: delete a;" in rendered
+
+    def test_single_section_run_not_merged(self):
+        # A lone code-like paragraph (run length 1) is passed through.
+        a = self._para("fence(release);", "a1: a->store(1, relaxed);")
+        prose = Section(
+            kind=SectionKind.PARAGRAPH,
+            text="This is ordinary prose that ends with a period.",
+            lines=[Line(spans=[Span(
+                text="This is ordinary prose that ends with a period.")])],
+        )
+        out = _coalesce_code_paragraphs([a, prose])
+        assert out[0] is a
+        assert len(out[0].lines) == 2
+
+
+class TestLineIsMonoCode:
+    """`_line_is_mono_code` recognises the mixed-font ``code // comment``
+    shape (P3181R1) while rejecting prose, section refs and URLs."""
+
+    @staticmethod
+    def _mixed(code_mono, comment_prop):
+        # Monospace code span (incl. the "//" marker) + proportional comment.
+        return Line(spans=[
+            Span(text=code_mono, monospace=True),
+            Span(text=comment_prop, monospace=False),
+        ])
+
+    def test_code_with_trailing_proportional_comment(self):
+        # P3181R1 c1: line. The "//" sits in the monospace code span.
+        line = self._mixed("c1: b = new atomic<int>(0);    //",
+                           " gets the same location as a.")
+        assert _line_is_mono_code(line) is True
+
+    def test_pure_monospace_line_is_code(self):
+        line = Line(spans=[Span(text="a1: a->store(1, relaxed);",
+                                monospace=True)])
+        assert _line_is_mono_code(line) is True
+
+    def test_prose_line_is_not_code(self):
+        line = Line(spans=[Span(text="According to the standard, this is fine.",
+                                monospace=False)])
+        assert _line_is_mono_code(line) is False
+
+    def test_comment_only_line_not_code(self):
+        # p0533r9-class: a // section-ref line that starts with the marker.
+        # No code before "//" -> must stay outside the fence.
+        line = self._mixed("//[c.math.abs],", " absolute values")
+        assert _line_is_mono_code(line) is False
+
+    def test_url_after_code_not_code(self):
+        # Opus guard: a monospace URL ("https://...") leading a prose line
+        # must not be misread as code-with-comment (the "//" is a scheme sep).
+        line = self._mixed("https://wg21.link/p1234r0", " has the rationale.")
+        assert _line_is_mono_code(line) is False
+
+
+class TestAbsorbMonoCodeOrphans:
+    """`_absorb_mono_code_orphans` moves leading mixed-font code lines into a
+    preceding CODE block (P3181R1 Defect 2), keeping text/lines in sync."""
+
+    @staticmethod
+    def _code(*texts, page_num=1):
+        lines = [Line(spans=[Span(text=t, monospace=True)]) for t in texts]
+        return Section(kind=SectionKind.CODE, text="\n".join(texts),
+                       lines=lines, page_num=page_num, confidence=Confidence.MEDIUM)
+
+    @staticmethod
+    def _mixed_line(code_mono, comment_prop):
+        return Line(spans=[
+            Span(text=code_mono, monospace=True),
+            Span(text=comment_prop, monospace=False),
+        ])
+
+    def test_absorbs_leading_code_lines_into_prev_code(self):
+        code = self._code("Reallocating thread C:")
+        para = Section(
+            kind=SectionKind.PARAGRAPH,
+            text="",
+            page_num=1,
+            lines=[
+                self._mixed_line("c1: b = new atomic<int>(0);    //",
+                                 " gets the same location as a."),
+                self._mixed_line("c2: r2 = b->load(relaxed);     //",
+                                 " Should not see the 1 from thread A."),
+                Line(spans=[Span(text=" ")]),
+                Line(spans=[Span(text="[res.on.objects]p2 states:",
+                                 monospace=False)]),
+            ],
+        )
+        out = _absorb_mono_code_orphans([code, para])
+        # CODE grew by the two c1/c2 lines; prose paragraph survives separately.
+        merged = out[0]
+        assert merged.kind == SectionKind.CODE
+        assert len(merged.lines) == 3
+        assert [ln.text for ln in merged.lines] == merged.text.split("\n")
+        rendered = "\n".join(ln.text for ln in merged.lines)
+        assert "c1: b = new atomic<int>(0);" in rendered
+        assert "c2: r2 = b->load(relaxed);" in rendered
+        # The remaining prose stays a PARAGRAPH (the c1/c2 are gone from it).
+        assert out[1].kind == SectionKind.PARAGRAPH
+        assert "[res.on.objects]p2 states:" in out[1].text
+        assert "c1:" not in out[1].text
+
+    def test_comment_ref_paragraph_not_absorbed(self):
+        # p0533r9-class section-ref comment after CODE must stay prose.
+        code = self._code("long double cbrtl(long double x);")
+        para = Section(
+            kind=SectionKind.PARAGRAPH,
+            text="",
+            page_num=1,
+            lines=[self._mixed_line("//[c.math.abs],", " absolute values")],
+        )
+        out = _absorb_mono_code_orphans([code, para])
+        assert len(out) == 2
+        assert out[1].kind == SectionKind.PARAGRAPH
+
+    def test_different_page_not_absorbed(self):
+        code = self._code("a1: a->store(1, relaxed);", page_num=1)
+        para = Section(
+            kind=SectionKind.PARAGRAPH,
+            text="",
+            page_num=2,
+            lines=[self._mixed_line("c1: b = new atomic<int>(0);    //",
+                                    " comment.")],
+        )
+        out = _absorb_mono_code_orphans([code, para])
+        assert len(out) == 2
+        assert out[0].kind == SectionKind.CODE
+        assert len(out[0].lines) == 1
+
+
+class TestClassifyCodeLine:
+    """`_classify_code_line` discriminates prose from code by symbol density
+    and alphabetic-word ratio, NOT font (P3181R1 / P4174R0 Defect 3)."""
+
+    @staticmethod
+    def _line(text, *, mono=False):
+        return make_line([text], monospace=mono)
+
+    def test_blank(self):
+        assert _classify_code_line(self._line("   ")) == "blank"
+
+    def test_slash_comment_is_code(self):
+        # A wrapped non-mono comment line must not read as prose.
+        assert _classify_code_line(
+            self._line("// gets the same location as a")) == "code"
+
+    def test_short_trailing_colon_is_label(self):
+        assert _classify_code_line(self._line("Thread A:")) == "label"
+
+    def test_long_trailing_colon_not_label(self):
+        # Too many words to be a structural anchor; falls through to prose.
+        assert _classify_code_line(
+            self._line("the following produces an ambiguity error rather than:")
+        ) == "narrative"
+
+    def test_monospace_sentence_still_code(self):
+        # Font alone never demotes; mono is always code here.
+        assert _classify_code_line(
+            self._line("a1: a.store(1, relaxed);", mono=True)) == "code"
+
+    def test_proportional_code_is_code_by_symbols(self):
+        # P4174R0: dense symbols in a non-mono font are still code.
+        assert _classify_code_line(
+            self._line("concept is_number = is_natural<T> || is_real<T>;")
+        ) == "code"
+
+    def test_prose_is_narrative(self):
+        assert _classify_code_line(self._line(
+            "This paper proposes a library approach of type lists, meaning that"
+        )) == "narrative"
+
+    def test_short_low_alpha_line_is_code(self):
+        assert _classify_code_line(self._line("foo(1u);")) == "code"
+
+
+class TestNarrativeContinuation:
+    """`_is_narrative_continuation` rejoins a short wrapped prose tail to its
+    narrative run while leaving genuine code tails as code."""
+
+    @staticmethod
+    def _line(text, *, mono=False):
+        return make_line([text], monospace=mono)
+
+    def test_prose_tail_absorbed(self):
+        assert _is_narrative_continuation(self._line("slate concept.")) is True
+
+    def test_code_tail_not_absorbed(self):
+        # Brace/terminator core is not alphabetic, stays code.
+        assert _is_narrative_continuation(self._line("});")) is False
+
+    def test_monospace_tail_not_absorbed(self):
+        assert _is_narrative_continuation(
+            self._line("value;", mono=True)) is False
+
+    def test_too_long_not_absorbed(self):
+        assert _is_narrative_continuation(self._line(
+            "this tail has far too many plain words to be a wrap")) is False
+
+
+class TestTrimNarrativeFromCode:
+    """`_trim_narrative_from_code` splits prose runs out of CODE sections
+    (P3181R1) without fragmenting cohesive code blocks."""
+
+    @staticmethod
+    def _code(*texts, mono=False, page_num=1):
+        lines = [make_line([t], monospace=mono) for t in texts]
+        return Section(kind=SectionKind.CODE, text="\n".join(texts),
+                       lines=lines, page_num=page_num,
+                       confidence=Confidence.MEDIUM)
+
+    def test_non_code_section_passthrough(self):
+        para = make_section("just prose", kind=SectionKind.PARAGRAPH)
+        out = _trim_narrative_from_code([para])
+        assert out == [para]
+
+    def test_pure_code_unchanged(self):
+        code = self._code("int x = foo(1);", "return x + y;", mono=True)
+        out = _trim_narrative_from_code([code])
+        assert len(out) == 1
+        assert out[0].kind == SectionKind.CODE
+
+    def test_leading_prose_split_out(self):
+        code = self._code(
+            "This paper proposes a library approach of type lists, so that",
+            "subsumption is not feasible for the general unrelated overloads.",
+            "concept is_number = is_natural<T> || is_real<T>;",
+            "foo(1u);",
+        )
+        out = _trim_narrative_from_code([code])
+        assert [s.kind for s in out] == [
+            SectionKind.PARAGRAPH, SectionKind.CODE]
+        assert "library approach" in out[0].text
+        assert "concept is_number" in out[1].text
+        assert "library approach" not in out[1].text
+
+    def test_cohesion_guard_keeps_single_interior_prose(self):
+        # One wrapped narrative line surrounded by code must stay fenced.
+        code = self._code(
+            "template<typename T> concept is_natural = requires { value; };",
+            "the compiler sees two unrelated container value instantiations here",
+            "foo(1u); // now unambiguous is_natural subsumes is_number",
+        )
+        out = _trim_narrative_from_code([code])
+        assert len(out) == 1
+        assert out[0].kind == SectionKind.CODE
+
+    def test_continuation_tail_rejoins_prose(self):
+        code = self._code(
+            "The approach this paper proposes lets the user create a blank",
+            "slate concept.",
+            "concept is_number = is_natural<T> || is_real<T>;",
+            "foo(1u);",
+        )
+        out = _trim_narrative_from_code([code])
+        assert out[0].kind == SectionKind.PARAGRAPH
+        assert "slate concept." in out[0].text
+        assert any(s.kind == SectionKind.CODE for s in out)
+
+    def test_prose_connector_label_joins_following_prose(self):
+        # A short trailing-colon prose connector between narrative lines must
+        # NOT emit as a lone label-only code fence; it joins the prose that
+        # it introduces (label inherits its forward neighbour).
+        code = self._code(
+            "This resolves the case for every well-formed input given.",
+            "For example:",
+            "the predicate then holds for all inputs in the domain.",
+        )
+        out = _trim_narrative_from_code([code])
+        assert all(s.kind == SectionKind.PARAGRAPH for s in out)
+        assert not any(
+            s.kind == SectionKind.CODE and s.text.strip() == "For example:"
+            for s in out)
+
+    def test_blank_between_label_and_code_keeps_one_fence(self):
+        # P3181R1 "Stronger semantics": a blank line between a pseudocode
+        # label and its code must not orphan the label into its own fence.
+        # The blank must take the label's (code) side, not skip past it to
+        # the prose above.
+        code = self._code(
+            "We can roughly model the preceding example as described here now.",
+            "",
+            "Thread A:",
+            "",
+            "a1: a.store(1, relaxed);",
+            "b1: r1 = a.load(relaxed);",
+        )
+        out = _trim_narrative_from_code([code])
+        code_secs = [s for s in out if s.kind == SectionKind.CODE]
+        assert len(code_secs) == 1
+        assert "Thread A:" in code_secs[0].text
+        assert "a1: a.store" in code_secs[0].text
+
+    def test_pseudocode_label_stays_with_following_code(self):
+        # The P3181R1 motivation: "Thread A:" introduces the code beneath it
+        # and must stay fenced with it, not get pulled into preceding prose.
+        code = self._code(
+            "Consider the following concurrent execution across three threads.",
+            "Thread A:",
+            "a1: a.store(1, relaxed);",
+            "a2: b.store(2, release);",
+        )
+        out = _trim_narrative_from_code([code])
+        code_secs = [s for s in out if s.kind == SectionKind.CODE]
+        assert len(code_secs) == 1
+        assert "Thread A:" in code_secs[0].text
+        assert "a1: a.store" in code_secs[0].text
+
+
+class TestAbsorbTrailingLabelIntoCode:
+    """`_absorb_trailing_label_into_code` moves a listing label that wrapped
+    onto the tail of the preceding prose into the code block it heads
+    (P3181R1 "Detailed example": "Thread A:"), without tearing a prose
+    sentence whose last word merely ends in a colon."""
+
+    @staticmethod
+    def _para(*texts, page_num=1):
+        lines = [make_line([t], monospace=False) for t in texts]
+        return Section(kind=SectionKind.PARAGRAPH, text="\n".join(texts),
+                       lines=lines, page_num=page_num,
+                       confidence=Confidence.MEDIUM)
+
+    @staticmethod
+    def _code(*texts, page_num=1):
+        lines = [make_line([t], monospace=True) for t in texts]
+        return Section(kind=SectionKind.CODE, text="\n".join(texts),
+                       lines=lines, page_num=page_num,
+                       confidence=Confidence.MEDIUM)
+
+    def test_series_label_moved_into_code(self):
+        para = self._para(
+            "Here we include a third thread C and discuss the issues.",
+            "Thread A:")
+        code = self._code("fence(release);", "Thread B:", "b1: r1 = load();")
+        out = _absorb_trailing_label_into_code([para, code])
+        assert out[0].kind == SectionKind.PARAGRAPH
+        assert "Thread A:" not in out[0].text
+        assert out[1].kind == SectionKind.CODE
+        assert out[1].lines[0].text.strip() == "Thread A:"
+        assert [ln.text for ln in out[1].lines] == out[1].text.split("\n")
+
+    def test_prose_tail_colon_not_moved(self):
+        # "object:" is the last word of a prose sentence; no code label shares
+        # its first word, so it stays in the prose.
+        para = self._para(
+            "The literal operator returns an appropriately populated object:")
+        code = self._code("namespace std {", "template <int N>", "};")
+        out = _absorb_trailing_label_into_code([para, code])
+        assert out[0].kind == SectionKind.PARAGRAPH
+        assert out[0].text.strip().endswith("object:")
+        assert len(out[1].lines) == 3
+
+    def test_citation_label_not_moved(self):
+        # An editing instruction carrying a '[cite]' is never moved, even when
+        # a code label shares its first word.
+        para = self._para(
+            "We adjust the grammar here. Modify [dcl.contract.func] as follows:")
+        code = self._code("Modify [x] as follows:", "precondition-specifier:")
+        out = _absorb_trailing_label_into_code([para, code])
+        assert out[0].text.strip().endswith("as follows:")
+        assert out[1].lines[0].text.strip() == "Modify [x] as follows:"
+
+    def test_unmatched_first_word_not_moved(self):
+        # Label classifies, but its first word matches no code label.
+        para = self._para("This introduces the listing. Sketch:")
+        code = self._code("Thread B:", "b1: store();")
+        out = _absorb_trailing_label_into_code([para, code])
+        assert out[0].text.strip().endswith("Sketch:")
+        assert len(out[1].lines) == 2
+
+    def test_label_only_paragraph_not_moved(self):
+        # No real prose before the label: nothing to detach it from.
+        para = self._para("Thread A:")
+        code = self._code("Thread B:", "b1: store();")
+        out = _absorb_trailing_label_into_code([para, code])
+        assert out[0].kind == SectionKind.PARAGRAPH
+        assert out[0].text.strip() == "Thread A:"
+
+    def test_different_page_not_moved(self):
+        para = self._para("Prose leading to the listing. Thread A:", page_num=1)
+        code = self._code("Thread B:", "b1: store();", page_num=2)
+        out = _absorb_trailing_label_into_code([para, code])
+        assert out[0].text.strip().endswith("Thread A:")
+
+    def test_duplicate_head_label_not_moved(self):
+        # Code already opens with the same label: moving would duplicate it.
+        para = self._para("Prose leading to the listing. Thread A:")
+        code = self._code("Thread A:", "a1: store();", "Thread B:")
+        out = _absorb_trailing_label_into_code([para, code])
+        assert out[0].text.strip().endswith("Thread A:")
+        assert [ln.text for ln in out[1].lines].count("Thread A:") == 1
+
+    def test_narrative_head_not_moved(self):
+        # Code opens with a narrative line: the moved label would be peeled
+        # straight back out by the trim pass, so do not move it.
+        para = self._para("Prose leading to the listing. Thread A:")
+        code = self._code(
+            "this opening line is plainly wrapped prose, not any code at all",
+            "Thread B:", "b1: store();")
+        out = _absorb_trailing_label_into_code([para, code])
+        assert out[0].text.strip().endswith("Thread A:")
+
+
+class TestIsTailProse:
+    """`_is_tail_prose` recognises a sentence-like prose tail while rejecting
+    code statements, short lines, and monospace."""
+
+    @staticmethod
+    def _line(text, *, mono=False):
+        return make_line([text], monospace=mono)
+
+    def test_sentence_is_tail_prose(self):
+        assert _is_tail_prose(self._line(
+            "For now, let's treat c2 as a relaxed store.")) is True
+
+    def test_citation_sentence_is_tail_prose(self):
+        # The bracketed citation is stripped before measuring, so the
+        # remaining sentence reads as prose despite the brackets.
+        assert _is_tail_prose(self._line(
+            "If c2 follows a1 in the order, by [intro.races]p16, this can't "
+            "happen, since b1")) is True
+
+    def test_code_terminator_not_tail_prose(self):
+        assert _is_tail_prose(self._line("c3 = a.load(some, value);")) is False
+
+    def test_open_brace_not_tail_prose(self):
+        assert _is_tail_prose(
+            self._line("if (cond) some other words here {")) is False
+
+    def test_monospace_not_tail_prose(self):
+        assert _is_tail_prose(self._line(
+            "for now let us treat this", mono=True)) is False
+
+    def test_short_line_not_tail_prose(self):
+        assert _is_tail_prose(self._line("too short here")) is False
+
+    def test_comment_not_tail_prose(self):
+        assert _is_tail_prose(
+            self._line("// a wrapped comment goes here now")) is False
+
+
+class TestPeelTrailingProseFromCode:
+    """`_peel_trailing_prose_from_code` splits a trailing prose run off the end
+    of a CODE block (P3181R1 "Stronger semantics") while a ``;{}``/monospace
+    hard stop protects interior and wrapped code."""
+
+    @staticmethod
+    def _code(*lines, page_num=1):
+        # lines: (text, mono) tuples.
+        ls = [make_line([t], monospace=m) for t, m in lines]
+        return Section(kind=SectionKind.CODE,
+                       text="\n".join(t for t, _ in lines),
+                       lines=ls, page_num=page_num,
+                       confidence=Confidence.MEDIUM)
+
+    def test_trailing_sentence_peeled(self):
+        code = self._code(
+            ("a1: a.store(1, relaxed);", True),
+            ("c3: a.load();", True),
+            ("", False),
+            ("For now, let's treat c2 as a relaxed store.", False),
+            ("If c2 follows a1 in the modification order this cannot happen.",
+             False),
+        )
+        out = _peel_trailing_prose_from_code([code])
+        assert [s.kind for s in out] == [
+            SectionKind.CODE, SectionKind.PARAGRAPH]
+        assert "c3: a.load();" in out[0].text
+        assert "For now" in out[1].text
+        assert "If c2 follows" in out[1].text
+        assert "For now" not in out[0].text
+        assert [ln.text for ln in out[0].lines] == out[0].text.split("\n")
+
+    def test_terminator_line_protects_wrapped_code(self):
+        # A type-list line ending in ';' is a hard stop: nothing is peeled.
+        code = self._code(
+            ("using ints = type_list<unsigned char, unsigned short,", False),
+            ("unsigned long, unsigned long long>;", False),
+        )
+        out = _peel_trailing_prose_from_code([code])
+        assert len(out) == 1
+        assert out[0].kind == SectionKind.CODE
+
+    def test_pure_code_unchanged(self):
+        code = self._code(
+            ("int x = foo(1);", True),
+            ("return x + y;", True),
+        )
+        out = _peel_trailing_prose_from_code([code])
+        assert len(out) == 1
+        assert out[0].kind == SectionKind.CODE
+
+    def test_non_code_section_passthrough(self):
+        para = make_section("just prose here", kind=SectionKind.PARAGRAPH)
+        out = _peel_trailing_prose_from_code([para])
+        assert out == [para]
