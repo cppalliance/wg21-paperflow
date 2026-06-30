@@ -74,6 +74,8 @@ You are analyzing a C++ standards proposal (WG21 paper). Write plain technical E
 1. Section chunking via assay.chunker.chunk_paper with coalescing.
 2. Wording signal: scan headings for "Wording"/"Proposed Changes", check CWG/LWG audience.
 3. Triage: skip wording-dominant or reference documents.
+4. Run paper routing classifier (Stages 1-6); store routing on pipeline state.
+5. Record routing labels and quadrant scores on state; routing does not gate analysis until thresholds are calibrated.
 
 ## 4. Extract
 
