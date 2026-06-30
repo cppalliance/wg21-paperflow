@@ -33,13 +33,6 @@ REJECTED_CATEGORIES = frozenset({
     "core-wording",
 })
 
-GROUP_TO_CATEGORY = {
-    "LEWG": "library-design",
-    "LWG": "library-wording",
-    "EWG": "language-evolution",
-    "CWG": "language-wording",
-}
-
 REQUIRED_FIELDS = frozenset({
     "paper_id",
     "title",
@@ -52,14 +45,6 @@ REQUIRED_FIELDS = frozenset({
 
 def _default_jsonl_path() -> Path:
     return Path(__file__).resolve().parents[2] / "data" / "golden" / "paper_categories.jsonl"
-
-
-def _expected_categories_from_target_groups(target_groups: list[str]) -> list[str]:
-    return sorted({
-        GROUP_TO_CATEGORY[g]
-        for g in target_groups
-        if g in GROUP_TO_CATEGORY
-    })
 
 
 def load_entries(path: Path) -> list[dict]:
@@ -110,18 +95,9 @@ def validate_schema(entries: list[dict]) -> list[str]:
             elif cat not in ALLOWED_CATEGORIES:
                 errors.append(f"{prefix}: unknown category {cat!r}")
 
-        if "target_groups" in entry:
-            tgs = entry["target_groups"]
-            if not isinstance(tgs, list):
-                errors.append(f"{prefix}: target_groups must be a list")
-            else:
-                expected = _expected_categories_from_target_groups(tgs)
-                actual = sorted(categories)
-                if actual != expected:
-                    errors.append(
-                        f"{prefix}: categories {actual} != "
-                        f"target_groups map {expected}",
-                    )
+        extra = set(entry.keys()) - REQUIRED_FIELDS
+        if extra:
+            errors.append(f"{prefix}: unexpected fields {sorted(extra)}")
 
     return errors
 

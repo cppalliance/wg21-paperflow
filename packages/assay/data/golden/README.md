@@ -17,21 +17,10 @@ repo root.
 
 ## Labeling rules
 
-**Single-label papers** (no `target_groups` field): category from title
-heuristics plus `target_group` routing from the mailing index.
-
-**Multi-label papers** (`target_groups` present): `categories` is the sorted
-set derived from committee tags:
-
-| `target_groups` | Category |
-|-----------------|----------|
-| `LEWG` | `library-design` |
-| `LWG` | `library-wording` |
-| `EWG` | `language-evolution` |
-| `CWG` | `language-wording` |
-
-`target_group` remains the primary routing group from the index;
-`target_groups` is the full committee set when multiple subgroups are listed.
+Each entry has a `target_group` (primary routing group from the mailing index)
+and one or more `categories`. Single-label papers have one category; multi-label
+papers list every applicable category (sorted). Labels come from title
+heuristics, index routing, and paper content.
 
 `confidence` reflects labeling certainty (`high` or `medium`). Values are
 frozen at initial labeling time and are not auto-promoted.
