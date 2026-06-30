@@ -14,6 +14,8 @@ this file.
 
 from __future__ import annotations
 
+import os
+from pathlib import Path
 import asyncio
 import json
 import logging
@@ -29,9 +31,14 @@ from pipeline import (
     StepHooks,
     build_pipeline,
     dispatch,
+    load_classifiers,
+    resolve_classifier_slots,
     resolve_pipeline_models,
+    route_paper,
     validate_capabilities,
+    tokens_to_chars,
 )
+from pipeline.paper_routing import RoutingResult
 from pipeline.services import load_embedders, load_services
 
 from assay.harness import (
@@ -84,7 +91,6 @@ from assay.rag import (
 from assay.standard import StandardClient, from_service_config
 from assay.triage import should_analyze
 from pipeline.heading_classifiers import SURVEY_WORDING_HEADING_RE
-from pipeline import tokens_to_chars
 from assay.render import render_report, render_trace
 
 logger = logging.getLogger(__name__)
@@ -99,8 +105,6 @@ def _load_cpp_mcp_client() -> StandardClient:
     Raises ``ValueError`` if the entry is missing or the API key is
     not set. The C++ standard MCP server is required for assay.
     """
-    import os
-    from pathlib import Path
 
     try:
         import tomllib
@@ -523,7 +527,7 @@ async def _apply_survey_skip(
     paper_type: str,
     stats: dict,
 ) -> None:
-    """Mark pipeline skipped after triage."""
+    """Mark pipeline skipped after triage or administrative routing."""
     state.synthesis = SynthesisOutput(
         verdict_label="Skipped",
         verdict_confidence="High",
@@ -543,8 +547,22 @@ async def _apply_survey_skip(
     state.skipped = True
 
 
+def _run_paper_routing(state: PipelineState, ctx: StepContext) -> RoutingResult:
+    """Run Stages 1-6 and store routing on pipeline state."""
+    classifier = ctx.classifiers.get("selector")
+    debug_log = ctx.debug_log if ctx.debug else None
+    result = route_paper(
+        state.paper_md,
+        audience=state.audience,
+        classifier=classifier,
+        debug_log=debug_log,
+    )
+    state.routing = result
+    return result
+
+
 async def _custom_survey(state: PipelineState, ctx: StepContext, spec) -> None:
-    """Step 3: chunk paper, wording signal, triage."""
+    """Step 3: chunk paper, wording signal, triage, routing."""
     # Survey is pure-Python but uses the same tokenizer profile as
     # Extract / Scan to size chunks consistently. Grab the 'fast' agent
     # if the pipeline declares one; otherwise fall back to 'default'.
@@ -576,6 +594,15 @@ async def _custom_survey(state: PipelineState, ctx: StepContext, spec) -> None:
     if not triage.analyze:
         await _apply_survey_skip(state, triage.reason, triage.paper_type, triage.stats)
         return
+
+    result = _run_paper_routing(state, ctx)
+    if result.is_administrative:
+        await _apply_survey_skip(
+            state,
+            "Administrative: no routing labels (LEWG/LWG/EWG/CWG) above threshold.",
+            "administrative",
+            triage.stats,
+        )
 
 
 async def _custom_extract(state: PipelineState, ctx: StepContext, spec) -> None:
@@ -1897,6 +1924,9 @@ async def assay_paper(
     embedder_name = embedder_defaults.get("default")
     embedder = embedders.get(embedder_name) if embedder_name else None
 
+    classifiers, clf_defaults = load_classifiers()
+    clf_slots = resolve_classifier_slots(classifiers, defaults=clf_defaults)
+
     std_client = _load_cpp_mcp_client()
     await std_client.connect()
 
@@ -1910,6 +1940,7 @@ async def assay_paper(
         pid=pid,
         default_concurrency=default_concurrency,
         embedder=embedder,
+        classifiers=clf_slots,
     )
 
     debug_path = backend.get_debug_md_path(pid, tool="assay")

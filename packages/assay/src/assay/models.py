@@ -19,6 +19,8 @@ from typing import Annotated, Any, Literal, Optional
 
 from pydantic import BaseModel, BeforeValidator, Field
 
+from pipeline import RoutingResult
+
 
 def _ensure_int_list(v: Any) -> Any:
     """Coerce legacy ``closed_by`` values (sentinel 0, single int) to ``list[int]``.
@@ -491,6 +493,7 @@ class PipelineState(BaseModel):
     chunk_map: Optional[list[ChunkEntry]] = None
     wording_lines: int = 0
     targets_cwg_lwg: bool = False
+    routing: RoutingResult | None = None
     skipped: bool = False
 
     # Step 4 - Extract
