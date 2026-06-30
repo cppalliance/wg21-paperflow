@@ -463,6 +463,7 @@ class PipelineState(BaseModel):
     chunk_map: Optional[list[ChunkEntry]] = None
     wording_lines: int = 0
     targets_cwg_lwg: bool = False
+    skipped: bool = False
 
     # Step 4 - Extract
     raw_extractions: Optional[list[ChunkExtractOutput]] = None

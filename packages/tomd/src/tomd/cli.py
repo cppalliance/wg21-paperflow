@@ -333,7 +333,7 @@ def _cmd_rebless(args: argparse.Namespace) -> int:
         print(f"reblessed {outcome.stem}: {len(changed)} axis change(s) "
               f"{json.dumps(changed, sort_keys=True)}")
         if outcome.whisker_verdict and outcome.whisker_verdict != "pass":
-            print(f"  whisker: {outcome.whisker_verdict} — review structural quality",
+            print(f"  whisker: {outcome.whisker_verdict}: review structural quality",
                   file=sys.stderr)
     return 0
 

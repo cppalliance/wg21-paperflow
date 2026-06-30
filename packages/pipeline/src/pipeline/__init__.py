@@ -36,6 +36,7 @@ from pipeline.errors import (
     ValidationStepError,
 )
 from pipeline.markdown import extract_code_blocks, sanitize_md, sections
+from pipeline.markdown_patterns import BOLD_SUBSECTION_RE, HEADING_RE
 from pipeline.model_backends import ModelBackend
 from pipeline.prompt import (
     PipelinePrompt,
@@ -136,6 +137,8 @@ __all__ = [
     "parse_pipeline_services",
     "PipelineError",
     "PipelinePrompt",
+    "HEADING_RE",
+    "BOLD_SUBSECTION_RE",
     "postcondition_satisfied",
     "ProcessResult",
     "ConvertReport",

@@ -8,8 +8,13 @@
 #
 
 """Golden QA orchestration helpers: locate a paper's source, convert it with
-tomd, and score it against its blessed ideal. Library functions return data;
-the bless and regen scripts own persistence.
+tomd, and score it against its blessed ideal.
+
+Scoring and gap helpers are pure (return data). The three orchestrator
+functions that drive the dev workflow -- `generate_ideal`, `bless_stem`, and
+`rebless_stems` -- own their own persistence: they write the ideal file and
+the baselines manifest as part of their contract. The CLI in `cli.py` calls
+them and reports results; it does not re-persist what they have already written.
 """
 
 from __future__ import annotations
@@ -489,7 +494,6 @@ def _call_whisker_score_file(
     non-fatal: callers treat None as "whisker not available" and degrade gracefully.
     Only exit codes 0, 3, 5 (pass/review/fail) are accepted as valid responses.
     """
-    cmd = ["whisker", "score-file", "--json"]
     try:
         with tempfile.TemporaryDirectory() as tmpdir:
             tmp = Path(tmpdir)
@@ -658,6 +662,10 @@ def rebless_stems(
     regression the gate exists to catch.
     """
     data = json.loads(manifest.read_text(encoding="utf-8")) if manifest.exists() else {}
+    missing = [s for s in stems if s not in data]
+    if missing:
+        raise ValueError(
+            f"stems not in manifest (use `bless` first): {missing}")
     updated = dict(data)
     outcomes: list[ReblessOutcome] = []
     for stem in stems:

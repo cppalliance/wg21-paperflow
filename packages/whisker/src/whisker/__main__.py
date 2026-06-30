@@ -69,6 +69,9 @@ from whisker.golden import (
 from whisker.guard import baseline_from_rows, diff_rows
 from whisker.reference import REFERENCE_ENGINES
 from whisker.report import build_report, render_report_md, render_summary
+from whisker.bench import table_score
+from whisker.gates import run_gates
+from whisker.metrics import content_recall, mhs, normalized_text, text_nid
 from whisker.score import (
     VERDICT_FAIL,
     VERDICT_PASS,
@@ -78,6 +81,7 @@ from whisker.score import (
     sidecar_path,
     whisker_output_dir,
 )
+from tomd.lib.check_content import compute_content_coverage
 
 logger = logging.getLogger("whisker")
 
@@ -324,7 +328,6 @@ def _score_file_main(argv: list[str]) -> int:
     md_text = args.md.read_text(encoding="utf-8")
     pid = args.md.stem
 
-    from whisker.gates import run_gates
     gates = run_gates(md_text)
 
     ref_nid = ref_teds = ref_mhs = ref_overall = ref_content_recall = None
@@ -333,8 +336,6 @@ def _score_file_main(argv: list[str]) -> int:
             print(f"score-file: --ref {args.ref} not found", file=sys.stderr)
             return C.EXIT_ERROR
         ref_md = args.ref.read_text(encoding="utf-8")
-        from whisker.bench import table_score
-        from whisker.metrics import content_recall, mhs, normalized_text, text_nid
         ref_nid = text_nid(normalized_text(md_text), normalized_text(ref_md))
         ref_teds = table_score(md_text, ref_md)
         ref_mhs = mhs(md_text, ref_md)
@@ -350,7 +351,6 @@ def _score_file_main(argv: list[str]) -> int:
             print(f"score-file: --source {args.source} not found", file=sys.stderr)
             return C.EXIT_ERROR
         try:
-            from tomd.lib.check_content import compute_content_coverage
             r = compute_content_coverage(args.source, md_text, paper_id=pid)
         except Exception as exc:
             print(f"score-file: content coverage failed: {exc}", file=sys.stderr)

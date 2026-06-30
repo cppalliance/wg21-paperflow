@@ -13,11 +13,9 @@ parameters are in characters; the caller converts from tokens.
 
 from __future__ import annotations
 
-import re
 from dataclasses import dataclass, field
 
-_HEADING_RE = re.compile(r"^(#{1,6})\s+(.*)")
-_BOLD_SUBSECTION_RE = re.compile(r"^\*\*\d+(?:\.\d+)+\*\*")
+from pipeline.markdown_patterns import BOLD_SUBSECTION_RE, HEADING_RE
 
 
 @dataclass
@@ -90,7 +88,7 @@ def _parse_headings(lines: list[str]) -> list[tuple[int, int, str]]:
     """Extract (line_index, level, title) for all markdown headings."""
     headings: list[tuple[int, int, str]] = []
     for i, line in enumerate(lines):
-        m = _HEADING_RE.match(line)
+        m = HEADING_RE.match(line)
         if m:
             headings.append((i, len(m.group(1)), m.group(2).strip()))
     return headings
@@ -219,7 +217,7 @@ def _split_bold_subsections(
 
     split_points: list[tuple[int, str]] = []
     for i in range(start_idx + 1, end_idx):
-        if i < len(lines) and _BOLD_SUBSECTION_RE.match(lines[i]):
+        if i < len(lines) and BOLD_SUBSECTION_RE.match(lines[i]):
             title = lines[i].replace("**", "").strip()
             split_points.append((i, title))
 

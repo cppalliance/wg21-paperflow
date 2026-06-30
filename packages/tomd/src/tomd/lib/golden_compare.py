@@ -165,7 +165,9 @@ def _front_matter_keys(md_text: str) -> tuple[str, ...]:
 
 
 def normalize(md_text: str) -> NormalizedDoc:
-    tokens = _AST(md_text)
+    m = _FRONT_MATTER_RE.match(md_text)
+    body = md_text[m.end():] if m else md_text
+    tokens = _AST(body)
     blocks: list[Block] = []
     for tok in tokens:
         block = _block_from_token(tok)
@@ -224,6 +226,8 @@ def _frontmatter_axis(a: NormalizedDoc, b: NormalizedDoc) -> AxisScore:
 
 def _heading_signals(aa: list[tuple[int, str]],
                      bb: list[tuple[int, str]]) -> dict[str, float]:
+    if not aa and not bb:
+        return {"text": 1.0, "level": 1.0, "nesting": 1.0}
     a_text = [t for _, t in aa]
     b_text = [t for _, t in bb]
     text = _sequence_score(a_text, b_text)

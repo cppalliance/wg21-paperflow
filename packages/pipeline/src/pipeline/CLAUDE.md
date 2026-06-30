@@ -13,7 +13,10 @@ Shared framework for the LLM analytical pipelines (`agora`). Depends on `pipelin
 - `validate.py` - `validate_capabilities(specs, *, stop_after=None)`. Primary gate for capability mismatches; called by each pipeline's entry function right after `build_pipeline`.
 - `runner.py` - `dispatch`, `load_sections`, `run_agent`, `StepContext`, `write_debug_file`.
 - `tasks.py` - `run_task`, `render_debug_md`, `_task_semaphore`.
-- `markdown.py` - `sections` (H2 splitter), `sanitize_md`.
+- `markdown.py` - `sections` (H2 splitter), `sanitize_md`, `front_matter_end_index`, `YAML_FENCE_RE`.
+- `markdown_patterns.py` - shared `HEADING_RE`, `BOLD_SUBSECTION_RE`.
+- `heading_classifiers.py` - blanking tri-state classifiers (`is_revision_heading`, `is_reference_heading`, `is_acknowledgment_heading`), survey `SURVEY_WORDING_HEADING_RE`, standalone `is_appendix_heading_line`.
+- `nli_batch.py` - `score_entailment_pairs` for sentence-level NLI batch scoring (Tag Sentences family API).
 - `session.py` - `WebResearcher`, `SearchResult`, `SearchResponse`, `FetchResponse`, `SearchBackend` ABC.
 - `backends/` - `BraveBackend` (Brave Search API), `get_default_backend`.
 

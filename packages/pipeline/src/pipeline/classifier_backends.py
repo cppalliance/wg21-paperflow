@@ -178,6 +178,13 @@ class NliCrossEncoderBackend(ClassifierBackend):
             texts, candidate_labels, multi_label=multi_label,
         )
 
+    def nli_entailment_pairs(
+        self,
+        pairs: list[tuple[str, str]],
+    ) -> list[dict[str, float]]:
+        """Raw NLI scores for (premise, hypothesis) pairs in input order."""
+        return self._backend.nli_pairs(pairs)
+
 
 CLASSIFIER_BACKEND_REGISTRY: dict[str, type[ClassifierBackend]] = {
     "zeroshot_v2": ZeroShotV2Backend,
