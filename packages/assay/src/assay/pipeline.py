@@ -15,6 +15,7 @@ this file.
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 from collections import Counter
 
@@ -1460,6 +1461,11 @@ async def _custom_report(state: PipelineState, ctx: StepContext, spec) -> None:
 # -- Hook registry -----------------------------------------------------------
 
 
+def _run_unless_skipped(state: PipelineState) -> bool:
+    """Guard: skip analysis steps when Survey triaged the paper out."""
+    return not state.skipped
+
+
 def _build_hooks() -> dict[str, StepHooks]:
     """Build the step hook table.
 
@@ -1472,18 +1478,18 @@ def _build_hooks() -> dict[str, StepHooks]:
         "1. References": StepHooks(custom=_custom_references),
         "2. Index": StepHooks(custom=_custom_index),
         "3. Survey": StepHooks(custom=_custom_survey),
-        "4. Extract": StepHooks(custom=_custom_extract),
-        "5. Decide": StepHooks(custom=_custom_decide),
-        "6. Classify": StepHooks(custom=_custom_classify),
-        "7. Collect": StepHooks(custom=_custom_collect),
-        "8. Derive": StepHooks(custom=_custom_derive),
-        "9. Verify": StepHooks(custom=_custom_verify),
-        "10. Research": StepHooks(custom=_custom_research),
-        "11. Probe": StepHooks(custom=_custom_probe),
-        "12. Analyze": StepHooks(custom=_custom_analyze),
-        "13. Rationale": StepHooks(custom=_custom_rationale),
-        "14. Challenge": StepHooks(custom=_custom_challenge),
-        "15. Couple": StepHooks(custom=_custom_couple),
+        "4. Extract": StepHooks(guard=_run_unless_skipped, custom=_custom_extract),
+        "5. Decide": StepHooks(guard=_run_unless_skipped, custom=_custom_decide),
+        "6. Classify": StepHooks(guard=_run_unless_skipped, custom=_custom_classify),
+        "7. Collect": StepHooks(guard=_run_unless_skipped, custom=_custom_collect),
+        "8. Derive": StepHooks(guard=_run_unless_skipped, custom=_custom_derive),
+        "9. Verify": StepHooks(guard=_run_unless_skipped, custom=_custom_verify),
+        "10. Research": StepHooks(guard=_run_unless_skipped, custom=_custom_research),
+        "11. Probe": StepHooks(guard=_run_unless_skipped, custom=_custom_probe),
+        "12. Analyze": StepHooks(guard=_run_unless_skipped, custom=_custom_analyze),
+        "13. Rationale": StepHooks(guard=_run_unless_skipped, custom=_custom_rationale),
+        "14. Challenge": StepHooks(guard=_run_unless_skipped, custom=_custom_challenge),
+        "15. Couple": StepHooks(guard=_run_unless_skipped, custom=_custom_couple),
         "16. Synthesize": StepHooks(custom=_custom_synthesize),
         "17. Report": StepHooks(custom=_custom_report),
     }
@@ -1836,6 +1842,8 @@ def _persist_synthesis(backend, pid, synthesis):
         "thesis_statement": synthesis.thesis_statement,
         "critical_count": synthesis.critical_count,
         "significant_count": synthesis.significant_count,
+        "skip_reason": synthesis.skip_reason,
+        "paper_stats": json.dumps(synthesis.paper_stats),
     }
     backend.store_assay_synthesis(pid, row)
 
@@ -1922,16 +1930,6 @@ async def assay_paper(
             trace_path=trace_path,
             debug_path=debug_path if debug else None,
         )
-
-        if (
-            stop_after is None
-            and getattr(state, "skipped", False)
-            and state.synthesis is not None
-        ):
-            if ctx.backend is not None:
-                _persist_synthesis(ctx.backend, pid, state.synthesis)
-            if not state.report:
-                state.report = render_report(state, "")
 
         if stop_after is not None:
             return render_trace(state, stop_after)

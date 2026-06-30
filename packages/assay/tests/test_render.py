@@ -6,6 +6,12 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
+import pytest
+
+from paperstore import SqliteBackend
+
 from assay.models import (
     AskOutput,
     GapOutput,
@@ -22,7 +28,12 @@ from assay.models import (
     SynthesisOutput,
 )
 from assay.references import RefEntry, UrlEntry
-from assay.render import prepare_report_data, render_report
+from assay.render import load_assay_state, prepare_report_data, render_report
+
+
+@pytest.fixture
+def store(tmp_path: Path) -> SqliteBackend:
+    return SqliteBackend(tmp_path)
 
 
 def _make_state() -> PipelineState:
@@ -30,8 +41,6 @@ def _make_state() -> PipelineState:
     return PipelineState(
         paper_id="P9999R0",
         paper_title="Test Paper",
-        model_name="test-model",
-        service_name="test-svc",
         items=CollectedItems(
             claims=[CollectedItem(type="claim", line=1, quote="claim1")],
             evidence=[CollectedItem(type="evidence", line=2, quote="ev1")],
@@ -173,3 +182,32 @@ def test_render_report_no_template_raises():
     import pytest
     with pytest.raises(RuntimeError, match="No Jinja template"):
         render_report(state, "No code blocks here")
+
+
+def test_skipped_rerender_preserves_stats_and_reason(store: SqliteBackend):
+    store.upsert_year("2026", [{"paper_id": "P1000R0", "title": "Ref Doc"}])
+    store.store_assay_synthesis("P1000R0", {
+        "verdict": "Skipped",
+        "verdict_confidence": "High",
+        "central_thesis": "Reference Document: not analyzed.",
+        "thesis_statement": "",
+        "thesis_survives": False,
+        "dominant_dynamic": "",
+        "critical_count": 0,
+        "significant_count": 0,
+        "skip_reason": "Reference document (>300k chars, no proposal structure).",
+        "paper_stats": (
+            '{"total_chars": 400000, "chunk_count": 55, "wording_ratio": 0.12, '
+            '"audience": ""}'
+        ),
+    })
+    state = load_assay_state("P1000R0", store)
+    assert state.skipped is True
+    assert state.synthesis is not None
+    assert state.synthesis.skip_reason.startswith("Reference document")
+    assert state.synthesis.paper_stats["total_chars"] == 400000
+    report = render_report(state, "")
+    assert "400,000" in report
+    assert "Reference document" in report
+    assert "Step 3 (Survey)" in report
+    assert "Model: n/a" not in report

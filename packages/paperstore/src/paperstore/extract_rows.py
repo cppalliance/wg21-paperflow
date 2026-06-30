@@ -287,3 +287,9 @@ class AssaySynthesisRow:
     dominant_dynamic: str = ""
     critical_count: int = 0
     significant_count: int = 0
+    skip_reason: str = ""
+    paper_stats: dict | None = None
+
+    def __post_init__(self):
+        if self.paper_stats is None:
+            object.__setattr__(self, "paper_stats", {})

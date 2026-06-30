@@ -575,8 +575,11 @@ def load_assay_state(pid: str, backend) -> PipelineState:
             significant_count=synthesis_row.significant_count,
             major_findings=major_findings,
             regular_findings=regular_findings,
+            skip_reason=synthesis_row.skip_reason,
+            paper_stats=dict(synthesis_row.paper_stats),
         )
 
+    skipped = synthesis is not None and synthesis.verdict_label == "Skipped"
     state = PipelineState(
         paper_id=pid,
         paper_title=meta.title or "",
@@ -593,6 +596,7 @@ def load_assay_state(pid: str, backend) -> PipelineState:
         checklist=checklist_list,
         compounds=compounds_list,
         synthesis=synthesis,
+        skipped=skipped,
     )
 
     return state
@@ -948,11 +952,7 @@ def _render_skipped_report(state: PipelineState, synthesis: SynthesisOutput) -> 
     lines.append("## Methodology")
     lines.append("")
     lines.append(f"- Paper: {pid}, \"{title}\"")
-    lines.append("- Triage: skipped at Step 1 (Survey)")
-    model_name = getattr(state, "model_name", "") or "n/a"
-    service_name = getattr(state, "service_name", "") or "n/a"
-    lines.append(f"- Model: {model_name}")
-    lines.append(f"- Service: {service_name}")
+    lines.append("- Triage: skipped at Step 3 (Survey)")
     lines.append("")
 
     return "\n".join(lines)

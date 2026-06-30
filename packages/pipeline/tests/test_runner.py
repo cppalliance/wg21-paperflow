@@ -132,3 +132,40 @@ def test_step_failure_flushes_trace(tmp_path):
         )
 
     assert "seen=True" in trace_path.read_text(encoding="utf-8")
+
+
+def test_guard_skips_step_without_blocking_later_steps():
+    ran: list[int] = []
+
+    async def mark_skip(state, ctx, spec):
+        state.skipped = True
+
+    async def guarded(state, ctx, spec):
+        ran.append(1)
+
+    async def unguarded(state, ctx, spec):
+        ran.append(2)
+
+    class _State:
+        skipped = False
+
+    state = _State()
+    pipeline = [
+        StepSpec(
+            step=StepPrompt(name="0. Init", number=0, model="default", execution="main"),
+            hooks=StepHooks(custom=mark_skip),
+        ),
+        StepSpec(
+            step=StepPrompt(name="1. Guarded", number=1, model="default", execution="main"),
+            hooks=StepHooks(custom=guarded, guard=lambda s: not s.skipped),
+        ),
+        StepSpec(
+            step=StepPrompt(name="2. Run", number=2, model="default", execution="main"),
+            hooks=StepHooks(custom=unguarded),
+        ),
+    ]
+
+    import asyncio
+    asyncio.run(dispatch(pipeline, state, StepContext(agents={})))
+
+    assert ran == [2]
