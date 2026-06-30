@@ -1,0 +1,3 @@
+# Transient page renders from `tomd render` / `tomd add` (vision input for the
+# generator skill); regenerable, never committed.
+.render/

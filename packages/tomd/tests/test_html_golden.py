@@ -1,4 +1,4 @@
-"""Golden regression: full HTML papers vs committed expected Markdown."""
+"""Snapshot regression: full HTML papers vs committed byte-exact Markdown."""
 
 import difflib
 import json
@@ -9,10 +9,9 @@ import pytest
 from tomd.lib.html import convert_html
 
 _REPO = Path(__file__).resolve().parent.parent
-_PAPERS = _REPO / "papers"
 _GOLDEN = _REPO / "tests" / "fixtures" / "golden"
 
-# Stems must match `papers/{stem}.html` and `tests/fixtures/golden/{stem}.golden.md`.
+# Stems must match `golden/sources/{stem}.html` and `golden/snapshots/{stem}.md`.
 _GOLDEN_STEMS = (
     "p3411r5",
     "p2728r11",
@@ -44,14 +43,14 @@ def _diff_head(actual: str, golden: str, limit: int = 120) -> str:
 
 @pytest.mark.parametrize("stem", _GOLDEN_STEMS)
 def test_convert_html_matches_golden(stem: str):
-    html_path = _PAPERS / f"{stem}.html"
+    html_path = _GOLDEN / "sources" / f"{stem}.html"
     if not html_path.is_file():
-        pytest.skip(f"missing paper HTML: {html_path} (papers/ is gitignored)")
+        pytest.skip(f"missing paper HTML: {html_path} (sources/ not staged)")
 
     md, prompts = convert_html(html_path)
-    golden_md = _GOLDEN / f"{stem}.golden.md"
-    assert golden_md.is_file(), f"missing golden: {golden_md}"
-    expected_md = _read_expected(golden_md)
+    snapshot_md = _GOLDEN / "snapshots" / f"{stem}.md"
+    assert snapshot_md.is_file(), f"missing snapshot: {snapshot_md}"
+    expected_md = _read_expected(snapshot_md)
     got_md = _normalize_newlines(md)
     exp_md = _normalize_newlines(expected_md)
     if got_md != exp_md:
@@ -59,10 +58,10 @@ def test_convert_html_matches_golden(stem: str):
             f"Markdown mismatch for {stem}\n{_diff_head(md, expected_md)}",
         )
 
-    golden_prompts = _GOLDEN / f"{stem}.golden.prompts.json"
-    if golden_prompts.is_file():
+    snapshot_prompts = _GOLDEN / "snapshots" / f"{stem}.prompts.json"
+    if snapshot_prompts.is_file():
         assert prompts is not None, f"expected prompts for {stem}"
-        expected = json.loads(_read_expected(golden_prompts))
+        expected = json.loads(_read_expected(snapshot_prompts))
         assert isinstance(expected, list)
         got = [_normalize_newlines(p) for p in prompts]
         exp = [_normalize_newlines(p) for p in expected]
