@@ -28,7 +28,31 @@ import re
 from pathlib import Path
 
 _PREAMBLE_KEY = "_preamble"
-_CODE_SPAN_RE = re.compile(r'``.+?``|`[^`]+`')
+_CODE_SPAN_RE = re.compile(r"``.+?``|`[^`]+`")
+
+YAML_FENCE_RE = re.compile(r"^---\s*$")
+
+
+def front_matter_end_index(lines: list[str]) -> int:
+    """Index of the first body line after YAML front matter.
+
+    Returns 0 when the document does not begin with a ``---`` fence
+    (first non-blank line is not a fence). When the opening fence has
+    no closing fence, returns ``len(lines)`` so the entire document is
+    treated as front matter, matching assay blanking Pass 1.
+    """
+    saw_open = False
+    for i, line in enumerate(lines):
+        stripped = line.lstrip()
+        if YAML_FENCE_RE.match(stripped):
+            if saw_open:
+                return i + 1
+            saw_open = True
+        elif not saw_open and stripped:
+            return 0
+    if saw_open:
+        return len(lines)
+    return 0
 
 
 # -- Section splitter ---------------------------------------------------------
@@ -147,14 +171,14 @@ def sanitize_md(text: str) -> str:
     Code spans pass through unchanged.  Prose segments get ``<``, ``>``,
     ``|``, leading ``#``, and unbalanced emphasis markers escaped.
     """
-    if '```' in text:
-        parts = text.split('```')
+    if "```" in text:
+        parts = text.split("```")
         result = _sanitize_inline(parts[0].rstrip())
         for i in range(1, len(parts), 2):
             code = parts[i].strip()
-            result += f'\n\n```\n{code}\n```'
+            result += f"\n\n```\n{code}\n```"
             if i + 1 < len(parts) and parts[i + 1].strip():
-                result += f'\n\n{_sanitize_inline(parts[i + 1].strip())}'
+                result += f"\n\n{_sanitize_inline(parts[i + 1].strip())}"
         return result
     return _sanitize_inline(text)
 
@@ -165,47 +189,47 @@ def _sanitize_inline(text: str) -> str:
     last = 0
     for m in _CODE_SPAN_RE.finditer(text):
         if m.start() > last:
-            segments.append(_escape_md_chars(text[last:m.start()]))
+            segments.append(_escape_md_chars(text[last : m.start()]))
         segments.append(m.group())
         last = m.end()
     if last < len(text):
         segments.append(_escape_md_chars(text[last:]))
-    return ''.join(segments)
+    return "".join(segments)
 
 
 def _escape_md_chars(text: str) -> str:
     """Escape markdown-sensitive characters in prose text."""
-    text = text.replace('<', r'\<').replace('>', r'\>')
-    text = text.replace('|', r'\|')
-    text = re.sub(r'^(\s*)(#)', r'\1\\\2', text, flags=re.MULTILINE)
-    for double in ('**', '__'):
+    text = text.replace("<", r"\<").replace(">", r"\>")
+    text = text.replace("|", r"\|")
+    text = re.sub(r"^(\s*)(#)", r"\1\\\2", text, flags=re.MULTILINE)
+    for double in ("**", "__"):
         if text.count(double) % 2 != 0:
-            text = text.replace(double, '\\' + double)
-    for single in ('*', '_'):
+            text = text.replace(double, "\\" + double)
+    for single in ("*", "_"):
         double = single * 2
-        esc_double = '\\' + double
-        temp = text.replace(esc_double, '\x00\x00\x00')
-        temp = temp.replace(double, '\x00\x00')
-        temp = temp.replace('\\' + single, '\x00\x00')
+        esc_double = "\\" + double
+        temp = text.replace(esc_double, "\x00\x00\x00")
+        temp = temp.replace(double, "\x00\x00")
+        temp = temp.replace("\\" + single, "\x00\x00")
         count = temp.count(single)
         if count % 2 != 0:
             parts: list[str] = []
             i = 0
             while i < len(text):
-                if text[i:i + 3] == esc_double:
-                    parts.append(text[i:i + 3])
+                if text[i : i + 3] == esc_double:
+                    parts.append(text[i : i + 3])
                     i += 3
-                elif text[i:i + 2] == double:
-                    parts.append(text[i:i + 2])
+                elif text[i : i + 2] == double:
+                    parts.append(text[i : i + 2])
                     i += 2
-                elif text[i:i + 2] == '\\' + single:
-                    parts.append(text[i:i + 2])
+                elif text[i : i + 2] == "\\" + single:
+                    parts.append(text[i : i + 2])
                     i += 2
                 elif text[i] == single:
-                    parts.append('\\' + single)
+                    parts.append("\\" + single)
                     i += 1
                 else:
                     parts.append(text[i])
                     i += 1
-            text = ''.join(parts)
+            text = "".join(parts)
     return text

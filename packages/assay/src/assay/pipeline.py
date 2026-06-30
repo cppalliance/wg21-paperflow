@@ -16,7 +16,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import re
 from collections import Counter
 
 from paperstore import StorageBackend
@@ -82,6 +81,7 @@ from assay.rag import (
 )
 from assay.standard import StandardClient, from_service_config
 from assay.triage import should_analyze
+from pipeline.heading_classifiers import SURVEY_WORDING_HEADING_RE
 from pipeline import tokens_to_chars
 from assay.render import render_report, render_trace
 
@@ -515,6 +515,32 @@ async def _custom_index(state: PipelineState, ctx: StepContext, spec) -> None:
         )
 
 
+async def _apply_survey_skip(
+    state: PipelineState,
+    reason: str,
+    paper_type: str,
+    stats: dict,
+) -> None:
+    """Mark pipeline skipped after triage."""
+    state.synthesis = SynthesisOutput(
+        verdict_label="Skipped",
+        verdict_confidence="High",
+        verdict_statement=f"{paper_type.replace('_', ' ').title()}: not analyzed.",
+        dominant_dynamic=None,
+        thesis_survives=False,
+        thesis_statement="",
+        skip_reason=reason,
+        paper_stats=stats,
+    )
+    state.items = CollectedItems()
+    state.findings = []
+    state.surviving = []
+    state.killed = []
+    state.compounds = []
+    state.strengths = []
+    state.skipped = True
+
+
 async def _custom_survey(state: PipelineState, ctx: StepContext, spec) -> None:
     """Step 3: chunk paper, wording signal, triage."""
     # Survey is pure-Python but uses the same tokenizer profile as
@@ -537,10 +563,7 @@ async def _custom_survey(state: PipelineState, ctx: StepContext, spec) -> None:
         for i, s in enumerate(sections)
     ]
 
-    _WORDING_HEADING_RE = re.compile(
-        r"(?i)\bwording\b|\bproposed\s+changes\b|\bproposed\s+resolution\b"
-    )
-    wording_headings = [s for s in sections if _WORDING_HEADING_RE.search(s.heading)]
+    wording_headings = [s for s in sections if SURVEY_WORDING_HEADING_RE.search(s.heading)]
     state.wording_lines = sum(s.end_line - s.start_line for s in wording_headings)
     audience = " ".join(state.audience).upper()
     state.targets_cwg_lwg = "CWG" in audience or "LWG" in audience
@@ -549,22 +572,8 @@ async def _custom_survey(state: PipelineState, ctx: StepContext, spec) -> None:
         state.chunk_map, state.paper_title, state.intent, state.audience, state.paper_md
     )
     if not triage.analyze:
-        state.synthesis = SynthesisOutput(
-            verdict_label="Skipped",
-            verdict_confidence="High",
-            verdict_statement=f"{triage.paper_type.replace('_', ' ').title()}: not analyzed.",
-            dominant_dynamic=None,
-            thesis_survives=False,
-            thesis_statement="",
-            skip_reason=triage.reason,
-            paper_stats=triage.stats,
-        )
-        state.items = CollectedItems()
-        state.findings = []
-        state.surviving = []
-        state.killed = []
-        state.compounds = []
-        state.strengths = []
+        await _apply_survey_skip(state, triage.reason, triage.paper_type, triage.stats)
+        return
 
 
 async def _custom_extract(state: PipelineState, ctx: StepContext, spec) -> None:
@@ -1432,6 +1441,8 @@ async def _custom_couple(state: PipelineState, ctx: StepContext, spec) -> None:
 
 async def _custom_synthesize(state: PipelineState, ctx: StepContext, spec) -> None:
     """Step 16: verdict derivation (pure Python)."""
+    if state.skipped:
+        return
     state.synthesis = synthesize(
         state.surviving or [],
         state.compounds or [],
@@ -1911,6 +1922,16 @@ async def assay_paper(
             trace_path=trace_path,
             debug_path=debug_path if debug else None,
         )
+
+        if (
+            stop_after is None
+            and getattr(state, "skipped", False)
+            and state.synthesis is not None
+        ):
+            if ctx.backend is not None:
+                _persist_synthesis(ctx.backend, pid, state.synthesis)
+            if not state.report:
+                state.report = render_report(state, "")
 
         if stop_after is not None:
             return render_trace(state, stop_after)
