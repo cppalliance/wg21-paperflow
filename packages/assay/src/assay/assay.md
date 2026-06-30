@@ -75,7 +75,7 @@ You are analyzing a C++ standards proposal (WG21 paper). Write plain technical E
 2. Wording signal: scan headings for "Wording"/"Proposed Changes", check CWG/LWG audience.
 3. Triage: skip wording-dominant or reference documents.
 4. Run paper routing classifier (Stages 1-6); store routing on pipeline state.
-5. Record routing labels and quadrant scores on state; routing does not gate analysis until thresholds are calibrated.
+5. If routing yields zero labels (`is_administrative`), skip remaining steps via the same path as triage skip.
 
 ## 4. Extract
 
