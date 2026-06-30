@@ -27,7 +27,7 @@ from tomd.api import convert_paper
 
 FIXTURE_PDF = (
     Path(__file__).resolve().parent.parent
-    / "packages" / "tomd" / "tests" / "fixtures" / "golden" / "p1112r4.pdf"
+    / "packages" / "tomd" / "tests" / "fixtures" / "golden" / "sources" / "p1112r4.pdf"
 )
 
 

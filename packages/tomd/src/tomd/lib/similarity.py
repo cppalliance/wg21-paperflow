@@ -54,6 +54,16 @@ def _jaccard_similarity(a: str, b: str) -> float:
     return len(intersection) / len(union)
 
 
+def word_jaccard(a: str, b: str) -> float:
+    """Public word-level Jaccard similarity (0.0-1.0).
+
+    Lowercased whitespace-token set overlap. Two empty strings score 1.0;
+    one empty scores 0.0. Used by the golden structural comparator for the
+    per-block text axis.
+    """
+    return _jaccard_similarity(a, b)
+
+
 def _symmetric_similarity(a: str, b: str) -> float:
     """max(SM(a,b), SM(b,a)) -- neutralizes argument-order asymmetry.
 

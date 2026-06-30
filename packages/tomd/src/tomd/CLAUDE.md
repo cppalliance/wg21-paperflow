@@ -4,6 +4,8 @@
 
 tomd is a hybrid PDF-and-HTML-to-Markdown converter. It uses deterministic text extraction and multi-signal classification to produce Markdown, with optional LLM resolution for ambiguous sections. PDF conversion uses dual-path extraction with confidence scoring; HTML conversion uses DOM traversal with generator-specific metadata extraction.
 
+Improving conversion quality with confidence? The golden QA workflow (`tomd score` / `bless` / `rebless`, plus the structural gate) is documented in [`docs/tomd-qa.md`](../../../../docs/tomd-qa.md).
+
 ## Architecture
 
 Pipeline execution order:

@@ -1,4 +1,4 @@
-"""Golden regression: full PDF papers vs committed expected Markdown."""
+"""Snapshot regression: full PDF papers vs committed byte-exact Markdown."""
 
 import difflib
 import json
@@ -119,16 +119,22 @@ def _diff_head(actual: str, golden: str, limit: int = 120) -> str:
 
 
 @pytest.mark.parametrize("stem", _GOLDEN_STEMS)
-def test_run_pipeline_matches_golden(stem: str):
-    pdf_path = _GOLDEN / f"{stem}.pdf"
+def test_convert_pdf_matches_golden(stem: str):
+    # Original 8 stems use sources/; newer stems live flat in the golden root.
+    pdf_path = _GOLDEN / "sources" / f"{stem}.pdf"
     if not pdf_path.is_file():
-        pytest.skip(f"missing PDF fixture: {pdf_path}")
+        pdf_path = _GOLDEN / f"{stem}.pdf"
+    if not pdf_path.is_file():
+        pytest.skip(f"missing PDF fixture: {stem}.pdf")
 
     result = run_pipeline(pdf_path)
     md, prompts = result.md, result.prompts
-    golden_md = _GOLDEN / f"{stem}.golden.md"
-    assert golden_md.is_file(), f"missing golden: {golden_md}"
-    expected_md = golden_md.read_text(encoding="utf-8")
+    # Originals use snapshots/<stem>.md; newer stems use <stem>.golden.md.
+    snapshot_md = _GOLDEN / "snapshots" / f"{stem}.md"
+    if not snapshot_md.is_file():
+        snapshot_md = _GOLDEN / f"{stem}.golden.md"
+    assert snapshot_md.is_file(), f"missing snapshot: {snapshot_md}"
+    expected_md = snapshot_md.read_text(encoding="utf-8")
     got_md = _normalize_newlines(md)
     exp_md = _normalize_newlines(expected_md)
     if got_md != exp_md:
@@ -136,10 +142,12 @@ def test_run_pipeline_matches_golden(stem: str):
             f"Markdown mismatch for {stem}\n{_diff_head(md, expected_md)}",
         )
 
-    golden_prompts = _GOLDEN / f"{stem}.golden.prompts.json"
-    if golden_prompts.is_file():
+    snapshot_prompts = _GOLDEN / "snapshots" / f"{stem}.prompts.json"
+    if not snapshot_prompts.is_file():
+        snapshot_prompts = _GOLDEN / f"{stem}.golden.prompts.json"
+    if snapshot_prompts.is_file():
         assert prompts is not None, f"expected prompts for {stem}"
-        expected = json.loads(golden_prompts.read_text(encoding="utf-8"))
+        expected = json.loads(snapshot_prompts.read_text(encoding="utf-8"))
         assert isinstance(expected, list)
         got = [_normalize_newlines(p) for p in prompts]
         exp = [_normalize_newlines(p) for p in expected]
