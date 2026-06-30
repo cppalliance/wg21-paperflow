@@ -737,6 +737,21 @@ def _count(store: SqliteBackend, table: str, pid: str) -> int:
     ).fetchone()[0]
 
 
+def test_store_assay_synthesis_skip_metadata_roundtrip(store: SqliteBackend):
+    """skip_reason and paper_stats survive store/get for --rerender."""
+    store.upsert_year("2026", [{"paper_id": "P1"}])
+    stats = {"total_chars": 12345, "chunk_count": 7, "wording_ratio": 0.9}
+    store.store_assay_synthesis("P1", {
+        "verdict": "Skipped",
+        "skip_reason": "wording dominant",
+        "paper_stats": json.dumps(stats),
+    })
+    row = store.get_assay_synthesis("P1")
+    assert row.verdict == "Skipped"
+    assert row.skip_reason == "wording dominant"
+    assert row.paper_stats == stats
+
+
 def test_clear_downstream_outputs_wipes_assay_rows(store: SqliteBackend):
     """``clear_downstream_outputs`` deletes every ``assay_*`` row for the
     target paper alongside the ``.assay.md`` report file. Stored

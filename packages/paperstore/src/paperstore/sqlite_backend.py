@@ -347,7 +347,9 @@ CREATE TABLE IF NOT EXISTS assay_synthesis (
     central_thesis     TEXT DEFAULT '',
     dominant_dynamic   TEXT DEFAULT '',
     critical_count     INTEGER DEFAULT 0,
-    significant_count  INTEGER DEFAULT 0
+    significant_count  INTEGER DEFAULT 0,
+    skip_reason        TEXT DEFAULT '',
+    paper_stats        TEXT DEFAULT '{}'
 );
 
 """
@@ -480,6 +482,18 @@ def _migrate(conn: sqlite3.Connection) -> None:
     if finding_cols and "from_gap_ids" not in finding_cols:
         conn.execute(
             "ALTER TABLE assay_findings ADD COLUMN from_gap_ids TEXT DEFAULT ''"
+        )
+
+    synthesis_cols = {r[1] for r in conn.execute(
+        "PRAGMA table_info(assay_synthesis)"
+    ).fetchall()}
+    if synthesis_cols and "skip_reason" not in synthesis_cols:
+        conn.execute(
+            "ALTER TABLE assay_synthesis ADD COLUMN skip_reason TEXT DEFAULT ''"
+        )
+    if synthesis_cols and "paper_stats" not in synthesis_cols:
+        conn.execute(
+            "ALTER TABLE assay_synthesis ADD COLUMN paper_stats TEXT DEFAULT '{}'"
         )
 
     if "citations_extracted_at" not in {
@@ -1767,17 +1781,28 @@ class SqliteBackend(StorageBackend):
     def store_assay_synthesis(self, paper_id: str, synthesis) -> None:
         with self._conn:
             self._conn.execute(
-                "INSERT OR REPLACE INTO assay_synthesis (paper_id, verdict, verdict_confidence, thesis_statement, thesis_survives, central_thesis, dominant_dynamic, critical_count, significant_count) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                (paper_id, synthesis.get("verdict", "Insufficient"), synthesis.get("verdict_confidence", "Medium"), synthesis.get("thesis_statement", ""), int(synthesis.get("thesis_survives", False)), synthesis.get("central_thesis", ""), synthesis.get("dominant_dynamic", "") or "", synthesis.get("critical_count", 0), synthesis.get("significant_count", 0)),
+                "INSERT OR REPLACE INTO assay_synthesis (paper_id, verdict, verdict_confidence, thesis_statement, thesis_survives, central_thesis, dominant_dynamic, critical_count, significant_count, skip_reason, paper_stats) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (paper_id, synthesis.get("verdict", "Insufficient"), synthesis.get("verdict_confidence", "Medium"), synthesis.get("thesis_statement", ""), int(synthesis.get("thesis_survives", False)), synthesis.get("central_thesis", ""), synthesis.get("dominant_dynamic", "") or "", synthesis.get("critical_count", 0), synthesis.get("significant_count", 0), synthesis.get("skip_reason", ""), synthesis.get("paper_stats", "{}")),
             )
 
     def get_assay_synthesis(self, paper_id: str):
         from paperstore.extract_rows import AssaySynthesisRow
         row = self._conn.execute(
-            "SELECT paper_id, verdict, verdict_confidence, thesis_statement, thesis_survives, central_thesis, dominant_dynamic, critical_count, significant_count FROM assay_synthesis WHERE paper_id = ?",
+            "SELECT paper_id, verdict, verdict_confidence, thesis_statement, thesis_survives, central_thesis, dominant_dynamic, critical_count, significant_count, skip_reason, paper_stats FROM assay_synthesis WHERE paper_id = ?",
             (paper_id,),
         ).fetchone()
-        return AssaySynthesisRow(row[0], row[1], row[2], row[3], bool(row[4]), row[5], row[6], row[7], row[8]) if row else None
+        if not row:
+            return None
+        paper_stats_raw = row[10] if len(row) > 10 else "{}"
+        try:
+            paper_stats = json.loads(paper_stats_raw or "{}")
+        except json.JSONDecodeError:
+            paper_stats = {}
+        skip_reason = row[9] if len(row) > 9 else ""
+        return AssaySynthesisRow(
+            row[0], row[1], row[2], row[3], bool(row[4]), row[5], row[6], row[7], row[8],
+            skip_reason, paper_stats,
+        )
 
     def write_assay_md(self, paper_id: str, markdown: str) -> Path:
         pid = paper_id.strip().upper().lower()

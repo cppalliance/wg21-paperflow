@@ -545,7 +545,7 @@ class StorageBackend(ABC):
 
     @abstractmethod
     def store_assay_synthesis(self, paper_id: str, synthesis) -> None:
-        """Store or replace assay synthesis (verdict, counts) for ``paper_id``."""
+        """Store or replace assay synthesis (verdict, counts, skip metadata) for ``paper_id``."""
 
     @abstractmethod
     def get_assay_synthesis(self, paper_id: str):

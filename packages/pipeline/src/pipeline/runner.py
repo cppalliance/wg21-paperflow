@@ -328,12 +328,6 @@ async def dispatch(
             if stop_after is not None and i > stop_after:
                 break
 
-            if getattr(state, "skipped", False):
-                logger.info(
-                    "Step %d: %s (skipped: pipeline marked skipped)", i, spec.step.name,
-                )
-                continue
-
             ctx._progress_step = i
             if on_progress is not None:
                 on_progress(ProgressEvent(
