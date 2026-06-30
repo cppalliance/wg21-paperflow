@@ -87,6 +87,12 @@ from pipeline.postconditions import (
     postcondition_satisfied,
     truthful_status,
 )
+from pipeline.paper_routing import (
+    HypothesisAxis,
+    RoutingGroup,
+    RoutingResult,
+    route_paper,
+)
 from pipeline.process import ensure_paper_md, process_paper
 from pipeline.tasks import run_task
 from pipeline.tokens import CHARS_PER_TOKEN, est_tokens, tokens_to_chars
@@ -139,6 +145,10 @@ __all__ = [
     "PipelinePrompt",
     "HEADING_RE",
     "BOLD_SUBSECTION_RE",
+    "HypothesisAxis",
+    "route_paper",
+    "RoutingGroup",
+    "RoutingResult",
     "postcondition_satisfied",
     "ProcessResult",
     "ConvertReport",
