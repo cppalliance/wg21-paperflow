@@ -1095,7 +1095,7 @@ def _render_skipped_report(state: PipelineState, synthesis: SynthesisOutput) -> 
     lines.append("## Methodology")
     lines.append("")
     lines.append(f'- Paper: {pid}, "{title}"')
-    lines.append("- Triage: skipped at Step 1 (Survey)")
+    lines.append("- Triage: skipped at Step 3 (Survey)")
     model_name = getattr(state, "model_name", "") or "n/a"
     service_name = getattr(state, "service_name", "") or "n/a"
     lines.append(f"- Model: {model_name}")

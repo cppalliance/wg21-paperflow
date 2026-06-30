@@ -595,7 +595,14 @@ async def _custom_survey(state: PipelineState, ctx: StepContext, spec) -> None:
         await _apply_survey_skip(state, triage.reason, triage.paper_type, triage.stats)
         return
 
-    _run_paper_routing(state, ctx)
+    result = _run_paper_routing(state, ctx)
+    if result.is_administrative:
+        await _apply_survey_skip(
+            state,
+            "Administrative: no routing labels (LEWG/LWG/EWG/CWG) above threshold.",
+            "administrative",
+            triage.stats,
+        )
 
 
 async def _custom_extract(state: PipelineState, ctx: StepContext, spec) -> None:
