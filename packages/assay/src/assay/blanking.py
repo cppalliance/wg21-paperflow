@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import re
 
-from pipeline.heading_classifiers import (
+from assay.heading_classifiers import (
     HeadingKind,
     is_acknowledgment_heading,
     is_reference_heading,

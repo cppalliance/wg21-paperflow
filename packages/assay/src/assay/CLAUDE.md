@@ -20,6 +20,8 @@ Two-pass architecture: Pass 1 (Steps 0-8) extracts mechanically and derives a th
 - `rag.py` - ephemeral RAG index: build vector index over cited papers, query for evidence injection. No LLM, embedder only.
 - `pipeline.py` - async orchestration: step hooks, dispatch loop, `assay_paper()` / `assay_since()` entry points.
 - `render.py` - renders the assay report and diagnostic trace.
+- `heading_classifiers.py` - WG21 heading classifiers for blanking and survey signals (`is_revision_heading`, `is_reference_heading`, `is_acknowledgment_heading`, `is_appendix_heading_line`, `SURVEY_WORDING_HEADING_RE`). Imports only `HEADING_RE` from generic `pipeline.markdown`.
+- `paper_routing/` - six-stage WG21 review-group routing classifier (`route_paper`, `RoutingResult`, `RoutingGroup`). Self-contained subpackage depending only on generic `pipeline` modules (`classifier_backends`, `nli_batch`, `markdown`). Extractable to a standalone package if a non-assay consumer emerges.
 
 ## Pipeline steps
 

@@ -28,7 +28,9 @@ from dataclasses import dataclass, field
 
 from jinja2 import Template
 
-from pipeline import RoutingGroup, extract_code_blocks, load_sections
+from pipeline import extract_code_blocks, load_sections
+
+from assay.paper_routing import RoutingGroup
 
 from assay.models import (
     AskOutput,

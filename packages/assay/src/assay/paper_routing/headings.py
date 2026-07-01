@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2026 Vinnie Falco (vinnie.falco@gmail.com)
+# Copyright (c) 2026 Henry Wang(henryw910816@outlook.com)
 #
 # Distributed under the Boost Software License, Version 1.0. (See accompanying
 # file LICENSE_1_0.txt or copy at http://www.boost.org/LICENSE_1_0.txt)
@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import re
 
-from pipeline.paper_routing.types import SectionType
+from assay.paper_routing.types import SectionType
 
 _MOTIVATION_RE = re.compile(
     r"(?i)\b(introduction|motivation|background|problem\s+statement)\b"

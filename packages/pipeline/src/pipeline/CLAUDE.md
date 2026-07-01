@@ -15,11 +15,8 @@ Shared framework for the LLM analytical pipelines (`agora`). It depends only on 
 - `runner.py` - `dispatch`, `load_sections`, `run_agent`, `StepContext`, `write_debug_file`.
 - `progress.py` - `ProgressEvent`, `ProgressCallback`: the framework-owned progress-reporting contract. Domain-free; carries no paper concepts.
 - `tasks.py` - `run_task`, `render_debug_md`, `_task_semaphore`.
-- `markdown.py` - `sections` (H2 splitter), `sanitize_md`, `front_matter_end_index`, `YAML_FENCE_RE`.
-- `markdown_patterns.py` - shared `HEADING_RE`, `BOLD_SUBSECTION_RE`.
-- `heading_classifiers.py` - blanking tri-state classifiers (`is_revision_heading`, `is_reference_heading`, `is_acknowledgment_heading`), routing `classify_routing_section`, survey `SURVEY_WORDING_HEADING_RE`, standalone `is_appendix_heading_line`.
+- `markdown.py` - `sections` (H2 splitter), `sanitize_md`, `front_matter_end_index`, `YAML_FENCE_RE`, `HEADING_RE` (generic ATX heading pattern).
 - `nli_batch.py` - `score_entailment_pairs` for sentence-level NLI batch scoring (Tag Sentences family API).
-- `paper_routing/` - six-stage WG21 review-group routing classifier (`route_paper`, `RoutingResult`).
 - `session.py` - `WebResearcher`, `SearchResult`, `SearchResponse`, `FetchResponse`, `SearchBackend` ABC.
 - `backends/` - `BraveBackend` (Brave Search API), `get_default_backend`.
 

@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2026 Vinnie Falco (vinnie.falco@gmail.com)
+# Copyright (c) 2026 Henry Wang(henryw910816@outlook.com)
 #
 # Distributed under the Boost Software License, Version 1.0. (See accompanying
 # file LICENSE_1_0.txt or copy at http://www.boost.org/LICENSE_1_0.txt)
@@ -12,11 +12,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from pipeline.classifier_backends import ClassifierBackend
-from pipeline.paper_routing.aggregate import aggregate_quadrant_scores
-from pipeline.paper_routing.hypotheses import score_hypotheses
-from pipeline.paper_routing.sustain import sustained_counts
-from pipeline.paper_routing.threshold import apply_thresholds
-from pipeline.paper_routing.types import HypothesisAxis, RoutingGroup  # noqa: F401
+from assay.paper_routing.aggregate import aggregate_quadrant_scores
+from assay.paper_routing.hypotheses import score_hypotheses
+from assay.paper_routing.sustain import sustained_counts
+from assay.paper_routing.threshold import apply_thresholds
+from assay.paper_routing.types import HypothesisAxis, RoutingGroup  # noqa: F401
 
 
 @dataclass(frozen=True)
@@ -48,7 +48,7 @@ def route_paper(
     references, acknowledgments, and revision-history headings are
     already empty lines and do not contribute hypothesis hits. Standalone
     callers passing raw markdown may see appendix-style signals from
-    those sections; see ``heading_classifiers.is_appendix_heading_line``.
+    those sections; see ``assay.heading_classifiers.is_appendix_heading_line``.
     """
     sentences = score_hypotheses(
         paper_md,

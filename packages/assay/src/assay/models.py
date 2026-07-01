@@ -19,7 +19,7 @@ from typing import Annotated, Any, Literal, Optional
 
 from pydantic import BaseModel, BeforeValidator, Field
 
-from pipeline import RoutingResult
+from assay.paper_routing import RoutingResult
 
 
 def _ensure_int_list(v: Any) -> Any:

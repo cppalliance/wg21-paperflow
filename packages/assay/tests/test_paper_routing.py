@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2026 Vinnie Falco (vinnie.falco@gmail.com)
+# Copyright (c) 2026 Henry Wang(henryw910816@outlook.com)
 #
 # Distributed under the Boost Software License, Version 1.0. (See accompanying
 # file LICENSE_1_0.txt or copy at http://www.boost.org/LICENSE_1_0.txt)
@@ -11,17 +11,17 @@ from pathlib import Path
 
 import pytest
 
-from pipeline.paper_routing import RoutingGroup, route_paper
-from pipeline.paper_routing.hypotheses import CATALOG, Hypothesis
-from pipeline.paper_routing.split import split_sentences
-from pipeline.paper_routing.headings import classify_routing_section
-from pipeline.paper_routing.types import SectionType
-from pipeline.paper_routing.aggregate import (
+from assay.paper_routing import RoutingGroup, route_paper
+from assay.paper_routing.hypotheses import CATALOG, Hypothesis
+from assay.paper_routing.split import split_sentences
+from assay.paper_routing.headings import classify_routing_section
+from assay.paper_routing.types import SectionType
+from assay.paper_routing.aggregate import (
     _apply_metadata_bonus,
     aggregate_quadrant_scores,
 )
-from pipeline.paper_routing.sustain import min_sustained_threshold
-from pipeline.paper_routing.threshold import apply_thresholds, THRESHOLD_LEWG
+from assay.paper_routing.sustain import min_sustained_threshold
+from assay.paper_routing.threshold import apply_thresholds, THRESHOLD_LEWG
 
 _FIXTURES = Path(__file__).resolve().parents[3] / "tests" / "fixtures" / "routing"
 
@@ -153,7 +153,7 @@ def test_metadata_bonus_audience_tokens(
 
 
 def test_threshold_requires_sustained_signal():
-    from pipeline.paper_routing.types import Sentence
+    from assay.paper_routing.types import Sentence
 
     sentences = [
         Sentence(

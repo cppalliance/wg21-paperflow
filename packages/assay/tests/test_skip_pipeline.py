@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2026 Vinnie Falco (vinnie.falco@gmail.com)
+# Copyright (c) 2026 Henry Wang(henryw910816@outlook.com)
 #
 # Distributed under the Boost Software License, Version 1.0.
 #
@@ -31,7 +31,9 @@ def test_custom_synthesize_preserves_survey_synthesis_when_skipped():
 
     assert state.synthesis is original
     assert state.synthesis.verdict_label == "Skipped"
-    assert state.synthesis.skip_reason == "Wording-dominant paper (>80% clause headings)."
+    assert (
+        state.synthesis.skip_reason == "Wording-dominant paper (>80% clause headings)."
+    )
 
 
 def test_render_skipped_report_shows_stats_and_reason():

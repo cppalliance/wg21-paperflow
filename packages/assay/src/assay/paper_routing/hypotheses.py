@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2026 Vinnie Falco (vinnie.falco@gmail.com)
+# Copyright (c) 2026 Henry Wang(henryw910816@outlook.com)
 #
 # Distributed under the Boost Software License, Version 1.0. (See accompanying
 # file LICENSE_1_0.txt or copy at http://www.boost.org/LICENSE_1_0.txt)
@@ -14,9 +14,9 @@ from dataclasses import dataclass
 
 from pipeline.classifier_backends import ClassifierBackend, NliCrossEncoderBackend
 from pipeline.nli_batch import NLI_ENTAILMENT_THRESHOLD, score_entailment_pairs
-from pipeline.paper_routing.sections import line_section_map, section_for_sentence
-from pipeline.paper_routing.split import split_sentences
-from pipeline.paper_routing.types import HypothesisAxis, Sentence
+from assay.paper_routing.sections import line_section_map, section_for_sentence
+from assay.paper_routing.split import split_sentences
+from assay.paper_routing.types import HypothesisAxis, Sentence
 
 _D1_RE = re.compile(r"<\s*[a-z_][a-z0-9_]*\s*>")
 _D2_RE = re.compile(r"\b\d{1,2}\.\d+(?:\.\d+)*\s+\[[\w.]+\]")

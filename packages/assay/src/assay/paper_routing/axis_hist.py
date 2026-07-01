@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2026 Vinnie Falco (vinnie.falco@gmail.com)
+# Copyright (c) 2026 Henry Wang(henryw910816@outlook.com)
 #
 # Distributed under the Boost Software License, Version 1.0. (See accompanying
 # file LICENSE_1_0.txt or copy at http://www.boost.org/LICENSE_1_0.txt)
@@ -11,13 +11,13 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
-from pipeline.paper_routing.hypotheses import (
+from assay.paper_routing.hypotheses import (
     DESIGN_MODE,
     LANGUAGE_DOMAIN,
     LIBRARY_DOMAIN,
     WORDING_MODE,
 )
-from pipeline.paper_routing.types import HypothesisAxis, Sentence
+from assay.paper_routing.types import HypothesisAxis, Sentence
 
 AxisHitFn = Callable[[frozenset[str]], frozenset[str]]
 

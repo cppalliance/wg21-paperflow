@@ -32,6 +32,8 @@ _CODE_SPAN_RE = re.compile(r"``.+?``|`[^`]+`")
 
 YAML_FENCE_RE = re.compile(r"^---\s*$")
 
+HEADING_RE = re.compile(r"^(#{1,6})\s+(.*)")
+
 
 def front_matter_end_index(lines: list[str]) -> int:
     """Index of the first body line after YAML front matter.

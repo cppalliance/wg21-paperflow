@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2026 Vinnie Falco (vinnie.falco@gmail.com)
+# Copyright (c) 2026 Henry Wang(henryw910816@outlook.com)
 #
 # Distributed under the Boost Software License, Version 1.0.
 #
@@ -11,7 +11,9 @@ from __future__ import annotations
 import asyncio
 from pathlib import Path
 
-from pipeline import RoutingGroup, StepContext
+from pipeline import StepContext
+
+from assay.paper_routing import RoutingGroup
 
 from assay.models import PipelineState
 from assay.pipeline import _custom_survey

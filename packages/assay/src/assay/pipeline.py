@@ -34,11 +34,10 @@ from pipeline import (
     load_classifiers,
     resolve_classifier_slots,
     resolve_pipeline_models,
-    route_paper,
     validate_capabilities,
     tokens_to_chars,
 )
-from pipeline.paper_routing import RoutingResult
+from assay.paper_routing import RoutingResult, route_paper
 from pipeline.services import load_embedders, load_services
 
 from assay.harness import (
@@ -90,7 +89,7 @@ from assay.rag import (
 )
 from assay.standard import StandardClient, from_service_config
 from assay.triage import should_analyze
-from pipeline.heading_classifiers import SURVEY_WORDING_HEADING_RE
+from assay.heading_classifiers import SURVEY_WORDING_HEADING_RE
 from assay.render import render_report, render_trace
 
 logger = logging.getLogger(__name__)

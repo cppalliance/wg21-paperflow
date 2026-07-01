@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2026 Vinnie Falco (vinnie.falco@gmail.com)
+# Copyright (c) 2026 Henry Wang(henryw910816@outlook.com)
 #
 # Distributed under the Boost Software License, Version 1.0. (See accompanying
 # file LICENSE_1_0.txt or copy at http://www.boost.org/LICENSE_1_0.txt)
@@ -37,7 +37,9 @@ def score_entailment_pairs(
     raw_scores = classifier.nli_entailment_pairs(pairs)
     fired: list[bool] = []
 
-    for i, ((premise, _hypothesis), score) in enumerate(zip(pairs, raw_scores, strict=True)):
+    for i, ((premise, _hypothesis), score) in enumerate(
+        zip(pairs, raw_scores, strict=True)
+    ):
         entailment = score.get("entailment", 0.0)
         hit = entailment > threshold
         fired.append(hit)

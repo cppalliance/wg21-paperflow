@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2026 Vinnie Falco (vinnie.falco@gmail.com)
+# Copyright (c) 2026 Henry Wang(henryw910816@outlook.com)
 #
 # Distributed under the Boost Software License, Version 1.0. (See accompanying
 # file LICENSE_1_0.txt or copy at http://www.boost.org/LICENSE_1_0.txt)
@@ -9,11 +9,10 @@
 
 from __future__ import annotations
 
-from pipeline.paper_routing.headings import classify_routing_section
-from pipeline.markdown import front_matter_end_index
-from pipeline.markdown_patterns import HEADING_RE
-from pipeline.paper_routing.split import RawSentence
-from pipeline.paper_routing.types import SectionType
+from assay.paper_routing.headings import classify_routing_section
+from pipeline.markdown import HEADING_RE, front_matter_end_index
+from assay.paper_routing.split import RawSentence
+from assay.paper_routing.types import SectionType
 
 
 def line_section_map(paper_md: str) -> list[SectionType]:

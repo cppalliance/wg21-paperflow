@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2026 Vinnie Falco (vinnie.falco@gmail.com)
+# Copyright (c) 2026 Henry Wang(henryw910816@outlook.com)
 #
 # Distributed under the Boost Software License, Version 1.0. (See accompanying
 # file LICENSE_1_0.txt or copy at http://www.boost.org/LICENSE_1_0.txt)
@@ -11,14 +11,14 @@ from __future__ import annotations
 
 import re
 
-from pipeline.paper_routing.axis_hist import (
+from assay.paper_routing.axis_hist import (
     axis_density,
     design_hits,
     language_hits,
     library_hits,
     wording_hits,
 )
-from pipeline.paper_routing.types import RoutingGroup, SectionType, Sentence
+from assay.paper_routing.types import RoutingGroup, SectionType, Sentence
 
 _DESIGN_SECTION_WEIGHTS: dict[SectionType, float] = {
     SectionType.PREAMBLE: 0.3,
