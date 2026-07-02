@@ -41,5 +41,4 @@ has fewer than 30 `high` confidence labels (informational only; does not fail).
 ## Bias note
 
 Among non-`informational` papers, LEWG routing dominates the sample.
-Full committee rebalancing is out of scope for the initial golden set; see
-validate output for the `target_group` histogram.
+Full committee rebalancing is out of scope for the initial golden set.

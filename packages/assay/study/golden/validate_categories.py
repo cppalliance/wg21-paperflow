@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2026 Vinnie Falco (vinnie.falco@gmail.com)
+# Copyright (c) 2026 Leo Chen (leo.chen0412@outlook.com)
 #
 # Distributed under the Boost Software License, Version 1.0. (See accompanying
 # file LICENSE_1_0.txt or copy at http://www.boost.org/LICENSE_1_0.txt)
@@ -18,38 +18,59 @@ from pathlib import Path
 MIN_ENTRIES = 200
 MIN_PER_PRIMARY = 30
 
-PRIMARY_CATEGORIES = frozenset({
-    "library-design",
-    "library-wording",
-    "language-evolution",
-    "language-wording",
-})
+PRIMARY_CATEGORIES = frozenset(
+    {
+        "library-design",
+        "library-wording",
+        "language-evolution",
+        "language-wording",
+    }
+)
 SKIP_CATEGORIES = frozenset({"informational"})
 ALLOWED_CATEGORIES = PRIMARY_CATEGORIES | SKIP_CATEGORIES
 ALLOWED_CONFIDENCE = frozenset({"high", "medium"})
-REJECTED_CATEGORIES = frozenset({
-    "language-design",
-    "procedural",
-    "core-wording",
-})
+ALLOWED_TARGET_GROUPS = frozenset({"LEWG", "LWG", "EWG", "CWG", "NONE"})
+TARGET_GROUP_PRIMARY_CATEGORY = {
+    "LEWG": "library-design",
+    "LWG": "library-wording",
+    "EWG": "language-evolution",
+    "CWG": "language-wording",
+    "NONE": "informational",
+}
+REJECTED_CATEGORIES = frozenset(
+    {
+        "language-design",
+        "procedural",
+        "core-wording",
+    }
+)
 
-REQUIRED_FIELDS = frozenset({
-    "paper_id",
-    "title",
-    "target_group",
-    "categories",
-    "confidence",
-    "notes",
-})
+REQUIRED_FIELDS = frozenset(
+    {
+        "paper_id",
+        "title",
+        "target_group",
+        "categories",
+        "confidence",
+        "notes",
+    }
+)
 
 
 def _default_jsonl_path() -> Path:
-    return Path(__file__).resolve().parents[2] / "data" / "golden" / "paper_categories.jsonl"
+    return (
+        Path(__file__).resolve().parents[2]
+        / "data"
+        / "golden"
+        / "paper_categories.jsonl"
+    )
 
 
 def load_entries(path: Path) -> list[dict]:
     entries: list[dict] = []
-    for lineno, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
+    for lineno, line in enumerate(
+        path.read_text(encoding="utf-8").splitlines(), start=1
+    ):
         if not line.strip():
             continue
         try:
@@ -84,6 +105,11 @@ def validate_schema(entries: list[dict]) -> list[str]:
                 f"{prefix}: invalid confidence {entry['confidence']!r}",
             )
 
+        if entry["target_group"] not in ALLOWED_TARGET_GROUPS:
+            errors.append(
+                f"{prefix}: invalid target_group {entry['target_group']!r}",
+            )
+
         categories = entry["categories"]
         if not isinstance(categories, list) or not categories:
             errors.append(f"{prefix}: categories must be a non-empty list")
@@ -95,6 +121,29 @@ def validate_schema(entries: list[dict]) -> list[str]:
             elif cat not in ALLOWED_CATEGORIES:
                 errors.append(f"{prefix}: unknown category {cat!r}")
 
+        if len(categories) != len(set(categories)):
+            errors.append(f"{prefix}: duplicate categories {categories!r}")
+
+        if categories[1:] != sorted(categories[1:]):
+            errors.append(
+                f"{prefix}: categories after the first must be sorted "
+                f"(got {categories!r})",
+            )
+
+        if "informational" in categories and len(categories) > 1:
+            errors.append(
+                f"{prefix}: informational cannot co-occur with primary categories",
+            )
+
+        target_group = entry["target_group"]
+        if target_group in TARGET_GROUP_PRIMARY_CATEGORY:
+            expected = TARGET_GROUP_PRIMARY_CATEGORY[target_group]
+            if categories[0] != expected:
+                errors.append(
+                    f"{prefix}: first category {categories[0]!r} does not match "
+                    f"target_group {target_group!r} (expected {expected!r})",
+                )
+
         extra = set(entry.keys()) - REQUIRED_FIELDS
         if extra:
             errors.append(f"{prefix}: unexpected fields {sorted(extra)}")
@@ -105,7 +154,6 @@ def validate_schema(entries: list[dict]) -> list[str]:
 def print_distribution(entries: list[dict]) -> None:
     label_counts: Counter[str] = Counter()
     high_counts: Counter[str] = Counter()
-    target_group_counts: Counter[str] = Counter()
     multi_label = 0
     overlap: Counter[tuple[str, str]] = Counter()
 
@@ -119,11 +167,10 @@ def print_distribution(entries: list[dict]) -> None:
 
         if len(cats) > 1 and "informational" not in cats:
             multi_label += 1
-            for pair in combinations(sorted(c for c in cats if c in PRIMARY_CATEGORIES), 2):
+            for pair in combinations(
+                sorted(c for c in cats if c in PRIMARY_CATEGORIES), 2
+            ):
                 overlap[pair] += 1
-
-        if "informational" not in cats:
-            target_group_counts[entry["target_group"]] += 1
 
     print(f"Total entries: {len(entries)}")
     print()
@@ -140,10 +187,6 @@ def print_distribution(entries: list[dict]) -> None:
         print("Overlap matrix (pair counts):")
         for pair, count in sorted(overlap.items()):
             print(f"  {pair[0]} + {pair[1]}: {count}")
-    print()
-    print("target_group histogram (non-informational):")
-    for group, count in target_group_counts.most_common():
-        print(f"  {group}: {count}")
 
 
 def acceptance_errors(entries: list[dict]) -> list[str]:
@@ -154,7 +197,7 @@ def acceptance_errors(entries: list[dict]) -> list[str]:
     per_primary: Counter[str] = Counter()
     high_per_primary: Counter[str] = Counter()
     for entry in entries:
-        for cat in entry["categories"]:
+        for cat in set(entry["categories"]):
             if cat in PRIMARY_CATEGORIES:
                 per_primary[cat] += 1
                 if entry["confidence"] == "high":
