@@ -9,10 +9,8 @@
 
 Three categories, each with a different response:
 
-- **User-fixable**: edit the prompt file or run a paperflow command.
-  ``PromptFileError`` and its subclasses carry the step name and
-  expected format. ``PaperNotFoundError`` and ``PaperNotConvertedError``
-  carry the paperflow command to run.
+- **User-fixable**: edit the prompt file. ``PromptFileError`` and its
+  subclasses carry the step name and expected format.
 - **Transient**: retry. ``TransientStepError`` wraps API timeouts,
   rate limits, and network errors.
 - **Hard runtime**: pipeline bug. ``ValidationStepError`` wraps LLM
@@ -24,20 +22,6 @@ from __future__ import annotations
 
 class PipelineError(Exception):
     """Base for all pipeline errors."""
-
-
-class PaperNotFoundError(PipelineError):
-    """Paper not in paperstore.
-
-    Message includes the paperflow command to run.
-    """
-
-
-class PaperNotConvertedError(PipelineError):
-    """Paper has no converted markdown.
-
-    Message includes the paperflow convert command.
-    """
 
 
 class PromptFileError(PipelineError):
@@ -96,7 +80,7 @@ class BackendConfigError(PipelineError):
 
 
 class UnknownStageError(PipelineError):
-    """Raised when :func:`pipeline.process.run_pipeline` is asked to run an
+    """Raised when :func:`cli.process._run_stage` is asked to run an
     unknown stage.
     """
 

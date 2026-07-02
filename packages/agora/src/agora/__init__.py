@@ -12,14 +12,13 @@ from __future__ import annotations
 from pipeline.errors import (
     HookMismatchError,
     MissingMetadataError,
-    PaperNotConvertedError,
-    PaperNotFoundError,
     PipelineError,
     PromptFileError,
     StepError,
     TransientStepError,
     ValidationStepError,
 )
+from agora.errors import PaperNotConvertedError, PaperNotFoundError
 from agora.pipeline import agora_paper, agora_since
 
 __all__ = [

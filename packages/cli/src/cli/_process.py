@@ -14,8 +14,9 @@ import asyncio
 import sys
 
 import pydantic_ai.exceptions
-from pipeline import PipelineError, process_paper
+from pipeline import PipelineError
 
+from cli.process import process_paper
 from cli.progress import make_progress_handler
 from cli.targets import MONTH_RE, resolve_pid
 from paperstore.backend import StorageBackend
