@@ -10,6 +10,13 @@
 Libraries fire ProgressEvent via an optional ProgressCallback. Rendering
 (rich, logging, nothing) is the caller's responsibility. This is the
 framework-owned contract; it carries no paper-domain concepts.
+
+Intentional duplicate of ``paperstore.progress``: the framework must not
+import a paper package, and paper-only consumers should not depend on the
+framework. The two definitions are structurally identical and interoperate
+at runtime by duck typing (no ``isinstance`` checks cross the boundary).
+Keep them in sync - any field change here must be mirrored in
+``paperstore.progress`` and vice versa.
 """
 
 from __future__ import annotations

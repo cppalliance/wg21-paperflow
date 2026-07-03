@@ -102,7 +102,6 @@ Determinism contract: offline-first weight loading, per-instance pipeline single
 - Source delimiter contract. Every piece of external/untrusted text injected into an LLM prompt must be wrapped via `ctx.inject_untrusted()` (on `StepContext`). Never inject raw external content. Callers format line numbers before calling `inject_untrusted`. The guard tag is randomized per pipeline run; `inject_untrusted` escapes forged delimiter text before wrapping.
 - Step failures fail the pipeline. `dispatch()` preserves failures as `StepError`, flushes trace/debug diagnostics, and does not call `on_step_complete` for a failed step.
 - Fan-out thresholds are explicit. Custom fan-out steps may tolerate item failures only under a named threshold. Above the threshold they raise `StepError`.
-- PaperRow failure persistence. Pipeline failure updates the paper row with `status = -(stage + 1)`, stores `error = str(exc)`, and refreshes `updated_at`.
 - Status codes on everything. `search()` returns `SearchResponse` with `status_code`. `fetch()` returns `FetchResponse` with `status_code`. No bare strings or lists.
 - Backends are self-contained. Each search backend owns its own HTTP client. No shared client coupling between session and backend.
 - Backends are long-lived. `BraveBackend` holds a persistent connection pool and rate limiter. Create once, share across `WebResearcher` instances for parallel runs.

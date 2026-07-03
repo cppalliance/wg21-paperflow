@@ -104,9 +104,7 @@ The CI workflow runs ruff, pyright, and per-package pytest across a matrix of ub
 
 2. `pyright` runs with `continue-on-error: true`. Type errors are visible in logs but do not block merges. For a project whose raw-int status type (T6) and multi-backend model dispatch depend on type correctness, advisory type checking is a structural gap (Meyers 2004).
 
-3. `pipeline` imports `paperstore` in four modules (`runner.py`, `process.py`, `postconditions.py`, `tools.py`) but does not declare `paperstore` as a dependency in its `pyproject.toml`.<sup>11</sup> The uv workspace masks the gap at development time; pip-installing `pipeline` in isolation would fail at import (Lakos 1996).
-
-These three findings compound: the undeclared dependency is never exercised in a clean-install path because CI omits `pipeline` from its matrix, and type errors from the status integer would not block the merge even if CI did run the package.
+These two findings compound: the undeclared dependency is never exercised in a clean-install path because CI omits `pipeline` from its matrix, and type errors from the status integer would not block the merge even if CI did run the package.
 
 ### 5.3 The Fidelity Invariant versus the Silent Catch
 

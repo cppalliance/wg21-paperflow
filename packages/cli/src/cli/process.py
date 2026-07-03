@@ -263,6 +263,7 @@ async def _stage_download(pid: str, backend: StorageBackend, *, on_progress: obj
             # source. The manifest is the convert-time handoff so tomd never
             # has to re-parse the HTML or hit the network.
             if suffix in (".html", ".htm"):
+                walk_ok = True
                 try:
                     fetched = await fetch_html_images(
                         content, source_url=paper.url, client=client,
@@ -270,7 +271,9 @@ async def _stage_download(pid: str, backend: StorageBackend, *, on_progress: obj
                 except Exception as exc:  # Per-paper firewall: image flow
                     # failures must not fail the whole download stage. The
                     # paper's source is already on disk; the manifest just
-                    # ends up missing or partial.
+                    # ends up missing or partial. Treat this as transient
+                    # and keep any prior artifacts rather than wiping them.
+                    walk_ok = False
                     logger.warning(
                         "html image walk failed for %s: %s", pid, exc,
                     )
@@ -304,6 +307,20 @@ async def _stage_download(pid: str, backend: StorageBackend, *, on_progress: obj
                         "%s: persisted %d HTML image(s) + manifest",
                         pid, len(entries),
                     )
+                elif walk_ok:
+                    # The re-downloaded HTML genuinely has no images. Drop any
+                    # stale image set + manifest from a prior run so convert
+                    # doesn't pair the fresh source with old figures. (A failed
+                    # walk leaves walk_ok False and prior artifacts intact.)
+                    removed = backend.delete_paper_images(pid)
+                    manifest_path = backend.get_html_images_manifest_path(pid)
+                    manifest_path.unlink(missing_ok=True)
+                    if removed:
+                        logger.info(
+                            "%s: cleared %d stale HTML image(s) + manifest "
+                            "(no images in re-downloaded source)",
+                            pid, removed,
+                        )
     except httpx.HTTPStatusError as exc:
         error_msg = f"{exc.response.status_code} {exc.response.reason_phrase}: {paper.url}"
         logger.warning("%s failed at download: %s", pid, error_msg)

@@ -248,7 +248,7 @@ Surfaces flags from the mechanical reference inventory (Step 1):
 
 Future LLM expansion:
 
-Verify Citations: fetch or read one cited paper via ensure_paper_md + make_read_paper_tool. Check whether quoted or paraphrased claims match the cited source. Report evidence relevant to the citing paper's claims.
+Verify Citations: fetch or read one cited paper via `cli.process.ensure_paper_md` + `cli.paper_tools.make_read_paper_tool`. Check whether quoted or paraphrased claims match the cited source. Report evidence relevant to the citing paper's claims.
 
 Web Search: search for public external evidence on critical gaps not covered by citation evidence. Prefer primary sources, implementation docs, standards papers, benchmarks.
 
