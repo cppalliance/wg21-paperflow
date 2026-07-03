@@ -5,13 +5,13 @@
 # file LICENSE_1_0.txt or copy at http://www.boost.org/LICENSE_1_0.txt)
 #
 
-"""Local zero-shot text classifier backends.
+"""Local text classifier backends.
 
 These classes are thin adapters over :mod:`pipeline.transformer_backend`.
 They preserve the original ``ClassifierBackend.classify(...)`` API so
 existing classifier consumers keep working without edits.
 
-Two adapters are registered:
+Three adapters are registered:
 
 - :class:`ZeroShotV2Backend` -> :class:`HFZeroShotBackend` (the HF
   ``zero-shot-classification`` pipeline). Targets
@@ -234,6 +234,14 @@ class MultiLabelClassifierBackend(ClassifierBackend):
         *,
         multi_label: bool = True,
     ) -> list[dict[str, float]]:
+        """Score texts against checkpoint labels projected onto ``candidate_labels``.
+
+        With ``multi_label=True`` (default), returns independent per-label
+        sigmoid scores from the checkpoint. With ``multi_label=False``,
+        re-normalizes those sigmoid scores across ``candidate_labels`` so
+        they sum to 1 for API compatibility with other classifier backends.
+        That re-normalization is not logit softmax.
+        """
         if not texts:
             return []
 
@@ -250,6 +258,7 @@ class MultiLabelClassifierBackend(ClassifierBackend):
         for scores in raw:
             projected = {label: scores.get(label, 0.0) for label in candidate_labels}
             if not multi_label:
+                # Re-normalize sigmoid scores (not raw logits) for API parity.
                 import math
                 vals = [projected[label] for label in candidate_labels]
                 m = max(vals)

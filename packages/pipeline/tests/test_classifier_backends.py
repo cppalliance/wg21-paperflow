@@ -20,6 +20,7 @@ import types
 
 import pytest
 
+from conftest import SeqClsStubModel, install_seqcls_transformers_stub
 from pipeline.classifier_backends import (
     CLASSIFIER_BACKEND_REGISTRY,
     ClassifierBackend,
@@ -413,68 +414,12 @@ def test_load_classifiers_file_not_found(tmp_path):
 # ---------------------------------------------------------------------------
 
 
-class _StubSeqClsModel:
-    """Minimal HF sequence-classification model stub."""
-
-    def __init__(self) -> None:
-        self.config = types.SimpleNamespace(id2label={0: "alpha", 1: "beta"})
-        self.load_count = 0
-        self.eval_called = False
-
-    def eval(self) -> "_StubSeqClsModel":
-        self.eval_called = True
-        return self
-
-    def to(self, _device: str) -> "_StubSeqClsModel":
-        return self
-
-    def parameters(self):
-        yield types.SimpleNamespace(device="cpu")
-
-    def __call__(self, **encoded: object) -> types.SimpleNamespace:
-        input_ids = encoded["input_ids"]
-        batch = len(input_ids)
-        try:
-            import torch  # type: ignore[import-untyped]
-            logits = torch.tensor([[0.0, 2.0]] * batch, dtype=torch.float32)
-        except ImportError:
-            logits = [[0.0, 2.0] for _ in range(batch)]
-        return types.SimpleNamespace(logits=logits)
-
-
-class _StubSeqClsTokenizer:
-    def __call__(self, texts, **kwargs):
-        _ = kwargs
-        return {
-            "input_ids": [[1, 2] for _ in texts],
-            "attention_mask": [[1, 1] for _ in texts],
-        }
-
-
-def _install_stub_seqcls_transformers(monkeypatch, model: _StubSeqClsModel) -> None:
-    fake_mod = types.ModuleType("transformers")
-
-    class _AutoTokenizer:
-        @staticmethod
-        def from_pretrained(_model_id, local_files_only=False):
-            _ = local_files_only
-            return _StubSeqClsTokenizer()
-
-    class _AutoModel:
-        @staticmethod
-        def from_pretrained(_model_id, local_files_only=False, **_kw):
-            _ = local_files_only, _kw
-            model.load_count += 1
-            return model
-
-    fake_mod.AutoTokenizer = _AutoTokenizer
-    fake_mod.AutoModelForSequenceClassification = _AutoModel
-    monkeypatch.setitem(sys.modules, "transformers", fake_mod)
-
-
 def test_multilabel_seqcls_projects_scores(monkeypatch):
-    stub_model = _StubSeqClsModel()
-    _install_stub_seqcls_transformers(monkeypatch, stub_model)
+    stub_model = SeqClsStubModel(
+        id2label={0: "alpha", 1: "beta"},
+        logits=[0.0, 2.0],
+    )
+    install_seqcls_transformers_stub(monkeypatch, stub_model)
     backend = MultiLabelClassifierBackend(model="fake/seqcls")
     result = backend.classify(["one", "two"], ["alpha", "beta"])
 
@@ -486,24 +431,33 @@ def test_multilabel_seqcls_projects_scores(monkeypatch):
 
 
 def test_multilabel_seqcls_unknown_label_raises(monkeypatch):
-    stub_model = _StubSeqClsModel()
-    _install_stub_seqcls_transformers(monkeypatch, stub_model)
+    stub_model = SeqClsStubModel(
+        id2label={0: "alpha", 1: "beta"},
+        logits=[0.0, 2.0],
+    )
+    install_seqcls_transformers_stub(monkeypatch, stub_model)
     backend = MultiLabelClassifierBackend(model="fake/seqcls")
     with pytest.raises(ValueError, match="Unknown candidate_labels"):
         backend.classify(["x"], ["alpha", "missing"])
 
 
 def test_multilabel_seqcls_empty_input_short_circuits(monkeypatch):
-    stub_model = _StubSeqClsModel()
-    _install_stub_seqcls_transformers(monkeypatch, stub_model)
+    stub_model = SeqClsStubModel(
+        id2label={0: "alpha", 1: "beta"},
+        logits=[0.0, 2.0],
+    )
+    install_seqcls_transformers_stub(monkeypatch, stub_model)
     backend = MultiLabelClassifierBackend(model="fake/seqcls")
     assert backend.classify([], ["alpha", "beta"]) == []
     assert stub_model.load_count == 0
 
 
 def test_multilabel_seqcls_single_label_softmax(monkeypatch):
-    stub_model = _StubSeqClsModel()
-    _install_stub_seqcls_transformers(monkeypatch, stub_model)
+    stub_model = SeqClsStubModel(
+        id2label={0: "alpha", 1: "beta"},
+        logits=[0.0, 2.0],
+    )
+    install_seqcls_transformers_stub(monkeypatch, stub_model)
     backend = MultiLabelClassifierBackend(model="fake/seqcls")
     result = backend.classify(["x"], ["alpha", "beta"], multi_label=False)
     total = sum(result[0].values())
@@ -512,8 +466,11 @@ def test_multilabel_seqcls_single_label_softmax(monkeypatch):
 
 
 def test_multilabel_seqcls_labels_property(monkeypatch):
-    stub_model = _StubSeqClsModel()
-    _install_stub_seqcls_transformers(monkeypatch, stub_model)
+    stub_model = SeqClsStubModel(
+        id2label={0: "alpha", 1: "beta"},
+        logits=[0.0, 2.0],
+    )
+    install_seqcls_transformers_stub(monkeypatch, stub_model)
     backend = MultiLabelClassifierBackend(model="fake/seqcls")
     assert backend.labels == ("alpha", "beta")
 
