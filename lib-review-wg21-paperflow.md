@@ -98,13 +98,13 @@ Most critically, no snapshot or replay test guards determinism. The project coul
 
 ### 5.2 A Safety Net with Structural Holes
 
-The CI workflow runs ruff, pyright, and per-package pytest across a matrix of ubuntu-latest and windows-latest.<sup>8</sup> Three gaps undermine its value:
+The CI workflow runs ruff, pyright, and per-package pytest across a matrix of ubuntu-latest and windows-latest.<sup>8</sup> Two gaps undermine its value:
 
 1. The matrix lists a package called `web_tools` that does not exist in the repository. It omits `agora`, `pipeline`, and `preview`, all of which have test directories that `pyproject.toml`'s `testpaths` includes.<sup>10</sup> Passing CI does not exercise the analytical pipelines.
 
 2. `pyright` runs with `continue-on-error: true`. Type errors are visible in logs but do not block merges. For a project whose raw-int status type (T6) and multi-backend model dispatch depend on type correctness, advisory type checking is a structural gap (Meyers 2004).
 
-These two findings compound: the undeclared dependency is never exercised in a clean-install path because CI omits `pipeline` from its matrix, and type errors from the status integer would not block the merge even if CI did run the package.
+These two findings compound: CI omits `pipeline` from its matrix, so its analytical pipeline is never exercised in a clean-install path, and type errors from the status integer would not block the merge even if CI did run the package.
 
 ### 5.3 The Fidelity Invariant versus the Silent Catch
 
