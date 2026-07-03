@@ -19,6 +19,9 @@ Two adapters are registered:
 - :class:`NliCrossEncoderBackend` -> :class:`CrossEncoderBackend` (the
   ``sentence_transformers`` CrossEncoder NLI head). Targets
   ``cross-encoder/nli-deberta-v3-*`` and similar.
+- :class:`MultiLabelClassifierBackend` -> :class:`SeqClassificationBackend`
+  (a fine-tuned ``AutoModelForSequenceClassification`` checkpoint).
+  Targets locally trained multi-label sequence classifiers.
 
 Configuration moved from the per-classifier ``device`` field to the
 ``[transformer_providers.*]`` namespace in SERVICES.toml. A bare
@@ -37,6 +40,7 @@ from typing import Any
 from pipeline.transformer_backend import (
     CrossEncoderBackend,
     HFZeroShotBackend,
+    SeqClassificationBackend,
     TransformerProvider,
 )
 
@@ -186,7 +190,81 @@ class NliCrossEncoderBackend(ClassifierBackend):
         return self._backend.nli_pairs(pairs)
 
 
+class MultiLabelClassifierBackend(ClassifierBackend):
+    """Adapter over :class:`SeqClassificationBackend`.
+
+    Delegates inference to a fine-tuned multi-label sequence
+    classification checkpoint. The label set is fixed by the model's
+    ``id2label``; ``classify(...)`` projects scores onto
+    ``candidate_labels`` and raises :class:`ValueError` when a
+    requested label is absent from the checkpoint.
+    """
+
+    def __init__(
+        self,
+        *,
+        model: str,
+        provider: TransformerProvider | None = None,
+        device: str | None = None,  # legacy; ignored
+        **_unused: Any,
+    ) -> None:
+        if device is not None:
+            logger.debug(
+                "MultiLabelClassifierBackend: legacy device=%r kwarg ignored; "
+                "configure via [transformer_providers.*] in SERVICES.toml.",
+                device,
+            )
+        self.model_id = model
+        self.provider = provider or TransformerProvider.auto()
+        self._backend = SeqClassificationBackend(model, self.provider)
+
+    @property
+    def device(self) -> str:
+        return self.provider.device
+
+    @property
+    def labels(self) -> tuple[str, ...]:
+        """Full label set from the loaded checkpoint."""
+        return self._backend.labels
+
+    def classify(
+        self,
+        texts: list[str],
+        candidate_labels: list[str],
+        *,
+        multi_label: bool = True,
+    ) -> list[dict[str, float]]:
+        if not texts:
+            return []
+
+        known = set(self.labels)
+        unknown = sorted(set(candidate_labels) - known)
+        if unknown:
+            raise ValueError(
+                f"Unknown candidate_labels not in checkpoint id2label: "
+                f"{unknown}. Known labels: {sorted(known)}"
+            )
+
+        raw = self._backend.classify_multilabel(texts)
+        out: list[dict[str, float]] = []
+        for scores in raw:
+            projected = {label: scores.get(label, 0.0) for label in candidate_labels}
+            if not multi_label:
+                import math
+                vals = [projected[label] for label in candidate_labels]
+                m = max(vals)
+                exps = [math.exp(v - m) for v in vals]
+                z = sum(exps)
+                projected = {
+                    label: exps[i] / z
+                    for i, label in enumerate(candidate_labels)
+                }
+            out.append(projected)
+        return out
+
+
 CLASSIFIER_BACKEND_REGISTRY: dict[str, type[ClassifierBackend]] = {
     "zeroshot_v2": ZeroShotV2Backend,
     "nli_cross_encoder": NliCrossEncoderBackend,
+    "multilabel_seqcls": MultiLabelClassifierBackend,
 }

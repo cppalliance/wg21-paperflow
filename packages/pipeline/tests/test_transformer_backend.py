@@ -39,6 +39,7 @@ from pipeline.errors import TransformerConfigError
 from pipeline.transformer_backend import (
     CrossEncoderBackend,
     HFZeroShotBackend,
+    SeqClassificationBackend,
     TransformerProvider,
     default_auto_provider,
     run_mps_correctness_selftest,
@@ -427,3 +428,86 @@ def test_default_auto_provider_is_cached():
     p1 = default_auto_provider()
     p2 = default_auto_provider()
     assert p1 is p2
+
+
+# ---------------------------------------------------------------------------
+# SeqClassificationBackend
+# ---------------------------------------------------------------------------
+
+
+class _SeqClsStubModel:
+    def __init__(self) -> None:
+        self.config = types.SimpleNamespace(id2label={0: "x", 1: "y"})
+        self.load_count = 0
+
+    def eval(self) -> "_SeqClsStubModel":
+        return self
+
+    def to(self, _device: str) -> "_SeqClsStubModel":
+        return self
+
+    def parameters(self):
+        yield types.SimpleNamespace(device="cpu")
+
+    def __call__(self, **encoded: object) -> types.SimpleNamespace:
+        batch = len(encoded["input_ids"])  # type: ignore[arg-type]
+        try:
+            import torch  # type: ignore[import-untyped]
+            logits = torch.tensor([[1.0, -1.0]] * batch, dtype=torch.float32)
+        except ImportError:
+            logits = [[1.0, -1.0] for _ in range(batch)]
+        return types.SimpleNamespace(logits=logits)
+
+
+class _SeqClsStubTokenizer:
+    def __call__(self, texts, **kwargs):
+        _ = kwargs
+        return {
+            "input_ids": [[1] for _ in texts],
+            "attention_mask": [[1] for _ in texts],
+        }
+
+
+def _install_seqcls_stubs(monkeypatch, model: _SeqClsStubModel) -> None:
+    fake_mod = types.ModuleType("transformers")
+
+    class _AutoTokenizer:
+        @staticmethod
+        def from_pretrained(_model_id, local_files_only=False):
+            _ = local_files_only
+            return _SeqClsStubTokenizer()
+
+    class _AutoModel:
+        @staticmethod
+        def from_pretrained(_model_id, local_files_only=False, **_kw):
+            _ = local_files_only, _kw
+            model.load_count += 1
+            return model
+
+    fake_mod.AutoTokenizer = _AutoTokenizer
+    fake_mod.AutoModelForSequenceClassification = _AutoModel
+    monkeypatch.setitem(sys.modules, "transformers", fake_mod)
+
+
+def test_seqcls_backend_load_caching(monkeypatch):
+    stub = _SeqClsStubModel()
+    _install_seqcls_stubs(monkeypatch, stub)
+    backend = SeqClassificationBackend("fake/seqcls")
+    backend.classify_multilabel(["a"])
+    backend.classify_multilabel(["b"])
+    assert stub.load_count == 1
+
+
+def test_seqcls_backend_async_parity(monkeypatch):
+    stub = _SeqClsStubModel()
+    _install_seqcls_stubs(monkeypatch, stub)
+    backend = SeqClassificationBackend("fake/seqcls")
+
+    async def _run() -> tuple[list[dict[str, float]], list[dict[str, float]]]:
+        sync = backend.classify_multilabel(["hello"])
+        async_ = await backend.classify_multilabel_async(["hello"])
+        return sync, async_
+
+    sync, async_ = asyncio.run(_run())
+    assert sync == async_
+    assert set(sync[0].keys()) == {"x", "y"}

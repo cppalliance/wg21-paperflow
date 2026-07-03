@@ -5,7 +5,8 @@ Shared framework for the LLM analytical pipelines (`agora`). Depends on `pipelin
 ## Modules
 
 - `model_backends.py` - `ModelBackend` ABC and concrete backends (`VllmThinkingBackend`, `Llama3Backend`, `Qwen3Backend`, `AnthropicBackend`), `BACKEND_REGISTRY`. One class per model family; encapsulates structured output strategy, BPE cleanup, thinking-block stripping, tool-calling workarounds.
-- `classifier_backends.py` - `ClassifierBackend` ABC and concrete backends (`ZeroShotV2Backend`, `NliCrossEncoderBackend`), `CLASSIFIER_BACKEND_REGISTRY`. Local zero-shot text classifiers wrapping HF Transformers / sentence_transformers. Parallel namespace to `model_backends.py`; no interaction.
+- `classifier_backends.py` - `ClassifierBackend` ABC and concrete backends (`ZeroShotV2Backend`, `NliCrossEncoderBackend`, `MultiLabelClassifierBackend`), `CLASSIFIER_BACKEND_REGISTRY`. Local text classifiers wrapping HF Transformers / sentence_transformers. Parallel namespace to `model_backends.py`; no interaction.
+- `transformer_backend.py` - `TransformerBackend` family (`HFZeroShotBackend`, `CrossEncoderBackend`, `SeqClassificationBackend`, `EmbeddingBackend`), `TransformerProvider` device/dtype/batch resolution.
 - `agents.py` - `AgentBackend`: wraps a `ModelBackend` with pipeline-level config (`thinking_budget`) and the slot/service identity (`slot_name`, `service_name`, `backend_class_name`) used by capability-mismatch error messages. The call-time `tools_capable` check remains as defense-in-depth for tools passed via `run_task` outside `meta.tools`.
 - `services.py` - `load_services()` / `resolve_slots()` for LLM `[services.NAME]` slots, and `load_classifiers()` / `resolve_classifier_slots()` for local `[classifiers.NAME]` slots. Both parse SERVICES.toml; the two namespaces are independent. `resolve_slots` returns `dict[str, tuple[str, ModelBackend]]` so callers can thread the resolved service name into each `AgentBackend`.
 - `errors.py` - exception hierarchy rooted at `PipelineError`. Includes `CapabilityMismatchError` for pipeline-construction-time slot/capability mismatches.
@@ -28,6 +29,7 @@ Everything downstream needs is re-exported from `pipeline.__init__`:
 from pipeline import (
     AgentBackend, ModelBackend,
     ClassifierBackend, ZeroShotV2Backend, NliCrossEncoderBackend,
+    MultiLabelClassifierBackend, SeqClassificationBackend,
     CLASSIFIER_BACKEND_REGISTRY,
     load_services, resolve_slots, ServiceRegistry,
     load_classifiers, resolve_classifier_slots,
@@ -63,7 +65,7 @@ Each backend implements `async def run(system_prompt, user_message, output_type,
 
 ## ClassifierBackend contract
 
-Each `ClassifierBackend` subclass wraps one local zero-shot classification framework (HF Transformers `zero-shot-classification` pipeline, `sentence_transformers` CrossEncoder NLI, future ClaimBuster, future custom fine-tunes) under one common API:
+Each `ClassifierBackend` subclass wraps one local classification framework (HF Transformers `zero-shot-classification` pipeline, `sentence_transformers` CrossEncoder NLI, fine-tuned `AutoModelForSequenceClassification`, future ClaimBuster) under one common API:
 
 ```python
 classify(
@@ -74,7 +76,9 @@ classify(
 ) -> list[dict[str, float]]
 ```
 
-Per text: returns `{label: score}` for every candidate label. With `multi_label=True` (the default), each label is scored independently via per-label binary entailment-vs-contradiction softmax; scores do NOT sum to 1, each is a per-label probability suitable for an absolute threshold. This is the only correct mode for non-mutually-exclusive labels (e.g. TARGET and SKIP labels that can both be weakly true).
+Per text: returns `{label: score}` for every candidate label. With `multi_label=True` (the default), each label is scored independently; scores do NOT sum to 1, each is a per-label probability suitable for an absolute threshold. Zero-shot backends use per-label entailment-vs-contradiction softmax; `MultiLabelClassifierBackend` uses sigmoid over a fine-tuned multi-label head. This is the only correct mode for non-mutually-exclusive labels (e.g. TARGET and SKIP labels that can both be weakly true).
+
+`MultiLabelClassifierBackend` raises `ValueError` when a `candidate_label` is absent from the checkpoint's `id2label`.
 
 Determinism contract: offline-first weight loading, per-instance pipeline singleton, CPU only by default, `eval()` mode (HF pipeline applies on construction). `HF_HUB_OFFLINE` defaults to off so first-run downloads succeed; offline-first is achieved by trying `local_files_only=True` first inside each backend's `_load()`.
 

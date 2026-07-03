@@ -637,6 +637,146 @@ class CrossEncoderBackend(TransformerBackend):
 
 
 # ---------------------------------------------------------------------------
+# Sequence-classification backend (fine-tuned multi-label)
+# ---------------------------------------------------------------------------
+
+
+class SeqClassificationBackend(TransformerBackend):
+    """Wraps ``AutoModelForSequenceClassification`` for multi-label inference.
+
+    Loads a fine-tuned checkpoint whose ``config.id2label`` defines the
+    label set. Applies ``torch.sigmoid`` to logits so each label score
+    is an independent probability in ``[0, 1]``.
+    """
+
+    def __init__(self, model_id: str, provider: TransformerProvider | None = None) -> None:
+        super().__init__(model_id, provider)
+        self._model: Any = None
+        self._tokenizer: Any = None
+        self._id2label: dict[int, str] = {}
+
+    @property
+    def labels(self) -> tuple[str, ...]:
+        """Label names from the loaded checkpoint's ``id2label``."""
+        self._load()
+        return tuple(self._id2label[i] for i in sorted(self._id2label))
+
+    def _load(self) -> Any:
+        if self._model is not None:
+            return self._model
+        from transformers import (  # type: ignore[import-untyped]
+            AutoModelForSequenceClassification,
+            AutoTokenizer,
+        )
+
+        model_kwargs: dict[str, Any] = {}
+        try:
+            model_kwargs["torch_dtype"] = torch_dtype_for(self.provider.dtype)
+        except Exception:
+            pass
+
+        try:
+            self._tokenizer = AutoTokenizer.from_pretrained(
+                self.model_id, local_files_only=True,
+            )
+            self._model = AutoModelForSequenceClassification.from_pretrained(
+                self.model_id, local_files_only=True, **model_kwargs,
+            )
+        except (OSError, ValueError, TypeError):
+            logger.info(
+                "Downloading sequence-classification model '%s' to local "
+                "HF cache (first run only).",
+                self.model_id,
+            )
+            try:
+                self._tokenizer = AutoTokenizer.from_pretrained(self.model_id)
+                self._model = AutoModelForSequenceClassification.from_pretrained(
+                    self.model_id, **model_kwargs,
+                )
+            except TypeError:
+                self._tokenizer = AutoTokenizer.from_pretrained(self.model_id)
+                self._model = AutoModelForSequenceClassification.from_pretrained(
+                    self.model_id,
+                )
+
+        raw_id2label = getattr(self._model.config, "id2label", None) or {}
+        self._id2label = {
+            int(k): str(v) for k, v in raw_id2label.items()
+        }
+
+        device = self.provider.device
+        try:
+            if device == "cuda":
+                self._model = self._model.to("cuda:0")
+            else:
+                self._model = self._model.to(device)
+        except Exception:
+            logger.warning(
+                "SeqClassificationBackend(%s): failed to move model to "
+                "device %r; leaving on default device.",
+                self.model_id, device, exc_info=True,
+            )
+
+        self._model.eval()
+        return self._model
+
+    def classify_multilabel(self, texts: list[str]) -> list[dict[str, float]]:
+        """Score each text against every label in the checkpoint."""
+        if not texts:
+            return []
+
+        model = self._load()
+        tokenizer = self._tokenizer
+        assert tokenizer is not None
+
+        out: list[dict[str, float]] = []
+        for batch in self._batched(texts):
+            encoded = tokenizer(
+                batch,
+                padding=True,
+                truncation=True,
+                max_length=self.provider.max_length,
+                return_tensors="pt",
+            )
+            try:
+                import torch  # type: ignore[import-untyped]
+                device = next(model.parameters()).device
+                encoded = {
+                    k: v.to(device) if hasattr(v, "to") else v
+                    for k, v in encoded.items()
+                }
+            except (ImportError, StopIteration):
+                pass
+
+            def _forward() -> Any:
+                return model(**encoded).logits
+
+            logits = _inference_mode_call(_forward)
+            try:
+                import torch  # type: ignore[import-untyped]
+                probs = torch.sigmoid(logits).cpu().tolist()
+            except ImportError:
+                import math
+                probs = []
+                for row in logits:
+                    probs.append([1.0 / (1.0 + math.exp(-x)) for x in row])
+
+            for row_probs in probs:
+                scores = {
+                    self._id2label[i]: float(row_probs[i])
+                    for i in range(len(row_probs))
+                    if i in self._id2label
+                }
+                out.append(scores)
+        return out
+
+    async def classify_multilabel_async(
+        self, texts: list[str],
+    ) -> list[dict[str, float]]:
+        return await self._run_in_executor(self.classify_multilabel, texts)
+
+
+# ---------------------------------------------------------------------------
 # Embedding backend (skeleton; full migration is a follow-up)
 # ---------------------------------------------------------------------------
 
@@ -796,6 +936,7 @@ __all__ = [
     "EmbeddingBackend",
     "HFZeroShotBackend",
     "ProviderMode",
+    "SeqClassificationBackend",
     "TransformerBackend",
     "TransformerProvider",
     "default_auto_provider",
