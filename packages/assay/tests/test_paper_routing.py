@@ -12,7 +12,7 @@ from pathlib import Path
 import pytest
 
 from assay.paper_routing import RoutingGroup, route_paper
-from assay.paper_routing.hypotheses import CATALOG, Hypothesis
+from assay.paper_routing.hypotheses import CATALOG, Hypothesis, get_hits_from_text, score_hypotheses
 from assay.paper_routing.split import split_sentences
 from assay.paper_routing.headings import classify_routing_section
 from assay.paper_routing.types import SectionType
@@ -150,6 +150,38 @@ def test_metadata_bonus_audience_tokens(
     scores = _zeroed_scores()
     _apply_metadata_bonus(scores, [], audience)
     assert scores == expected
+
+
+def test_score_hypotheses_from_sentence_list_matches_regex_hits():
+    sentences = [
+        "We propose to add std::widget.",
+        "Effects: returns a value.",
+    ]
+    scored = score_hypotheses(sentences)
+    assert len(scored) == 2
+    assert scored[0].text == sentences[0]
+    assert scored[1].text == sentences[1]
+    assert scored[0].section == SectionType.PREAMBLE
+    assert scored[1].section == SectionType.PREAMBLE
+    assert set(scored[0].hypothesis_hits) == get_hits_from_text(sentences[0])
+    assert set(scored[1].hypothesis_hits) == get_hits_from_text(sentences[1])
+
+
+def test_score_hypotheses_markdown_assigns_section_from_headings():
+    md = "## Motivation\n\nWe propose to add <vector> support."
+    scored = score_hypotheses(md)
+    assert len(scored) == 2
+    assert scored[1].section == SectionType.MOTIVATION
+
+
+def test_score_hypotheses_rejects_invalid_input_type():
+    with pytest.raises(TypeError, match="expects str"):
+        score_hypotheses(123)  # type: ignore[arg-type]
+
+
+def test_score_hypotheses_rejects_non_string_list_items():
+    with pytest.raises(TypeError, match="sentence list items must be str"):
+        score_hypotheses(["ok", 1])  # type: ignore[list-item]
 
 
 def test_threshold_requires_sustained_signal():

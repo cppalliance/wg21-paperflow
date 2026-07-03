@@ -15,8 +15,8 @@ from dataclasses import dataclass
 from pipeline.classifier_backends import ClassifierBackend, NliCrossEncoderBackend
 from pipeline.nli_batch import NLI_ENTAILMENT_THRESHOLD, score_entailment_pairs
 from assay.paper_routing.sections import line_section_map, section_for_sentence
-from assay.paper_routing.split import split_sentences
-from assay.paper_routing.types import HypothesisAxis, Sentence
+from assay.paper_routing.split import RawSentence, split_sentences
+from assay.paper_routing.types import HypothesisAxis, SectionType, Sentence
 
 _D1_RE = re.compile(r"<\s*[a-z_][a-z0-9_]*\s*>")
 _D2_RE = re.compile(r"\b\d{1,2}\.\d+(?:\.\d+)*\s+\[[\w.]+\]")
@@ -250,32 +250,76 @@ _NLI_HYPOTHESES: tuple[Hypothesis, ...] = tuple(
 )
 
 
+def get_hits_from_text(text: str) -> set[str]:
+    hits: set[str] = set()
+    for hyp in CATALOG:
+        if hyp.regex is not None and hyp.regex.search(text) is not None:
+            hits.add(hyp.id)
+    if re.search(r"(?i)\baudience:\s*", text):
+        hits.add("S1")
+    return hits
+
+
+def _raw_units_from_input(
+    paper_md_or_sentences: str | list[str],
+) -> tuple[list[RawSentence], list[SectionType]]:
+    """Normalize markdown or a pre-split sentence list into routable units."""
+    if isinstance(paper_md_or_sentences, str):
+        return (
+            split_sentences(paper_md_or_sentences),
+            line_section_map(paper_md_or_sentences),
+        )
+
+    if isinstance(paper_md_or_sentences, list):
+        raw_units: list[RawSentence] = []
+        for idx, item in enumerate(paper_md_or_sentences):
+            if not isinstance(item, str):
+                raise TypeError(
+                    "score_hypotheses sentence list items must be str, "
+                    f"got {type(item).__name__} at index {idx}",
+                )
+            raw_units.append(RawSentence(item, 0))
+        return raw_units, []
+
+    raise TypeError(
+        "score_hypotheses expects str (markdown) or list[str] (sentences), "
+        f"got {type(paper_md_or_sentences).__name__}",
+    )
+
+
 def score_hypotheses(
-    paper_md: str,
+    paper_md_or_sentences: str | list[str],
     *,
     audience: list[str] | None = None,
     classifier: ClassifierBackend | None = None,
     debug_log: list[str] | None = None,
 ) -> list[Sentence]:
-    """Run Stage 1-3: split, section-detect, and score all hypotheses."""
-    raw_units = split_sentences(paper_md)
-    line_sections = line_section_map(paper_md)
+    """Run Stage 1-3: split, section-detect, and score all hypotheses.
+
+    Accepts either full paper markdown or a caller-provided sentence list.
+    Markdown runs ``split_sentences`` and ``line_section_map`` so each unit
+    inherits section context from headings. A sentence list skips splitting
+    and assigns ``SectionType.PREAMBLE`` to every unit (no heading context).
+
+    Regex hits are always applied. When ``classifier`` is an
+    ``NliCrossEncoderBackend``, NLI-only catalog hypotheses are scored in
+    batch and merged into ``hypothesis_hits``.
+
+    ``audience`` is accepted for API symmetry with ``route_paper``; metadata
+    bonus is applied later in aggregation, not here.
+    """
+    del audience  # reserved for call-site symmetry with route_paper
+
+    raw_units, line_sections = _raw_units_from_input(paper_md_or_sentences)
 
     sentences: list[Sentence] = []
     for idx, raw in enumerate(raw_units):
-        section = section_for_sentence(raw, line_sections)
-        hits: set[str] = set()
-        for hyp in CATALOG:
-            if hyp.matches_regex(raw.text):
-                hits.add(hyp.id)
-        if re.search(r"(?i)\baudience:\s*", raw.text):
-            hits.add("S1")
         sentences.append(
             Sentence(
                 text=raw.text,
-                section=section,
+                section=section_for_sentence(raw, line_sections),
                 index=idx,
-                hypothesis_hits=frozenset(hits),
+                hypothesis_hits=frozenset(get_hits_from_text(raw.text)),
             ),
         )
 
