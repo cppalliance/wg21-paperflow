@@ -183,3 +183,72 @@ def test_stage_download_keeps_stale_manifest_on_walk_failure(
     asyncio.run(_stage_download(staged_paper, backend))
 
     assert manifest_path.exists()
+
+
+def test_stage_download_keeps_stale_manifest_when_all_image_fetches_fail(
+    backend: SqliteBackend, staged_paper: str, monkeypatch
+):
+    """Source still references images but every fetch failed.
+
+    ``fetch_html_images`` swallows per-image errors and returns ``[]``
+    without raising, so ``walk_ok`` stays True. The stage must NOT read
+    that empty list as "the source has no images" and wipe previously
+    good artifacts - only a source that genuinely references zero
+    ``<img>`` tags should clear them.
+    """
+    backend.write_paper_image(
+        staged_paper, page=0, index=1, ext="png", data=b"old",
+    )
+    manifest_path = backend.get_html_images_manifest_path(staged_paper)
+    manifest_path.write_text('{"pid": "P1234R0", "entries": []}', encoding="utf-8")
+    stale_image = backend.get_paper_image_path(
+        staged_paper, page=0, index=1, ext="png",
+    )
+    assert stale_image.exists()
+
+    # Re-downloaded HTML still references an image (<img src>), but the
+    # walk recovers nothing because every per-image fetch failed.
+    async def ok(*args, **kwargs):
+        return (b"<html><img src='x.png'></html>", ".html")
+
+    async def no_images(*args, **kwargs):
+        return []
+
+    monkeypatch.setattr("mailing.download.download_paper", ok)
+    monkeypatch.setattr("mailing.fetch_html_images", no_images)
+
+    asyncio.run(_stage_download(staged_paper, backend))
+
+    assert manifest_path.exists()
+    assert stale_image.exists()
+
+
+def test_process_paper_marks_failed_when_download_raises(
+    backend: SqliteBackend, staged_paper: str, monkeypatch
+):
+    """The reworked error path relies on ``process_paper``'s outer handler.
+
+    ``_stage_download`` raises on transport failure; ``process_paper``
+    must catch it, call ``fail_paper`` (negative status + stored error),
+    and re-raise. This guards the wiring that the isolated stage tests
+    cannot: they would stay green even if the outer handler were removed.
+    """
+    from paperstore.stages import STAGES
+
+    from cli.process import process_paper
+
+    async def boom(*args, **kwargs):
+        raise httpx.ConnectError("connection refused")
+
+    monkeypatch.setattr("mailing.download.download_paper", boom)
+
+    with pytest.raises(RuntimeError, match="ConnectError"):
+        asyncio.run(
+            process_paper(
+                staged_paper, backend, through=STAGES["download"] + 1,
+            )
+        )
+
+    meta = backend.get_meta(staged_paper)
+    assert meta.status == -(STAGES["download"] + 1)
+    assert "ConnectError" in (meta.error or "")

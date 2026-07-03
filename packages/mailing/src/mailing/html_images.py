@@ -192,6 +192,22 @@ def _caption_from(img: Tag) -> str:
     return " ".join(cap.get_text(" ", strip=True).split())
 
 
+def count_html_image_refs(html_bytes: bytes | str) -> int:
+    """Count ``<img>`` tags with a non-empty ``src`` in the HTML.
+
+    Mirrors the reference-counting in :func:`fetch_html_images` (an image
+    is "referenced" when its ``src`` attribute is present and non-empty)
+    but performs no network I/O. The download stage uses this to tell
+    "the source genuinely references no images" apart from "images were
+    referenced but every fetch failed", so it only discards prior
+    artifacts in the former case.
+    """
+    soup = BeautifulSoup(html_bytes, "html.parser")
+    return sum(
+        1 for img in soup.find_all("img") if (img.get("src") or "").strip()
+    )
+
+
 async def fetch_html_images(
     html_bytes: bytes | str,
     *,

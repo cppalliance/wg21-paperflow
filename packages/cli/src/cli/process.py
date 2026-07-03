@@ -242,7 +242,7 @@ async def _stage_download(pid: str, backend: StorageBackend, *, on_progress: obj
     referenced images and write the tomd-side handoff manifest.
     """
     import httpx
-    from mailing import fetch_html_images
+    from mailing import count_html_image_refs, fetch_html_images
     from mailing.download import default_client, download_paper
 
     if postcondition_satisfied(backend, pid, STAGES["download"]):
@@ -307,11 +307,16 @@ async def _stage_download(pid: str, backend: StorageBackend, *, on_progress: obj
                         "%s: persisted %d HTML image(s) + manifest",
                         pid, len(entries),
                     )
-                elif walk_ok:
-                    # The re-downloaded HTML genuinely has no images. Drop any
-                    # stale image set + manifest from a prior run so convert
-                    # doesn't pair the fresh source with old figures. (A failed
-                    # walk leaves walk_ok False and prior artifacts intact.)
+                elif walk_ok and count_html_image_refs(content) == 0:
+                    # The re-downloaded HTML genuinely references no images.
+                    # Drop any stale image set + manifest from a prior run so
+                    # convert doesn't pair the fresh source with old figures.
+                    # We only clear when the source truly has zero <img> refs:
+                    # a failed walk (walk_ok False) or a source that still
+                    # references images whose fetches all failed (fetched empty
+                    # but refs > 0) leaves prior artifacts intact, since
+                    # fetch_html_images swallows per-image errors and returns
+                    # [] rather than raising.
                     removed = backend.delete_paper_images(pid)
                     manifest_path = backend.get_html_images_manifest_path(pid)
                     manifest_path.unlink(missing_ok=True)
