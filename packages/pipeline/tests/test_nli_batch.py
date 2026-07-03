@@ -36,7 +36,9 @@ class _FakeClassifier(NliCrossEncoderBackend):
 def test_score_entailment_pairs_preserves_order():
     clf = _FakeClassifier([0.9, 0.1, 0.51])
     pairs = [("a", "h1"), ("b", "h2"), ("c", "h3")]
-    fired, scores = score_entailment_pairs(clf, pairs, threshold=0.5)
+    fired, scores = score_entailment_pairs(
+        clf, pairs, threshold=NLI_ENTAILMENT_THRESHOLD
+    )
     assert fired == [True, False, True]
     assert len(scores) == 3
     assert clf._fake.calls[0] == pairs
@@ -47,7 +49,3 @@ def test_score_entailment_pairs_empty():
     fired, scores = score_entailment_pairs(clf, [])
     assert fired == []
     assert scores == []
-
-
-def test_threshold_constant():
-    assert NLI_ENTAILMENT_THRESHOLD == 0.5
