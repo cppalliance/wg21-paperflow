@@ -27,3 +27,9 @@ data/
 .data/
 reports/
 .cursor/
+
+# Assay golden dataset (negate global data/ ignore for golden/ only)
+!packages/assay/data/
+packages/assay/data/*
+!packages/assay/data/golden/
+!packages/assay/data/golden/**
