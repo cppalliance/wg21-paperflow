@@ -18,9 +18,14 @@ repo root.
 ## Labeling rules
 
 Each entry has a `target_group` (primary routing group from the mailing index)
-and one or more `categories`. Single-label papers have one category; multi-label
-papers list every applicable category (sorted). Labels come from title
-heuristics, index routing, and paper content.
+and one or more `categories` from the taxonomy above. Determine which categories
+apply from title heuristics, index routing, and paper content.
+
+`categories[0]` must be the category paired with `target_group` in the taxonomy
+table (for example, LEWG -> `library-design`). Single-label papers have one
+category. Multi-label papers list every applicable category; put that primary
+category first and any others after it in alphabetical order. Do not sort the
+full list alphabetically.
 
 `confidence` reflects labeling certainty (`high` or `medium`). Values are
 frozen at initial labeling time and are not auto-promoted.
