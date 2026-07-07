@@ -112,6 +112,7 @@ def _rows_to_dataset(
     tokenizer: object,
     max_length: int,
     dataset_cls: type,
+    fixed_padding: bool = False,
 ) -> object:
     label_to_idx = {name: i for i, name in enumerate(label_names)}
     texts: list[str] = []
@@ -140,7 +141,7 @@ def _rows_to_dataset(
     enc = tokenizer(  # type: ignore[operator]
         texts,
         truncation=True,
-        padding=False,
+        padding="max_length" if fixed_padding else False,
         max_length=max_length,
     )
     enc["labels"] = label_vectors
@@ -158,6 +159,8 @@ def finetune_multilabel_seqcls(
     learning_rate: float = 2e-5,
     per_device_train_batch_size: int = 16,
     seed: int = _TRAIN_SEED,
+    cpu_only: bool = False,
+    fixed_padding: bool = False,
 ) -> Path:
     """Train and save a multi-label sequence classifier checkpoint."""
     deps = _import_train_deps()
@@ -195,6 +198,7 @@ def finetune_multilabel_seqcls(
         tokenizer=tokenizer,
         max_length=max_length,
         dataset_cls=Dataset,
+        fixed_padding=fixed_padding,
     )
     eval_ds = None
     if val_path is not None:
@@ -205,6 +209,7 @@ def finetune_multilabel_seqcls(
             tokenizer=tokenizer,
             max_length=max_length,
             dataset_cls=Dataset,
+            fixed_padding=fixed_padding,
         )
 
     def _compute_metrics(eval_pred: object) -> dict[str, float]:
@@ -235,6 +240,7 @@ def finetune_multilabel_seqcls(
         metric_for_best_model="micro_f1" if eval_ds is not None else None,
         logging_steps=50,
         report_to=[],
+        use_cpu=cpu_only,
     )
 
     trainer = Trainer(
@@ -292,6 +298,17 @@ def _build_parser() -> argparse.ArgumentParser:
         "--seed", type=int, default=_TRAIN_SEED,
         help="Random seed (default: %(default)s).",
     )
+    parser.add_argument(
+        "--cpu-only", action="store_true",
+        help="Force CPU training, bypassing CUDA/MPS auto-detection "
+             "(useful when the accelerator lacks headroom for the batch size).",
+    )
+    parser.add_argument(
+        "--fixed-padding", action="store_true",
+        help="Pad every batch to --max-length instead of the batch's longest "
+             "sequence. Trades some compute for stable tensor shapes, which "
+             "avoids MPS allocator fragmentation on memory-constrained hosts.",
+    )
     return parser
 
 
@@ -308,6 +325,8 @@ def main(argv: list[str] | None = None) -> int:
         learning_rate=args.learning_rate,
         per_device_train_batch_size=args.batch_size,
         seed=args.seed,
+        cpu_only=args.cpu_only,
+        fixed_padding=args.fixed_padding,
     )
     return 0
 
