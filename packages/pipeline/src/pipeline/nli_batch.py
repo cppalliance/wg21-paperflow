@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from pipeline.classifier_backends import NliCrossEncoderBackend
 
-NLI_ENTAILMENT_THRESHOLD = 0.3
+NLI_ENTAILMENT_THRESHOLD = 0.5
 
 
 def score_entailment_pairs(

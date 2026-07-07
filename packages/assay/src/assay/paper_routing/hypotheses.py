@@ -13,10 +13,12 @@ import re
 from dataclasses import dataclass
 
 from pipeline.classifier_backends import ClassifierBackend, NliCrossEncoderBackend
-from pipeline.nli_batch import NLI_ENTAILMENT_THRESHOLD, score_entailment_pairs
+from pipeline.nli_batch import score_entailment_pairs
 from assay.paper_routing.sections import line_section_map, section_for_sentence
 from assay.paper_routing.split import RawSentence, split_sentences
 from assay.paper_routing.types import HypothesisAxis, SectionType, Sentence
+
+_ROUTING_NLI_THRESHOLD = 0.3
 
 _D1_RE = re.compile(r"<\s*[a-z_][a-z0-9_]*\s*>")
 _D2_RE = re.compile(r"\b\d{1,2}\.\d+(?:\.\d+)*\s+\[[\w.]+\]")
@@ -352,7 +354,7 @@ def _apply_nli_scores(
     fired, scores = score_entailment_pairs(
         classifier,
         pairs,
-        threshold=NLI_ENTAILMENT_THRESHOLD,
+        threshold=_ROUTING_NLI_THRESHOLD,
     )
 
     if debug_log is not None:

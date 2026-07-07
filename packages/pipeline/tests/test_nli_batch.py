@@ -49,3 +49,7 @@ def test_score_entailment_pairs_empty():
     fired, scores = score_entailment_pairs(clf, [])
     assert fired == []
     assert scores == []
+
+
+def test_threshold_constant():
+    assert NLI_ENTAILMENT_THRESHOLD == 0.5

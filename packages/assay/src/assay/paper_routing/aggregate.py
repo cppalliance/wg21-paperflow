@@ -115,6 +115,7 @@ def _apply_metadata_bonus(
         blob, "LEWG"
     ):
         scores[RoutingGroup.LEWG] += _METADATA_BONUS_LIBRARY_EVOLUTION_LEWG
+        scores[RoutingGroup.LWG] += _METADATA_BONUS_LIBRARY_LWG
     elif _audience_has_phrase(blob, "LIBRARY") or _audience_has_phrase(blob, "LWG"):
         scores[RoutingGroup.LEWG] += _METADATA_BONUS_LIBRARY_LEWG
         scores[RoutingGroup.LWG] += _METADATA_BONUS_LIBRARY_LWG

@@ -11,8 +11,16 @@ from pathlib import Path
 
 import pytest
 
+from pipeline.classifier_backends import NliCrossEncoderBackend
+
 from assay.paper_routing import RoutingGroup, route_paper
-from assay.paper_routing.hypotheses import CATALOG, Hypothesis, get_hits_from_text, score_hypotheses
+from assay.paper_routing.hypotheses import (
+    CATALOG,
+    Hypothesis,
+    _ROUTING_NLI_THRESHOLD,
+    get_hits_from_text,
+    score_hypotheses,
+)
 from assay.paper_routing.split import split_sentences
 from assay.paper_routing.headings import classify_routing_section
 from assay.paper_routing.types import SectionType
@@ -110,7 +118,7 @@ def _zeroed_scores() -> dict[RoutingGroup, float]:
             ["LEWG"],
             {
                 RoutingGroup.LEWG: 0.20,
-                RoutingGroup.LWG: 0.0,
+                RoutingGroup.LWG: 0.10,
                 RoutingGroup.EWG: 0.0,
                 RoutingGroup.CWG: 0.0,
             },
@@ -128,7 +136,16 @@ def _zeroed_scores() -> dict[RoutingGroup, float]:
             ["Library Evolution"],
             {
                 RoutingGroup.LEWG: 0.20,
-                RoutingGroup.LWG: 0.0,
+                RoutingGroup.LWG: 0.10,
+                RoutingGroup.EWG: 0.0,
+                RoutingGroup.CWG: 0.0,
+            },
+        ),
+        (
+            ["LEWG", "LWG"],
+            {
+                RoutingGroup.LEWG: 0.20,
+                RoutingGroup.LWG: 0.10,
                 RoutingGroup.EWG: 0.0,
                 RoutingGroup.CWG: 0.0,
             },
@@ -150,6 +167,56 @@ def test_metadata_bonus_audience_tokens(
     scores = _zeroed_scores()
     _apply_metadata_bonus(scores, [], audience)
     assert scores == expected
+
+
+_M4_NLI_TEXT = "The sentence explains why a design choice was made."
+_NLI_ONLY_SENTENCE = "We chose this approach because it minimizes template bloat."
+
+
+class _StubNliClassifier(NliCrossEncoderBackend):
+    def __init__(self, entailment: float, *, match_hypothesis: str | None = None) -> None:
+        self._entailment = entailment
+        self._match_hypothesis = match_hypothesis
+        self.calls: list[list[tuple[str, str]]] = []
+
+    def nli_entailment_pairs(
+        self, pairs: list[tuple[str, str]]
+    ) -> list[dict[str, float]]:
+        self.calls.append(list(pairs))
+        scores: list[dict[str, float]] = []
+        for _premise, hypothesis in pairs:
+            if self._match_hypothesis is None or hypothesis == self._match_hypothesis:
+                e = self._entailment
+            else:
+                e = 0.0
+            scores.append({"entailment": e, "neutral": 0.0, "contradiction": 0.0})
+        return scores
+
+
+def test_routing_nli_threshold_constant():
+    assert _ROUTING_NLI_THRESHOLD == 0.3
+
+
+def test_score_hypotheses_nli_path_fires_on_high_entailment():
+    sentence = _NLI_ONLY_SENTENCE
+    assert get_hits_from_text(sentence) == set()
+
+    classifier = _StubNliClassifier(0.9, match_hypothesis=_M4_NLI_TEXT)
+    scored = score_hypotheses([sentence], classifier=classifier)
+
+    assert len(scored) == 1
+    assert "M4" in scored[0].hypothesis_hits
+    assert classifier.calls
+    assert classifier.calls[0][0][0] == sentence
+
+
+def test_score_hypotheses_nli_path_skips_low_entailment():
+    sentence = _NLI_ONLY_SENTENCE
+    classifier = _StubNliClassifier(0.1, match_hypothesis=_M4_NLI_TEXT)
+    scored = score_hypotheses([sentence], classifier=classifier)
+
+    assert len(scored) == 1
+    assert "M4" not in scored[0].hypothesis_hits
 
 
 def test_score_hypotheses_from_sentence_list_matches_regex_hits():

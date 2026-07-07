@@ -29,7 +29,7 @@ Two-pass architecture: Pass 1 (Steps 0-8) extracts mechanically and derives a th
  0. Receive        validate path, load metadata                   (pure Python)
  1. References     mechanical ref extraction, cross-check          (pure Python)
  2. Index          build RAG index over cited papers               (pure Python, embedder)
- 3. Survey         blanking, chunking, wording signal, triage      (pure Python)
+ 3. Survey         chunking, wording signal, triage, routing        (pure Python)
  4. Extract        per-chunk item extraction                       (LLM, C calls)
  5. Decide         per-chunk claim support judgment                (LLM, C calls)
  6. Classify       turn unsupported claims into gaps               (LLM, C calls)
