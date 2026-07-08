@@ -30,7 +30,7 @@ import pytest
 
 from mailing.html_images import HtmlFetchedImage
 from paperstore import SqliteBackend
-from cli.process import _stage_download
+from cli.process import _stage_download, ensure_paper_md
 
 
 @pytest.fixture
@@ -56,7 +56,7 @@ def test_stage_download_raises_on_http_status_error(
     async def boom(*args, **kwargs):
         raise httpx.HTTPStatusError("404", request=request, response=response)
 
-    monkeypatch.setattr("mailing.download.download_paper", boom)
+    monkeypatch.setattr("cli.process.download_paper", boom)
 
     with pytest.raises(RuntimeError, match="404"):
         asyncio.run(_stage_download(staged_paper, backend))
@@ -71,7 +71,7 @@ def test_stage_download_raises_on_request_error(
     async def boom(*args, **kwargs):
         raise httpx.ConnectError("connection refused")
 
-    monkeypatch.setattr("mailing.download.download_paper", boom)
+    monkeypatch.setattr("cli.process.download_paper", boom)
 
     with pytest.raises(RuntimeError, match="ConnectError"):
         asyncio.run(_stage_download(staged_paper, backend))
@@ -88,7 +88,7 @@ def test_stage_download_persists_source_on_success(
     async def ok(*args, **kwargs):
         return (b"%PDF-1.7 fake", ".pdf")
 
-    monkeypatch.setattr("mailing.download.download_paper", ok)
+    monkeypatch.setattr("cli.process.download_paper", ok)
 
     asyncio.run(_stage_download(staged_paper, backend))
 
@@ -117,8 +117,8 @@ def test_stage_download_persists_html_images_and_manifest(
             )
         ]
 
-    monkeypatch.setattr("mailing.download.download_paper", ok)
-    monkeypatch.setattr("mailing.fetch_html_images", images)
+    monkeypatch.setattr("cli.process.download_paper", ok)
+    monkeypatch.setattr("cli.process.fetch_html_images", images)
 
     asyncio.run(_stage_download(staged_paper, backend))
 
@@ -153,8 +153,8 @@ def test_stage_download_clears_stale_manifest_when_no_images(
     async def no_images(*args, **kwargs):
         return []
 
-    monkeypatch.setattr("mailing.download.download_paper", ok)
-    monkeypatch.setattr("mailing.fetch_html_images", no_images)
+    monkeypatch.setattr("cli.process.download_paper", ok)
+    monkeypatch.setattr("cli.process.fetch_html_images", no_images)
 
     asyncio.run(_stage_download(staged_paper, backend))
 
@@ -176,8 +176,8 @@ def test_stage_download_keeps_stale_manifest_on_walk_failure(
     async def boom(*args, **kwargs):
         raise RuntimeError("transient network blip")
 
-    monkeypatch.setattr("mailing.download.download_paper", ok)
-    monkeypatch.setattr("mailing.fetch_html_images", boom)
+    monkeypatch.setattr("cli.process.download_paper", ok)
+    monkeypatch.setattr("cli.process.fetch_html_images", boom)
 
     # Firewall: the walk failure is swallowed, download stage still succeeds.
     asyncio.run(_stage_download(staged_paper, backend))
@@ -214,8 +214,8 @@ def test_stage_download_keeps_stale_manifest_when_all_image_fetches_fail(
     async def no_images(*args, **kwargs):
         return []
 
-    monkeypatch.setattr("mailing.download.download_paper", ok)
-    monkeypatch.setattr("mailing.fetch_html_images", no_images)
+    monkeypatch.setattr("cli.process.download_paper", ok)
+    monkeypatch.setattr("cli.process.fetch_html_images", no_images)
 
     asyncio.run(_stage_download(staged_paper, backend))
 
@@ -240,7 +240,7 @@ def test_process_paper_marks_failed_when_download_raises(
     async def boom(*args, **kwargs):
         raise httpx.ConnectError("connection refused")
 
-    monkeypatch.setattr("mailing.download.download_paper", boom)
+    monkeypatch.setattr("cli.process.download_paper", boom)
 
     with pytest.raises(RuntimeError, match="ConnectError"):
         asyncio.run(
@@ -252,3 +252,55 @@ def test_process_paper_marks_failed_when_download_raises(
     meta = backend.get_meta(staged_paper)
     assert meta.status == -(STAGES["download"] + 1)
     assert "ConnectError" in (meta.error or "")
+
+
+def test_ensure_paper_md_persists_failure_on_download_error(
+    backend: SqliteBackend, staged_paper: str, monkeypatch
+):
+    """The citation shortcut must record a download failure on the paper row.
+
+    ``_stage_download`` now raises instead of calling ``fail_paper`` itself.
+    ``ensure_paper_md`` has no outer ``process_paper`` handler, so it must
+    persist the failure on the way out rather than swallowing it silently.
+    """
+    from paperstore.stages import STAGES
+
+    async def boom(*args, **kwargs):
+        raise httpx.ConnectError("connection refused")
+
+    monkeypatch.setattr("cli.process.download_paper", boom)
+
+    result = asyncio.run(ensure_paper_md(staged_paper, backend))
+
+    assert result is None
+    meta = backend.get_meta(staged_paper)
+    assert meta.status == -(STAGES["download"] + 1)
+    assert "ConnectError" in (meta.error or "")
+
+
+def test_ensure_paper_md_persists_failure_at_convert_stage(
+    backend: SqliteBackend, staged_paper: str, monkeypatch
+):
+    """A convert-stage failure after a successful download must be recorded
+    at the convert stage (status -2), not the download stage.
+
+    Guards ``ensure_paper_md``'s stage tracking: the failure is attributed
+    to whichever stage actually raised.
+    """
+    from paperstore.stages import STAGES
+
+    async def ok(*args, **kwargs):
+        return (b"%PDF-1.7 fake", ".pdf")
+
+    async def boom_convert(*args, **kwargs):
+        raise RuntimeError("convert exploded")
+
+    monkeypatch.setattr("cli.process.download_paper", ok)
+    monkeypatch.setattr("cli.process._stage_convert", boom_convert)
+
+    result = asyncio.run(ensure_paper_md(staged_paper, backend))
+
+    assert result is None
+    meta = backend.get_meta(staged_paper)
+    assert meta.status == -(STAGES["convert"] + 1)
+    assert "convert exploded" in (meta.error or "")

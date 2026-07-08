@@ -24,10 +24,14 @@ from pathlib import Path
 from datetime import datetime, timezone
 from typing import Any
 
+import httpx
+
 from paperstore.backend import StorageBackend
 from paperstore.html_manifest import HtmlImageEntry, HtmlImagesManifest, HtmlManifestError
 from paperstore.stages import STAGE_NAMES, STAGES, failed_stage
 
+from mailing import count_html_image_refs, fetch_html_images
+from mailing.download import default_client, download_paper
 from cli.postconditions import (
     ConvertReport,
     ProcessResult,
@@ -185,11 +189,14 @@ async def ensure_paper_md(pid: str, backend: StorageBackend) -> str | None:
     ):
         return backend.get_paper_md(pid)
 
+    stage = STAGES["download"]
     try:
         await _run_stage(pid, STAGES["download"], backend)
+        stage = STAGES["convert"]
         await _run_stage(pid, STAGES["convert"], backend)
-    except Exception:
+    except Exception as exc:
         logger.warning("ensure_paper_md failed for %s", pid, exc_info=True)
+        backend.fail_paper(pid, stage, str(exc))
         return None
 
     backend.advance_status(pid, STAGES["download"], STAGES["convert"])
@@ -241,10 +248,6 @@ async def _stage_download(pid: str, backend: StorageBackend, *, on_progress: obj
     """Download the paper's source file. For HTML sources, also fetch
     referenced images and write the tomd-side handoff manifest.
     """
-    import httpx
-    from mailing import count_html_image_refs, fetch_html_images
-    from mailing.download import default_client, download_paper
-
     if postcondition_satisfied(backend, pid, STAGES["download"]):
         return
     paper = backend.get_meta(pid)
