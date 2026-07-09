@@ -19,11 +19,10 @@ One-shot, fully batch. No `AskQuestion`, no human-in-the-loop, no resumable runs
 ## Layout
 
 - `agora.md` - prompt document and pipeline authority.
-- `the-mod.md` - canonical creative reference. Injected into LLM call user messages where needed.
-- `prompt.py` - parses step metadata, validates against registered hooks, builds the ordered `StepSpec` list. Domain-free.
-- `pipeline.py` - async orchestration: `StepContext`, hook registry (`_HOOKS`), dispatch loop, public `agora_paper()` and `agora_since()` entry points. Sub-agent dispatch goes through `pipeline.tasks.run_task`, which serializes via the shared `_task_semaphore`.
+- `the-mod.md` - canonical creative reference, shipped as package data. `mod_reference.py` slices it into per-step excerpts injected into LLM call user messages.
+- `mod_reference.py` - loads the-mod.md and exposes the scoped excerpt each step's prepare hook injects (heat check for calibration, Table C + noise palette for the skeleton, etc.). Fails loudly if a cited heading disappears.
+- `pipeline.py` - async orchestration: hook registry (`_build_hooks`), step prepare/extract functions, blueprint validation, public `agora_paper()` and `agora_since()` entry points. Step parsing (`StepSpec`, `PipelinePrompt`) and the dispatch loop live in the `pipeline` package. Sub-agent dispatch goes through `pipeline.tasks.run_task`, which serializes via the shared `_task_semaphore`.
 - `render.py` - debug transcript and per-step trace renderers. No HTML.
-- `parse.py` - domain-free H2 markdown section splitter.
 - `models.py` - Pydantic models. One schema (`Thread`, `Reply`, `EncounterPlan` and friends) matches the eventual database; analysis-phase fields are required, generation-phase fields are `Optional`. Per-step LLM output classes and `PipelineState` live here too. `SourceLoc` imported from `paperstore`.
 - `errors.py` - paper-domain errors (`PaperNotFoundError`, `PaperNotConvertedError`) inheriting `pipeline.PipelineError`.
 
@@ -43,4 +42,6 @@ The pipeline writes the final `Thread` as `{pid}.agora.json` via `backend.write_
 - Generation fields stay `None`. This package does not generate reply content, character assignments, vote scores, or furniture.
 - Provenance bound at generation time. Every `TechnicalAnchor` carries a `SourceLoc` (from paperstore).
 - D6 reminder: every step hook declares `output_type=<PydanticModel>`.
-- D7 reminder: validation sets like `addressed`, `lens_used`, `orphan_encounter` in `_validate_blueprint` stay internal. If you start feeding such collections into a prompt, sort them first.
+- D7 reminder: validation sets like `addressed`, `lens_used`, `orphan_encounter` in `_validate_blueprint` stay internal (error messages sort them). If you start feeding such collections into a prompt, sort them first.
+- Blueprint validation is hard-fail: unaddressed anchors, orphan encounter slots, and domain-lens floor shortfalls raise `ValidationStepError`; an invalid blueprint never serializes. `agora_since` catches per-paper failures and continues the batch.
+- Research (Step 2) is toggleable per run via `agora_paper(..., research=False)`; off records an empty research summary, the same shape as the missing-web-tools degradation.
