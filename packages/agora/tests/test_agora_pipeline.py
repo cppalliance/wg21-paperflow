@@ -40,7 +40,7 @@ from agora.pipeline import (
     _prepare_submission,
     _pure_research,
     _pure_research_disabled,
-    _route_subreddit,
+    _route_committee,
     _split_paper_id,
     _validate_blueprint,
 )
@@ -76,22 +76,22 @@ def test_guard_encounter_count_runs_when_positive():
 @pytest.mark.parametrize(
     "audience,expected",
     [
-        ("EWG", "r/ewg"),
-        ("EWGI", "r/ewg"),
-        ("LEWG", "r/lewg"),
-        ("LEWGI", "r/lewg"),
-        ("CWG", "r/cwg"),
-        ("LWG", "r/lwg"),
-        ("SG21", "r/ewg"),
-        ("Plenary", "r/ewg"),
-        ("EWG, LEWG", "r/ewg"),  # first wins
-        ("LEWG/LEWGI", "r/lewg"),
-        ("", "r/ewg"),  # default
-        ("unknown", "r/ewg"),
+        ("EWG", "ewg"),
+        ("EWGI", "ewg"),
+        ("LEWG", "lewg"),
+        ("LEWGI", "lewg"),
+        ("CWG", "cwg"),
+        ("LWG", "lwg"),
+        ("SG21", "ewg"),
+        ("Plenary", "ewg"),
+        ("EWG, LEWG", "ewg"),  # first wins
+        ("LEWG/LEWGI", "lewg"),
+        ("", "ewg"),  # default
+        ("unknown", "ewg"),
     ],
 )
-def test_route_subreddit(audience: str, expected: str):
-    assert _route_subreddit(audience) == expected
+def test_route_committee(audience: str, expected: str):
+    assert _route_committee(audience) == expected
 
 
 @pytest.mark.parametrize(

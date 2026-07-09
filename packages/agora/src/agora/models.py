@@ -33,7 +33,15 @@ from pydantic import BaseModel, Field
 PaperType = Literal["wording", "proposal", "directional"]
 HeatTier = Literal["cold", "warm", "hot", "thermonuclear"]
 InterestTier = Literal["niche", "relevant", "magnetic", "gravitational"]
-Subreddit = Literal["r/ewg", "r/lewg", "r/cwg", "r/lwg"]
+Subreddit = Literal["r/wg21"]
+"""Every thread lands in the single r/wg21 community. The artifact
+carries this as producer vocabulary; the website maps it to its
+``wg21`` community row. The schema stays a Literal so more
+communities can be added later without a shape change."""
+Committee = Literal["ewg", "lewg", "cwg", "lwg"]
+"""Committee group derived from the paper's first target audience.
+Drives audience badges on the website; does not change where the
+thread lands."""
 AnchorKind = Literal["load_bearing", "conflicted", "critical_gap"]
 ReplyRole = Literal[
     "signal",
@@ -132,6 +140,18 @@ class DesignTension(BaseModel, frozen=True):
     )
 
 
+class Vote(BaseModel, frozen=True):
+    """One persona's vote on one target (the submission or a comment).
+
+    Votes are always individual — never aggregated into a score. The
+    website derives scores from the votes that have revealed, so the
+    artifact carries who voted and how, nothing else.
+    """
+
+    persona: str = Field(description="Roster username of the voter.")
+    direction: Literal[1, -1]
+
+
 class EncounterPlan(BaseModel, frozen=True):
     """A planned multi-turn back-and-forth between two named positions.
 
@@ -211,14 +231,18 @@ class Reply(BaseModel):
     ordering: Optional[int] = None
     time_label: Optional[str] = None
     controversial: bool = False
-    awards: list[str] = Field(default_factory=list)
-    edited: Optional[str] = None
+    edited: bool = False
     collapsed: bool = False
     deleted: bool = False
     removed: bool = False
     is_mod: bool = False
     is_op: bool = False
     flair: Optional[str] = None
+    votes: list[Vote] = Field(
+        default_factory=list,
+        description="Per-persona votes on this comment. At most one vote"
+        " per persona; filled by the reactor pass.",
+    )
 
 
 class Thread(BaseModel):
@@ -226,8 +250,8 @@ class Thread(BaseModel):
 
     Analysis-phase fields are populated by Steps 0-7 in this package.
     Generation-phase fields (``submission_poster_id``,
-    ``submission_votes``, ``submission_upvote_pct``, ``generated_at``)
-    stay ``None`` until a future generation phase runs.
+    ``submission_votes``, ``generated_at``) stay ``None`` until a
+    future generation phase runs.
 
     Not frozen: the generation phase mutates these in place.
     """
@@ -237,11 +261,24 @@ class Thread(BaseModel):
     document: str = Field(description="Full revisioned paper id, e.g. ``P2900R14``.")
     paper: str = Field(description="Paper id without revision, e.g. ``P2900``.")
     revision: int = Field(ge=0, description="Numeric revision (``0`` for ``R0``).")
+    mailing_id: str = Field(
+        default="",
+        description="Mailing the paper arrived in (paperstore ``mailing_date``,"
+        " e.g. ``2026-05``).",
+    )
     title: str
-    authors: str = Field(description="Author list as a single display string.")
+    authors: list[str] = Field(
+        default_factory=list,
+        description="Author names as stored in paperstore.",
+    )
     audience: str = Field(description="Comma-joined target groups from paperstore.")
     date: str = Field(description="Document date as stored in paperstore.")
-    subreddit: Subreddit
+    subreddit: Subreddit = "r/wg21"
+    committee: Committee = Field(
+        default="ewg",
+        description="Group derived from the first target audience; drives"
+        " audience badges.",
+    )
     prior_revision: Optional[str] = Field(
         default=None,
         description="``Pnnnnn.Rk-1`` document if this is a re-revision (Case C).",
@@ -296,8 +333,11 @@ class Thread(BaseModel):
     # -- Generation phase (Optional / None for now) --------------------------
 
     submission_poster_id: Optional[str] = None
-    submission_votes: Optional[int] = None
-    submission_upvote_pct: Optional[str] = None
+    submission_votes: Optional[list[Vote]] = Field(
+        default=None,
+        description="Per-persona votes on the submission itself."
+        " ``None`` until the reactor pass runs.",
+    )
     generated_at: Optional[datetime] = None
 
 
@@ -384,7 +424,9 @@ class PipelineState(BaseModel):
     paper_url: str = ""
     paper_number: str = ""
     paper_revision: int = 0
+    mailing_id: str = ""
     subreddit: Optional[Subreddit] = None
+    committee: Optional[Committee] = None
     prior_revision: Optional[str] = None
     revision_case: RevisionCase = "A"
 

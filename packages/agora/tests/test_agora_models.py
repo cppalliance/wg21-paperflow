@@ -25,6 +25,7 @@ from agora.models import (
     SubmissionOutput,
     TechnicalAnchor,
     Thread,
+    Vote,
 )
 
 
@@ -72,8 +73,18 @@ def test_reply_required_fields_only_analysis():
     assert r.content is None
     assert r.character_username is None
     assert r.score is None
-    assert r.awards == []
+    assert r.votes == []
+    assert r.edited is False
     assert r.is_op is False
+
+
+def test_vote_direction_literal():
+    Vote(persona="ranges_andy", direction=1)
+    Vote(persona="ranges_andy", direction=-1)
+    with pytest.raises(ValidationError):
+        Vote(persona="ranges_andy", direction=0)
+    with pytest.raises(ValidationError):
+        Vote(persona="ranges_andy", direction=2)
 
 
 def test_reply_depth_bounds():
@@ -108,8 +119,8 @@ def test_encounter_plan_round_trip():
 def test_thread_construct_with_analysis_only_fields():
     t = Thread(
         document="P4003R2", paper="P4003", revision=2,
-        title="Foo", authors="A, B", audience="EWG",
-        date="2026-01-15", subreddit="r/ewg",
+        title="Foo", authors=["A. Author", "B. Author"], audience="EWG",
+        date="2026-01-15", subreddit="r/wg21", committee="ewg",
         paper_type="proposal",
         technical_anchors=[_anchor()],
         research_summary=_research(),
@@ -183,10 +194,12 @@ def test_pipeline_state_defaults_none():
 def test_pipeline_state_assignable():
     s = PipelineState()
     s.paper_id = "P4003R2"
-    s.subreddit = "r/lewg"
+    s.subreddit = "r/wg21"
+    s.committee = "lewg"
     s.heat = "thermonuclear"
     s.encounter_count = 3
     assert s.paper_id == "P4003R2"
-    assert s.subreddit == "r/lewg"
+    assert s.subreddit == "r/wg21"
+    assert s.committee == "lewg"
     assert s.heat == "thermonuclear"
     assert s.encounter_count == 3
