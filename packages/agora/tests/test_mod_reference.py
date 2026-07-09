@@ -1,9 +1,3 @@
-#
-# Copyright (c) 2026 Vinnie Falco (vinnie.falco@gmail.com)
-#
-# Distributed under the Boost Software License, Version 1.0.
-#
-
 """Tests for the-mod.md excerpt slicing (mod_reference)."""
 
 from __future__ import annotations
