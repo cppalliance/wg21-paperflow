@@ -88,6 +88,47 @@ def test_heading_section_mapping():
     assert classify_routing_section("Motivation and Scope") == SectionType.MOTIVATION
     assert classify_routing_section("Proposed Wording") == SectionType.WORDING
     assert classify_routing_section("References") == SectionType.APPENDIX
+    assert classify_routing_section("Design Decisions") == SectionType.DESIGN
+    assert classify_routing_section("Interface") == SectionType.DESIGN
+    assert (
+        classify_routing_section("Impact on the Standard") == SectionType.IMPACT
+    )
+    assert classify_routing_section("Compatibility") == SectionType.IMPACT
+    assert classify_routing_section("ABI Considerations") == SectionType.IMPACT
+    assert (
+        classify_routing_section("Implementation Experience")
+        == SectionType.IMPLEMENTATION
+    )
+    assert classify_routing_section("") == SectionType.PREAMBLE
+    assert classify_routing_section("Abstract") == SectionType.PREAMBLE
+
+
+def test_heading_bare_generic_token_fallback():
+    """Bare, generic single-word headings still resolve to the expected
+    section when no other category's specific vocabulary is present."""
+    assert classify_routing_section("API") == SectionType.DESIGN
+    assert classify_routing_section("Design") == SectionType.DESIGN
+    assert classify_routing_section("Wording") == SectionType.WORDING
+    assert classify_routing_section("Implementation") == SectionType.IMPLEMENTATION
+    assert classify_routing_section("Design of this Document") == SectionType.PREAMBLE
+
+
+def test_heading_cross_category_collision_favors_specific_phrase():
+    """A heading mixing a generic token from one category (bare "API") with
+    a specific phrase from another ("ABI Considerations") must resolve to
+    the category owning the specific phrase, regardless of category check
+    order. Regression test for the DESIGN/IMPACT check-order bug where
+    ``\\bAPI\\b`` in the DESIGN pattern pre-empted IMPACT's more specific
+    ``ABI Considerations`` match.
+    """
+    assert (
+        classify_routing_section("API and ABI Considerations")
+        == SectionType.IMPACT
+    )
+    assert (
+        classify_routing_section("ABI Considerations and the API")
+        == SectionType.IMPACT
+    )
 
 
 @pytest.mark.parametrize("hyp", CATALOG)
