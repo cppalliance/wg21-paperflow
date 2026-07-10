@@ -9,17 +9,25 @@
 
 from __future__ import annotations
 
+import bisect
 import re
 from dataclasses import dataclass
+from typing import cast
 
+from pysbd import Segmenter
+from pysbd.utils import TextSpan
+
+from assay.paper_routing.standardese import (
+    STANDARDESE_LABEL_RE,
+    is_standardese_line,
+)
 from pipeline.markdown import HEADING_RE, front_matter_end_index
 
 _FENCE_OPEN_RE = re.compile(r"^(`{3,}|~{3,})(\w*)")
-_SENTENCE_END_RE = re.compile(r"(?<=[.!?])\s+")
-_GRAMMAR_PRODUCTION_RE = re.compile(
-    r"^[a-z][a-z0-9_-]*\s*:\s*.+",
-    re.IGNORECASE,
-)
+_BNF_PRODUCTION_RE = re.compile(r"^[a-z][a-z0-9_-]*\s*:\s*.+")
+# Lowercase lhs tokens that look like BNF but are wording directives or prose.
+_BNF_FALSE_POSITIVE_LHS = frozenset({"add", "modify", "insert", "strike", "delete"})
+_SEGMENTER = Segmenter(language="en", clean=False, char_span=True)
 
 
 @dataclass(frozen=True)
@@ -74,7 +82,7 @@ def split_sentences(paper_md: str) -> list[RawSentence]:
             i += 1
             continue
 
-        if _GRAMMAR_PRODUCTION_RE.match(line.strip()):
+        if _is_bnf_production_line(line):
             units.append(RawSentence(text=line.strip(), start_line=i))
             i += 1
             continue
@@ -90,18 +98,116 @@ def split_sentences(paper_md: str) -> list[RawSentence]:
                 break
             if _FENCE_OPEN_RE.match(cur.strip()):
                 break
-            if _GRAMMAR_PRODUCTION_RE.match(cur.strip()):
+            if _is_bnf_production_line(cur):
                 break
             prose_buf.append(cur)
             i += 1
         if prose_buf:
-            for part in _split_prose("\n".join(prose_buf)):
-                units.append(RawSentence(text=part, start_line=prose_start))
+            units.extend(_split_prose_units(prose_buf, prose_start))
 
     return [u for u in units if u.text.strip()]
 
 
-def _split_prose(text: str) -> list[str]:
-    """Split prose on sentence boundaries."""
-    parts = _SENTENCE_END_RE.split(text.strip())
-    return [p.strip() for p in parts if p.strip()]
+def _is_bnf_production_line(line: str) -> bool:
+    """Return True for lowercase BNF grammar productions, not Standardese labels."""
+    stripped = line.strip()
+    if is_standardese_line(stripped):
+        return False
+    match = _BNF_PRODUCTION_RE.match(stripped)
+    if match is None:
+        return False
+    lhs = stripped.split(":", 1)[0].strip()
+    if lhs in _BNF_FALSE_POSITIVE_LHS:
+        return False
+    return True
+
+
+def _prose_line_offsets(prose_lines: list[str]) -> list[int]:
+    """Character offset of each prose line within a newline-joined paragraph."""
+    if not prose_lines:
+        return [0]
+    offsets = [0]
+    for line in prose_lines[:-1]:
+        offsets.append(offsets[-1] + len(line) + 1)
+    return offsets
+
+
+def _offset_to_prose_line(line_offsets: list[int], char_offset: int) -> int:
+    """Map a paragraph character offset to a 0-based index within *prose_lines*."""
+    idx = bisect.bisect_right(line_offsets, char_offset) - 1
+    return max(0, idx)
+
+
+_NORMATIVE_SPLIT_SUFFIX_RE = re.compile(
+    r"(?:add:\s*$|modify:\s*$)",
+    re.IGNORECASE,
+)
+_ATTACHED_LABEL_PREFIX_RE = re.compile(
+    r"(?:"
+    r"[-*]\s*$"  # markdown list marker
+    r"|\(\w+\)\s*$"  # lettered (a), (b)
+    r"|\d+(?:\.\d+)+\s*$"  # clause ref 1.2.3
+    r"|\d+\.\s*$"  # numbered normative 1.
+    r"|\b[A-Za-z]+\s*$"  # prose word before label (Release, with)
+    r")",
+    re.IGNORECASE,
+)
+
+
+def _should_split_at_standardese(prefix: str) -> bool:
+    """Return True when an internal Standardese label should start a new unit."""
+    if _ATTACHED_LABEL_PREFIX_RE.search(prefix):
+        return False
+    return _NORMATIVE_SPLIT_SUFFIX_RE.search(prefix) is not None
+
+
+def _standardese_split_points(text: str) -> list[int]:
+    """Local offsets where *text* should split before an internal Standardese label."""
+    points: list[int] = []
+    for match in STANDARDESE_LABEL_RE.finditer(text):
+        if match.start() == 0:
+            continue
+        prefix = text[: match.start()]
+        if not _should_split_at_standardese(prefix):
+            continue
+        points.append(match.start())
+    return points
+
+
+def _post_split_standardese(span: TextSpan) -> list[tuple[str, int]]:
+    """Split a pySBD TextSpan on internal Standardese label boundaries."""
+    text = span.sent
+    base = span.start
+    points = _standardese_split_points(text)
+    if not points:
+        return [(text, base)]
+
+    parts: list[tuple[str, int]] = []
+    prev = 0
+    for point in points:
+        chunk = text[prev:point]
+        if chunk.strip():
+            parts.append((chunk, base + prev))
+        prev = point
+    tail = text[prev:]
+    if tail.strip():
+        parts.append((tail, base + prev))
+    return parts
+
+
+def _split_prose_units(prose_lines: list[str], prose_start: int) -> list[RawSentence]:
+    """Split prose lines into sentences with per-sentence source line attribution."""
+    paragraph = "\n".join(prose_lines)
+    line_offsets = _prose_line_offsets(prose_lines)
+    units: list[RawSentence] = []
+
+    for raw_span in _SEGMENTER.segment(paragraph):
+        span = cast(TextSpan, raw_span)
+        for part_text, abs_offset in _post_split_standardese(span):
+            text = part_text.strip()
+            if not text:
+                continue
+            local_line = _offset_to_prose_line(line_offsets, abs_offset)
+            units.append(RawSentence(text=text, start_line=prose_start + local_line))
+
+    return units
