@@ -112,7 +112,17 @@ def _build_tree(
         if start < ln < end and lv == parent_level + 1
     ]
     if not children_hdgs:
-        return []
+        deeper_hdgs = [
+            (ln, lv, t)
+            for ln, lv, t in headings
+            if start < ln < end and lv > parent_level + 1
+        ]
+        if not deeper_hdgs:
+            return []
+        child_level = min(lv for _, lv, _ in deeper_hdgs)
+        children_hdgs = [
+            (ln, lv, t) for ln, lv, t in deeper_hdgs if lv == child_level
+        ]
 
     sections: list[_TreeSection] = []
 

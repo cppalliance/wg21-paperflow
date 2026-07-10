@@ -6,7 +6,7 @@
 
 from __future__ import annotations
 
-from assay.chunker import Section, chunk_paper
+from assay.chunker import Section, _build_tree, _parse_headings, chunk_paper
 
 
 SIMPLE_PAPER = """\
@@ -57,6 +57,37 @@ meaningful and testable as an independent chunk.
 
 Content of third subsection rounding out the test.
 """
+
+ISSUE_LIST_PAPER = """\
+---
+title: Ready Issues
+---
+
+## Ready issues in C++26
+
+#### Issue one
+Content for issue one.
+
+#### Issue two
+Content for issue two.
+
+#### Issue three
+Content for issue three.
+"""
+
+
+def _legacy_direct_children(
+    headings: list[tuple[int, int, str]],
+    start: int,
+    end: int,
+    parent_level: int,
+) -> list[tuple[int, int, str]]:
+    """Pre-fix child selection: only headings at parent_level + 1."""
+    return [
+        (ln, lv, t)
+        for ln, lv, t in headings
+        if start < ln < end and lv == parent_level + 1
+    ]
 
 
 class TestChunkPaperBasic:
@@ -135,3 +166,75 @@ class TestBoldSubsectionSplit:
         for s in result:
             assert s.start_line >= 1
             assert s.end_line >= s.start_line
+
+
+class TestSkippedHeadingLevels:
+    def test_splits_h4_under_h2_without_h3(self):
+        result = chunk_paper(ISSUE_LIST_PAPER, max_chars=50)
+        assert len(result) > 1
+
+    def test_issue_chunks_under_cap(self):
+        max_chars = 50
+        result = chunk_paper(ISSUE_LIST_PAPER, max_chars=max_chars)
+        assert all(s.char_count <= max_chars for s in result)
+
+    def test_preserves_issue_headings(self):
+        result = chunk_paper(ISSUE_LIST_PAPER, max_chars=50)
+        headings = [s.heading for s in result]
+        assert any("Issue one" in h for h in headings)
+        assert any("Issue two" in h for h in headings)
+        assert any("Issue three" in h for h in headings)
+
+    def test_line_coverage(self):
+        result = chunk_paper(ISSUE_LIST_PAPER, max_chars=50)
+        lines = ISSUE_LIST_PAPER.splitlines()
+        assert result[0].start_line >= 1
+        assert result[-1].end_line <= len(lines)
+        for i in range(len(result) - 1):
+            assert result[i].end_line == result[i + 1].start_line - 1 or \
+                   result[i].end_line >= result[i + 1].start_line - 1
+
+
+class TestP4160R0ChunkerRegression:
+    """Regression tests for P4160R0: old chunker produced one monolithic chunk."""
+
+    def test_legacy_tree_ignores_h4_when_h3_absent(self, large_issue_list_paper):
+        lines = large_issue_list_paper.splitlines()
+        headings = _parse_headings(lines)
+        h2_line = next(ln for ln, lv, _t in headings if lv == 2)
+
+        legacy_children = _legacy_direct_children(headings, h2_line, len(lines), 2)
+        assert legacy_children == []
+
+        fixed_children = _build_tree(lines, headings, h2_line, len(lines), 2)
+        issue_children = [s for s in fixed_children if s.level == 4]
+        assert len(issue_children) == 20
+
+    def test_large_issue_list_not_monolithic_under_survey_budget(
+        self, large_issue_list_paper, survey_max_chars,
+    ):
+        result = chunk_paper(large_issue_list_paper, max_chars=survey_max_chars)
+
+        assert len(result) > 1
+        assert len(result) >= 5
+        assert max(s.char_count for s in result) < len(large_issue_list_paper) // 2
+
+    def test_old_behavior_would_fail_single_chunk_assertion(
+        self, large_issue_list_paper, survey_max_chars,
+    ):
+        """Documents the pre-fix failure: one chunk covered the whole paper."""
+        result = chunk_paper(large_issue_list_paper, max_chars=survey_max_chars)
+        lines = large_issue_list_paper.splitlines()
+
+        old_style_single_chunk = len(result) == 1 and result[0].end_line >= len(lines) - 1
+        assert not old_style_single_chunk
+
+    def test_issue_headings_split_out_not_merged_into_h2_only(
+        self, large_issue_list_paper, survey_max_chars,
+    ):
+        result = chunk_paper(large_issue_list_paper, max_chars=survey_max_chars)
+        headings = [s.heading for s in result]
+
+        assert any(h.startswith("Issue 1") or " + Issue 1" in h for h in headings)
+        assert any("Issue 10" in h for h in headings)
+        assert any("Issue 20" in h for h in headings)
