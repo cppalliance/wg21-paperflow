@@ -140,7 +140,9 @@ def _build_tree(
             start_line=start + 1,
             end_line=first_child_line,
             char_count=prefix_chars,
-            children=[],
+            children=_build_tree(
+                lines, headings, start, first_child_line, parent_level,
+            ),
         ))
 
     for idx, (ln, lv, title) in enumerate(children_hdgs):

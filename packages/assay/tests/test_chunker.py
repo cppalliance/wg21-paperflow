@@ -195,6 +195,77 @@ class TestSkippedHeadingLevels:
                    result[i].end_line >= result[i + 1].start_line - 1
 
 
+class TestIncidentalIntermediateHeading:
+    """Prefix span before a lone H3 must still use skipped-level fallback."""
+
+    def test_prefix_h4_issues_split_when_later_h3_exists(
+        self, survey_max_chars,
+    ):
+        prefix_issues = []
+        for i in range(1, 11):
+            body = "\n".join(
+                f"Wording detail line {j} for issue {i}."
+                for j in range(1, 26)
+            )
+            prefix_issues.append(f"#### Issue {i}\n{body}")
+        suffix_issues = []
+        for i in range(11, 16):
+            body = "\n".join(
+                f"Wording detail line {j} for issue {i}."
+                for j in range(1, 26)
+            )
+            suffix_issues.append(f"#### Issue {i}\n{body}")
+        paper = (
+            "---\n"
+            "title: Ready Issues\n"
+            "---\n\n"
+            "## Ready issues in C++26\n\n"
+            + "\n\n".join(prefix_issues)
+            + "\n\n### Editorial notes\n\n"
+            "One incidental intermediate heading after many H4 issues.\n\n"
+            + "\n\n".join(suffix_issues)
+        )
+
+        result = chunk_paper(paper, max_chars=survey_max_chars)
+        headings = [s.heading for s in result]
+
+        assert len(result) > 1
+        assert any("Issue 1" in h for h in headings)
+        assert any("Issue 5" in h for h in headings)
+        assert any("Issue 10" in h for h in headings)
+        assert max(s.char_count for s in result) < len(paper) // 2
+
+    def test_prefix_tree_recurses_into_h4_before_incidental_h3(self):
+        lines = [
+            "---",
+            "title: Ready Issues",
+            "---",
+            "",
+            "## Ready issues in C++26",
+            "",
+            "#### Issue 1",
+            "Content one.",
+            "",
+            "#### Issue 2",
+            "Content two.",
+            "",
+            "### Editorial notes",
+            "",
+            "#### Issue 3",
+            "Content three.",
+        ]
+        headings = _parse_headings(lines)
+        h2_line = next(ln for ln, lv, _t in headings if lv == 2)
+        h3_line = next(ln for ln, lv, _t in headings if lv == 3)
+
+        tree = _build_tree(lines, headings, h2_line, len(lines), 2)
+        prefix = next(s for s in tree if s.start_line <= h3_line + 1 and s.end_line == h3_line)
+        prefix_children = [s for s in prefix.children if s.level == 4]
+
+        assert len(prefix_children) == 2
+        assert {s.heading for s in prefix_children} == {"Issue 1", "Issue 2"}
+
+
 class TestP4160R0ChunkerRegression:
     """Regression tests for P4160R0: old chunker produced one monolithic chunk."""
 
