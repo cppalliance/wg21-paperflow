@@ -27,6 +27,12 @@ _FENCE_OPEN_RE = re.compile(r"^(`{3,}|~{3,})(\w*)")
 _BNF_PRODUCTION_RE = re.compile(r"^[a-z][a-z0-9_-]*\s*:\s*.+")
 # Lowercase lhs tokens that look like BNF but are wording directives or prose.
 _BNF_FALSE_POSITIVE_LHS = frozenset({"add", "modify", "insert", "strike", "delete"})
+# A genuine BNF right-hand side is made of grammar tokens (nonterminal names,
+# terminals, meta-symbols): no sentence-terminal punctuation and no
+# capitalized prose words. Lines that fail this look like informal lowercase
+# labels ("note:", "caveat:", "aside:") rather than grammar productions, and
+# would otherwise be swallowed whole instead of sentence-split.
+_BNF_RHS_PROSE_RE = re.compile(r"[.!?](?:\s|$)|[A-Z]")
 _SEGMENTER = Segmenter(language="en", clean=False, char_span=True)
 
 
@@ -116,8 +122,10 @@ def _is_bnf_production_line(line: str) -> bool:
     match = _BNF_PRODUCTION_RE.match(stripped)
     if match is None:
         return False
-    lhs = stripped.split(":", 1)[0].strip()
-    if lhs in _BNF_FALSE_POSITIVE_LHS:
+    lhs, _, rhs = stripped.partition(":")
+    if lhs.strip() in _BNF_FALSE_POSITIVE_LHS:
+        return False
+    if _BNF_RHS_PROSE_RE.search(rhs.strip()):
         return False
     return True
 

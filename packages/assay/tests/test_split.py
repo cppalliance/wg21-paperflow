@@ -130,3 +130,41 @@ def test_split_edge_cases_no_junk_fragments(
     assert [u.text for u in units] == expected_texts
     for text in expected_texts:
         assert text not in {"-", "(a)", "(b)", "1.2.3", "Release", "1.", "2.", "3."}
+
+
+@pytest.mark.parametrize(
+    "label",
+    [
+        "Constraints",
+        "Postconditions",
+        "Error conditions",
+        "Recommended practice",
+        "Hardware constraints",
+    ],
+)
+def test_standardese_covers_structure_specifications_elements(label: str) -> None:
+    md = f"{label}: some normative text applies here."
+    units = split_sentences(md)
+    assert len(units) == 1
+    assert units[0].text == md
+
+
+@pytest.mark.parametrize(
+    "markdown",
+    [
+        "note: this is a caveat about foo. Bar happens next.",
+        "caveat: watch out for edge cases. More detail follows.",
+        "aside: this is informal commentary. It continues here.",
+    ],
+)
+def test_lowercase_prose_label_is_not_treated_as_bnf(markdown: str) -> None:
+    units = split_sentences(markdown)
+    assert len(units) == 2
+
+
+def test_hardware_constraints_label_not_split_mid_word() -> None:
+    md = "Hardware constraints: requires atomic support. Next sentence."
+    units = split_sentences(md)
+    assert len(units) == 2
+    assert units[0].text == "Hardware constraints: requires atomic support."
+    assert units[1].text == "Next sentence."

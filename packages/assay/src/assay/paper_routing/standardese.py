@@ -11,7 +11,8 @@ from __future__ import annotations
 
 import re
 
-# Labels aligned with W1 hypothesis regex in hypotheses.py plus common wording
+# Labels aligned with W1 hypothesis regex in hypotheses.py, the standard's
+# [structure.specifications] normative element list, plus common wording
 # elements from tomd golden fixtures.
 STANDARDESE_LABELS: tuple[str, ...] = (
     "Effects",
@@ -22,6 +23,11 @@ STANDARDESE_LABELS: tuple[str, ...] = (
     "Complexity",
     "Mandates",
     "Preconditions",
+    "Postconditions",
+    "Constraints",
+    "Error conditions",
+    "Recommended practice",
+    "Hardware constraints",
     "Synchronization",
     "Expects",
     "Notes",
@@ -36,8 +42,11 @@ STANDARDESE_LINE_RE = re.compile(
 )
 
 # Unanchored matcher for label boundaries inside a sentence (post-split pass).
+# The negative lookbehind keeps a label from matching mid-word (e.g. "notes"
+# inside "footnotes:") now that the label set has grown to include compound
+# phrases such as "Hardware constraints".
 STANDARDESE_LABEL_RE = re.compile(
-    rf"(?:\*)?({_LABEL_ALT})(?:\*)?\s*:",
+    rf"(?<![A-Za-z])(?:\*)?({_LABEL_ALT})(?:\*)?\s*:",
     re.IGNORECASE,
 )
 
