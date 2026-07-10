@@ -137,10 +137,60 @@ def test_hypothesis_catalog_ids_unique(hyp: Hypothesis):
     assert ids.count(hyp.id) == 1
 
 
+@pytest.mark.parametrize("hyp", CATALOG)
+def test_hypothesis_catalog_declares_regex_or_nli(hyp: Hypothesis):
+    """Every hypothesis is scored by exactly one mechanism: a compiled regex
+    or an NLI entailment text. A hypothesis with neither is silently inert
+    from the catalog's point of view, which invites hidden special-casing
+    elsewhere (e.g. the old S1 hardcoded ``re.search`` in
+    ``get_hits_from_text``) that is easy to miss on the next catalog edit.
+    """
+    assert hyp.regex is not None or hyp.nli_text is not None
+    assert not (hyp.regex is not None and hyp.nli_text is not None)
+
+
 def test_d1_matches_library_header():
     hyp = next(h for h in CATALOG if h.id == "D1")
     assert hyp.matches_regex("Use <type_traits> for trait queries.")
     assert not hyp.matches_regex("No headers here.")
+
+
+def test_s1_declared_as_regex_in_catalog():
+    """S1 must fire through its own catalog-declared regex, not a hardcoded
+    special case in ``get_hits_from_text``."""
+    hyp = next(h for h in CATALOG if h.id == "S1")
+    assert hyp.regex is not None
+    assert hyp.matches_regex("audience: LEWG, LWG")
+    assert "S1" in get_hits_from_text("audience: SG1, LEWG")
+    assert "S1" not in get_hits_from_text("No metadata here.")
+
+
+def test_d4_generalizes_beyond_worked_example_wording():
+    """D4 (NAMESPACE_STD_MUTATION) must fire on library-modification
+    phrasing that is not a verbatim transcription of the N3854 worked
+    example ("the C++17 Standard Library should be updated accordingly").
+    """
+    hyp = next(h for h in CATALOG if h.id == "D4")
+    assert hyp.matches_regex(
+        "The header files for the standard library must be modified to add the new "
+        "annotations.",
+    )
+    assert hyp.matches_regex(
+        "Existing library implementations will need to be updated to support this.",
+    )
+    assert not hyp.matches_regex("This sentence has nothing to do with the library.")
+
+
+def test_m2_generalizes_beyond_worked_example_wording():
+    """M2 (PROPOSES_MODIFICATION) must fire on modification phrasing that is
+    not a verbatim transcription of the N3854 worked example ("updated
+    accordingly").
+    """
+    hyp = next(h for h in CATALOG if h.id == "M2")
+    assert hyp.matches_regex("The following signature should be changed to match.")
+    assert hyp.matches_regex("This wording needs to be revised for clarity.")
+    assert hyp.matches_regex("The reference implementation is updated accordingly.")
+    assert not hyp.matches_regex("This sentence proposes nothing in particular.")
 
 
 def test_sustained_min_floor():

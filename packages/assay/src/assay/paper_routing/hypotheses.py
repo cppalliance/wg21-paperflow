@@ -29,7 +29,11 @@ _D3_RE = re.compile(
     re.IGNORECASE,
 )
 _D4_RE = re.compile(
-    r"(?i)\bnamespace\s+std\b|standard\s+library\s+should\s+be\s+updated"
+    r"(?i)\bnamespace\s+std\b|"
+    r"\b(?:standard\s+)?library\b.{0,60}?\b(?:should|shall|must|will|needs?\s+to)\s+be\s+"
+    r"(?:updated|modified|changed|extended|amended)\b|"
+    r"\b(?:should|shall|must|will|needs?\s+to)\s+be\s+"
+    r"(?:updated|modified|changed|extended|amended)\b.{0,60}?\b(?:standard\s+)?library\b"
 )
 _D8_RE = re.compile(
     r"\[(?:expr|dcl|class|stmt|decl|basic|conv|temp|cpp|lex)\.[\w.]+\]|"
@@ -44,7 +48,10 @@ _M1_RE = re.compile(
     r"(?i)\b(proposal\s+to\s+add|we\s+propose|this\s+paper\s+introduces?|this\s+proposal\s+adds?)\b",
 )
 _M2_RE = re.compile(
-    r"(?i)\b(should\s+be\s+changed|we\s+modify|updated\s+accordingly)\b",
+    r"(?i)\b(?:should|shall|must|will|needs?\s+to)\s+be\s+"
+    r"(?:changed|modified|updated|revised|amended)\b|"
+    r"\bwe\s+modify\b|"
+    r"\bupdat(?:e|ed)\s+accordingly\b",
 )
 _M5_RE = re.compile(r"(?i)\b(_v\s+suffix|_t\s+suffix|naming\s+convention)\b")
 _M6_RE = re.compile(r"(?i)\b(superior\s+to|compared\s+to|alternative\s+approach)\b")
@@ -72,6 +79,7 @@ _W3_RE = re.compile(
 _S3_RE = re.compile(
     r"(?i)\b(does(?:n't| not)\s+affect\s+existing\s+user\s+code|migration\s+path)\b",
 )
+_S1_RE = re.compile(r"(?i)\baudience:\s*")
 
 
 @dataclass(frozen=True)
@@ -220,7 +228,7 @@ CATALOG: tuple[Hypothesis, ...] = (
         _WOR,
         nli_text="The sentence proposes or modifies a feature-test macro.",
     ),
-    _h("S1", "AUDIENCE_METADATA", _STR),
+    _h("S1", "AUDIENCE_METADATA", _STR, regex=_S1_RE),
     _h(
         "S2",
         "CROSS_REFERENCE_PAPER",
@@ -257,8 +265,6 @@ def get_hits_from_text(text: str) -> set[str]:
     for hyp in CATALOG:
         if hyp.regex is not None and hyp.regex.search(text) is not None:
             hits.add(hyp.id)
-    if re.search(r"(?i)\baudience:\s*", text):
-        hits.add("S1")
     return hits
 
 
