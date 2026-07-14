@@ -115,6 +115,20 @@ class ItemOutput(BaseModel, frozen=True):
     line: int = Field(description="Line number.")
     quality_tier: str | None = Field(default=None, description="Evidence quality tier.")
 
+class ChunkExtractItems(BaseModel, frozen=True):
+    """Model-facing Extract output: items only.
+
+    Omits ``chunk_index`` (known from the per-chunk call context and assigned by
+    the orchestrator). Asking the model to author a leading bare integer
+    destabilizes JSON generation on thinking backends - the same failure
+    ``ClassifyGap`` documents (a junk token emitted for the managed field).
+    The hook wraps this into ``ChunkExtractOutput`` with the authoritative
+    ``chunk_index``.
+    """
+
+    items: list[ItemOutput] = Field(default=[], description="Extracted items.")
+
+
 class ChunkExtractOutput(BaseModel, frozen=True):
     """Structured output from one extract sub-agent (one chunk)."""
 
@@ -186,6 +200,16 @@ class ClaimDecision(BaseModel, frozen=True):
     claim_id: int = Field(description="Global claim ID from Extract.")
     supported: bool = Field(description="True if chunk provides support.")
     reason: str = Field(description="One-line reason for the decision.")
+
+
+class ChunkDecideItems(BaseModel, frozen=True):
+    """Model-facing Decide output: decisions only.
+
+    Omits ``chunk_index`` for the same reason as ``ChunkExtractItems``; the hook
+    wraps this into ``ChunkDecideOutput`` with the authoritative ``chunk_index``.
+    """
+
+    decisions: list[ClaimDecision] = Field(default=[], description="Per-claim decisions.")
 
 
 class ChunkDecideOutput(BaseModel, frozen=True):
@@ -362,10 +386,14 @@ class StrengthOutput(BaseModel, frozen=True):
     explanation: str = Field(description="Why this is solid. 1-2 sentences.")
 
 
-class ChunkAnalyzeOutput(BaseModel, frozen=True):
-    """Structured output from one per-chunk analyze sub-agent."""
+class ChunkAnalyzeItems(BaseModel, frozen=True):
+    """Model-facing Analyze output: findings + strengths.
 
-    chunk_index: int = Field(description="Which chunk this analysis covers.")
+    Omits ``chunk_index`` for the same reason as ``ChunkExtractItems``. Unlike
+    Extract/Decide, the analyze hook never reads a per-chunk index back, so there
+    is no wrapper type - the hook consumes ``findings``/``strengths`` directly.
+    """
+
     findings: list[FindingOutput] = Field(default=[], description="Findings from this chunk.")
     strengths: list[StrengthOutput] = Field(default=[], description="Strengths from this chunk.")
 

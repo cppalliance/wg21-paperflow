@@ -99,7 +99,7 @@ For each item: an exact verbatim substring of the source, plus the line number.
 
 ---
 
-Per-chunk extraction with concurrency from ## Config. Output: ChunkExtractOutput per chunk.
+Per-chunk extraction with concurrency from ## Config. Output: ChunkExtractItems per chunk (items only; the orchestrator assigns the authoritative chunk_index, mirroring Classify).
 
 ## 5. Decide
 
@@ -134,7 +134,7 @@ If unsupported, state what is missing (e.g., "no benchmark for the cited 1-2ns f
 
 ---
 
-Per-chunk decide with concurrency from ## Config. Output: ChunkDecideOutput per chunk.
+Per-chunk decide with concurrency from ## Config. Output: ChunkDecideItems per chunk (decisions only; the orchestrator assigns the authoritative chunk_index, mirroring Classify).
 
 ## 6. Classify
 
@@ -276,7 +276,7 @@ Do NOT set `id` on FindingOutput or StrengthOutput - the pipeline assigns IDs af
 
 ---
 
-C sub-agents (one per chunk), run serially. Each chunk sub-agent reads its chunk with the thesis, cross-chunk gaps, research context, and 25 test patterns. Output: ChunkAnalyzeOutput per chunk.
+C sub-agents (one per chunk), run serially. Each chunk sub-agent reads its chunk with the thesis, cross-chunk gaps, research context, and 25 test patterns. Output: ChunkAnalyzeItems per chunk (findings + strengths; no model-authored chunk_index, mirroring Classify).
 
 ## 13. Rationale
 
