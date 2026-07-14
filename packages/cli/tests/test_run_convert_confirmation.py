@@ -39,7 +39,7 @@ from unittest.mock import patch
 import pytest
 
 from paperstore import SqliteBackend
-from pipeline import ConvertReport, ProcessResult
+from cli.postconditions import ConvertReport, ProcessResult
 
 
 @pytest.fixture

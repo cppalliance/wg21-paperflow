@@ -21,11 +21,10 @@ from collections import Counter
 
 from paperstore import StorageBackend
 
-from paperstore.progress import ProgressCallback
-
 from pipeline import (
     AgentBackend,
     PipelinePrompt,
+    ProgressCallback,
     StepContext,
     StepHooks,
     build_pipeline,

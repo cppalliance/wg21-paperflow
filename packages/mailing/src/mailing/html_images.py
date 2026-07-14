@@ -27,6 +27,7 @@ from __future__ import annotations
 import base64
 import logging
 import re
+from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import urljoin, urlparse
@@ -192,6 +193,38 @@ def _caption_from(img: Tag) -> str:
     return " ".join(cap.get_text(" ", strip=True).split())
 
 
+def _iter_referenced_imgs(soup: BeautifulSoup) -> Iterator[tuple[int, Tag, str]]:
+    """Yield ``(document_order, img, src)`` for each ``<img>`` with a
+    non-empty ``src``.
+
+    Single source of truth for which ``<img>`` tags "count", so
+    :func:`count_html_image_refs` and :func:`fetch_html_images` cannot
+    drift apart. ``document_order`` is 1-based and reflects the position
+    of the ``<img>`` element in the parsed HTML.
+    """
+    order = 0
+    for img in soup.find_all("img"):
+        src = (img.get("src") or "").strip()
+        if not src:
+            continue
+        order += 1
+        yield order, img, src
+
+
+def count_html_image_refs(html_bytes: bytes | str) -> int:
+    """Count ``<img>`` tags with a non-empty ``src`` in the HTML.
+
+    Mirrors the reference-counting in :func:`fetch_html_images` (an image
+    is "referenced" when its ``src`` attribute is present and non-empty)
+    but performs no network I/O. The download stage uses this to tell
+    "the source genuinely references no images" apart from "images were
+    referenced but every fetch failed", so it only discards prior
+    artifacts in the former case.
+    """
+    soup = BeautifulSoup(html_bytes, "html.parser")
+    return sum(1 for _ in _iter_referenced_imgs(soup))
+
+
 async def fetch_html_images(
     html_bytes: bytes | str,
     *,
@@ -211,19 +244,10 @@ async def fetch_html_images(
     skipped so the rest of the paper's images still land. The whole
     paper download does not fail on a single bad image.
     """
-    if isinstance(html_bytes, bytes):
-        soup = BeautifulSoup(html_bytes, "html.parser")
-    else:
-        soup = BeautifulSoup(html_bytes, "html.parser")
+    soup = BeautifulSoup(html_bytes, "html.parser")
 
     out: list[HtmlFetchedImage] = []
-    order = 0
-    for img in soup.find_all("img"):
-        src = (img.get("src") or "").strip()
-        if not src:
-            continue
-        order += 1
-
+    for order, img, src in _iter_referenced_imgs(soup):
         alt_attr = (img.get("alt") or "").strip()
         caption_text = _caption_from(img)
 
