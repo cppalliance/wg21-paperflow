@@ -30,8 +30,11 @@ Code promotion (turning a multi-line monospace-dominant wording
 section into a fenced ``cpp`` block inside the div) lives in the PDF
 emitter because it needs span-level structure that the rendered
 Markdown has already collapsed. This module never touches code-
-promoted divs: they contain no inline role tags and trip the
-"no role chars" early return.
+promoted divs: a uniform-role fence carries no inline role tags and
+trips the "no role chars" early return, while a mixed fenced diff sits
+in a neutral ``:::wording`` div and trips the ``implicit is None`` early
+return (its ``<ins>`` / ``<del>`` markers are deliberately literal
+inside the fence).
 """
 
 from __future__ import annotations
