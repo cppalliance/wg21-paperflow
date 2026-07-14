@@ -334,8 +334,13 @@ hot, 3+ for thermonuclear. Mod actions are short and procedural.
 **Depth.** Max depth 6. Most chains are depth <= 3. Encounter chains
 may reach depth 4-5.
 
-**Misconception traps.** Allocate one signal slot per trap that
-anticipates the misreading and gently corrects it.
+**Misconception traps.** Allocate a two-slot pair per trap: a
+``noise`` slot with ``noise_stance="misconception"`` whose brief
+voices the misreading as a confused or leading question (a learner
+asks it), and a child ``signal`` slot one level deeper whose brief
+gently corrects it, carrying the relevant ``anchor_id`` and
+``domain_lens``. The correction teaches the reader, not just the
+asker.
 
 Every reply slot must have a non-empty ``brief``. Slot ids are
 sequential (``s01``, ``s02``, ...). ``parent_slot_id`` is the slot
