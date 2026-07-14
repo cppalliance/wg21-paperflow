@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2026 Vinnie Falco (vinnie.falco@gmail.com)
+# Copyright (c) 2026 Henry Wang(henryw910816@outlook.com)
 #
 # Distributed under the Boost Software License, Version 1.0.
 #
@@ -124,15 +124,23 @@ def _assert_collect_result(
 def test_collect_dedupes_claims_and_assigns_sequential_ids():
     duplicate_claim = "The proposal improves throughput for senders"
     extractions = [
-        _chunk(0, [
-            _item("claim", duplicate_claim, line=5),
-            _item("evidence", "benchmark shows throughput", line=6),
-            _item("concession", "minor API churn", line=7),
-        ]),
-        _chunk(1, [
-            _item("claim", duplicate_claim, line=20),
-            _item("evidence", "benchmark shows throughput on large workloads", line=21),
-        ]),
+        _chunk(
+            0,
+            [
+                _item("claim", duplicate_claim, line=5),
+                _item("evidence", "benchmark shows throughput", line=6),
+                _item("concession", "minor API churn", line=7),
+            ],
+        ),
+        _chunk(
+            1,
+            [
+                _item("claim", duplicate_claim, line=20),
+                _item(
+                    "evidence", "benchmark shows throughput on large workloads", line=21
+                ),
+            ],
+        ),
     ]
     scans = [
         ScanOutput(chunk_index=0, gaps=[_gap("missing latency data")]),
@@ -241,7 +249,11 @@ def test_collect_builds_asks_from_ask_type_items():
     ]
     assert active_lenses == ["Rationale"]
     assert inactive_lenses == [
-        "Performance", "Design", "Specification", "Usability", "Ecosystem",
+        "Performance",
+        "Design",
+        "Specification",
+        "Usability",
+        "Ecosystem",
     ]
     assert next_id == 6
 
@@ -249,16 +261,22 @@ def test_collect_builds_asks_from_ask_type_items():
 def test_collect_does_not_dedup_questions_dependencies_scope():
     shared = "Should this apply to coroutines?"
     extractions = [
-        _chunk(0, [
-            _item("question", shared, line=1),
-            _item("dependency", "P2300 sender algorithms", line=2),
-            _item("scope", "executors only", line=3),
-        ]),
-        _chunk(1, [
-            _item("question", shared, line=10),
-            _item("dependency", "P2300 sender algorithms", line=11),
-            _item("scope", "executors only", line=12),
-        ]),
+        _chunk(
+            0,
+            [
+                _item("question", shared, line=1),
+                _item("dependency", "P2300 sender algorithms", line=2),
+                _item("scope", "executors only", line=3),
+            ],
+        ),
+        _chunk(
+            1,
+            [
+                _item("question", shared, line=10),
+                _item("dependency", "P2300 sender algorithms", line=11),
+                _item("scope", "executors only", line=12),
+            ],
+        ),
     ]
 
     result = collect(extractions, [], start_id=1)
@@ -281,7 +299,11 @@ def test_collect_does_not_dedup_questions_dependencies_scope():
     assert asks == []
     assert active_lenses == ["Rationale"]
     assert inactive_lenses == [
-        "Performance", "Design", "Specification", "Usability", "Ecosystem",
+        "Performance",
+        "Design",
+        "Specification",
+        "Usability",
+        "Ecosystem",
     ]
     assert next_id == 1
 
@@ -528,7 +550,14 @@ def test_synthesize_dominant_dynamic_tie_resolves_to_first():
             0,
         ),
         (
-            [_finding(2, "critical unrelated", severity="critical", quote="unrelated words only")],
+            [
+                _finding(
+                    2,
+                    "critical unrelated",
+                    severity="critical",
+                    quote="unrelated words only",
+                )
+            ],
             "Weakened",
             "High",
             True,
