@@ -23,6 +23,28 @@ def _make_paper(line_count: int) -> str:
     return "\n".join(f"Content for line {i}" for i in range(1, line_count + 1))
 
 
+def _worst_case_chunk_body_lines() -> list[str]:
+    """Single-char lines sized to the formatted Challenge embed cap."""
+    lines: list[str] = []
+    while True:
+        lines.append("x")
+        formatted = format_numbered_lines(lines, 1, len(lines))
+        if len(formatted) > CHALLENGE_CHUNK_CHAR_CAP:
+            lines.pop()
+            break
+    return lines
+
+
+def _source_chunks_section(message: str) -> str:
+    marker = "## Source chunks\n\n"
+    start = message.index(marker)
+    rest = message[start + len(marker):]
+    end = rest.find("\n### [")
+    if end < 0:
+        end = len(rest)
+    return marker + rest[:end]
+
+
 def _legacy_cross_exam_user_message(
     findings_batch: list[FindingOutput],
     state: PipelineState,
@@ -102,13 +124,17 @@ class TestChallengeContext:
         assert message.count("see Source chunks above") == len(findings)
 
     def test_oversized_chunk_uses_line_window(self):
-        paper_md = _make_paper(200)
+        line_count = 1000
+        paper_md = "\n".join("x" for _ in range(line_count))
+        formatted_len = len(format_numbered_lines(paper_md.splitlines(), 1, line_count))
+        assert formatted_len > CHALLENGE_CHUNK_CHAR_CAP
+
         oversized_chunk = ChunkEntry(
             index=0,
             heading="Huge section",
             start_line=1,
-            end_line=200,
-            char_count=CHALLENGE_CHUNK_CHAR_CAP + 1,
+            end_line=line_count,
+            char_count=len(paper_md),
         )
         state = PipelineState(
             paper_id="P9999R0",
@@ -121,7 +147,7 @@ class TestChallengeContext:
             lens="Design",
             severity="minor",
             quote="q1",
-            line=100,
+            line=500,
             explanation="explanation one",
         )
         ctx = StepContext()
@@ -130,8 +156,97 @@ class TestChallengeContext:
 
         assert "## Source chunks" not in message
         assert f"exceeds {CHALLENGE_CHUNK_CHAR_CAP} chars" in message
-        assert "Content for line 100" in message
-        assert "Content for line 1\n" not in message
+        assert "Content for line 500" not in message
+        assert "500| x" in message
+        assert "   1| x" not in message
+
+    def test_raw_under_cap_formatted_over_cap_excluded_from_source_chunks(self):
+        line_count = 1000
+        paper_lines = ["x"] * line_count
+        paper_md = "\n".join(paper_lines)
+        raw_len = len(paper_md)
+        formatted_len = len(format_numbered_lines(paper_lines, 1, line_count))
+        assert raw_len <= CHALLENGE_CHUNK_CHAR_CAP
+        assert formatted_len > CHALLENGE_CHUNK_CHAR_CAP
+
+        chunk = ChunkEntry(
+            index=0,
+            heading="Dense lines",
+            start_line=1,
+            end_line=line_count,
+            char_count=raw_len,
+        )
+        state = PipelineState(
+            paper_id="P9999R0",
+            paper_md=paper_md,
+            chunk_map=[chunk],
+        )
+        finding = FindingOutput(
+            id=1,
+            title="Finding one",
+            lens="Design",
+            severity="minor",
+            quote="q1",
+            line=500,
+            explanation="explanation one",
+        )
+        ctx = StepContext()
+
+        message = _build_cross_exam_user_message([finding], state, ctx)
+
+        assert "## Source chunks" not in message
+        assert f"exceeds {CHALLENGE_CHUNK_CHAR_CAP} chars" in message
+
+    def test_max_formatted_source_chunks_batch_under_runpod_limit(self):
+        chunk_body = _worst_case_chunk_body_lines()
+        formatted_one = format_numbered_lines(chunk_body, 1, len(chunk_body))
+        assert len(formatted_one) <= CHALLENGE_CHUNK_CHAR_CAP
+        assert len(formatted_one) >= CHALLENGE_CHUNK_CHAR_CAP - 20
+
+        paper_lines: list[str] = ["---", "title: Test", "---", ""]
+        chunk_map: list[ChunkEntry] = []
+        for i in range(CHALLENGE_MAX_BATCH):
+            paper_lines.append(f"## Section {i + 1}")
+            paper_lines.append("")
+            start_line = len(paper_lines) + 1
+            paper_lines.extend(chunk_body)
+            paper_lines.append("")
+            end_line = len(paper_lines) - 1
+            chunk_map.append(
+                ChunkEntry(
+                    index=i,
+                    heading=f"Section {i + 1}",
+                    start_line=start_line,
+                    end_line=end_line,
+                    char_count=sum(len(line) for line in chunk_body),
+                )
+            )
+
+        paper_md = "\n".join(paper_lines)
+        state = PipelineState(
+            paper_id="P9999R0",
+            paper_md=paper_md,
+            chunk_map=chunk_map,
+        )
+        findings = [
+            FindingOutput(
+                id=i + 1,
+                title=f"Finding {i + 1}",
+                lens="Design",
+                severity="minor",
+                quote="q",
+                line=chunk_map[i].start_line,
+                explanation="x" * 200,
+            )
+            for i in range(CHALLENGE_MAX_BATCH)
+        ]
+        ctx = StepContext()
+
+        message = _build_cross_exam_user_message(findings, state, ctx)
+        source_section = _source_chunks_section(message)
+
+        assert message.count("see Source chunks above") == CHALLENGE_MAX_BATCH
+        assert len(source_section) < RUNPOD_BODY_LIMIT_CHARS
 
 
 class TestP4160R0ChallengeRegression:

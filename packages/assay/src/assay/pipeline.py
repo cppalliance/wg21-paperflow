@@ -350,6 +350,12 @@ def _build_rationale_user_message(state: PipelineState) -> str:
     return "".join(parts)
 
 
+def _challenge_chunk_fits_cap(chunk: ChunkEntry, paper_lines: list[str]) -> bool:
+    """True when ``format_numbered_lines`` output fits the Challenge embed cap."""
+    formatted = format_numbered_lines(paper_lines, chunk.start_line, chunk.end_line)
+    return len(formatted) <= CHALLENGE_CHUNK_CHAR_CAP
+
+
 def _build_cross_exam_user_message(
     findings_batch: list[FindingOutput], state: PipelineState, ctx: StepContext
 ) -> str:
@@ -405,7 +411,7 @@ def _build_cross_exam_user_message(
     chunk_by_key: dict[tuple[int, int], ChunkEntry] = {}
     for f in findings_batch:
         ch = chunk_by_line.get(f.line) if f.line > 0 else None
-        if ch is not None and ch.char_count <= CHALLENGE_CHUNK_CHAR_CAP:
+        if ch is not None and _challenge_chunk_fits_cap(ch, paper_lines):
             chunk_by_key[(ch.start_line, ch.end_line)] = ch
 
     if chunk_by_key:
@@ -428,7 +434,7 @@ def _build_cross_exam_user_message(
             parts.append(f"**Damage:** {f.damage}\n")
 
         ch = chunk_by_line.get(f.line) if f.line > 0 else None
-        if ch is not None and ch.char_count <= CHALLENGE_CHUNK_CHAR_CAP:
+        if ch is not None and _challenge_chunk_fits_cap(ch, paper_lines):
             parts.append(
                 f"\n**Containing chunk: {ch.heading} "
                 f"(lines {ch.start_line}-{ch.end_line}; see Source chunks above)**\n"

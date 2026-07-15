@@ -121,6 +121,14 @@ class TestChunkPaperBasic:
         assert len(result) == 1
         assert result[0].heading == "(untitled)"
 
+    def test_heading_at_line_zero_covers_full_paper(self):
+        paper = "# Title\n\nbody"
+        result = chunk_paper(paper)
+        lines = paper.splitlines()
+        assert len(result) == 1
+        assert result[0].heading == "Title"
+        assert result[0].start_line == 1
+        assert result[0].end_line == len(lines)
 
 
 class TestDefaultChunking:

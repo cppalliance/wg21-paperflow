@@ -135,6 +135,10 @@ def _build_tree(
     skip-level fallback selects the shallowest deeper heading in the
     span (see module docstring).
 
+    Child headings on the span's opening line (``ln == start``) are
+    included; the strict ``start < ln`` bound would drop an H1 at line 0
+    when the root span begins there.
+
     When the span has leading prose before its first child heading, that
     prefix is emitted as its own section and ``_build_tree`` is called
     again on the prefix with the same ``parent_level`` so nested
@@ -143,13 +147,13 @@ def _build_tree(
     children_hdgs = [
         (ln, lv, t)
         for ln, lv, t in headings
-        if start < ln < end and lv == parent_level + 1
+        if start <= ln < end and lv == parent_level + 1
     ]
     if not children_hdgs:
         deeper_hdgs = [
             (ln, lv, t)
             for ln, lv, t in headings
-            if start < ln < end and lv > parent_level + 1
+            if start <= ln < end and lv > parent_level + 1
         ]
         if not deeper_hdgs:
             return []
