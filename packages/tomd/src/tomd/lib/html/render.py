@@ -536,7 +536,7 @@ def _render_element(el: Tag, generator: str) -> str | None:
         return _render_paragraph(el)
 
     if tag == "pre":
-        return _render_pre(el, generator)
+        return _render_pre(el)
 
     if tag == "code-block":
         return _render_code_block_custom(el)
@@ -704,16 +704,39 @@ def _collapse_whitespace(text: str) -> str:
     return _COLLAPSE_WS_RE.sub(" ", text).strip()
 
 
-def _render_pre(el: Tag, generator: str) -> str:
+# WG21 papers are C++ by default: a code block with no explicit language class
+# is labeled ``cpp`` so downstream pipelines (dissect/agora) can parse it as
+# code. An explicit class (``language-python``, ``sourceCode bash``, a bare
+# known-language token) on the ``<code>`` or its ``<pre>`` parent is the escape
+# hatch for the rare non-C++ block and wins over the default.
+_WG21_DEFAULT_CODE_LANG = "cpp"
+_CODE_LANG_ALIASES = {"c++": "cpp", "cxx": "cpp", "cplusplus": "cpp"}
+_KNOWN_CODE_LANGS = frozenset({
+    "cpp", "c", "python", "javascript", "rust", "go",
+    "java", "bash", "shell", "json", "yaml", "xml",
+})
+
+
+def _lang_from_classes(classes: list[str]) -> str:
+    """Extract an explicit code language from CSS classes, or "" if none."""
+    for cls in classes:
+        if cls.startswith("sourceCode"):
+            lang = cls[len("sourceCode"):]
+            if lang:
+                return lang.lower()
+        if cls.startswith("language-"):
+            return cls[len("language-"):].lower()
+        if cls in _KNOWN_CODE_LANGS:
+            return cls
+    return ""
+
+
+def _render_pre(el: Tag) -> str:
     """Render a preformatted block as a fenced code block."""
     code_el = el.find("code")
-    if code_el:
-        lang = _detect_code_language(code_el, generator)
-        text = code_el.get_text()
-    else:
-        lang = ""
-        text = el.get_text()
-    text = text.strip("\n")
+    source = code_el or el
+    lang = _detect_code_language(source)
+    text = source.get_text().strip("\n")
     return f"```{lang}\n{text}\n```"
 
 
@@ -724,29 +747,21 @@ def _render_code_block_custom(el: Tag) -> str:
     return f"```cpp\n{text}\n```"
 
 
-def _detect_code_language(code_el: Tag, generator: str) -> str:
-    """Detect the programming language from code element classes."""
-    classes = code_el.get("class", [])
-    for cls in classes:
-        if cls.startswith("sourceCode"):
-            lang = cls[len("sourceCode"):]
-            if lang:
-                return lang.lower()
-        if cls.startswith("language-"):
-            return cls[len("language-"):].lower()
-        if cls in ("cpp", "c", "python", "javascript", "rust", "go",
-                    "java", "bash", "shell", "json", "yaml", "xml"):
-            return cls
-    parent = code_el.parent
-    if parent and parent.name == "pre":
-        for cls in parent.get("class", []):
-            if cls.startswith("sourceCode"):
-                lang = cls[len("sourceCode"):]
-                if lang:
-                    return lang.lower()
-    if generator == "mpark":
-        return "cpp"
-    return ""
+def _detect_code_language(el: Tag) -> str:
+    """Detect the fenced-code language for a ``<pre>``/``<code>`` element.
+
+    An explicit language class on the element (or, for a ``<code>``, its parent
+    ``<pre>``) wins. Absent one, WG21 papers are C++ by default, so the block
+    is labeled ``cpp``. ``c++``/``cxx`` aliases normalize to ``cpp``.
+    """
+    lang = _lang_from_classes(el.get("class", []))
+    if not lang and el.name == "code":
+        parent = el.parent
+        if parent and parent.name == "pre":
+            lang = _lang_from_classes(parent.get("class", []))
+    if not lang:
+        return _WG21_DEFAULT_CODE_LANG
+    return _CODE_LANG_ALIASES.get(lang, lang)
 
 
 def _render_div(el: Tag, generator: str) -> str | None:
@@ -756,7 +771,7 @@ def _render_div(el: Tag, generator: str) -> str | None:
     if "sourceCode" in classes:
         pre = el.find("pre")
         if pre:
-            return _render_pre(pre, generator)
+            return _render_pre(pre)
 
     if "code" in classes:
         text = el.get_text()

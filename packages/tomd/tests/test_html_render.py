@@ -90,10 +90,10 @@ class TestCodeBlock:
         md = render_body(soup, "mpark")
         assert "```cpp" in md
 
-    def test_no_default_for_unknown(self):
+    def test_default_cpp_for_unknown(self):
         soup = parse_html("<pre><code>void f();</code></pre>")
         md = render_body(soup, "unknown")
-        assert "```\n" in md
+        assert "```cpp" in md
 
 
 class TestTable:
@@ -387,9 +387,42 @@ class TestCodeBlockExtended:
         )
         assert "```cpp" in md
 
-    def test_bikeshed_no_default_lang_without_class(self):
+    def test_bikeshed_defaults_to_cpp_without_class(self):
+        # WG21 papers are C++ by default: a code block with no language class
+        # is labeled cpp regardless of generator (issue #297).
         md = render_body(parse_html("<pre><code>x</code></pre>"), "bikeshed")
-        assert md.startswith("```\n") or "\n```\n" in md
+        assert "```cpp" in md
+
+    def test_language_cpp_plus_on_parent_pre_normalizes(self):
+        # Bikeshed (P3953R0) puts the language on the parent <pre> as
+        # ``language-c++``; it must normalize to the cpp alias.
+        md = render_body(
+            parse_html(
+                '<pre class="language-c++ highlight">'
+                '<code class="highlight">int x;</code></pre>'
+            ),
+            "bikeshed",
+        )
+        assert "```cpp" in md
+        assert "```c++" not in md
+
+    def test_bare_pre_without_code_defaults_to_cpp(self):
+        # P4020R0: a bare <pre> with no <code> child and no class still
+        # renders as cpp rather than an unlabeled fence.
+        md = render_body(
+            parse_html("<pre>double atan2(double, double);</pre>"),
+            "hand-written",
+        )
+        assert "```cpp" in md
+        assert "double atan2(double, double);" in md
+
+    def test_explicit_non_cpp_language_is_escape_hatch(self):
+        # An explicit non-C++ class wins over the cpp default.
+        md = render_body(
+            parse_html('<pre><code class="language-python">x = 1</code></pre>'),
+            "bikeshed",
+        )
+        assert "```python" in md
         assert "```cpp" not in md
 
 

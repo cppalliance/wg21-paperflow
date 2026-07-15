@@ -216,7 +216,7 @@ Unknown generator prompt suppression when generic metadata still succeeded; loss
 
 **`<pre>`**
 
-- Prefer nested `<code>`; detect language from `sourceCode*`, `language-*`, known short names, or **`cpp`** default when generator is **mpark** ([`_detect_code_language`](lib/html/render.py)).
+- Prefer nested `<code>`; detect language from `sourceCode*`, `language-*`, or known short names on the `<code>` or its parent `<pre>`. WG21 papers are C++ by default, so a block with no explicit language class is labeled **`cpp`**; an explicit non-C++ class is the escape hatch. `c++`/`cxx` normalize to `cpp` ([`_detect_code_language`](lib/html/render.py)).
 
 **`<code-block>` (Schultke)**
 

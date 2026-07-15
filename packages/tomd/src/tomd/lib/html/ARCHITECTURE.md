@@ -96,8 +96,8 @@ The converter handles six generator families (mpark/wg21, Bikeshed, hand-written
 **T11. Code block rendering**
 - `render.py:_render_pre`, `_detect_code_language`
 - `<pre><code>` -> fenced block with language tag
-- Language detection: `sourceCode*` class prefix, `language-*` prefix, known language class names
-- Default language: `"cpp"` for mpark generator, `""` otherwise
+- Language detection: `sourceCode*` class prefix, `language-*` prefix, or known language class names, read from the `<code>` or (for `<code>`) its parent `<pre>`
+- Default language: `"cpp"` (WG21 papers are C++ by default); an explicit non-C++ class is the escape hatch. `c++`/`cxx` alias to `cpp`
 - Code text extracted via `get_text()` (strips all HTML spans/highlighting)
 
 **T12. Table rendering**
