@@ -258,6 +258,40 @@ def test_collect_builds_asks_from_ask_type_items():
     assert next_id == 6
 
 
+def test_collect_dedupes_asks_across_chunks():
+    duplicate_ask = "We request LEWG direction"
+    extractions = [
+        _chunk(0, [_item("ask", duplicate_ask, line=99)]),
+        _chunk(1, [_item("ask", duplicate_ask, line=120)]),
+    ]
+
+    result = collect(extractions, [], start_id=5)
+
+    _assert_collect_result(
+        result,
+        items=CollectedItems(),
+        gaps_by_lens=_empty_gaps_by_lens(),
+        asks=[
+            AskOutput(
+                id=5,
+                quote=duplicate_ask,
+                line=99,
+                target="",
+                type="",
+            ),
+        ],
+        active_lenses=["Rationale"],
+        inactive_lenses=[
+            "Performance",
+            "Design",
+            "Specification",
+            "Usability",
+            "Ecosystem",
+        ],
+        next_id=6,
+    )
+
+
 def test_collect_does_not_dedup_questions_dependencies_scope():
     shared = "Should this apply to coroutines?"
     extractions = [
@@ -528,6 +562,21 @@ def test_synthesize_dominant_dynamic_tie_resolves_to_first():
     assert result.dominant_dynamic == "first-dynamic"
 
 
+def test_synthesize_dominant_dynamic_prefers_longer_constituent_chain():
+    f1 = _finding(1, "first")
+    f2 = _finding(2, "second")
+    f3 = _finding(3, "third")
+    compounds = [
+        CompoundOutput(name="short-chain", constituents=[3], mechanism="c alone"),
+        CompoundOutput(name="long-chain", constituents=[1, 2], mechanism="a then b"),
+    ]
+    derive = _derive("unrelated thesis statement here")
+
+    result = synthesize([f1, f2, f3], compounds, derive)
+
+    assert result.dominant_dynamic == "long-chain"
+
+
 @pytest.mark.parametrize(
     "surviving, expected_label, expected_confidence, expected_thesis_survives, "
     "expected_critical, expected_significant",
@@ -600,9 +649,7 @@ def test_synthesize_verdict_matrix(
     assert result.critical_count == expected_critical
     assert result.significant_count == expected_significant
     assert result.thesis_statement == derive.central_claim
-    if expected_label == "Sound" and not surviving:
-        assert result.verdict_statement == "No structural weaknesses found."
-    elif expected_label == "Sound" and surviving:
+    if expected_label == "Sound":
         assert result.verdict_statement == "No structural weaknesses found."
     else:
         assert "survived challenge" in result.verdict_statement
