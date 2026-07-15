@@ -905,16 +905,56 @@ def _detect_body_size(sections: list[Section]) -> float:
 
 
 def _rank_font_sizes(sections: list[Section],
-                     body_size: float) -> dict[float, int]:
-    """Rank font sizes larger than body. Returns {size: heading_level}."""
+                     body_size: float,
+                     skip: Section | None = None) -> dict[float, int]:
+    """Rank font sizes larger than body. Returns {size: heading_level}.
+
+    ``skip`` excludes one section's line contributions (the document
+    title): its font must not define a heading tier, otherwise it takes
+    rank 1 and every real body heading ranks one level too deep. Only the
+    title's *lines* are dropped, not the size globally, so a real heading
+    that happens to share the title's font still contributes that size and
+    keeps its tier.
+    """
     sizes = set()
     for sec in sections:
+        if sec is skip:
+            continue
         for line in sec.lines:
             fs = line.font_size
             if fs > body_size * _HEADING_SIZE_RATIO:
                 sizes.add(fs)
     ranked = sorted(sizes, reverse=True)
     return {sz: i + 1 for i, sz in enumerate(ranked)}
+
+
+def _title_section_for_ranking(sections: list[Section],
+                               body_size: float) -> Section | None:
+    """The document-title block, to exclude from font-size ranking.
+
+    The title renders as H1 (front matter) and is not a body heading. If
+    its font stays in ``_rank_font_sizes`` it takes rank 1 and pushes every
+    body-heading tier one level too deep. Identify it the way the
+    classifier does: the first large-font, non-metadata block that precedes
+    any numbered section. Returns None when the document opens on numbered
+    content (no distinct title block to exclude).
+    """
+    large_thresh = body_size * _TITLE_SIZE_RATIO
+    for sec in sections:
+        first_line = sec.text.split("\n")[0].strip()
+        if not first_line:
+            continue
+        if SECTION_NUM_RE.match(first_line):
+            return None
+        if sec.font_size <= large_thresh:
+            continue
+        if (_is_known_section(first_line)
+                or "@" in first_line
+                or DATE_RE.match(first_line)
+                or len(first_line) > _TITLE_MAX_LENGTH):
+            continue
+        return sec
+    return None
 
 
 _ROMAN_RE = re.compile(r"^[IVXLCDM]+$")
@@ -1143,7 +1183,15 @@ def _structure_body_impl(metadata: dict,
                          ) -> tuple[dict, list[Section], int]:
     """Implementation of body structuring logic."""
     body_size = _detect_body_size(sections)
-    font_ranks = _rank_font_sizes(sections, body_size)
+    title_section = _title_section_for_ranking(sections, body_size)
+    font_ranks = _rank_font_sizes(sections, body_size, skip=title_section)
+    if title_section is not None and not font_ranks:
+        # Excluding the title emptied the ranking: the title is the only
+        # heading-scale font, so there are no real font-based heading tiers
+        # for its exclusion to protect. Keep it in to preserve the prior
+        # classification (dropping to an empty ranking destabilises the
+        # front-region passes and can strip leading body paragraphs).
+        font_ranks = _rank_font_sizes(sections, body_size)
 
     _log.debug("Body size: %.1f, font ranks: %s", body_size, font_ranks)
 
@@ -2914,7 +2962,15 @@ def _validate_nesting(sections: list[Section]) -> int:
             and abs(sec.font_size - prev_font_size) <= _SIBLING_FONT_TOL
         )
         is_numbered = _heading_is_numbered(sec)
-        if is_sibling and prev_level > 0 and sec.heading_level > prev_level:
+        if (is_sibling and prev_level > 0 and sec.heading_level > prev_level
+                and not is_numbered):
+            # Numbered headings are exempt: their level comes from the
+            # section-number depth, which is authoritative. WG21 papers
+            # render a subsection ("3.2.1") at the same font size as its
+            # parent ("3.2"), so the shared-font sibling heuristic would
+            # otherwise clamp the deeper numbered heading up a level
+            # (H4 -> H3), collapsing the numbering hierarchy. This mirrors
+            # the numbered-exempt guard on the inversion clamp below.
             _log.info("Nesting sibling: h%d -> h%d for %r",
                        sec.heading_level, prev_level, sec.text[:40])
             sec.heading_level = prev_level

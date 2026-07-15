@@ -124,6 +124,30 @@ def test_handwritten_table_boilerplate_stripped():
     assert soup.find("table", class_="header") is None
 
 
+def test_handwritten_title_h1_stripped():
+    """The title <h1> is removed so it does not inflate the heading-level
+    baseline used by _normalize_heading_levels (issue #300)."""
+    soup = parse_html(_load("handwritten_address_sample.html"))
+    strip_boilerplate(soup, "hand-written")
+    assert soup.find("h1") is None
+
+
+def test_handwritten_heading_levels_not_offset_by_title_h1():
+    """Body headings keep their source level. With the title <h1> stripped it
+    stays out of the minimum-heading calculation, so a body <h2> renders as
+    `## ` and is not offset to `### ` (issue #300, the p4020r0 defect).
+    Asserted on whole lines, not substrings: `### Introduction` also contains
+    the string `## Introduction`."""
+    soup = parse_html(_load("handwritten_address_sample.html"))
+    strip_boilerplate(soup, "hand-written")
+    md = render_body(soup, "hand-written")
+    lines = md.splitlines()
+    assert "## Introduction" in lines
+    assert "### Introduction" not in lines
+    # The title text is not duplicated into the body as a heading.
+    assert not any("Test Handwritten Paper" in ln for ln in lines)
+
+
 # ---- Hatemplate (eelis/draft) -------------------------------------------
 
 def test_hatemplate_detection():

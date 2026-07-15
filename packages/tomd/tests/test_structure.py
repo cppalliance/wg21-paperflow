@@ -10,6 +10,7 @@ from tomd.lib.pdf.structure import (
     compare_extractions, structure_sections, drop_leaked_toc_entries,
     heading_confidence, _extract_metadata,
     _detect_body_size, _validate_nesting,
+    _rank_font_sizes, _title_section_for_ranking,
     _demote_repeated_low_confidence_numbers,
     _section_top_y, _reorders_only_monospace, _page_is_multicolumn,
     _is_title_like_straggler, _is_empty_heading, _straggler_forward_references,
@@ -1155,6 +1156,114 @@ class TestHeadingStructureDefectsP4221R0:
         assert headings["Proposed Functions"] <= headings["Overview"], (
             f"parent rendered deeper than child: {headings}"
         )
+
+
+class TestHeadingLevelDefectsIssue300:
+    """Heading levels derived from numbering depth (numbered) and the true
+    heading font tier (unnumbered), per issue #300."""
+
+    def test_numbered_subsection_keeps_depth_level(self):
+        """A numbered subsection rendered at the SAME font size as its parent
+        keeps its numbering-derived level. WG21 papers render `2.1` and `2.1.1`
+        at one font; the shared-font sibling clamp must not collapse the deeper
+        numbered heading up a level (p0957r8: `### 3.2.1` should be `#### 3.2.1`).
+        """
+        sections = [
+            make_section("2 Widgets", font_size=16.0),
+            make_section("body prose to anchor the body size baseline here",
+                         font_size=10.0),
+            make_section("2.1 Gadgets", font_size=13.0),
+            make_section("more body prose text at the body size", font_size=10.0),
+            make_section("2.1.1 Sprockets", font_size=13.0),  # same font as 2.1
+            make_section("still more body prose at the body size", font_size=10.0),
+        ]
+        _, result, _ = structure_sections(sections, has_title=True)
+        levels = {s.text.split()[0]: s.heading_level
+                  for s in result if s.kind == SectionKind.HEADING}
+        assert levels.get("2") == 2, levels
+        assert levels.get("2.1") == 3, levels
+        assert levels.get("2.1.1") == 4, (
+            f"numbered subsection clamped off its numbering depth: {levels}")
+
+    def test_title_font_not_counted_as_heading_tier(self):
+        """The title's font must not occupy heading rank 1; otherwise every
+        body heading ranks one tier too deep (p2040r0: top-level `Building
+        blocks` at 14pt rendered `###` instead of `##`)."""
+        sections = [
+            make_section("The Paper Title Goes Here", font_size=20.0),
+            make_section("Building blocks", font_size=14.0),   # top-level, unknown
+            make_section("body prose text at the body size here", font_size=10.0),
+            make_section("Reflection on expressions", font_size=12.0),  # subheading
+            make_section("more body prose text at the body size", font_size=10.0),
+        ]
+        _, result, _ = structure_sections(sections, has_title=True)
+        levels = {s.text: s.heading_level
+                  for s in result if s.kind == SectionKind.HEADING}
+        assert levels.get("Building blocks") == 2, (
+            f"top-level heading not at H2 (title-font pollution): {levels}")
+        assert levels.get("Reflection on expressions") == 3, (
+            f"subheading not at H3: {levels}")
+
+    def test_title_only_large_font_preserves_leading_paragraphs(self):
+        """When the title is the ONLY heading-scale font, excluding it would
+        empty the font ranking and destabilise the front-region passes,
+        dropping leading body paragraphs (p4024r0). The empty-ranking guard
+        keeps the title in, so the paragraphs survive."""
+        sections = [
+            make_section("Title: Guidance on Something", font_size=26.0),
+            make_section("Motivation: the community thrives on diverse input "
+                         "and this line is body prose", font_size=12.0),
+            make_section("A second body paragraph that continues the prose here",
+                         font_size=12.0),
+        ]
+        _, result, _ = structure_sections(sections, has_title=True)
+        texts = "\n".join(s.text for s in result)
+        assert "Motivation" in texts, "leading body paragraph dropped"
+        assert "second body paragraph" in texts, "second paragraph dropped"
+
+    def test_rank_font_sizes_skip_excludes_sole_holder(self):
+        """Skipping the title drops a size only when the title is its sole
+        holder; the remaining tiers renumber from rank 1."""
+        title = make_section("Title", font_size=20.0)
+        body = make_section("body prose here at the base size", font_size=10.0)
+        h1 = make_section("Section A", font_size=14.0)
+        h2 = make_section("Sub A", font_size=12.0)
+        ranks = _rank_font_sizes([title, body, h1, h2], 10.0, skip=title)
+        assert 20.0 not in ranks
+        assert ranks[14.0] == 1
+        assert ranks[12.0] == 2
+
+    def test_rank_font_sizes_skip_keeps_shared_size(self):
+        """A size shared by a real heading survives the title skip (only the
+        title's own line contribution is dropped, not the size globally)."""
+        title = make_section("Title", font_size=14.0)
+        h1 = make_section("Section A", font_size=14.0)  # shares the title font
+        body = make_section("body prose here", font_size=10.0)
+        ranks = _rank_font_sizes([title, h1, body], 10.0, skip=title)
+        assert ranks.get(14.0) == 1
+
+    def test_rank_font_sizes_skip_empties_when_title_is_only_tier(self):
+        """Documents the guard's trigger: skipping the sole large-font block
+        leaves an empty ranking."""
+        title = make_section("Title", font_size=26.0)
+        p1 = make_section("body prose one at base size", font_size=12.0)
+        assert _rank_font_sizes([title, p1], 12.0, skip=title) == {}
+
+    def test_title_section_for_ranking_finds_leading_large_block(self):
+        sections = [
+            make_section("Some Grand Title", font_size=20.0),
+            make_section("Abstract", font_size=14.0),
+            make_section("body prose", font_size=10.0),
+        ]
+        t = _title_section_for_ranking(sections, 10.0)
+        assert t is not None and t.text == "Some Grand Title"
+
+    def test_title_section_for_ranking_none_when_numbered_first(self):
+        sections = [
+            make_section("1 Introduction", font_size=16.0),
+            make_section("body prose", font_size=10.0),
+        ]
+        assert _title_section_for_ranking(sections, 10.0) is None
 
 
 class TestExtractMetadataKey:

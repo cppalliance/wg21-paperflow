@@ -1150,6 +1150,14 @@ def strip_boilerplate(soup: BeautifulSoup, generator: str) -> list[str]:
             addr.decompose()
         for table in soup.find_all("table", class_="header"):
             table.decompose()
+        # The paper title is the leading <h1> (metadata extraction already
+        # captured it from the first <h1>). Remove it so
+        # _normalize_heading_levels does not include the H1 in its
+        # minimum-heading calculation, which would offset every body heading
+        # by +1 (H2 -> H3, etc.). Mirrors the hatemplate branch below.
+        title_h1 = soup.find("h1")
+        if title_h1:
+            title_h1.decompose()
 
     if generator == "wg21":
         for el in soup.find_all("div", class_="wg21-head"):
