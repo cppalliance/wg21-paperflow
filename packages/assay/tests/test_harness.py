@@ -19,8 +19,8 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from assay.harness import dedupe_findings, upgrade_gaps
-from assay.models import FindingOutput, GapOutput, _ensure_int_list
+from assay.harness import cross_examine, dedupe_findings, upgrade_gaps
+from assay.models import CrossExamVerdict, FindingOutput, GapOutput, _ensure_int_list
 
 
 class _StubEmbedder:
@@ -223,6 +223,44 @@ def test_dedupe_findings_broken_embedder_falls_back_to_lexical():
     candidate = _finding("Y mishandles allocator")
     kept = dedupe_findings(existing, [candidate], embedder=_BrokenEmbedder())
     assert kept == [candidate]
+
+
+# -- cross_examine ----------------------------------------------------------
+
+
+def _finding_with_id(
+    finding_id: int,
+    title: str,
+    *,
+    lens: str = "Design",
+) -> FindingOutput:
+    return FindingOutput(
+        id=finding_id,
+        title=title,
+        lens=lens,
+        severity="significant",
+        quote="",
+        line=0,
+        explanation=title,
+    )
+
+
+def test_cross_examine_missing_verdict_raises():
+    findings = [
+        _finding_with_id(1, "first"),
+        _finding_with_id(2, "second"),
+    ]
+    verdicts = [
+        CrossExamVerdict(
+            finding_id=99,
+            finding_title="orphan",
+            survived=False,
+            killed_by="phantom",
+            reasoning="no such finding",
+        ),
+    ]
+    with pytest.raises(ValueError, match="incomplete: no verdict for finding_id\\(s\\) \\[1, 2\\]"):
+        cross_examine(findings, verdicts)
 
 
 # -- _cosine sanity ---------------------------------------------------------

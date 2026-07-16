@@ -304,18 +304,37 @@ def cross_examine(
     """Step 14: apply LLM cross-examination verdicts to findings.
 
     Returns (surviving, killed).
+    Raises ValueError when any finding has no matching verdict.
     """
+    if not findings:
+        return [], []
+
+    finding_ids = {f.id for f in findings}
     verdict_map: dict[int, CrossExamVerdict] = {}
     for v in verdicts:
         verdict_map[v.finding_id] = v
+    verdict_ids = set(verdict_map.keys())
+
+    orphan_ids = sorted(verdict_ids - finding_ids)
+    if orphan_ids:
+        logger.warning(
+            "cross_examine: orphan verdict finding_id(s) %s (no matching finding)",
+            orphan_ids,
+        )
+
+    unjudged_ids = sorted(finding_ids - verdict_ids)
+    if unjudged_ids:
+        raise ValueError(
+            f"cross_examination incomplete: no verdict for finding_id(s) {unjudged_ids}"
+        )
 
     surviving: list[FindingOutput] = []
     killed: list[KilledFinding] = []
 
     for f in findings:
-        v = verdict_map.get(f.id)
+        v = verdict_map[f.id]
 
-        if v and not v.survived:
+        if not v.survived:
             killed.append(KilledFinding(
                 f.id,
                 finding_title=f.title,
