@@ -365,7 +365,7 @@ def test_dedup_items_drops_duplicate_and_absorbs_substring():
 
 def test_cross_examine_missing_verdict_raises():
     findings = [_finding(1, "orphan finding")]
-    with pytest.raises(ValueError, match="incomplete: no verdict for finding_id\\(s\\) \\[1\\]"):
+    with pytest.raises(ValueError, match="incomplete: no verdict for \\[1\\] orphan finding"):
         cross_examine(findings, [])
 
 
@@ -379,7 +379,7 @@ def test_cross_examine_partial_batch_raises():
         killed_by=None,
         reasoning="holds up",
     )
-    with pytest.raises(ValueError, match="incomplete: no verdict for finding_id\\(s\\) \\[2\\]"):
+    with pytest.raises(ValueError, match="incomplete: no verdict for \\[2\\] unjudged"):
         cross_examine([f1, f2], [verdict])
 
 

@@ -324,8 +324,14 @@ def cross_examine(
 
     unjudged_ids = sorted(finding_ids - verdict_ids)
     if unjudged_ids:
+        finding_by_id = {f.id: f for f in findings}
+        unjudged_labels = [
+            f"[{fid}] {finding_by_id[fid].title}"
+            for fid in unjudged_ids
+        ]
         raise ValueError(
-            f"cross_examination incomplete: no verdict for finding_id(s) {unjudged_ids}"
+            "cross_examination incomplete: no verdict for "
+            + ", ".join(unjudged_labels)
         )
 
     surviving: list[FindingOutput] = []

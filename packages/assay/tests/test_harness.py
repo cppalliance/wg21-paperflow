@@ -259,7 +259,7 @@ def test_cross_examine_missing_verdict_raises():
             reasoning="no such finding",
         ),
     ]
-    with pytest.raises(ValueError, match="incomplete: no verdict for finding_id\\(s\\) \\[1, 2\\]"):
+    with pytest.raises(ValueError, match="incomplete: no verdict for \\[1\\] first, \\[2\\] second"):
         cross_examine(findings, verdicts)
 
 
