@@ -295,8 +295,8 @@ def prepare_report_data(state: PipelineState) -> ReportData:
     has_structural = bool(major_raw or compounds)
     structural_summary = ""
     if major_raw:
-        compound_count = sum(1 for f in major_raw
-                            if f.title in {t for c in (state.compounds or []) for t in c.constituents})
+        constituent_ids = {fid for c in (state.compounds or []) for fid in c.constituents}
+        compound_count = sum(1 for f in major_raw if f.id in constituent_ids)
         thesis_count = len(major_raw) - compound_count
         parts = []
         if compound_count:
