@@ -97,6 +97,13 @@ Otherwise, apply this funnel to prose. Stop at the first match:
 
 For each item: an exact verbatim substring of the source, plus the line number.
 
+Output size rules (keep JSON compact):
+
+- Use the shortest verbatim quote that still identifies the item. Do not quote entire multi-paragraph blocks or full code listings in one item.
+- One fenced code block may become multiple evidence items (split on logical boundaries: function, concept, table row group). Each item gets its own shorter quote.
+- For wording-heavy normative text, prefer evidence over claim; keep individual quotes under roughly 500 characters.
+- When the chunk is dense, prioritize claims and asks first; omit low-value stage-direction lines already excluded by rule 7.
+
 ---
 
 Per-chunk extraction with concurrency from ## Config. Output: ChunkExtractItems per chunk (items only; the orchestrator assigns the authoritative chunk_index, mirroring Classify).
