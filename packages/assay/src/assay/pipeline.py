@@ -1038,8 +1038,7 @@ def _apply_challenge_quote_grounding(state: PipelineState) -> None:
         state.quote_grounding_collect,
         report,
     )
-    if state.quote_grounding is not None:
-        _log_quote_grounding(state.quote_grounding, step="Challenge")
+    _log_quote_grounding(report, step="Challenge")
 
 
 async def _custom_derive(state: PipelineState, ctx: StepContext, spec) -> None:

@@ -119,10 +119,12 @@ You judge whether claims in a section of a WG21 paper are supported by evidence 
 A claim restating itself is NOT support. The question is: does the chunk contain something OTHER than the claim that backs it up?
 
 You receive:
+
 - the chunk text (a section of the paper)
 - a list of claims Extract identified in this chunk, each with an ID and quote
 
 For each claim, look for support DISTINCT from the claim. Support means:
+
 - benchmark or measurement data (for performance claims)
 - code, implementation, or worked example (for implementation claims)
 - citation or formal definition (for specification claims)
@@ -130,6 +132,7 @@ For each claim, look for support DISTINCT from the claim. Support means:
 - explanatory mechanism with technical detail (for design claims)
 
 NOT support:
+
 - the claim's own text repeated or paraphrased
 - a bare assertion without backing ("X is Y" alone is not support for "X is Y")
 - another claim that depends on the same unsupported premise
@@ -162,6 +165,7 @@ For each unsupported claim, produce a GapOutput:
 - severity - "significant" if retracting the claim breaks the paper's argument, "minor" otherwise
 
 Lens definitions:
+
 - Performance - speed, latency, overhead, allocation, scaling
 - Design - protocol shape, type structure, API ergonomics
 - Specification - normative wording, conformance, what an implementation must do
@@ -228,6 +232,7 @@ Output: VerifyOutput (confirmations, contradictions, new_evidence).
 You are researching external technical context for one analytical lens of a WG21 paper. Budget: 3 web searches maximum. After each search, check relevance to the paper's thesis. Stop early if first 2 searches return nothing relevant. Return only direct hits. Every finding must connect to the paper's thesis or scope.
 
 When researching the Specification lens and standard-lookup tools are available, use them instead of web search for normative questions. Tool selection:
+
 - Not sure which tool? -> guide_query (describe what you need)
 - Does mechanism X exist? -> verify_mechanism
 - Fetch a specific section [label] -> lookup_section
@@ -236,7 +241,7 @@ When researching the Specification lens and standard-lookup tools are available,
 - Broader search -> search_standard or search_index
 - Grammar rules -> search_grammar
 - Related sections -> get_cross_references
-Web search remains available for non-normative context (implementations, benchmarks, blog posts).
+  Web search remains available for non-normative context (implementations, benchmarks, blog posts).
 
 ---
 
@@ -267,8 +272,8 @@ Resolve External: integrate citation and web evidence back into the load-bearing
 - **thinking-budget:** 32768
 - **concurrency:** 8
 
-
 You are analyzing one section of a WG21 paper in Pass 2. You have:
+
 - The thesis (central_claim, problem_statement, scope_boundary)
 - Load-bearing claims
 - Cross-chunk gaps from OTHER chunks
@@ -293,6 +298,7 @@ C sub-agents (one per chunk), run serially. Each chunk sub-agent reads its chunk
 You assess the paper's rationale completeness. Two layers:
 
 Layer 1 - SD-4 mechanical checklist (5 items):
+
 - SD4-1: Motivating Examples - does paper show problem today + improvement?
 - SD4-2: Design Principles - does paper articulate principles or connect to C++ philosophy?
 - SD4-3: Alternatives Considered - are alternatives discussed with reasons?

@@ -8,11 +8,25 @@
 
 from __future__ import annotations
 
+import logging
+
 from assay.harness import ground_quotes, normalize_for_grounding, validate_quote
-from assay.models import AskOutput, CollectedItem, CollectedItems, ItemOutput
+from assay.models import (
+    AskOutput,
+    CollectedItem,
+    CollectedItems,
+    FindingOutput,
+    ItemOutput,
+    PipelineState,
+    QuoteCheckResult,
+    QuoteGroundingReport,
+)
 
+PAPER_MD_EXACT = "Line A\nThe committee shall require X.\nLine C\n"
+PAPER_MD_WHITESPACE_DRIFT = "Line A\nThe committee shall  require X.\nLine C\n"
+PAPER_MD = PAPER_MD_WHITESPACE_DRIFT
 
-PAPER_MD = "Line A\nThe committee shall  require X.\nLine C\n"
+QUOTE = "The committee shall require X."
 
 
 def test_normalize_for_grounding_collapses_whitespace():
@@ -20,7 +34,8 @@ def test_normalize_for_grounding_collapses_whitespace():
 
 
 def test_validate_quote_exact_substring_ok():
-    result = validate_quote("The committee shall require X.", 2, PAPER_MD)
+    assert QUOTE in PAPER_MD_EXACT
+    result = validate_quote(QUOTE, 2, PAPER_MD_EXACT)
     assert result.ok
     assert not result.line_mismatch
     assert result.corrected_line == 2
@@ -32,12 +47,13 @@ def test_validate_quote_flags_nonsubstring():
 
 
 def test_validate_quote_whitespace_drift_ok():
-    result = validate_quote("The committee shall require X.", 2, PAPER_MD)
+    assert QUOTE not in PAPER_MD_WHITESPACE_DRIFT
+    result = validate_quote(QUOTE, 2, PAPER_MD_WHITESPACE_DRIFT)
     assert result.ok
 
 
 def test_validate_quote_wrong_line_sets_mismatch():
-    result = validate_quote("The committee shall require X.", 99, PAPER_MD)
+    result = validate_quote(QUOTE, 99, PAPER_MD)
     assert result.ok
     assert result.line_mismatch
     assert result.corrected_line == 2
@@ -50,7 +66,7 @@ def test_validate_quote_empty_ok():
 
 def test_ground_quotes_batch():
     entries = [
-        ("The committee shall require X.", 2, "claim", 1),
+        (QUOTE, 2, "claim", 1),
         ("The committee shall ban Y.", 2, "claim", 2),
     ]
     report = ground_quotes(entries, PAPER_MD)
@@ -61,7 +77,7 @@ def test_ground_quotes_batch():
 
 
 def test_quote_grounding_flags_nonsubstring():
-    good = ItemOutput(type="claim", quote="The committee shall require X.", line=2)
+    good = ItemOutput(type="claim", quote=QUOTE, line=2)
     bad = ItemOutput(type="claim", quote="The committee shall ban Y.", line=2)
     assert validate_quote(good.quote, good.line, PAPER_MD).ok
     assert not validate_quote(bad.quote, bad.line, PAPER_MD).ok
@@ -89,3 +105,64 @@ def test_collect_entries_skip_companion_source_pid():
     assert "paper evidence" in quotes
     assert "do X" in quotes
     assert "companion quote" not in quotes
+
+
+def test_challenge_log_uses_challenge_only_report(caplog):
+    """Collect ungrounded failures must not appear under Challenge WARNING logs."""
+    from assay.pipeline import _apply_challenge_quote_grounding
+
+    state = PipelineState(
+        paper_md=PAPER_MD,
+        quote_grounding_collect=QuoteGroundingReport(
+            checked=1,
+            ungrounded=1,
+            failures=[
+                QuoteCheckResult(
+                    ok=False,
+                    quote="fabricated collect quote",
+                    line=1,
+                    kind="claim",
+                    ref_id=1,
+                ),
+            ],
+        ),
+        surviving=[],
+        strengths=[],
+    )
+    with caplog.at_level(logging.WARNING, logger="assay.pipeline"):
+        _apply_challenge_quote_grounding(state)
+
+    challenge_logs = [
+        r.message for r in caplog.records if "Challenge quote grounding" in r.message
+    ]
+    assert challenge_logs == []
+
+
+def test_challenge_log_reports_challenge_failures(caplog):
+    """Challenge-stage ungrounded quotes are logged under Challenge only."""
+    from assay.pipeline import _apply_challenge_quote_grounding
+
+    state = PipelineState(
+        paper_md=PAPER_MD,
+        quote_grounding_collect=QuoteGroundingReport(checked=0, ungrounded=0),
+        surviving=[
+            FindingOutput(
+                id=1,
+                title="bad finding",
+                lens="Design",
+                severity="minor",
+                quote="fabricated finding quote",
+                line=1,
+                explanation="because",
+            ),
+        ],
+        strengths=[],
+    )
+    with caplog.at_level(logging.WARNING, logger="assay.pipeline"):
+        _apply_challenge_quote_grounding(state)
+
+    challenge_logs = [
+        r.message for r in caplog.records if "Challenge quote grounding" in r.message
+    ]
+    assert len(challenge_logs) == 1
+    assert "1 ungrounded / 1 checked" in challenge_logs[0]
