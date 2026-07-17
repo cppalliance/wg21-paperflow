@@ -9,11 +9,11 @@
   },
   "p1122r3": {
     "code": 1.0,
-    "frontmatter": 1.0,
-    "heading": 1.0,
-    "list": 0.55,
-    "table": 1.0,
-    "text": 0.97
+    "frontmatter": 0.75,
+    "heading": 0.89,
+    "list": 0.35,
+    "table": 0.0,
+    "text": 0.92
   },
   "p4182r0": {
     "code": 1.0,
