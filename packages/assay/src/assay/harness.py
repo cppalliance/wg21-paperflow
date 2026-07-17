@@ -14,6 +14,7 @@ and synthesize (Step 16) logic.
 from __future__ import annotations
 
 import logging
+import re
 
 import numpy as np
 
@@ -28,6 +29,8 @@ from assay.models import (
     FindingOutput,
     ItemOutput,
     KilledFinding,
+    QuoteCheckResult,
+    QuoteGroundingReport,
     ScanOutput,
     SynthesisOutput,
 )
@@ -480,6 +483,105 @@ def _dedup_items(items: list[ItemOutput]) -> list[ItemOutput]:
 
     return [s for idx, s in enumerate(survivors) if idx not in absorbed]
 
+
+# -- Quote grounding (ASSAY-005) --------------------------------------------
+
+_WHITESPACE_RE = re.compile(r"\s+")
+
+
+def normalize_for_grounding(text: str) -> str:
+    """Collapse whitespace runs for substring grounding checks."""
+    return _WHITESPACE_RE.sub(" ", text).strip()
+
+
+def _find_corrected_line(normalized_quote: str, paper_md: str) -> int | None:
+    """Return 1-based line of first line whose normalized text contains the quote."""
+    if not normalized_quote:
+        return None
+    for line_no, line in enumerate(paper_md.splitlines(), start=1):
+        if normalized_quote in normalize_for_grounding(line):
+            return line_no
+    return None
+
+
+def validate_quote(quote: str, line: int, paper_md: str) -> QuoteCheckResult:
+    """Check whether quote is grounded in paper_md after whitespace normalization."""
+    if not quote.strip():
+        return QuoteCheckResult(ok=True, quote=quote, line=line)
+
+    normalized_quote = normalize_for_grounding(quote)
+    normalized_paper = normalize_for_grounding(paper_md)
+    if normalized_quote not in normalized_paper:
+        return QuoteCheckResult(ok=False, quote=quote, line=line)
+
+    corrected_line = _find_corrected_line(normalized_quote, paper_md)
+    line_mismatch = corrected_line is not None and corrected_line != line
+    return QuoteCheckResult(
+        ok=True,
+        quote=quote,
+        line=line,
+        corrected_line=corrected_line,
+        line_mismatch=line_mismatch,
+    )
+
+
+def ground_quotes(
+    entries: list[tuple[str, int, str, int | None]],
+    paper_md: str,
+) -> QuoteGroundingReport:
+    """Ground a batch of (quote, line, kind, ref_id) entries against paper_md."""
+    failures: list[QuoteCheckResult] = []
+    line_mismatches = 0
+    checked = 0
+    for quote, line, kind, ref_id in entries:
+        if not quote.strip():
+            continue
+        checked += 1
+        result = validate_quote(quote, line, paper_md)
+        if not result.ok:
+            failures.append(
+                QuoteCheckResult(
+                    ok=False,
+                    quote=result.quote,
+                    line=result.line,
+                    kind=kind,
+                    ref_id=ref_id,
+                )
+            )
+            continue
+        if result.line_mismatch:
+            line_mismatches += 1
+
+    return QuoteGroundingReport(
+        checked=checked,
+        ungrounded=len([f for f in failures if not f.ok]),
+        line_mismatches=line_mismatches,
+        failures=failures,
+    )
+
+
+def merge_quote_grounding_reports(
+    *reports: QuoteGroundingReport | None,
+) -> QuoteGroundingReport | None:
+    """Merge multiple grounding reports into one aggregate."""
+    present = [r for r in reports if r is not None]
+    if not present:
+        return None
+    failures: list[QuoteCheckResult] = []
+    checked = 0
+    ungrounded = 0
+    line_mismatches = 0
+    for report in present:
+        checked += report.checked
+        ungrounded += report.ungrounded
+        line_mismatches += report.line_mismatches
+        failures.extend(report.failures)
+    return QuoteGroundingReport(
+        checked=checked,
+        ungrounded=ungrounded,
+        line_mismatches=line_mismatches,
+        failures=failures,
+    )
 
 
 _STOP_WORDS = frozenset(

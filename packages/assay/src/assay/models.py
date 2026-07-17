@@ -105,6 +105,29 @@ class ProbeResult:
     stale_refs: list[str] = field(default_factory=list)
 
 
+@dataclass(frozen=True)
+class QuoteCheckResult:
+    """Result of a deterministic quote-grounding check against paper_md."""
+
+    ok: bool
+    quote: str
+    line: int
+    corrected_line: int | None = None
+    line_mismatch: bool = False
+    kind: str = ""
+    ref_id: int | None = None
+
+
+@dataclass(frozen=True)
+class QuoteGroundingReport:
+    """Aggregate quote-grounding results for one pipeline checkpoint."""
+
+    checked: int = 0
+    ungrounded: int = 0
+    line_mismatches: int = 0
+    failures: list[QuoteCheckResult] = field(default_factory=list)
+
+
 # -- Step 4: Extract output -------------------------------------------------
 
 class ItemOutput(BaseModel, frozen=True):
@@ -514,6 +537,7 @@ class PipelineState(BaseModel):
     asks: Optional[list[AskOutput]] = None
     active_lenses: Optional[list[str]] = None
     inactive_lenses: Optional[list[str]] = None
+    quote_grounding_collect: Optional[QuoteGroundingReport] = None
 
     # Step 8 - Derive
     derive: Optional[DeriveOutput] = None
@@ -537,6 +561,8 @@ class PipelineState(BaseModel):
     # Step 14 - Challenge
     surviving: Optional[list[FindingOutput]] = None
     killed: Optional[list[KilledFinding]] = None
+    quote_grounding_challenge: Optional[QuoteGroundingReport] = None
+    quote_grounding: Optional[QuoteGroundingReport] = None
 
     # Step 15 - Couple
     compounds: Optional[list[CompoundOutput]] = None
