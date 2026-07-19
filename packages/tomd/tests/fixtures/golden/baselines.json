@@ -13,7 +13,15 @@
     "heading": 0.59,
     "list": 1.0,
     "table": 1.0,
-    "text": 0.66
+    "text": 0.66,
+  },
+  "p4020r0": {
+    "code": 0.0,
+    "frontmatter": 1.0,
+    "heading": 0.67,
+    "list": 1.0,
+    "table": 1.0,
+    "text": 1.0
   },
   "p4182r0": {
     "code": 1.0,

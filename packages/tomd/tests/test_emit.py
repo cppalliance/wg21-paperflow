@@ -663,27 +663,32 @@ class TestRenderWordingSection:
 
     def test_near_uniform_add_with_minority_del_falls_through_to_diff(self):
         # An almost-uniform-ins block that still carries a small ``<del>``
-        # run must NOT be fenced: a fence path drops inline role tags, so
-        # the deletion would silently disappear (a fidelity violation).
-        # The implicit-role share is well above ``UNIFORM_ROLE_THRESHOLD``
-        # (0.95) but the contrarian-char count is non-zero, so the fence
-        # gate falls through to the ``<br>`` code-diff renderer with the
-        # ``<del>`` tag preserved.
+        # run must NOT take the directional-fence path (shape 1), which
+        # drops inline role tags: the deletion would silently disappear (a
+        # fidelity violation). The implicit-role share is well above
+        # ``UNIFORM_ROLE_THRESHOLD`` (0.95) but the contrarian-char count
+        # is non-zero, so it falls through to the neutral fenced code diff
+        # (shape 2), which keeps the ``<del>`` marker verbatim inside the
+        # fence and uses a neutral ``:::wording`` div (never directional).
         ins_payload = _mono_span("x" * 200, "ins")
         del_payload = _mono_span("noexcept", "del")
         l1 = Line(spans=[ins_payload])
         l2 = Line(spans=[del_payload])
         sec = _make_wording_section(SectionKind.WORDING_ADD, [l1, l2])
         out = _render_wording_section(sec)
-        assert "```" not in out
-        assert "<del>noexcept</del>" in out
         assert out.splitlines()[0] == ":::wording"
+        assert "wording-add" not in out
+        assert "```cpp" in out
+        assert "<del>noexcept</del>" in out
 
-    def test_multiline_mono_mixed_emits_br_code_diff(self):
+    def test_multiline_mono_mixed_emits_fenced_code_diff(self):
         # Monospace, multi-line, but NOT uniform role: a partial edit
-        # inside a code listing. Keep line structure (<br>) and the inline
-        # tags, in a neutral :::wording div (never directional, which would
-        # paint the unchanged context as removed).
+        # inside a code listing. Emit a real ``cpp`` fence (raw angle
+        # brackets / ampersands, real newlines: the C++ stays valid and
+        # copy-pasteable, issue #299) in a neutral :::wording div (never
+        # directional, which would paint the unchanged context as removed).
+        # The inline ``<del>`` marker survives inside the fence as literal
+        # text.
         l1 = Line(spans=[_mono_span("template<class U>")])
         l2 = Line(spans=[
             _mono_span("  constexpr "),
@@ -694,14 +699,15 @@ class TestRenderWordingSection:
         out = _render_wording_section(sec)
         assert out.splitlines()[0] == ":::wording"
         assert "wording-remove" not in out
-        assert "<br>" in out
+        assert "```cpp" in out
+        assert "<br>" not in out
         assert "<del>explicit(see below)</del>" in out
-        # Code angle brackets / ampersands are HTML-escaped so they
-        # survive the wording div's HTML context (the <del> tag stays).
-        assert "template&lt;class U&gt;" in out
-        assert "basic_vec(U&amp;&amp; value)" in out
+        # Code angle brackets / ampersands are raw inside the fence.
+        assert "template<class U>" in out
+        assert "basic_vec(U&& value)" in out
+        assert "&lt;" not in out
+        assert "&amp;" not in out
         assert "  constexpr" in out
-        assert "```" not in out
 
     def test_singleline_mono_bullet_not_promoted(self):
         # Bullet item like "• common_type_t<From, To> is To," can be 86%

@@ -24,8 +24,6 @@ from pipeline.errors import (
     MissingMetadataError,
     MissingSystemPromptError,
     ModelBackendConfigError,
-    PaperNotConvertedError,
-    PaperNotFoundError,
     PipelineError,
     PromptFileError,
     ServiceConfigError,
@@ -38,6 +36,7 @@ from pipeline.errors import (
 from pipeline.markdown import extract_code_blocks, sanitize_md, sections
 from pipeline.markdown_patterns import BOLD_SUBSECTION_RE, HEADING_RE
 from pipeline.model_backends import ModelBackend
+from pipeline.progress import ProgressCallback, ProgressEvent
 from pipeline.prompt import (
     PipelinePrompt,
     StepHooks,
@@ -81,16 +80,8 @@ from pipeline.session import (
     SearchResult,
     WebResearcher,
 )
-from pipeline.postconditions import (
-    ConvertReport,
-    ProcessResult,
-    postcondition_satisfied,
-    truthful_status,
-)
-from pipeline.process import ensure_paper_md, process_paper
 from pipeline.tasks import run_task
 from pipeline.tokens import CHARS_PER_TOKEN, est_tokens, tokens_to_chars
-from pipeline.tools import make_read_paper_tool
 from pipeline.validate import validate_capabilities
 
 __all__ = [
@@ -107,21 +98,20 @@ __all__ = [
     "CrossEncoderBackend",
     "default_auto_provider",
     "EmbeddingBackend",
-    "ensure_paper_md",
     "extract_code_blocks",
     "HFZeroShotBackend",
     "load_classifiers",
     "load_transformer_providers",
-    "make_read_paper_tool",
     "ModelBackend",
     "NliCrossEncoderBackend",
+    "ProgressCallback",
+    "ProgressEvent",
     "resolve_classifier_slots",
     "resolve_transformer_provider",
     "run_mps_correctness_selftest",
     "TransformerBackend",
     "TransformerProvider",
     "ZeroShotV2Backend",
-    "process_paper",
     "build_pipeline",
     "dispatch",
     "FetchResponse",
@@ -130,18 +120,13 @@ __all__ = [
     "load_services",
     "MissingMetadataError",
     "MissingSystemPromptError",
-    "PaperNotConvertedError",
     "parse_step_prompt",
-    "PaperNotFoundError",
     "parse_pipeline_config",
     "parse_pipeline_services",
     "PipelineError",
     "PipelinePrompt",
     "HEADING_RE",
     "BOLD_SUBSECTION_RE",
-    "postcondition_satisfied",
-    "ProcessResult",
-    "ConvertReport",
     "PromptFileError",
     "resolve_pipeline_models",
     "ServiceRegistry",
@@ -159,7 +144,6 @@ __all__ = [
     "StepPrompt",
     "StepSpec",
     "TransientStepError",
-    "truthful_status",
     "validate_capabilities",
     "ValidationStepError",
     "WebResearcher",

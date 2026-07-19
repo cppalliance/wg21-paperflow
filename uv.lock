@@ -530,6 +530,7 @@ source = { editable = "packages/cli" }
 dependencies = [
     { name = "agora" },
     { name = "assay" },
+    { name = "httpx" },
     { name = "mailing" },
     { name = "paperstore" },
     { name = "pipeline" },
@@ -542,6 +543,7 @@ dependencies = [
 requires-dist = [
     { name = "agora", editable = "packages/agora" },
     { name = "assay", editable = "packages/assay" },
+    { name = "httpx" },
     { name = "mailing", editable = "packages/mailing" },
     { name = "paperstore", editable = "packages/paperstore" },
     { name = "pipeline", editable = "packages/pipeline" },

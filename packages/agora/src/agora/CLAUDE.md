@@ -25,7 +25,7 @@ One-shot, fully batch. No `AskQuestion`, no human-in-the-loop, no resumable runs
 - `render.py` - debug transcript and per-step trace renderers. No HTML.
 - `parse.py` - domain-free H2 markdown section splitter.
 - `models.py` - Pydantic models. One schema (`Thread`, `Reply`, `EncounterPlan` and friends) matches the eventual database; analysis-phase fields are required, generation-phase fields are `Optional`. Per-step LLM output classes and `PipelineState` live here too. `SourceLoc` imported from `paperstore`.
-- `errors.py` - error hierarchy.
+- `errors.py` - paper-domain errors (`PaperNotFoundError`, `PaperNotConvertedError`) inheriting `pipeline.PipelineError`.
 
 ## Pipeline architecture
 

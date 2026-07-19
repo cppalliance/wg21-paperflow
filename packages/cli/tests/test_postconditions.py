@@ -5,7 +5,7 @@
 # file LICENSE_1_0.txt or copy at http://www.boost.org/LICENSE_1_0.txt)
 #
 
-"""Tests for ``pipeline.postconditions``.
+"""Tests for ``cli.postconditions``.
 
 Cover the artifact-existence check for every stage and the
 ``truthful_status`` floor-to-first-gap algorithm. Uses a real
@@ -21,7 +21,7 @@ import pytest
 
 from paperstore import SqliteBackend
 from paperstore.stages import STAGES
-from pipeline.postconditions import postcondition_satisfied, truthful_status
+from cli.postconditions import postcondition_satisfied, truthful_status
 
 
 @pytest.fixture
