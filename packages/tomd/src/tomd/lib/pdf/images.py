@@ -159,7 +159,7 @@ class ExtractedImage:
       ``(0.0, 0.0, 0.0, 0.0)`` (HTML has no spatial concept), and
       ``xref`` is ``0`` (not applicable). ``page`` is ``0`` (the
       paperstore-wide "no page concept" sentinel). The CLI
-      orchestration in ``pipeline.process._stage_convert`` checks
+      orchestration in ``cli.process._stage_convert`` checks
       ``bytes`` truthiness to decide whether to call
       ``write_paper_image``.
     """

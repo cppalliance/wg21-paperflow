@@ -1,6 +1,6 @@
 # pipeline
 
-Shared framework for the LLM analytical pipelines (`agora`). Depends on `pipeline`. Project-wide rules and the determinism rule numbering live in the root `CLAUDE.md`. Sampling and concurrency rationale lives in `MODELS.md`.
+Shared framework for the LLM analytical pipelines (`agora`). It depends only on third-party libraries and must not import from any internal/workspace package. Project-wide rules and the determinism rule numbering live in the root `CLAUDE.md`. Sampling and concurrency rationale lives in `MODELS.md`.
 
 ## Modules
 
@@ -12,6 +12,7 @@ Shared framework for the LLM analytical pipelines (`agora`). Depends on `pipelin
 - `prompt.py` - `StepHooks`, `StepMeta`, `StepSpec`, `build_pipeline`, `parse_step_meta`. Owns prompt-to-hook conformance only; capability validation lives in `validate.py`. Step-meta field-name convention: single-word fields are TitleCase (`**Model:**`, `**Execution:**`, `**Tools:**`, `**Condition:**`); new multi-word fields are kebab-case (`**max-output:**`). Pre-existing `**System prompt:**` (TitleCase + space) is grandfathered. Lookup is case-insensitive (the parser lowercases keys). `_META_RE` allows `[\w \-]+` so hyphens in field names parse correctly; adding a new punctuation character requires updating that regex.
 - `validate.py` - `validate_capabilities(specs, *, stop_after=None)`. Primary gate for capability mismatches; called by each pipeline's entry function right after `build_pipeline`.
 - `runner.py` - `dispatch`, `load_sections`, `run_agent`, `StepContext`, `write_debug_file`.
+- `progress.py` - `ProgressEvent`, `ProgressCallback`: the framework-owned progress-reporting contract. Domain-free; carries no paper concepts.
 - `tasks.py` - `run_task`, `render_debug_md`, `_task_semaphore`.
 - `markdown.py` - `sections` (H2 splitter), `sanitize_md`, `front_matter_end_index`, `YAML_FENCE_RE`.
 - `markdown_patterns.py` - shared `HEADING_RE`, `BOLD_SUBSECTION_RE`.
@@ -33,11 +34,11 @@ from pipeline import (
     load_classifiers, resolve_classifier_slots,
     PipelineError, StepError, HookMismatchError, MissingMetadataError,
     CapabilityMismatchError,
-    PaperNotFoundError, PaperNotConvertedError,
     StepHooks, StepMeta, StepSpec, build_pipeline,
     validate_capabilities,
     dispatch, load_sections, run_agent, run_task, StepContext,
     sections, sanitize_md,
+    ProgressCallback, ProgressEvent,
     WebResearcher, SearchBackend, SearchResult, SearchResponse, FetchResponse,
     write_debug_file,
 )
@@ -93,6 +94,7 @@ Determinism contract: offline-first weight loading, per-instance pipeline single
 
 ## Invariants
 
+- Paper-agnostic, no internal dependencies. `pipeline` is a domain-free framework and MUST NOT import from any internal/workspace package (`paperstore`, `cli`, `agora`, `assay`, `tomd`, `mailing`, `preview`). It depends only on third-party libraries. Paper-domain orchestration (`process_paper`, stage postconditions, the `read_paper` tool) lives in `cli`, not here. If a framework module needs a shared type that currently lives in a paper package, define it here instead of importing it.
 - `ClassifierBackend` and `ModelBackend` are parallel namespaces. `[services.NAME]` / `[classifiers.NAME]` and `[defaults]` / `[classifier_defaults]` do not mix; slot resolution is independent. Override flags map to different `StepContext` dicts: `--service` populates `ctx.agents` (via `AgentBackend(slots[slot_name][1], slot_name=slot_name, service_name=slots[slot_name][0])`), `--classifier` populates `ctx.classifiers`.
 - Capability validation runs once at pipeline-construction time. `validate_capabilities()` rejects any step whose declared `meta.tools` or assigned `thinking_budget` would land on a backend whose class attributes do not support it. The runtime `NotImplementedError` in `AgentBackend.run` is secondary defense, retained for custom hooks that pass ad-hoc tools via `run_task` outside `meta.tools`.
 - `dispatch()` and `validate_capabilities()` must use identical `stop_after` scoping logic. Today both filter by `enumerate` index against the step list; if you switch one site to `spec.meta.number`, switch both in the same commit.
@@ -100,7 +102,6 @@ Determinism contract: offline-first weight loading, per-instance pipeline single
 - Source delimiter contract. Every piece of external/untrusted text injected into an LLM prompt must be wrapped via `ctx.inject_untrusted()` (on `StepContext`). Never inject raw external content. Callers format line numbers before calling `inject_untrusted`. The guard tag is randomized per pipeline run; `inject_untrusted` escapes forged delimiter text before wrapping.
 - Step failures fail the pipeline. `dispatch()` preserves failures as `StepError`, flushes trace/debug diagnostics, and does not call `on_step_complete` for a failed step.
 - Fan-out thresholds are explicit. Custom fan-out steps may tolerate item failures only under a named threshold. Above the threshold they raise `StepError`.
-- PaperRow failure persistence. Pipeline failure updates the paper row with `status = -(stage + 1)`, stores `error = str(exc)`, and refreshes `updated_at`.
 - Status codes on everything. `search()` returns `SearchResponse` with `status_code`. `fetch()` returns `FetchResponse` with `status_code`. No bare strings or lists.
 - Backends are self-contained. Each search backend owns its own HTTP client. No shared client coupling between session and backend.
 - Backends are long-lived. `BraveBackend` holds a persistent connection pool and rate limiter. Create once, share across `WebResearcher` instances for parallel runs.
