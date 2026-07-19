@@ -61,6 +61,14 @@ latency. Lower it per-step via StepHooks.request_limit when the tool-call
 shape is known.
 """
 
+_RAW_JSON_MAX_ATTEMPTS = 3
+"""Max raw-JSON completion attempts (initial + corrective retries).
+
+Each retry after a malformed/invalid parse appends the bad output plus a
+corrective turn, so an extra attempt changes the context and can recover a
+one-off token glitch (e.g. a junk token in a numeric field). Clamped by the
+call's ``request_limit``. Finite per D10."""
+
 _RETRY_MAX_TOKENS_GROWTH = 1.5
 """Factor by which to grow max_tokens when a raw-JSON attempt was truncated.
 
@@ -297,7 +305,7 @@ class VllmThinkingBackend(ModelBackend):
             else:
                 extra["extra_body"] = {"thinking_token_budget": thinking_budget}
 
-        max_attempts = min(2, request_limit)
+        max_attempts = min(_RAW_JSON_MAX_ATTEMPTS, request_limit)
         effective_max = max_tokens
         for attempt in range(max_attempts):
             finish_reason: str | None = None

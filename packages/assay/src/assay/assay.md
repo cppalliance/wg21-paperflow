@@ -97,9 +97,16 @@ Otherwise, apply this funnel to prose. Stop at the first match:
 
 For each item: an exact verbatim substring of the source, plus the line number.
 
+Output size rules (keep JSON compact):
+
+- Use the shortest verbatim quote that still identifies the item. Do not quote entire multi-paragraph blocks or full code listings in one item.
+- One fenced code block may become multiple evidence items (split on logical boundaries: function, concept, table row group). Each item gets its own shorter quote.
+- For wording-heavy normative text, prefer evidence over claim; keep individual quotes under roughly 500 characters.
+- When the chunk is dense, prioritize claims and asks first; omit low-value stage-direction lines already excluded by rule 7.
+
 ---
 
-Per-chunk extraction with concurrency from ## Config. Output: ChunkExtractOutput per chunk.
+Per-chunk extraction with concurrency from ## Config. Output: ChunkExtractItems per chunk (items only; the orchestrator assigns the authoritative chunk_index, mirroring Classify).
 
 ## 5. Decide
 
@@ -134,7 +141,7 @@ If unsupported, state what is missing (e.g., "no benchmark for the cited 1-2ns f
 
 ---
 
-Per-chunk decide with concurrency from ## Config. Output: ChunkDecideOutput per chunk.
+Per-chunk decide with concurrency from ## Config. Output: ChunkDecideItems per chunk (decisions only; the orchestrator assigns the authoritative chunk_index, mirroring Classify).
 
 ## 6. Classify
 
@@ -248,7 +255,7 @@ Surfaces flags from the mechanical reference inventory (Step 1):
 
 Future LLM expansion:
 
-Verify Citations: fetch or read one cited paper via ensure_paper_md + make_read_paper_tool. Check whether quoted or paraphrased claims match the cited source. Report evidence relevant to the citing paper's claims.
+Verify Citations: fetch or read one cited paper via `cli.process.ensure_paper_md` + `cli.paper_tools.make_read_paper_tool`. Check whether quoted or paraphrased claims match the cited source. Report evidence relevant to the citing paper's claims.
 
 Web Search: search for public external evidence on critical gaps not covered by citation evidence. Prefer primary sources, implementation docs, standards papers, benchmarks.
 
@@ -276,7 +283,7 @@ Do NOT set `id` on FindingOutput or StrengthOutput - the pipeline assigns IDs af
 
 ---
 
-C sub-agents (one per chunk), run serially. Each chunk sub-agent reads its chunk with the thesis, cross-chunk gaps, research context, and 25 test patterns. Output: ChunkAnalyzeOutput per chunk.
+C sub-agents (one per chunk), run serially. Each chunk sub-agent reads its chunk with the thesis, cross-chunk gaps, research context, and 25 test patterns. Output: ChunkAnalyzeItems per chunk (findings + strengths; no model-authored chunk_index, mirroring Classify).
 
 ## 13. Rationale
 
