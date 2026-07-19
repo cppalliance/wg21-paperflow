@@ -5,10 +5,10 @@
 - **paperstore** - Storage layer. SQLite backend for paper metadata, source files, markdown, and pipeline outputs. No network dependencies. Defines the `papers` table with status tracking.
 - **mailing** - Scrapes WG21 mailing indexes from open-std.org. Populates paperstore with paper metadata and URLs. Also handles source file downloads. Admin-only operation.
 - **tomd** - Converts paper source files (HTML, PDF) to markdown.
-- **pipeline** - Framework for LLM-driven pipelines. Step execution engine (dispatch, run_agent, run_task), error hierarchy, prompt parsing, markdown utilities, web search/fetch, process_paper orchestration, read_paper tool.
+- **pipeline** - Framework for LLM-driven pipelines. Step execution engine (dispatch, run_agent, run_task), error hierarchy, prompt parsing, markdown utilities, web search/fetch. Paper-agnostic: no internal package dependencies.
 - **dissect** - Extracts claims, evidence, and rhetoric from a paper's markdown. First analytical stage.
 - **agora** - Plans a discussion thread for a dissected paper.
-- **cli** - Command-line interface. Maps verbs to pipeline stages.
+- **cli** - Command-line interface. Maps verbs to pipeline stages. Owns per-paper orchestration (`process_paper`, stage postconditions, `read_paper` tool).
 
 ## Dependency graph
 
@@ -43,7 +43,7 @@ Constants live in `paperstore.stages.STAGES` and `STAGE_NAMES`.
 
 ## Processing model
 
-`process_paper(pid, backend, through)` in the pipeline package walks one paper through stages up to `through`. Each stage does its work, then advances status with a CAS:
+`process_paper(pid, backend, through)` in the cli package walks one paper through stages up to `through`. Each stage does its work, then advances status with a CAS:
 
 ```sql
 UPDATE papers SET status = :new WHERE paper_id = :pid AND status = :expected

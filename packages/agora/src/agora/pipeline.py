@@ -32,11 +32,11 @@ from typing import Any
 
 from paperstore import StorageBackend
 from paperstore.errors import MissingMetaError, MissingPaperMdError
-from paperstore.progress import ProgressCallback
 
 from pipeline import (
     AgentBackend,
     PipelinePrompt,
+    ProgressCallback,
     StepContext,
     StepHooks,
     StepSpec,
@@ -48,12 +48,11 @@ from pipeline import (
     run_task,
 )
 from pipeline.errors import (
-    PaperNotConvertedError,
-    PaperNotFoundError,
     PromptFileError,
     StepError,
     ValidationStepError,
 )
+from agora.errors import PaperNotConvertedError, PaperNotFoundError
 from agora.models import (
     CalibrationOutput,
     EncountersOutput,

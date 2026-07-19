@@ -12,6 +12,7 @@ dependencies = [
     "pipeline",
     "agora",
     "assay",
+    "httpx",
     "pydantic-ai",
     "rich",
 ]
