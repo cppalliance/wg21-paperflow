@@ -8,12 +8,20 @@
     "text": 0.39
   },
   "p1068r11": {
-    "code": 0.59,
+    "code": 0.75,
     "frontmatter": 1.0,
     "heading": 0.76,
     "list": 0.19,
     "table": 1.0,
-    "text": 0.56
+    "text": 0.57
+  },
+  "p4020r0": {
+    "code": 0.0,
+    "frontmatter": 1.0,
+    "heading": 0.67,
+    "list": 1.0,
+    "table": 1.0,
+    "text": 1.0
   },
   "p4182r0": {
     "code": 1.0,
