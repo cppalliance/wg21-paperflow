@@ -70,6 +70,7 @@ def install_seqcls_transformers_stub(
     model: SeqClsStubModel,
     *,
     offline_first: bool = False,
+    drop_kwargs_on_retry: bool = False,
 ) -> None:
     fake_mod = types.ModuleType("transformers")
 
@@ -86,6 +87,8 @@ def install_seqcls_transformers_stub(
             model.load_count += 1
             if offline_first and local_files_only:
                 raise OSError("local cache miss")
+            if drop_kwargs_on_retry and not local_files_only and _kw:
+                raise TypeError("stub rejects model_kwargs")
             return model
 
     fake_mod.AutoTokenizer = _AutoTokenizer

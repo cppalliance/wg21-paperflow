@@ -504,3 +504,25 @@ def test_seqcls_backend_offline_first_fallback(monkeypatch):
     # Tokenizer local_files_only fails first; model loads once on network retry.
     assert stub.load_count == 1
     assert set(result[0].keys()) == {"x", "y"}
+
+
+def test_seqcls_backend_typeerror_retry_drops_model_kwargs(monkeypatch):
+    stub = SeqClsStubModel(
+        id2label={0: "x", 1: "y"},
+        logits=[1.0, -1.0],
+    )
+    install_seqcls_transformers_stub(
+        monkeypatch,
+        stub,
+        offline_first=True,
+        drop_kwargs_on_retry=True,
+    )
+    provider = TransformerProvider.from_toml("cpu", {
+        "mode": "explicit", "device": "cpu", "dtype": "fp32",
+        "batch_size": 4,
+    })
+    backend = SeqClassificationBackend("fake/seqcls", provider)
+    result = backend.classify_multilabel(["hello"])
+    # Tokenizer local miss; model network+kwargs TypeError; model network ok.
+    assert stub.load_count == 2
+    assert set(result[0].keys()) == {"x", "y"}
