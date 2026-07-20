@@ -1781,10 +1781,10 @@ def _persist_findings(backend, pid, surviving: list, killed: list, synthesis=Non
         major_set = {f.title for f in synthesis.major_findings}
 
     rows = []
-    for i, f in enumerate(surviving, 1):
+    for f in surviving:
         rows.append(
             _Row(
-                i,
+                f.id,
                 f.title,
                 f.lens,
                 f.severity,
@@ -1799,11 +1799,10 @@ def _persist_findings(backend, pid, surviving: list, killed: list, synthesis=Non
                 list(getattr(f, "from_gap_ids", []) or []),
             )
         )
-    offset = len(surviving)
-    for i, k in enumerate(killed, offset + 1):
+    for k in killed:
         rows.append(
             _Row(
-                i,
+                k.finding_id,
                 k.finding_title,
                 k.lens,
                 "",
