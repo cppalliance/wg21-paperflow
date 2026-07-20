@@ -562,3 +562,73 @@ async def test_fetch_http_error_during_stream_returns_error_response():
             response = await r.fetch("https://example.com/fail")
     assert response.status_code == 0
     assert response.content.startswith("Error: Failed to fetch URL")
+
+
+@pytest.mark.anyio
+async def test_fetch_terminal_http_failure_cached_within_run():
+    stream, _resp = _stream_mock(
+        status_code=404,
+        headers={"content-type": "text/html"},
+        chunks=[b"ignored"],
+    )
+
+    backend = FakeBackend()
+    async with WebResearcher(backend=backend) as r:
+        with patch.object(r._client, "stream", stream):
+            first = await r.fetch("https://example.com/gone")
+            second = await r.fetch("https://example.com/gone")
+    assert stream.call_count == 1
+    assert first.status_code == 404
+    assert first.content == "Error: HTTP 404 for https://example.com/gone"
+    assert second.status_code == 404
+    assert second.content.startswith("Error: HTTP 404")
+    assert "already failed this run" in second.content
+
+
+@pytest.mark.anyio
+async def test_fetch_failure_cache_keyed_on_normalized_url():
+    stream, _resp = _stream_mock(
+        status_code=404,
+        headers={"content-type": "text/html"},
+        chunks=[b"ignored"],
+    )
+    base = "https://www.open-std.org/jtc1/sc22/wg21/docs/papers/2026/"
+
+    backend = FakeBackend()
+    async with WebResearcher(backend=backend) as r:
+        with patch.object(r._client, "stream", stream):
+            await r.fetch(base + "P4148R0.html")
+            response = await r.fetch(base + "p4148r0.html")
+    assert stream.call_count == 1
+    assert "already failed this run" in response.content
+
+
+@pytest.mark.anyio
+async def test_fetch_transport_error_not_cached():
+    failing_stream = MagicMock(side_effect=httpx.HTTPError("boom"))
+
+    backend = FakeBackend()
+    async with WebResearcher(backend=backend) as r:
+        with patch.object(r._client, "stream", failing_stream):
+            await r.fetch("https://example.com/flaky")
+            response = await r.fetch("https://example.com/flaky")
+    assert failing_stream.call_count == 2
+    assert response.content.startswith("Error: Failed to fetch URL")
+
+
+@pytest.mark.anyio
+async def test_fetch_success_not_cached():
+    stream, _resp = _stream_mock(
+        status_code=200,
+        headers={"content-type": "text/html"},
+        chunks=[b"<html><body><p>Hello world</p></body></html>"],
+        charset_encoding="utf-8",
+    )
+
+    backend = FakeBackend()
+    async with WebResearcher(backend=backend) as r:
+        with patch.object(r._client, "stream", stream):
+            await r.fetch("https://example.com", extract=False)
+            response = await r.fetch("https://example.com", extract=False)
+    assert stream.call_count == 2
+    assert "Hello world" in response.content

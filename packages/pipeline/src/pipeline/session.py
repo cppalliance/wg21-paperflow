@@ -135,6 +135,7 @@ class WebResearcher:
             dict(binary_extractors) if binary_extractors else {}
         )
         self._guard_tag = guard_tag or _random_tag()
+        self._failed_fetches: dict[str, FetchResponse] = {}
         self._closed = False
 
     async def __aenter__(self) -> WebResearcher:
@@ -198,6 +199,13 @@ class WebResearcher:
         extractor return an empty string; binary bodies have no
         meaningful raw text form for LLM tools, and the registry is the
         entry point for getting useful text out of them.
+
+        A URL that terminally failed with a non-200 HTTP status is
+        remembered for the researcher's lifetime and answered from that
+        memory on later calls, without touching the network. An LLM
+        agent that keeps re-requesting a dead URL otherwise burns its
+        whole request budget on it. Transport errors (DNS, timeouts)
+        are not remembered - those can recover within a run.
         """
         if self._closed:
             raise RuntimeError("Researcher is closed.")
@@ -205,6 +213,20 @@ class WebResearcher:
             return FetchResponse(status_code=0, content="Error: Empty URL")
 
         url = _normalize_open_std_url(url)
+
+        cached = self._failed_fetches.get(url)
+        if cached is not None:
+            logger.info(
+                "Fetch skipped for %r: HTTP %d already returned this run",
+                url, cached.status_code,
+            )
+            return FetchResponse(
+                status_code=cached.status_code,
+                content=(
+                    f"{cached.content} (this URL already failed this run;"
+                    f" it was not re-fetched and retrying will not help)"
+                ),
+            )
 
         body: bytes | None = None
         content_type = ""
@@ -236,10 +258,12 @@ class WebResearcher:
                         logger.warning(
                             "Fetch got HTTP %d for %r", resp.status_code, url,
                         )
-                        return FetchResponse(
+                        failure = FetchResponse(
                             status_code=resp.status_code,
                             content=f"Error: HTTP {resp.status_code} for {url}",
                         )
+                        self._failed_fetches[url] = failure
+                        return failure
 
                     chunks: list[bytes] = []
                     total = 0
