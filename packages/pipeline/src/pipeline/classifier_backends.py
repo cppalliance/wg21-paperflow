@@ -238,9 +238,9 @@ class MultiLabelClassifierBackend(ClassifierBackend):
 
         With ``multi_label=True`` (default), returns independent per-label
         sigmoid scores from the checkpoint. With ``multi_label=False``,
-        re-normalizes those sigmoid scores across ``candidate_labels`` so
+        sum-normalizes those sigmoid scores across ``candidate_labels`` so
         they sum to 1 for API compatibility with other classifier backends.
-        That re-normalization is not logit softmax.
+        That is not logit softmax (zero-shot backends use logit softmax).
         """
         if not texts:
             return []
@@ -258,16 +258,18 @@ class MultiLabelClassifierBackend(ClassifierBackend):
         for scores in raw:
             projected = {label: scores.get(label, 0.0) for label in candidate_labels}
             if not multi_label:
-                # Re-normalize sigmoid scores (not raw logits) for API parity.
-                import math
-                vals = [projected[label] for label in candidate_labels]
-                m = max(vals)
-                exps = [math.exp(v - m) for v in vals]
-                z = sum(exps)
-                projected = {
-                    label: exps[i] / z
-                    for i, label in enumerate(candidate_labels)
-                }
+                # Sum-normalize sigmoid scores (not raw logits) for API parity.
+                total = sum(projected[label] for label in candidate_labels)
+                if total > 0:
+                    projected = {
+                        label: projected[label] / total
+                        for label in candidate_labels
+                    }
+                else:
+                    uniform = 1.0 / len(candidate_labels)
+                    projected = {
+                        label: uniform for label in candidate_labels
+                    }
             out.append(projected)
         return out
 

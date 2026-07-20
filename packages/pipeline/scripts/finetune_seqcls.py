@@ -24,8 +24,7 @@ The dev dependency group includes ``pipeline[train]``.
 
 Usage (from repo root)::
 
-    uv run --extra train --directory packages/pipeline \\
-        python scripts/finetune_seqcls.py \\
+    uv run python packages/pipeline/scripts/finetune_seqcls.py \\
         --train data/train.jsonl \\
         --output artifacts/my-tagger-v1 \\
         --base-model microsoft/deberta-v3-base
@@ -42,6 +41,8 @@ _log = logging.getLogger(__name__)
 
 _TRAIN_SEED = 0
 _DEFAULT_MAX_LENGTH = 192
+_EVAL_PREDICTION_THRESHOLD = 0.5
+_TRAIN_LOGGING_STEPS = 50
 _TRAIN_EXTRA_HINT = (
     "Install training dependencies with: "
     "uv sync --group dev from repo root "
@@ -215,7 +216,7 @@ def finetune_multilabel_seqcls(
     def _compute_metrics(eval_pred: object) -> dict[str, float]:
         logits, labels = eval_pred  # type: ignore[misc]
         probs = 1.0 / (1.0 + np.exp(-logits))
-        preds = (probs >= 0.5).astype(int)
+        preds = (probs >= _EVAL_PREDICTION_THRESHOLD).astype(int)
         labels_arr = np.array(labels).astype(int)
         return {
             "micro_f1": float(
@@ -238,7 +239,7 @@ def finetune_multilabel_seqcls(
         save_strategy="epoch" if eval_ds is not None else "no",
         load_best_model_at_end=eval_ds is not None,
         metric_for_best_model="micro_f1" if eval_ds is not None else None,
-        logging_steps=50,
+        logging_steps=_TRAIN_LOGGING_STEPS,
         report_to=[],
         use_cpu=cpu_only,
     )

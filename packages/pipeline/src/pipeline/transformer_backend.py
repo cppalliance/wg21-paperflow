@@ -45,6 +45,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import math
 import os
 import threading
 from concurrent.futures import ThreadPoolExecutor
@@ -673,6 +674,8 @@ class SeqClassificationBackend(TransformerBackend):
         try:
             model_kwargs["torch_dtype"] = torch_dtype_for(self.provider.dtype)
         except Exception:
+            # If torch is unavailable but the pipeline factory is stubbed
+            # (tests), proceed without forcing a dtype.
             pass
 
         try:
@@ -703,6 +706,22 @@ class SeqClassificationBackend(TransformerBackend):
         self._id2label = {
             int(k): str(v) for k, v in raw_id2label.items()
         }
+        if not self._id2label:
+            raise ValueError(
+                f"Sequence-classification checkpoint {self.model_id!r} has no "
+                f"id2label mapping; retrain or check config.json."
+            )
+        problem_type = getattr(self._model.config, "problem_type", None)
+        if (
+            problem_type is not None
+            and problem_type != "multi_label_classification"
+        ):
+            logger.warning(
+                "SeqClassificationBackend(%s): config.problem_type=%r; "
+                "expected 'multi_label_classification' for sigmoid scoring.",
+                self.model_id,
+                problem_type,
+            )
 
         device = self.provider.device
         try:
@@ -711,6 +730,7 @@ class SeqClassificationBackend(TransformerBackend):
             else:
                 self._model = self._model.to(device)
         except Exception:
+            # Missing device, stubbed models, or MPS quirks: keep default device.
             logger.warning(
                 "SeqClassificationBackend(%s): failed to move model to "
                 "device %r; leaving on default device.",
@@ -756,7 +776,6 @@ class SeqClassificationBackend(TransformerBackend):
                 import torch  # type: ignore[import-untyped]
                 probs = torch.sigmoid(logits).cpu().tolist()
             except ImportError:
-                import math
                 probs = []
                 for row in logits:
                     probs.append([1.0 / (1.0 + math.exp(-x)) for x in row])

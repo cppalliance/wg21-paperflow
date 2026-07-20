@@ -78,7 +78,7 @@ classify(
 
 Per text: returns `{label: score}` for every candidate label. With `multi_label=True` (the default), each label is scored independently; scores do NOT sum to 1, each is a per-label probability suitable for an absolute threshold. Zero-shot backends use per-label entailment-vs-contradiction softmax; `MultiLabelClassifierBackend` uses sigmoid over a fine-tuned multi-label head. This is the only correct mode for non-mutually-exclusive labels (e.g. TARGET and SKIP labels that can both be weakly true).
 
-`MultiLabelClassifierBackend` raises `ValueError` when a `candidate_label` is absent from the checkpoint's `id2label`.
+`MultiLabelClassifierBackend` raises `ValueError` when a `candidate_label` is absent from the checkpoint's `id2label`. With `multi_label=False`, `MultiLabelClassifierBackend` sum-normalizes sigmoid scores across `candidate_labels` (not logit softmax; zero-shot backends use logit softmax).
 
 Determinism contract: offline-first weight loading, per-instance pipeline singleton, CPU only by default, `eval()` mode (HF pipeline applies on construction). `HF_HUB_OFFLINE` defaults to off so first-run downloads succeed; offline-first is achieved by trying `local_files_only=True` first inside each backend's `_load()`.
 

@@ -464,3 +464,43 @@ def test_seqcls_backend_async_parity(monkeypatch):
     sync, async_ = asyncio.run(_run())
     assert sync == async_
     assert set(sync[0].keys()) == {"x", "y"}
+
+
+def test_seqcls_backend_raises_on_empty_id2label(monkeypatch):
+    stub = SeqClsStubModel(
+        id2label={},
+        logits=[1.0, -1.0],
+    )
+    install_seqcls_transformers_stub(monkeypatch, stub)
+    backend = SeqClassificationBackend("fake/seqcls")
+    with pytest.raises(ValueError, match="no id2label"):
+        backend.classify_multilabel(["hello"])
+
+
+def test_seqcls_backend_warns_on_wrong_problem_type(
+    monkeypatch, caplog,
+):
+    stub = SeqClsStubModel(
+        id2label={0: "x", 1: "y"},
+        logits=[1.0, -1.0],
+        problem_type="single_label_classification",
+    )
+    install_seqcls_transformers_stub(monkeypatch, stub)
+    backend = SeqClassificationBackend("fake/seqcls")
+    with caplog.at_level("WARNING"):
+        backend.classify_multilabel(["hello"])
+    assert "problem_type" in caplog.text
+    assert stub.eval_called
+
+
+def test_seqcls_backend_offline_first_fallback(monkeypatch):
+    stub = SeqClsStubModel(
+        id2label={0: "x", 1: "y"},
+        logits=[1.0, -1.0],
+    )
+    install_seqcls_transformers_stub(monkeypatch, stub, offline_first=True)
+    backend = SeqClassificationBackend("fake/seqcls")
+    result = backend.classify_multilabel(["hello"])
+    # Tokenizer local_files_only fails first; model loads once on network retry.
+    assert stub.load_count == 1
+    assert set(result[0].keys()) == {"x", "y"}

@@ -21,8 +21,12 @@ class SeqClsStubModel:
         *,
         id2label: dict[int, str],
         logits: list[float],
+        problem_type: str | None = "multi_label_classification",
     ) -> None:
-        self.config = types.SimpleNamespace(id2label=id2label)
+        self.config = types.SimpleNamespace(
+            id2label=id2label,
+            problem_type=problem_type,
+        )
         self._logits = logits
         self.load_count = 0
         self.eval_called = False
@@ -61,20 +65,27 @@ class SeqClsStubTokenizer:
         }
 
 
-def install_seqcls_transformers_stub(monkeypatch, model: SeqClsStubModel) -> None:
+def install_seqcls_transformers_stub(
+    monkeypatch,
+    model: SeqClsStubModel,
+    *,
+    offline_first: bool = False,
+) -> None:
     fake_mod = types.ModuleType("transformers")
 
     class _AutoTokenizer:
         @staticmethod
         def from_pretrained(_model_id, local_files_only=False):
-            _ = local_files_only
+            if offline_first and local_files_only:
+                raise OSError("local cache miss")
             return SeqClsStubTokenizer()
 
     class _AutoModel:
         @staticmethod
         def from_pretrained(_model_id, local_files_only=False, **_kw):
-            _ = local_files_only, _kw
             model.load_count += 1
+            if offline_first and local_files_only:
+                raise OSError("local cache miss")
             return model
 
     fake_mod.AutoTokenizer = _AutoTokenizer

@@ -452,7 +452,7 @@ def test_multilabel_seqcls_empty_input_short_circuits(monkeypatch):
     assert stub_model.load_count == 0
 
 
-def test_multilabel_seqcls_single_label_softmax(monkeypatch):
+def test_multilabel_seqcls_single_label_sum_normalized(monkeypatch):
     stub_model = SeqClsStubModel(
         id2label={0: "alpha", 1: "beta"},
         logits=[0.0, 2.0],
@@ -463,6 +463,9 @@ def test_multilabel_seqcls_single_label_softmax(monkeypatch):
     total = sum(result[0].values())
     assert total == pytest.approx(1.0, abs=1e-6)
     assert result[0]["beta"] > result[0]["alpha"]
+    # Sigmoid 0.5 / ~0.881 sum-normalized preserves ratios (~0.362 / ~0.638).
+    assert result[0]["alpha"] == pytest.approx(0.5 / 1.38, abs=0.01)
+    assert result[0]["beta"] == pytest.approx(0.88 / 1.38, abs=0.01)
 
 
 def test_multilabel_seqcls_labels_property(monkeypatch):
