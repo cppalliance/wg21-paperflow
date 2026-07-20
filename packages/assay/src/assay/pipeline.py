@@ -1639,9 +1639,7 @@ def _persist_concessions(backend, pid, concessions: list):
         section: str
         subtype: str
 
-    rows = [
-        _Row(i, c.line, c.quote, c.section, "") for i, c in enumerate(concessions, 1)
-    ]
+    rows = [_Row(c.id, c.line, c.quote, c.section, "") for c in concessions]
     backend.store_assay_concessions(pid, rows)
 
 
