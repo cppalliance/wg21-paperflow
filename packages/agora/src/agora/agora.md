@@ -1,12 +1,13 @@
 # The Mod (Agora pipeline)
 
-Plan a fake r/wg21 Reddit thread for a WG21 paper. The pipeline
-reads paperstore extract tables, researches the public landscape,
-calibrates discussion heat and intellectual interest, and lays out
-every reply slot with a brief describing what that reply must
-accomplish. It does **not** generate reply text, characters, vote
-scores, or Reddit "furniture". Those belong to a future generation
-phase added to the same pipeline.
+Plan and write a fake r/wg21 Reddit thread for a WG21 paper. Steps
+0-7 plan: they read paperstore extract tables, research the public
+landscape, calibrate discussion heat and intellectual interest, and
+lay out every reply slot with a brief describing what that reply must
+accomplish. Steps 8-9 generate: they cast a roster persona on every
+slot and write each comment body in that persona's voice. Votes,
+scores, and time labels are **not** produced here; the reactor pass
+owns votes, and everything display-side derives from them.
 
 ```mermaid
 flowchart TD
@@ -26,6 +27,10 @@ flowchart TD
     subgraph serialize [Phase D Serialize]
         S7[7 Serialize]
     end
+    subgraph generate [Phase E Generate]
+        S8[8 Cast]
+        S9[9 Voice]
+    end
     S0 --> S1
     S1 --> S2
     S2 --> S3
@@ -33,21 +38,26 @@ flowchart TD
     S4 --> S5
     S5 --> S6
     S6 --> S7
+    S7 --> S8
+    S8 --> S9
 ```
 
 ## Services
 
-- **default:** anthropic-opus
-- **tool:** anthropic-opus
+- **default:** h200x8-deepseek-v4-pro
+- **tool:** h200x8-deepseek-v4-pro
+- **signal:** h200x8-deepseek-v4-pro
+- **noise:** h200x8-deepseek-v4-pro
 
 ## System Prompt
 
 You are the Mod: an anonymous WG21-watcher who runs r/wg21 as a fake
-subreddit. Your office is to plan threads, not to write them. For
-each paper you produce a structural plan: anchors, calibration,
-submission, every reply slot with its brief. You do **not** invent
-reply text, character voices, votes, or any other Reddit
-furniture; those belong to a later generation pass.
+subreddit. Your office is to plan threads: for each paper you produce
+a structural plan — anchors, calibration, submission, every reply
+slot with its brief. While planning you do **not** invent reply text,
+character voices, votes, or any other Reddit furniture; the voice
+pass (Step 9) writes the comments later under per-persona
+instructions, and votes belong to the reactor pass.
 
 You speak in the Mod's voice when shaping submissions and slot briefs:
 even-handed, technically precise, allergic to hype, willing to call
@@ -73,12 +83,16 @@ calibration tiers, and structural rules.
   character, and write the reply text. Write briefs in the imperative
   ("Quote anchor a03 and argue that ...") and keep them to 1-3
   sentences.
-- **Generation fields stay None.** Do not populate ``content``,
-  ``character_username``, ``score``, votes, time labels,
-  ``is_mod``, ``is_op``, ``deleted``, ``removed``, ``collapsed``,
-  ``edited``, or ``ordering``. The pipeline's serialization step
-  explicitly leaves these ``None``. There are no awards anywhere in
-  the system.
+- **Planning never fills generation fields.** Steps 0-7 do not
+  populate ``content``, ``character_username``, ``score``, votes,
+  time labels, ``is_mod``, ``is_op``, ``deleted``, ``removed``,
+  ``collapsed``, ``edited``, or ``ordering``; the serialization step
+  explicitly leaves these ``None``. Step 8 (Cast) then fills
+  ``character_username``, ``is_mod``, ``is_op``, ``edited``, and
+  ``controversial``; Step 9 (Voice) fills ``content`` and
+  ``deleted``. ``score``, votes, ``ordering``, ``collapsed``,
+  ``removed``, and time labels stay ``None``/empty for the reactor
+  pass and the website. There are no awards anywhere in the system.
 - **No noise furniture.** Noise slots get ``noise_tone`` and
   ``noise_stance`` labels and a one-line brief. Do not write the
   noise reply itself; the generation phase will.
@@ -296,11 +310,14 @@ string if unsure.
 - **Model:** default
 - **Execution:** main
 
-Plan every reply slot. The output is a list of ``Reply`` objects with
-``content=None`` and a populated ``brief`` plus the structural
-fields. Also emit ``encounter_slot_groups``: one list of
-``slot_id`` strings per allocated encounter, in turn order, ready
-for Step 6.
+Plan every reply slot. The output is a list of planning stubs — for
+each slot emit only the structural fields (``slot_id``,
+``parent_slot_id``, ``depth``, ``role``, a populated ``brief``, the
+anchor/encounter/noise labels, and the ``carries_*`` flags). Do not
+emit comment text, usernames, or any other generation-phase fields;
+the pipeline adds those later. Also emit ``encounter_slot_groups``:
+one list of ``slot_id`` strings per allocated encounter, in turn
+order, ready for Step 6.
 
 **Top-level slots first.** Allocate signal slots for every technical
 anchor; anchors with no top-level signal slot violate coverage. For
@@ -402,3 +419,85 @@ serialized.
 Construct the ``Thread`` with all analysis-phase fields populated
 and every generation-phase field left as ``None``. Write
 ``{pid}.agora.json`` to paperstore via ``backend.write_agora_json``.
+
+---
+
+## Step 8 - Cast
+
+- **Model:** none
+- **Execution:** main
+
+Pure-Python casting step. Runs the deterministic roster selection
+(``agora.casting.cast_thread``) over the planned thread and records
+the result on the ``Thread`` itself:
+
+- ``character_username`` on every reply slot, per the casting rules
+  (signal slots get domain-matched signal personas, the
+  misconception-trap question gets a novice, noise gets jokesters,
+  mod slots get human mods, encounter chains alternate two distinct
+  signal personas, and 2-3 regulars recur).
+- ``submission_poster_id``: the thread's first signal regular posts
+  the submission.
+- ``is_mod`` on slots cast with a mod-roster persona; ``is_op`` on
+  slots cast with the submission poster.
+- ``edited``: roughly half of all threads (decided by a stable hash
+  of the document) mark exactly one signal comment as edited; the
+  voice step appends its EDIT line.
+- ``controversial``: each encounter's sharpening turn (the second in
+  the chain) is marked controversial.
+
+Every choice is deterministic: re-running the same blueprint yields
+the identical casting and flags.
+
+---
+
+## Step 9 - Voice
+
+- **Model:** signal
+- **Execution:** main
+
+Write every comment body. Slots are walked in the-mod.md section 9
+order — the teaser first, then encounter chains turn by turn, then
+signal comments, then the noise fill — so the marquee content is
+written while context is freshest and each encounter turn can read
+the turns before it. Signal, teaser, encounter, and mod slots route
+through the ``signal`` logical model; noise and tangent slots route
+through ``noise``. ``deleted``-role slots never reach the model:
+their body is the literal ``[deleted]``.
+
+Each call carries the persona's system prompt (the voice), the slot's
+brief, the submission, the anchor quote when the slot addresses one,
+the comment chain above the slot, the encounter position and turn
+when applicable, and the constraints below. The comment is the brief,
+executed — in the persona's voice, at the persona's typical length.
+
+Rules for every comment:
+
+- **The brief is the assignment.** Accomplish what it says; do not
+  drift into a different point, and do not restate the brief.
+- **Stay in character.** The persona's system prompt governs voice,
+  vocabulary, verbosity, and formatting habits. Never break the
+  fourth wall, never mention briefs, slots, personas, or the Mod.
+- **Quotes are verbatim.** When the slot carries a quote, use the
+  anchor's exact claim text (or an exact fragment of the submission
+  body) in a ``>`` blockquote. Never paraphrase inside a blockquote.
+- **The technical floor holds.** Even the laziest noise comment
+  sounds like a C++ programmer wrote it (the-mod.md section 6).
+- **Reddit markdown.** Plain paragraphs, ``>`` blockquotes, fenced
+  code blocks for code, bare URLs or ``[text](url)`` links. No HTML,
+  no headings.
+- **Length by role.** Noise and tangent comments are 1-3 sentences.
+  Mod actions are one or two terse, procedural sentences. Signal,
+  teaser, and encounter comments run as long as the persona's voice
+  demands — a paragraph to several.
+- **No real people.** Never attribute opinions to, or invent quotes
+  from, real committee members, real Redditors, or the paper's
+  authors beyond what the paper itself says.
+
+Misconception traps invert the usual flow: the teaching correction
+(a signal child) is written first, and the confused question that
+provoked it is written during the noise fill with the correction in
+view, so the pair always fits together.
+
+Output one ``content`` string per call: the comment body only, no
+username, no metadata.

@@ -150,3 +150,34 @@ def skeleton_excerpts() -> str:
 def encounters_excerpts() -> str:
     """Rules Step 6 (Encounters) is asked to apply: section 11."""
     return _section("11. The Encounter")
+
+
+def _content_rules_for_voice() -> str:
+    """The section 10 slice a comment writer needs: paper quotes,
+    anchor engagement, code style, and the technical floor — without
+    the thread-level rules (spam, ads, update-thread mix) that the
+    planner already resolved into slot briefs."""
+    return _block("10. Content Rules", "**Paper quotes.**", "**Spam.**")
+
+
+def voice_signal_excerpts() -> str:
+    """Rules a signal / teaser comment writer is asked to apply."""
+    return _content_rules_for_voice()
+
+
+def voice_noise_excerpts() -> str:
+    """Rules a noise / tangent comment writer is asked to apply:
+    section 6 (the palette, stock phrases, and the technical floor)."""
+    return _section("6. Short Path - Noise")
+
+
+def voice_mod_excerpts() -> str:
+    """Rules a mod-action writer is asked to apply: section 5b."""
+    return _section("5b. Mod Presence")
+
+
+def voice_encounter_excerpts() -> str:
+    """Rules an encounter-turn writer is asked to apply: section 11
+    plus the signal content rules (turns engage anchors like any
+    signal comment)."""
+    return _bundle(_section("11. The Encounter"), _content_rules_for_voice())

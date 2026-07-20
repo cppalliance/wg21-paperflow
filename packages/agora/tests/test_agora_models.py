@@ -21,6 +21,7 @@ from agora.models import (
     ResearchAgentReport,
     ResearchSummary,
     SkeletonOutput,
+    SkeletonReply,
     SmellTestOutput,
     SubmissionOutput,
     TechnicalAnchor,
@@ -168,11 +169,35 @@ def test_submission_output_default_case_A():
 
 def test_skeleton_output_carries_groups():
     o = SkeletonOutput(
-        replies=[Reply(slot_id="s01", depth=0, role="signal", brief="b")],
+        replies=[SkeletonReply(slot_id="s01", depth=0, role="signal", brief="b")],
         encounter_slot_groups=[["s05", "s06", "s07"]],
     )
     assert len(o.encounter_slot_groups) == 1
     assert o.encounter_slot_groups[0] == ["s05", "s06", "s07"]
+
+
+def test_skeleton_reply_has_no_generation_fields():
+    fields = set(SkeletonReply.model_fields)
+    assert fields <= set(Reply.model_fields)
+    assert not fields & {
+        "content", "character_username", "score", "ordering",
+        "time_label", "controversial", "edited", "collapsed",
+        "deleted", "removed", "is_mod", "is_op", "flair", "votes",
+    }
+
+
+def test_skeleton_reply_widens_to_reply():
+    slot = SkeletonReply(
+        slot_id="s01", parent_slot_id=None, depth=0, role="signal",
+        brief="b", anchor_id="a01", domain_lens=3, carries_code=True,
+    )
+    reply = Reply(**slot.model_dump())
+    assert reply.slot_id == "s01"
+    assert reply.anchor_id == "a01"
+    assert reply.carries_code is True
+    assert reply.content is None
+    assert reply.character_username is None
+    assert reply.votes == []
 
 
 def test_encounters_output_default():

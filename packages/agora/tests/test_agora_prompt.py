@@ -29,8 +29,9 @@ def _agora_prompt() -> PipelinePrompt:
 def test_load_returns_all_step_headers():
     prompt = _agora_prompt()
     step_names = [s.name for s in prompt.steps]
-    assert len(step_names) == 8
+    assert len(step_names) == 10
     assert step_names[0] == "Step 0 - Load"
+    assert step_names[-1] == "Step 9 - Voice"
     assert set(step_names) == set(_build_hooks())
 
 
@@ -43,13 +44,29 @@ def test_load_has_services():
     prompt = _agora_prompt()
     assert "default" in prompt.services
     assert "tool" in prompt.services
+    assert "signal" in prompt.services
+    assert "noise" in prompt.services
+    # The generation slots ride the same live endpoint as the planner:
+    # a split is allowed later, but an inert slot is not.
+    assert prompt.services["signal"] == prompt.services["default"]
+    assert prompt.services["noise"] == prompt.services["default"]
 
 
-def test_build_pipeline_returns_8_specs_in_numeric_order():
+def test_step_9_voice_uses_the_signal_model():
+    """Step 9 spawns per-slot calls via run_task; its declared model
+    must be a real logical name so ctx.agents resolution works."""
     prompt = _agora_prompt()
     specs = build_pipeline(prompt, _build_hooks())
-    assert len(specs) == 8
-    assert [s.step.number for s in specs] == list(range(8))
+    by_name = {s.step.name: s for s in specs}
+    assert by_name["Step 9 - Voice"].step.model == "signal"
+    assert by_name["Step 8 - Cast"].step.model == "none"
+
+
+def test_build_pipeline_returns_10_specs_in_numeric_order():
+    prompt = _agora_prompt()
+    specs = build_pipeline(prompt, _build_hooks())
+    assert len(specs) == 10
+    assert [s.step.number for s in specs] == list(range(10))
 
 
 def test_step_2_research_uses_a_real_model():

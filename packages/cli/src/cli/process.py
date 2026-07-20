@@ -122,6 +122,16 @@ async def process_paper(
     stages_run: list[int] = []
     convert_report: ConvertReport | None = None
     while 0 <= status < through:
+        if status not in STAGE_NAMES:
+            # Retired stage number (the dissect stages left a hole at
+            # 2-3 when they were removed). Existing rows and failure
+            # rewinds can still land here; walk through the hole
+            # without running anything.
+            if not backend.advance_status(pid, status, status + 1):
+                break
+            status += 1
+            continue
+
         stage_name = STAGE_NAMES.get(status, f"stage-{status}")
         logger.info("Processing %s: %s", pid, stage_name)
 

@@ -48,8 +48,8 @@
 
 [services.h200x8-deepseek-v4-pro]
 backend = "vllm_thinking"
-base_url = "https://w80putgan2qou8-8000.proxy.runpod.net/v1"
-api_key = "sk-w80putgan2qou8"
+base_url = "https://sgjy18glyi4blu-8000.proxy.runpod.net/v1"
+api_key = "$VLLM_DEEPSEEK_API_KEY"
 model = "deepseek-v4-pro"
 max_context_window = 393216
 chars_per_token = 4.0

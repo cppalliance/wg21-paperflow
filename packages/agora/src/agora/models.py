@@ -380,6 +380,54 @@ class SubmissionOutput(BaseModel, frozen=True):
     revision_case: RevisionCase = "A"
 
 
+class SkeletonReply(BaseModel, frozen=True):
+    """A planned reply slot as emitted by Step 5 (Skeleton).
+
+    Only the analysis-phase fields of :class:`Reply` — the generation
+    phase fills the rest, so asking the model to echo them as nulls
+    just burns output tokens (a 90-slot thread overflows the output
+    budget). ``_extract_skeleton`` widens these into full ``Reply``
+    objects.
+    """
+
+    slot_id: str = Field(description="Unique within the thread, e.g. ``s01``.")
+    parent_slot_id: Optional[str] = Field(
+        default=None,
+        description="``None`` for top-level slots; otherwise a sibling's ``slot_id``.",
+    )
+    depth: int = Field(ge=0, le=6, description="Reply depth (0 = top-level).")
+    role: ReplyRole
+    brief: str = Field(
+        description="1-3 sentences. What this reply must accomplish."
+        " Permanent audit trail; survives generation.",
+    )
+
+    anchor_id: Optional[str] = Field(
+        default=None,
+        description="``TechnicalAnchor.id`` this reply addresses (signal / encounter).",
+    )
+    domain_lens: Optional[int] = Field(
+        default=None, ge=1, le=13,
+        description="Table C domain index (1-13) for signal / encounter roles.",
+    )
+    encounter_id: Optional[str] = Field(
+        default=None,
+        description="``EncounterPlan.encounter_id`` for encounter turns.",
+    )
+    noise_tone: Optional[str] = Field(
+        default=None,
+        description="Tone label for noise slots (e.g. ``snark``, ``earnest``).",
+    )
+    noise_stance: Optional[str] = Field(
+        default=None,
+        description="Stance label for noise slots (e.g. ``pro``, ``con``, ``baffled``).",
+    )
+
+    carries_quote: bool = False
+    carries_code: bool = False
+    carries_link: bool = False
+
+
 class SkeletonOutput(BaseModel, frozen=True):
     """Step 5 (Skeleton) output.
 
@@ -387,7 +435,7 @@ class SkeletonOutput(BaseModel, frozen=True):
     pointers for Step 6 to fill in.
     """
 
-    replies: list[Reply] = Field(default_factory=list)
+    replies: list[SkeletonReply] = Field(default_factory=list)
     encounter_slot_groups: list[list[str]] = Field(
         default_factory=list,
         description="One list of ``slot_id`` strings per allocated encounter, "
@@ -399,6 +447,16 @@ class EncountersOutput(BaseModel, frozen=True):
     """Step 6 (Encounters) output."""
 
     encounters: list[EncounterPlan] = Field(default_factory=list)
+
+
+class CommentOutput(BaseModel, frozen=True):
+    """Step 9 (Voice) per-slot output: one comment body."""
+
+    content: str = Field(
+        min_length=1,
+        description="The comment body in Reddit-flavored markdown,"
+        " written in the assigned persona's voice.",
+    )
 
 
 # -- Pipeline state ----------------------------------------------------------

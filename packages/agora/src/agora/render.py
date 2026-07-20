@@ -262,4 +262,50 @@ def render_trace(state: PipelineState, stop_step: int) -> str:
             lines.append("- (not serialized)")
         lines.append("")
 
+    if stop_step >= 8:
+        lines.append("## 8. Cast\n")
+        t = state.thread
+        if t is not None and any(r.character_username for r in t.replies):
+            lines.append(f"- submission poster: u/{t.submission_poster_id}")
+            counts: dict[str, int] = {}
+            for r in t.replies:
+                if r.character_username:
+                    counts[r.character_username] = (
+                        counts.get(r.character_username, 0) + 1
+                    )
+            cast_line = ", ".join(
+                f"u/{name} x{n}" if n > 1 else f"u/{name}"
+                for name, n in sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))
+            )
+            lines.append(f"- cast ({len(counts)} personas): {cast_line}")
+            edited = [r.slot_id for r in t.replies if r.edited]
+            controversial = [r.slot_id for r in t.replies if r.controversial]
+            if edited:
+                lines.append(f"- edited: {', '.join(edited)}")
+            if controversial:
+                lines.append(f"- controversial: {', '.join(controversial)}")
+        else:
+            lines.append("- (not cast)")
+        lines.append("")
+
+    if stop_step >= 9:
+        lines.append("## 9. Voice\n")
+        t = state.thread
+        written = [r for r in (t.replies if t else []) if r.content]
+        if written:
+            total_chars = sum(len(r.content or "") for r in written)
+            lines.append(
+                f"- {len(written)}/{len(t.replies)} comments written "
+                f"({total_chars} chars)"
+            )
+            teaser = next((r for r in written if r.role == "teaser"), None)
+            if teaser and teaser.content:
+                preview = teaser.content.strip().splitlines()[:4]
+                lines.append(f"- teaser ({teaser.slot_id}, u/{teaser.character_username}):")
+                for ln in preview:
+                    lines.append(f"  > {sanitize_md(ln)}")
+        else:
+            lines.append("- (no comments written)")
+        lines.append("")
+
     return "\n".join(lines).rstrip() + "\n"

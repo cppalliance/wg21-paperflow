@@ -14,11 +14,14 @@ structure; this module conforms to it.
 
 One-shot, fully batch. No human-in-the-loop.
 
-The pipeline runs Steps 0-7 (analysis phase). It plans the thread and
-writes ``{pid}.agora.json`` to paperstore. It does **not** generate
-reply text, characters, votes, or Reddit furniture; those
-remain ``None`` on the emitted ``Thread`` and are filled later by a
-future generation phase.
+The pipeline runs Steps 0-7 (analysis phase) followed by Steps 8-9
+(generation phase, :mod:`agora.generate`). Steps 0-7 plan the thread
+and write the blueprint ``{pid}.agora.json`` to paperstore; Step 8
+casts a roster persona on every slot and Step 9 writes the comment
+bodies in those voices, mutating the ``Thread`` in place. Votes,
+scores, orderings, and time labels remain ``None``/empty — the
+reactor pass owns votes, and the full-artifact emit happens with the
+integration work.
 """
 
 from __future__ import annotations
@@ -54,11 +57,13 @@ from pipeline.errors import (
 )
 from agora import mod_reference
 from agora.errors import PaperNotConvertedError, PaperNotFoundError
+from agora.generate import _pure_cast, _pure_voice
 from agora.models import (
     CalibrationOutput,
     Committee,
     EncountersOutput,
     PipelineState,
+    Reply,
     ResearchAgentReport,
     ResearchSummary,
     SkeletonOutput,
@@ -81,6 +86,8 @@ _STEP_4_SUBMISSION = "Step 4 - Submission"
 _STEP_5_SKELETON = "Step 5 - Skeleton"
 _STEP_6_ENCOUNTERS = "Step 6 - Encounters"
 _STEP_7_SERIALIZE = "Step 7 - Serialize"
+_STEP_8_CAST = "Step 8 - Cast"
+_STEP_9_VOICE = "Step 9 - Voice"
 
 
 # -- Committee routing -------------------------------------------------------
@@ -539,7 +546,7 @@ def _prepare_skeleton(state: PipelineState, ctx: StepContext) -> str:
 
 
 def _extract_skeleton(state: PipelineState, output: SkeletonOutput) -> None:
-    state.replies = list(output.replies)
+    state.replies = [Reply(**slot.model_dump()) for slot in output.replies]
     state.encounter_slot_groups = [list(g) for g in output.encounter_slot_groups]
 
 
@@ -750,6 +757,8 @@ def _build_hooks(*, research: bool = True) -> dict[str, StepHooks]:
             guard=_guard_encounter_count_positive,
         ),
         _STEP_7_SERIALIZE: StepHooks(custom=_pure_serialize),
+        _STEP_8_CAST: StepHooks(custom=_pure_cast),
+        _STEP_9_VOICE: StepHooks(custom=_pure_voice),
     }
 
 
@@ -766,13 +775,15 @@ async def agora_paper(
     trace: bool = False,
     research: bool = True,
 ) -> Thread | str:
-    """Plan a Reddit thread for a dissected WG21 paper.
+    """Plan and generate a Reddit thread for a dissected WG21 paper.
 
     Loads ``agora.md``, resolves its ``## Services`` block against
-    SERVICES.toml, builds agents, runs the 8-step analysis pipeline,
-    writes ``{pid}.agora.json`` via ``backend.write_agora_json``, and
-    returns the planned :class:`Thread`. Generation-phase fields stay
-    ``None``.
+    SERVICES.toml, builds agents, and runs the 10-step pipeline:
+    Steps 0-7 plan the thread and write the blueprint
+    ``{pid}.agora.json`` via ``backend.write_agora_json``; Steps 8-9
+    cast personas and write every comment body onto the returned
+    :class:`Thread`. Votes and scores stay ``None``/empty for the
+    reactor pass.
 
     ``research=False`` turns Step 2 off for this run: no web search
     or MCP traffic; the thread calibrates from paper signals alone
