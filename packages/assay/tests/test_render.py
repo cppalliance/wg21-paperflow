@@ -28,7 +28,7 @@ from assay.models import (
     SynthesisOutput,
 )
 from assay.references import RefEntry, UrlEntry
-from assay.render import load_assay_state, prepare_report_data, render_report
+from assay.render import load_assay_state, prepare_report_data, render_report, render_trace
 
 
 @pytest.fixture
@@ -47,11 +47,13 @@ def _make_state() -> PipelineState:
         ),
         gaps_by_lens={
             "Design": [GapOutput(
+                id=1,
                 chunk_index=0, item_quote="iq1", line=10,
                 gap="gap1", why_important="matters", primary_lens="Design",
                 severity="critical",
             )],
             "Performance": [GapOutput(
+                id=2,
                 chunk_index=1, item_quote="iq2", line=20,
                 gap="gap2", why_important="matters", primary_lens="Performance",
                 severity="minor",
@@ -150,6 +152,88 @@ def test_prepare_report_data_inventory():
     assert data.inventory.gap_minor == 1
     assert data.inventory.findings_killed == 1
     assert "resolution" in data.inventory.killed_breakdown
+
+
+def test_prepare_report_data_dedupes_dual_lens_gaps():
+    shared = GapOutput(
+        id=1,
+        chunk_index=0,
+        item_quote="q",
+        line=10,
+        gap="API shape unclear",
+        why_important="matters",
+        primary_lens="Performance",
+        secondary_lens="Design",
+        severity="significant",
+    )
+    state = PipelineState(
+        paper_id="P9999R0",
+        paper_title="Test",
+        gaps_by_lens={
+            "Performance": [shared],
+            "Design": [shared.model_copy()],
+        },
+    )
+    data = prepare_report_data(state)
+    assert data.inventory.gap_total == 1
+    assert data.inventory.gap_significant == 1
+    assert data.inventory.gap_critical == 0
+    assert data.inventory.gap_minor == 0
+
+
+def test_prepare_report_data_dedupes_dual_lens_gaps_keeps_highest_severity():
+    base = dict(
+        id=1,
+        chunk_index=0,
+        item_quote="q",
+        line=10,
+        gap="API shape unclear",
+        why_important="matters",
+        primary_lens="Performance",
+        secondary_lens="Design",
+    )
+    state = PipelineState(
+        paper_id="P9999R0",
+        paper_title="Test",
+        gaps_by_lens={
+            "Performance": [GapOutput(**base, severity="critical")],
+            "Design": [GapOutput(**base, severity="significant")],
+        },
+    )
+    data = prepare_report_data(state)
+    assert data.inventory.gap_total == 1
+    assert data.inventory.gap_critical == 1
+    assert data.inventory.gap_significant == 0
+
+
+def test_render_trace_dedupes_dual_lens_gaps():
+    shared = GapOutput(
+        id=1,
+        chunk_index=0,
+        item_quote="q",
+        line=10,
+        gap="API shape unclear",
+        why_important="matters",
+        primary_lens="Performance",
+        secondary_lens="Design",
+        severity="significant",
+    )
+    state = PipelineState(
+        paper_id="P9999R0",
+        paper_title="Test",
+        derive=DeriveOutput(
+            central_claim="thesis",
+            problem_statement="problem",
+            scope_boundary="scope",
+        ),
+        gaps_by_lens={
+            "Performance": [shared],
+            "Design": [shared.model_copy()],
+        },
+    )
+    trace = render_trace(state, step=8)
+    assert "### Gaps (1:" in trace
+    assert trace.count("- [1]") == 1
 
 
 def test_prepare_report_data_checklist():
