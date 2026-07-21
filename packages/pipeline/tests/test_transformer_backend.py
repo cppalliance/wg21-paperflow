@@ -475,6 +475,10 @@ def test_seqcls_backend_raises_on_empty_id2label(monkeypatch):
     backend = SeqClassificationBackend("fake/seqcls")
     with pytest.raises(ValueError, match="no id2label"):
         backend.classify_multilabel(["hello"])
+    assert backend._model is None
+    with pytest.raises(ValueError, match="no id2label"):
+        backend.classify_multilabel(["hello"])
+    assert stub.load_count == 2
 
 
 def test_seqcls_backend_warns_on_wrong_problem_type(

@@ -679,10 +679,10 @@ class SeqClassificationBackend(TransformerBackend):
             pass
 
         try:
-            self._tokenizer = AutoTokenizer.from_pretrained(
+            tokenizer = AutoTokenizer.from_pretrained(
                 self.model_id, local_files_only=True,
             )
-            self._model = AutoModelForSequenceClassification.from_pretrained(
+            model = AutoModelForSequenceClassification.from_pretrained(
                 self.model_id, local_files_only=True, **model_kwargs,
             )
         except (OSError, ValueError, TypeError):
@@ -692,26 +692,26 @@ class SeqClassificationBackend(TransformerBackend):
                 self.model_id,
             )
             try:
-                self._tokenizer = AutoTokenizer.from_pretrained(self.model_id)
-                self._model = AutoModelForSequenceClassification.from_pretrained(
+                tokenizer = AutoTokenizer.from_pretrained(self.model_id)
+                model = AutoModelForSequenceClassification.from_pretrained(
                     self.model_id, **model_kwargs,
                 )
             except TypeError:
-                self._tokenizer = AutoTokenizer.from_pretrained(self.model_id)
-                self._model = AutoModelForSequenceClassification.from_pretrained(
+                tokenizer = AutoTokenizer.from_pretrained(self.model_id)
+                model = AutoModelForSequenceClassification.from_pretrained(
                     self.model_id,
                 )
 
-        raw_id2label = getattr(self._model.config, "id2label", None) or {}
-        self._id2label = {
+        raw_id2label = getattr(model.config, "id2label", None) or {}
+        id2label = {
             int(k): str(v) for k, v in raw_id2label.items()
         }
-        if not self._id2label:
+        if not id2label:
             raise ValueError(
                 f"Sequence-classification checkpoint {self.model_id!r} has no "
                 f"id2label mapping; retrain or check config.json."
             )
-        problem_type = getattr(self._model.config, "problem_type", None)
+        problem_type = getattr(model.config, "problem_type", None)
         if (
             problem_type is not None
             and problem_type != "multi_label_classification"
@@ -726,9 +726,9 @@ class SeqClassificationBackend(TransformerBackend):
         device = self.provider.device
         try:
             if device == "cuda":
-                self._model = self._model.to("cuda:0")
+                model = model.to("cuda:0")
             else:
-                self._model = self._model.to(device)
+                model = model.to(device)
         except Exception:
             # Missing device, stubbed models, or MPS quirks: keep default device.
             logger.warning(
@@ -737,7 +737,10 @@ class SeqClassificationBackend(TransformerBackend):
                 self.model_id, device, exc_info=True,
             )
 
-        self._model.eval()
+        model.eval()
+        self._tokenizer = tokenizer
+        self._model = model
+        self._id2label = id2label
         return self._model
 
     def classify_multilabel(self, texts: list[str]) -> list[dict[str, float]]:
