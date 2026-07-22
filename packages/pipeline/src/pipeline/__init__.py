@@ -34,8 +34,7 @@ from pipeline.errors import (
     UnknownStageError,
     ValidationStepError,
 )
-from pipeline.markdown import extract_code_blocks, sanitize_md, sections
-from pipeline.markdown_patterns import BOLD_SUBSECTION_RE, HEADING_RE
+from pipeline.markdown import HEADING_RE, extract_code_blocks, sanitize_md, sections
 from pipeline.model_backends import ModelBackend
 from pipeline.progress import ProgressCallback, ProgressEvent
 from pipeline.prompt import (
@@ -130,7 +129,6 @@ __all__ = [
     "PipelineError",
     "PipelinePrompt",
     "HEADING_RE",
-    "BOLD_SUBSECTION_RE",
     "PromptFileError",
     "resolve_pipeline_models",
     "ServiceRegistry",
