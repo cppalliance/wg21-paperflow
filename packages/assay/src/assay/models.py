@@ -562,7 +562,6 @@ class PipelineState(BaseModel):
     surviving: Optional[list[FindingOutput]] = None
     killed: Optional[list[KilledFinding]] = None
     quote_grounding_challenge: Optional[QuoteGroundingReport] = None
-    quote_grounding: Optional[QuoteGroundingReport] = None
 
     # Step 15 - Couple
     compounds: Optional[list[CompoundOutput]] = None

@@ -8,7 +8,7 @@
 
 No LLM calls, no network I/O.
 Functions here implement collect (Step 7), cross_examine (Step 14),
-and synthesize (Step 16) logic.
+synthesize (Step 16), and quote grounding (validate_quote, ground_quotes).
 """
 
 from __future__ import annotations
@@ -487,6 +487,7 @@ def _dedup_items(items: list[ItemOutput]) -> list[ItemOutput]:
 # -- Quote grounding (ASSAY-005) --------------------------------------------
 
 _WHITESPACE_RE = re.compile(r"\s+")
+_MAX_LINE_WINDOW = 2
 
 
 def normalize_for_grounding(text: str) -> str:
@@ -495,17 +496,30 @@ def normalize_for_grounding(text: str) -> str:
 
 
 def _find_corrected_line(normalized_quote: str, paper_md: str) -> int | None:
-    """Return 1-based line of first line whose normalized text contains the quote."""
+    """Return 1-based start line of first window whose normalized text contains the quote."""
     if not normalized_quote:
         return None
-    for line_no, line in enumerate(paper_md.splitlines(), start=1):
+    lines = paper_md.splitlines()
+    for start, line in enumerate(lines):
         if normalized_quote in normalize_for_grounding(line):
-            return line_no
+            return start + 1
+    for start in range(len(lines)):
+        end = start + _MAX_LINE_WINDOW
+        window = lines[start:end]
+        if len(window) < 2:
+            continue
+        normalized = normalize_for_grounding(" ".join(window))
+        if normalized_quote in normalized:
+            return start + 1
     return None
 
 
 def validate_quote(quote: str, line: int, paper_md: str) -> QuoteCheckResult:
-    """Check whether quote is grounded in paper_md after whitespace normalization."""
+    """Check whether quote is grounded in paper_md after whitespace normalization.
+
+    When grounded, ``corrected_line`` is the best-match start line and
+    ``line_mismatch`` is True when it differs from the cited ``line``.
+    """
     if not quote.strip():
         return QuoteCheckResult(ok=True, quote=quote, line=line)
 
@@ -529,7 +543,10 @@ def ground_quotes(
     entries: list[tuple[str, int, str, int | None]],
     paper_md: str,
 ) -> QuoteGroundingReport:
-    """Ground a batch of (quote, line, kind, ref_id) entries against paper_md."""
+    """Ground a batch of (quote, line, kind, ref_id) entries against paper_md.
+
+    ``failures`` contains only ungrounded (``ok=False``) entries.
+    """
     failures: list[QuoteCheckResult] = []
     line_mismatches = 0
     checked = 0
@@ -554,31 +571,7 @@ def ground_quotes(
 
     return QuoteGroundingReport(
         checked=checked,
-        ungrounded=len([f for f in failures if not f.ok]),
-        line_mismatches=line_mismatches,
-        failures=failures,
-    )
-
-
-def merge_quote_grounding_reports(
-    *reports: QuoteGroundingReport | None,
-) -> QuoteGroundingReport | None:
-    """Merge multiple grounding reports into one aggregate."""
-    present = [r for r in reports if r is not None]
-    if not present:
-        return None
-    failures: list[QuoteCheckResult] = []
-    checked = 0
-    ungrounded = 0
-    line_mismatches = 0
-    for report in present:
-        checked += report.checked
-        ungrounded += report.ungrounded
-        line_mismatches += report.line_mismatches
-        failures.extend(report.failures)
-    return QuoteGroundingReport(
-        checked=checked,
-        ungrounded=ungrounded,
+        ungrounded=len(failures),
         line_mismatches=line_mismatches,
         failures=failures,
     )

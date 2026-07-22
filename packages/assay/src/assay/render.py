@@ -633,8 +633,6 @@ def render_trace(state: PipelineState, step: int, *, step_durations: list[float]
             lines.append("")
         if report.ungrounded:
             for failure in report.failures:
-                if failure.ok:
-                    continue
                 ref = f"[{failure.ref_id}] " if failure.ref_id is not None else ""
                 kind = f"{failure.kind} " if failure.kind else ""
                 lines.append(f"- {kind}{ref}line {failure.line}: {_q(failure.quote)}")

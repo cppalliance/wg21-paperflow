@@ -59,6 +59,16 @@ def test_validate_quote_wrong_line_sets_mismatch():
     assert result.corrected_line == 2
 
 
+PAPER_MD_MULTILINE = "Line A\nThe committee shall\nrequire X.\nLine D\n"
+
+
+def test_validate_quote_multiline_wrong_line_sets_mismatch():
+    result = validate_quote("The committee shall require X.", 99, PAPER_MD_MULTILINE)
+    assert result.ok
+    assert result.corrected_line == 2
+    assert result.line_mismatch
+
+
 def test_validate_quote_empty_ok():
     result = validate_quote("", 1, PAPER_MD)
     assert result.ok
@@ -105,6 +115,41 @@ def test_collect_entries_skip_companion_source_pid():
     assert "paper evidence" in quotes
     assert "do X" in quotes
     assert "companion quote" not in quotes
+
+
+def test_collect_log_reports_collect_failures(caplog):
+    """Collect-stage ungrounded quotes are logged under Collect only."""
+    from assay.pipeline import _apply_collect_quote_grounding
+
+    state = PipelineState(
+        paper_md=PAPER_MD,
+        items=CollectedItems(
+            claims=[
+                CollectedItem(
+                    type="claim",
+                    quote="fabricated collect quote",
+                    line=1,
+                    id=1,
+                ),
+            ],
+            evidence=[],
+            concessions=[],
+            questions=[],
+            dependencies=[],
+            scope=[],
+        ),
+        asks=[],
+    )
+    with caplog.at_level(logging.WARNING, logger="assay.pipeline"):
+        _apply_collect_quote_grounding(state)
+
+    collect_logs = [
+        r.message for r in caplog.records if "Collect quote grounding" in r.message
+    ]
+    assert len(collect_logs) == 1
+    assert "1 ungrounded / 1 checked" in collect_logs[0]
+    assert state.quote_grounding_collect is not None
+    assert state.quote_grounding_collect.ungrounded == 1
 
 
 def test_challenge_log_uses_challenge_only_report(caplog):
