@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -295,6 +296,34 @@ def test_render_report_no_template_raises():
     import pytest
     with pytest.raises(RuntimeError, match="No Jinja template"):
         render_report(state, "No code blocks here")
+
+
+def test_load_assay_state_restores_gap_uids_for_rerender_inventory(store: SqliteBackend):
+    """Persisted gap UIDs must round-trip so _unique_gaps does not collapse rerender counts."""
+    store.upsert_year("2026", [{"paper_id": "P1R0", "title": "Test Paper"}])
+    store.store_assay_gaps("P1R0", [
+        SimpleNamespace(
+            uid=10, chunk_index=0, loc_line=5, gap="gap one",
+            why_important="matters", primary_lens="Design", secondary_lens="",
+            severity="minor", closed_by=[],
+        ),
+        SimpleNamespace(
+            uid=20, chunk_index=1, loc_line=15, gap="gap two",
+            why_important="matters", primary_lens="Performance", secondary_lens="",
+            severity="significant", closed_by=[],
+        ),
+        SimpleNamespace(
+            uid=30, chunk_index=2, loc_line=25, gap="gap three",
+            why_important="matters", primary_lens="Specification", secondary_lens="",
+            severity="critical", closed_by=[],
+        ),
+    ])
+    state = load_assay_state("P1R0", store)
+    data = prepare_report_data(state)
+    assert data.inventory.gap_total == 3
+    assert data.inventory.gap_critical == 1
+    assert data.inventory.gap_significant == 1
+    assert data.inventory.gap_minor == 1
 
 
 def test_skipped_rerender_preserves_stats_and_reason(store: SqliteBackend):

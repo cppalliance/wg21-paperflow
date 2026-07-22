@@ -491,10 +491,12 @@ def load_assay_state(pid: str, backend) -> PipelineState:
     for b in gap_rows:
         lens = b.primary_lens or "Other"
         g = GapOutput(
+            id=b.uid,
             chunk_index=b.chunk_index, item_quote="", line=b.loc_line,
             gap=b.gap, why_important=b.why_important,
             primary_lens=b.primary_lens, secondary_lens=b.secondary_lens or None,
             severity=b.severity,
+            closed_by=list(b.closed_by or []),
         )
         gaps_by_lens.setdefault(lens, []).append(g)
 
