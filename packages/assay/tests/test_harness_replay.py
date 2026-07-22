@@ -424,6 +424,21 @@ def test_cross_examine_orphan_only_does_not_raise(caplog):
     assert "orphan verdict" not in caplog.text
 
 
+def test_cross_examine_empty_findings_orphan_verdict_warns(caplog):
+    verdict = CrossExamVerdict(
+        finding_id=99,
+        finding_title="orphan",
+        survived=False,
+        killed_by="phantom",
+        reasoning="no such finding",
+    )
+    with caplog.at_level("WARNING"):
+        surviving, killed = cross_examine([], [verdict])
+    assert surviving == []
+    assert killed == []
+    assert "orphan verdict finding_id(s) [99]" in caplog.text
+
+
 def test_cross_examine_survived_true_keeps_finding():
     finding = _finding(2, "survives challenge")
     verdict = CrossExamVerdict(

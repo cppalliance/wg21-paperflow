@@ -306,9 +306,6 @@ def cross_examine(
     Returns (surviving, killed).
     Raises ValueError when any finding has no matching verdict.
     """
-    if not findings:
-        return [], []
-
     finding_ids = {f.id for f in findings}
     verdict_map: dict[int, CrossExamVerdict] = {}
     for v in verdicts:
@@ -321,6 +318,9 @@ def cross_examine(
             "cross_examine: orphan verdict finding_id(s) %s (no matching finding)",
             orphan_ids,
         )
+
+    if not findings:
+        return [], []
 
     unjudged_ids = sorted(finding_ids - verdict_ids)
     if unjudged_ids:
