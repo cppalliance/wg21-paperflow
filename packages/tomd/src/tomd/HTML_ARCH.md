@@ -216,7 +216,7 @@ Unknown generator prompt suppression when generic metadata still succeeded; loss
 
 **`<pre>`**
 
-- Prefer nested `<code>`; detect language from `sourceCode*`, `language-*`, or known short names on the `<code>` or its parent `<pre>`. WG21 papers are C++ by default, so a block with no explicit language class is labeled **`cpp`**; an explicit non-C++ class is the escape hatch. `c++`/`cxx` normalize to `cpp` ([`_detect_code_language`](lib/html/render.py)).
+- Prefer nested `<code>`; detect language from `sourceCode*`, `language-*`, or known short names on the `<code>` or its parent `<pre>` against the shared `CODE_LANG_LABELS` set (`c++`/`cxx` normalize to `cpp`; `swift`/`typescript`/`sql`/`css`/... keep their own name). Recognized neutral classes (`text`, `txt`, `ebnf`, `diagram`) emit an unlabeled fence. WG21 papers are C++ by default, so a **classless** block falls back to **`cpp`** unless its content is an obvious non-C++ shape (shell/console or git transcript, JSON/data, BNF grammar, ASCII diagram), which stays unlabeled. The default is conservative: the defect being fixed (issue #297) is false `cpp` labels, so when in doubt the block is left unlabeled ([`_detect_code_language`](lib/html/render.py)).
 
 **`<code-block>` (Schultke)**
 

@@ -358,6 +358,144 @@ class TestHeadingEdgeCases:
         assert "## See [X](https://example.com/x) now" in md
 
 
+class TestConservativeCodeLanguage:
+    """The cpp default is conservative (issue #297, review by sabriguenes).
+
+    A classless code block is C++ by default, but recognized non-C++/neutral
+    classes and obvious non-C++ classless shapes (shell/console, JSON/data,
+    grammar, ASCII diagrams) must NOT be relabeled ``cpp``. The bug being
+    fixed is false ``cpp`` labels, so when in doubt a block is left unlabeled.
+    """
+
+    @staticmethod
+    def _open_fence(md: str) -> str:
+        for line in md.splitlines():
+            if line.startswith("```"):
+                return line
+        raise AssertionError(f"no fence in {md!r}")
+
+    def test_class_text_stays_unlabeled(self):
+        md = render_body(
+            parse_html('<pre><code class="text">some prose data</code></pre>'),
+            "mpark",
+        )
+        assert self._open_fence(md) == "```"
+        assert "```cpp" not in md
+
+    def test_class_txt_stays_unlabeled(self):
+        md = render_body(
+            parse_html('<pre class="txt">column A   column B</pre>'),
+            "mpark",
+        )
+        assert self._open_fence(md) == "```"
+        assert "```cpp" not in md
+
+    def test_class_ebnf_stays_unlabeled(self):
+        md = render_body(
+            parse_html('<pre class="ebnf">expr ::= term "+" expr</pre>'),
+            "mpark",
+        )
+        assert self._open_fence(md) == "```"
+        assert "```cpp" not in md
+
+    def test_class_diagram_stays_unlabeled(self):
+        md = render_body(
+            parse_html('<pre class="diagram">+---+\n| A |\n+---+</pre>'),
+            "mpark",
+        )
+        assert self._open_fence(md) == "```"
+        assert "```cpp" not in md
+
+    def test_class_swift_uses_swift_label(self):
+        md = render_body(
+            parse_html('<pre><code class="swift">let x = 1</code></pre>'),
+            "mpark",
+        )
+        assert "```swift" in md
+        assert "```cpp" not in md
+
+    def test_broader_known_language_typescript(self):
+        md = render_body(
+            parse_html(
+                '<pre class="sourceCode typescript">const x: number = 1;</pre>'
+            ),
+            "mpark",
+        )
+        assert "```typescript" in md
+        assert "```cpp" not in md
+
+    def test_broader_known_language_sql(self):
+        md = render_body(
+            parse_html('<pre><code class="language-sql">SELECT 1;</code></pre>'),
+            "mpark",
+        )
+        assert "```sql" in md
+        assert "```cpp" not in md
+
+    def test_broader_known_language_css(self):
+        md = render_body(
+            parse_html('<pre class="css">a { color: red; }</pre>'),
+            "mpark",
+        )
+        assert "```css" in md
+        assert "```cpp" not in md
+
+    def test_classless_git_transcript_unlabeled(self):
+        html = (
+            "<pre>commit 3f2a1b8c9d0e4f5a6b7c8d9e0f1a2b3c4d5e6f7a\n"
+            "Author: Jane Doe &lt;jane@example.com&gt;\n"
+            "Date:   Mon Jan 1 12:00:00 2024\n\n"
+            "    Initial commit</pre>"
+        )
+        md = render_body(parse_html(html), "mpark")
+        assert self._open_fence(md) == "```"
+        assert "```cpp" not in md
+
+    def test_classless_shell_block_unlabeled(self):
+        html = "<pre>$ cmake --build .\n$ ./a.out</pre>"
+        md = render_body(parse_html(html), "mpark")
+        assert self._open_fence(md) == "```"
+        assert "```cpp" not in md
+
+    def test_classless_shell_bare_commands_unlabeled(self):
+        html = "<pre>git clone https://example.com/repo.git\ncd repo</pre>"
+        md = render_body(parse_html(html), "mpark")
+        assert self._open_fence(md) == "```"
+        assert "```cpp" not in md
+
+    def test_classless_json_block_unlabeled(self):
+        html = (
+            "<pre>{\n"
+            '  "name": "widget",\n'
+            '  "version": 2\n'
+            "}</pre>"
+        )
+        md = render_body(parse_html(html), "mpark")
+        assert self._open_fence(md) == "```"
+        assert "```cpp" not in md
+
+    def test_genuine_classless_cpp_still_labeled(self):
+        html = (
+            "<pre>namespace A {\n"
+            '  extern "C" void f(int = 5);\n'
+            "}</pre>"
+        )
+        md = render_body(parse_html(html), "mpark")
+        assert "```cpp" in md
+
+    def test_classless_include_stays_cpp(self):
+        # A preprocessor '#include' must not be mistaken for a shell comment.
+        html = "<pre>#include &lt;vector&gt;\nint main() { return 0; }</pre>"
+        md = render_body(parse_html(html), "mpark")
+        assert "```cpp" in md
+
+    def test_classless_cpp_mentioning_git_in_comment_stays_cpp(self):
+        # A trailing comment mentioning a shell command is not a shell block.
+        html = "<pre>int x = 1; // clone via git\nint y = 2;</pre>"
+        md = render_body(parse_html(html), "mpark")
+        assert "```cpp" in md
+
+
 class TestCodeBlockExtended:
     def test_pre_without_code(self):
         md = render_body(parse_html("<pre>plain\nlines</pre>"), "mpark")

@@ -8,8 +8,8 @@ from collections import Counter
 from dataclasses import replace
 
 from .. import (
-    DATE_RE, DEFAULT_FENCE_LANG, SECTION_NUM_PATTERN, SECTION_NUM_PREFIX_RE,
-    strip_format_chars,
+    CODE_LANG_LABELS, DATE_RE, DEFAULT_FENCE_LANG, SECTION_NUM_PATTERN,
+    SECTION_NUM_PREFIX_RE, strip_format_chars,
 )
 # `drop_leaked_toc_entries` reuses toc.py's TOC-recognition helpers so the
 # two "what is a TOC" definitions stay a single source of truth (see #122).
@@ -1845,26 +1845,9 @@ def _section_is_empty(sec: Section) -> bool:
     return not sec.text.strip()
 
 
-_LANG_LABELS = {
-    "c/c++": "cpp",
-    "c++": "cpp",
-    "cpp": "cpp",
-    "c": "c",
-    "python": "python",
-    "javascript": "javascript",
-    "typescript": "typescript",
-    "java": "java",
-    "rust": "rust",
-    "go": "go",
-    "bash": "bash",
-    "shell": "bash",
-    "sql": "sql",
-    "json": "json",
-    "yaml": "yaml",
-    "xml": "xml",
-    "html": "html",
-    "css": "css",
-}
+# Shared with the HTML class-based detector (lib.shared.CODE_LANG_LABELS) so
+# the recognized-language set is a single source of truth.
+_LANG_LABELS = CODE_LANG_LABELS
 
 
 def _detect_lang_label(sec: Section) -> str | None:
