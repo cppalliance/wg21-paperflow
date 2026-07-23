@@ -89,6 +89,8 @@ from assay.render import render_report, render_trace
 
 logger = logging.getLogger(__name__)
 
+CHALLENGE_CHUNK_CHAR_CAP = 8_000
+
 _MCP_TOML_SECTION = "mcp"
 _MCP_ENTRY_NAME = "cpp-standard"
 
@@ -349,6 +351,12 @@ def _build_rationale_user_message(state: PipelineState) -> str:
     return "".join(parts)
 
 
+def _challenge_chunk_fits_cap(chunk: ChunkEntry, paper_lines: list[str]) -> bool:
+    """True when ``format_numbered_lines`` output fits the Challenge embed cap."""
+    formatted = format_numbered_lines(paper_lines, chunk.start_line, chunk.end_line)
+    return len(formatted) <= CHALLENGE_CHUNK_CHAR_CAP
+
+
 def _build_cross_exam_user_message(
     findings_batch: list[FindingOutput], state: PipelineState, ctx: StepContext
 ) -> str:
@@ -400,6 +408,22 @@ def _build_cross_exam_user_message(
         parts.append("\n")
 
     parts.append("## Findings to cross-examine\n\n")
+
+    chunk_by_key: dict[tuple[int, int], ChunkEntry] = {}
+    for f in findings_batch:
+        ch = chunk_by_line.get(f.line) if f.line > 0 else None
+        if ch is not None and _challenge_chunk_fits_cap(ch, paper_lines):
+            chunk_by_key[(ch.start_line, ch.end_line)] = ch
+
+    if chunk_by_key:
+        parts.append("## Source chunks\n\n")
+        for ch in sorted(chunk_by_key.values(), key=lambda c: c.start_line):
+            context = format_numbered_lines(paper_lines, ch.start_line, ch.end_line)
+            parts.append(
+                f"### {ch.heading} (lines {ch.start_line}-{ch.end_line})\n\n"
+                f"{ctx.inject_untrusted(context)}\n\n"
+            )
+
     for f in findings_batch:
         parts.append(f"### [{f.id}] {f.title}\n\n")
         parts.append(f"**Severity:** {f.severity}\n")
@@ -411,18 +435,23 @@ def _build_cross_exam_user_message(
             parts.append(f"**Damage:** {f.damage}\n")
 
         ch = chunk_by_line.get(f.line) if f.line > 0 else None
-        if ch is not None:
-            context = format_numbered_lines(paper_lines, ch.start_line, ch.end_line)
+        if ch is not None and _challenge_chunk_fits_cap(ch, paper_lines):
             parts.append(
-                f"\n**Containing chunk: {ch.heading} (lines {ch.start_line}-{ch.end_line}):**"
-                f"\n\n{ctx.inject_untrusted(context)}\n"
+                f"\n**Containing chunk: {ch.heading} "
+                f"(lines {ch.start_line}-{ch.end_line}; see Source chunks above)**\n"
             )
         elif f.line > 0 and paper_lines:
             start = max(0, f.line - 16)
             end = min(len(paper_lines), f.line + 15)
             context = format_numbered_lines(paper_lines, start + 1, end)
+            label = "Paper context"
+            if ch is not None:
+                label = (
+                    f"Paper context (chunk {ch.heading} exceeds "
+                    f"{CHALLENGE_CHUNK_CHAR_CAP} chars)"
+                )
             parts.append(
-                f"\n**Paper context (lines {start + 1}-{end}):**\n\n"
+                f"\n**{label} (lines {start + 1}-{end}):**\n\n"
                 f"{ctx.inject_untrusted(context)}\n"
             )
 
