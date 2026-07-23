@@ -7,7 +7,8 @@ from tomd.lib.pdf.types import (
     Block, Line, Span, Section, SectionKind, Confidence,
 )
 from tomd.lib.pdf.structure import (
-    compare_extractions, structure_sections, drop_leaked_toc_entries,
+    compare_extractions, structure_sections, structure_body,
+    drop_leaked_toc_entries,
     heading_confidence, _extract_metadata,
     _detect_body_size, _validate_nesting,
     _rank_font_sizes, _title_section_for_ranking,
@@ -1264,6 +1265,57 @@ class TestHeadingLevelDefectsIssue300:
             make_section("body prose", font_size=10.0),
         ]
         assert _title_section_for_ranking(sections, 10.0) is None
+
+    def test_title_section_for_ranking_rejects_nonmatching_metadata_title(self):
+        """When the metadata title is already known and the leading large-font
+        block does not match it, that block is a body heading, not the title:
+        it must NOT be returned for exclusion (reviewer sabriguenes on #300)."""
+        sections = [
+            make_section("Building blocks", font_size=14.0),
+            make_section("body prose at the base size", font_size=10.0),
+        ]
+        t = _title_section_for_ranking(
+            sections, 10.0, metadata_title="A Completely Different Title")
+        assert t is None
+
+    def test_title_section_for_ranking_accepts_matching_metadata_title(self):
+        """A leading large-font block that matches the extracted metadata title
+        IS the title and is returned for font-ranking exclusion."""
+        sections = [
+            make_section("Reflection for C++26", font_size=20.0),
+            make_section("body prose at the base size", font_size=10.0),
+        ]
+        t = _title_section_for_ranking(
+            sections, 10.0, metadata_title="Reflection for C++26")
+        assert t is not None and t.text == "Reflection for C++26"
+
+    def test_missing_title_block_does_not_steal_body_heading(self):
+        """With the real title absent from the body (it came from metadata) and
+        the leading large-font block being a body heading, that block must not
+        be treated as the title. Otherwise it is excluded from font ranking and
+        the hierarchy inverts: `Building blocks` (14pt) rendered H3 and the
+        smaller `Reflection on expressions` (12pt) rendered H2 (reviewer
+        sabriguenes on #300)."""
+        def bold_heading(text, font_size):
+            return make_section(
+                text, font_size=font_size,
+                lines=[make_line([text], font_size=font_size, bold=True)])
+
+        sections = [
+            bold_heading("Building blocks", 14.0),
+            make_section("body prose text at the body size here", font_size=10.0),
+            bold_heading("Reflection on expressions", 12.0),
+            make_section("more body prose text at the body size", font_size=10.0),
+        ]
+        _, result, _ = structure_body(
+            sections, has_title=True,
+            metadata_title="A Completely Different Paper Title")
+        levels = {s.text: s.heading_level
+                  for s in result if s.kind == SectionKind.HEADING}
+        assert levels.get("Building blocks") == 2, (
+            f"leading body heading stolen as the title: {levels}")
+        assert levels.get("Reflection on expressions") == 3, (
+            f"subheading not at H3 (inverted hierarchy): {levels}")
 
 
 class TestExtractMetadataKey:

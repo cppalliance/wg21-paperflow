@@ -1105,6 +1105,23 @@ def _enrich_reply_to(soup: BeautifulSoup, metadata: dict) -> None:
         metadata["reply-to"] = enrich_reply_to_names(rt, candidates)
 
 
+def _remove_title_h1(soup: BeautifulSoup) -> None:
+    """Remove the leading <h1> that metadata extraction used as the title.
+
+    Hand-written and hatemplate papers both take the title from the first
+    <h1> (``soup.find("h1")``). This MUST run before the metadata blocks
+    (``<address>`` / ``table.header`` for hand-written, ``<nav>`` for
+    hatemplate) are decomposed. Calling ``soup.find("h1")`` afterwards can
+    return the first *body* h1 when the title h1 lived inside a removed
+    metadata block, silently deleting a real body heading. Capturing (and
+    removing) the title h1 up front keeps the decompose scoped to the block
+    metadata extraction already consumed.
+    """
+    title_h1 = soup.find("h1")
+    if title_h1:
+        title_h1.decompose()
+
+
 def strip_boilerplate(soup: BeautifulSoup, generator: str) -> list[str]:
     """Remove non-content elements from `soup` in-place.
 
@@ -1146,18 +1163,18 @@ def strip_boilerplate(soup: BeautifulSoup, generator: str) -> list[str]:
             h2.decompose()
 
     if generator == "hand-written":
+        # Remove the title h1 FIRST (metadata extraction captured it from the
+        # first <h1>), before decomposing the metadata blocks. A fresh
+        # soup.find("h1") after decomposing <address>/table.header would match
+        # the first *body* h1 when the title h1 was nested inside a removed
+        # metadata block, deleting a real body heading. Removing it here also
+        # keeps _normalize_heading_levels from counting the title h1 in its
+        # minimum-heading calculation (which would offset body headings +1).
+        _remove_title_h1(soup)
         for addr in soup.find_all("address"):
             addr.decompose()
         for table in soup.find_all("table", class_="header"):
             table.decompose()
-        # The paper title is the leading <h1> (metadata extraction already
-        # captured it from the first <h1>). Remove it so
-        # _normalize_heading_levels does not include the H1 in its
-        # minimum-heading calculation, which would offset every body heading
-        # by +1 (H2 -> H3, etc.). Mirrors the hatemplate branch below.
-        title_h1 = soup.find("h1")
-        if title_h1:
-            title_h1.decompose()
 
     if generator == "wg21":
         for el in soup.find_all("div", class_="wg21-head"):
@@ -1168,6 +1185,10 @@ def strip_boilerplate(soup: BeautifulSoup, generator: str) -> list[str]:
     if generator == "hatemplate":
         # eelis/draft: the metadata header and acknowledgements live in
         # <nav>; the collapse toggle is <div id="hide">. Both are chrome.
+        # Remove the title h1 FIRST (see _remove_title_h1): a title h1 nested
+        # inside <nav> would otherwise leave the post-decompose soup.find("h1")
+        # matching and deleting the first body heading.
+        _remove_title_h1(soup)
         for nav in soup.find_all("nav"):
             nav.decompose()
         hide = soup.find("div", id="hide")
@@ -1181,13 +1202,6 @@ def strip_boilerplate(soup: BeautifulSoup, generator: str) -> list[str]:
             and ("marginalizedparent" in c or "sourceLinkParent" in c),
         ):
             chrome.decompose()
-        # The paper title lives in <h1>; metadata extraction already captured
-        # it. Remove it here so _normalize_heading_levels does not include the
-        # H1 in its minimum-heading calculation, which would offset all body
-        # headings by +1 (H2 → H3, etc.).
-        title_h1 = soup.find("h1")
-        if title_h1:
-            title_h1.decompose()
 
     if generator == "unknown":
         problems.append(

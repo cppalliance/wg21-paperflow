@@ -148,6 +148,36 @@ def test_handwritten_heading_levels_not_offset_by_title_h1():
     assert not any("Test Handwritten Paper" in ln for ln in lines)
 
 
+def test_handwritten_title_h1_in_header_table_preserves_body_h1():
+    """The title <h1> nested inside the removed table.header must not cause the
+    first *body* <h1> to be deleted (reviewer sabriguenes on #300).
+
+    strip_boilerplate previously called ``soup.find("h1")`` *after* decomposing
+    ``table.header``. When the title <h1> lived inside that table, the fresh
+    lookup matched and deleted the first body <h1> ("Introduction") instead."""
+    html = (
+        "<html><body>"
+        "<table class='header'>"
+        "<tr><td><h1>Real Paper Title</h1></td></tr>"
+        "<tr><th>Document Number:</th><td>P9999R0</td></tr>"
+        "</table>"
+        "<h1>Introduction</h1>"
+        "<p>Body paragraph.</p>"
+        "</body></html>"
+    )
+    soup = parse_html(html)
+    meta = extract_metadata(soup, "hand-written")
+    assert meta.get("title") == "Real Paper Title"
+    strip_boilerplate(soup, "hand-written")
+    md = render_body(soup, "hand-written")
+    lines = md.splitlines()
+    # The body heading survives (shifted to H2 by _normalize_heading_levels).
+    assert "## Introduction" in lines
+    assert "Body paragraph." in md
+    # The title h1 is not left in the body.
+    assert not any("Real Paper Title" in ln for ln in lines)
+
+
 # ---- Hatemplate (eelis/draft) -------------------------------------------
 
 def test_hatemplate_detection():
@@ -175,6 +205,40 @@ def test_hatemplate_boilerplate_strips_chrome():
     assert soup.find("div", id="hide") is None
     assert soup.find("div", class_="marginalizedparent") is None
     assert soup.find("div", class_="sourceLinkParent") is None
+
+
+def test_hatemplate_title_h1_in_nav_preserves_body_h1():
+    """The title <h1> nested inside the removed <nav> must not cause the first
+    *body* <h1> to be deleted (reviewer sabriguenes on #300).
+
+    Same latent bug as the hand-written branch: strip_boilerplate called
+    ``soup.find("h1")`` *after* decomposing <nav>, so a title <h1> inside <nav>
+    left the lookup matching and deleting the first body <h1> ("Overview")."""
+    html = (
+        "<html><head>"
+        "<meta name='generator' content='hatemplate/v2'>"
+        "</head><body>"
+        "<nav><div class='paper-info'>"
+        "<span class='key'>Number:</span><span>P9999R0</span>"
+        "</div>"
+        "<h1>Real Hatemplate Title</h1>"
+        "</nav>"
+        "<article>"
+        "<h1>Overview</h1>"
+        "<p>Body paragraph.</p>"
+        "</article>"
+        "</body></html>"
+    )
+    soup = parse_html(html)
+    meta = extract_metadata(soup, "hatemplate")
+    assert meta.get("title") == "Real Hatemplate Title"
+    strip_boilerplate(soup, "hatemplate")
+    md = render_body(soup, "hatemplate")
+    lines = md.splitlines()
+    # The body heading survives (shifted to H2 by _normalize_heading_levels).
+    assert "## Overview" in lines
+    assert "Body paragraph." in md
+    assert not any("Real Hatemplate Title" in ln for ln in lines)
     # The title <h1> is stripped so it does not inflate the heading-level
     # baseline used by _normalize_heading_levels.
     assert soup.find("h1") is None

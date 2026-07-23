@@ -928,8 +928,16 @@ def _rank_font_sizes(sections: list[Section],
     return {sz: i + 1 for i, sz in enumerate(ranked)}
 
 
+def _normalize_title_for_match(text: str) -> str:
+    """Lowercase, strip the paper-ID prefix, and collapse whitespace."""
+    text = _TITLE_PID_PREFIX_RE.sub("", text)
+    return " ".join(text.split()).lower()
+
+
 def _title_section_for_ranking(sections: list[Section],
-                               body_size: float) -> Section | None:
+                               body_size: float,
+                               metadata_title: str | None = None,
+                               ) -> Section | None:
     """The document-title block, to exclude from font-size ranking.
 
     The title renders as H1 (front matter) and is not a body heading. If
@@ -938,8 +946,16 @@ def _title_section_for_ranking(sections: list[Section],
     classifier does: the first large-font, non-metadata block that precedes
     any numbered section. Returns None when the document opens on numbered
     content (no distinct title block to exclude).
+
+    When ``metadata_title`` is known (the title was already extracted
+    upstream from the WG21 block scan or PDF info) the leading large-font
+    block is cross-checked against it. If they do not match, that block is a
+    body heading, not the title: excluding it would push every real body
+    heading one tier too deep (inverted hierarchy), so None is returned and
+    the block keeps its font tier.
     """
     large_thresh = body_size * _TITLE_SIZE_RATIO
+    meta_norm = _normalize_title_for_match(metadata_title) if metadata_title else ""
     for sec in sections:
         first_line = sec.text.split("\n")[0].strip()
         if not first_line:
@@ -953,6 +969,12 @@ def _title_section_for_ranking(sections: list[Section],
                 or DATE_RE.match(first_line)
                 or len(first_line) > _TITLE_MAX_LENGTH):
             continue
+        if meta_norm:
+            cand_norm = _normalize_title_for_match(sec.text)
+            if not (cand_norm == meta_norm
+                    or meta_norm.startswith(cand_norm)
+                    or cand_norm.startswith(meta_norm)):
+                return None
         return sec
     return None
 
@@ -1128,15 +1150,21 @@ def structure_sections(sections: list[Section],
 def structure_body(sections: list[Section],
                    has_title: bool = False,
                    figure_regions: list | None = None,
+                   metadata_title: str | None = None,
                    ) -> tuple[dict, list[Section], int]:
     """Body structuring only, without metadata extraction.
 
     Called after metadata extraction is complete.
     Returns (body_metadata, structured_sections, nesting_corrections).
     body_metadata may contain a 'title' if one was detected during structuring.
+
+    ``metadata_title`` is the title already extracted upstream (WG21 block
+    scan / PDF info). It lets font-size ranking distinguish the real title
+    block from a same-position body heading; see ``_title_section_for_ranking``.
     """
     return _structure_body_impl({}, sections, has_title,
-                                figure_regions=figure_regions)
+                                figure_regions=figure_regions,
+                                metadata_title=metadata_title)
 
 
 def _section_in_figure_region(sec: Section,
@@ -1180,10 +1208,13 @@ def _structure_body_impl(metadata: dict,
                          sections: list[Section],
                          has_title: bool = False,
                          figure_regions: list | None = None,
+                         metadata_title: str | None = None,
                          ) -> tuple[dict, list[Section], int]:
     """Implementation of body structuring logic."""
     body_size = _detect_body_size(sections)
-    title_section = _title_section_for_ranking(sections, body_size)
+    effective_title = metadata_title or metadata.get("title")
+    title_section = _title_section_for_ranking(
+        sections, body_size, effective_title)
     font_ranks = _rank_font_sizes(sections, body_size, skip=title_section)
     if title_section is not None and not font_ranks:
         # Excluding the title emptied the ranking: the title is the only
