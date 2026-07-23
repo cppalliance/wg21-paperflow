@@ -1,17 +1,19 @@
 # pipeline
 
-Shared framework for the LLM analytical pipelines (`agora`). Depends on `pipeline`. Project-wide rules and the determinism rule numbering live in the root `CLAUDE.md`. Sampling and concurrency rationale lives in `MODELS.md`.
+Shared framework for the LLM analytical pipelines (`agora`). It depends only on third-party libraries and must not import from any internal/workspace package. Project-wide rules and the determinism rule numbering live in the root `CLAUDE.md`. Sampling and concurrency rationale lives in `MODELS.md`.
 
 ## Modules
 
 - `model_backends.py` - `ModelBackend` ABC and concrete backends (`VllmThinkingBackend`, `Llama3Backend`, `Qwen3Backend`, `AnthropicBackend`), `BACKEND_REGISTRY`. One class per model family; encapsulates structured output strategy, BPE cleanup, thinking-block stripping, tool-calling workarounds.
-- `classifier_backends.py` - `ClassifierBackend` ABC and concrete backends (`ZeroShotV2Backend`, `NliCrossEncoderBackend`), `CLASSIFIER_BACKEND_REGISTRY`. Local zero-shot text classifiers wrapping HF Transformers / sentence_transformers. Parallel namespace to `model_backends.py`; no interaction.
+- `classifier_backends.py` - `ClassifierBackend` ABC and concrete backends (`ZeroShotV2Backend`, `NliCrossEncoderBackend`, `MultiLabelClassifierBackend`), `CLASSIFIER_BACKEND_REGISTRY`. Local text classifiers wrapping HF Transformers / sentence_transformers. Parallel namespace to `model_backends.py`; no interaction.
+- `transformer_backend.py` - `TransformerBackend` family (`HFZeroShotBackend`, `CrossEncoderBackend`, `SeqClassificationBackend`, `EmbeddingBackend`), `TransformerProvider` device/dtype/batch resolution.
 - `agents.py` - `AgentBackend`: wraps a `ModelBackend` with pipeline-level config (`thinking_budget`) and the slot/service identity (`slot_name`, `service_name`, `backend_class_name`) used by capability-mismatch error messages. The call-time `tools_capable` check remains as defense-in-depth for tools passed via `run_task` outside `meta.tools`.
 - `services.py` - `load_services()` / `resolve_slots()` for LLM `[services.NAME]` slots, and `load_classifiers()` / `resolve_classifier_slots()` for local `[classifiers.NAME]` slots. Both parse SERVICES.toml; the two namespaces are independent. `resolve_slots` returns `dict[str, tuple[str, ModelBackend]]` so callers can thread the resolved service name into each `AgentBackend`.
 - `errors.py` - exception hierarchy rooted at `PipelineError`. Includes `CapabilityMismatchError` for pipeline-construction-time slot/capability mismatches.
 - `prompt.py` - `StepHooks`, `StepMeta`, `StepSpec`, `build_pipeline`, `parse_step_meta`. Owns prompt-to-hook conformance only; capability validation lives in `validate.py`. Step-meta field-name convention: single-word fields are TitleCase (`**Model:**`, `**Execution:**`, `**Tools:**`, `**Condition:**`); new multi-word fields are kebab-case (`**max-output:**`). Pre-existing `**System prompt:**` (TitleCase + space) is grandfathered. Lookup is case-insensitive (the parser lowercases keys). `_META_RE` allows `[\w \-]+` so hyphens in field names parse correctly; adding a new punctuation character requires updating that regex.
 - `validate.py` - `validate_capabilities(specs, *, stop_after=None)`. Primary gate for capability mismatches; called by each pipeline's entry function right after `build_pipeline`.
 - `runner.py` - `dispatch`, `load_sections`, `run_agent`, `StepContext`, `write_debug_file`.
+- `progress.py` - `ProgressEvent`, `ProgressCallback`: the framework-owned progress-reporting contract. Domain-free; carries no paper concepts.
 - `tasks.py` - `run_task`, `render_debug_md`, `_task_semaphore`.
 - `markdown.py` - `sections` (H2 splitter), `sanitize_md`, `front_matter_end_index`, `YAML_FENCE_RE`.
 - `markdown_patterns.py` - shared `HEADING_RE`, `BOLD_SUBSECTION_RE`.
@@ -28,16 +30,17 @@ Everything downstream needs is re-exported from `pipeline.__init__`:
 from pipeline import (
     AgentBackend, ModelBackend,
     ClassifierBackend, ZeroShotV2Backend, NliCrossEncoderBackend,
+    MultiLabelClassifierBackend, SeqClassificationBackend,
     CLASSIFIER_BACKEND_REGISTRY,
     load_services, resolve_slots, ServiceRegistry,
     load_classifiers, resolve_classifier_slots,
     PipelineError, StepError, HookMismatchError, MissingMetadataError,
     CapabilityMismatchError,
-    PaperNotFoundError, PaperNotConvertedError,
     StepHooks, StepMeta, StepSpec, build_pipeline,
     validate_capabilities,
     dispatch, load_sections, run_agent, run_task, StepContext,
     sections, sanitize_md,
+    ProgressCallback, ProgressEvent,
     WebResearcher, SearchBackend, SearchResult, SearchResponse, FetchResponse,
     write_debug_file,
 )
@@ -63,7 +66,7 @@ Each backend implements `async def run(system_prompt, user_message, output_type,
 
 ## ClassifierBackend contract
 
-Each `ClassifierBackend` subclass wraps one local zero-shot classification framework (HF Transformers `zero-shot-classification` pipeline, `sentence_transformers` CrossEncoder NLI, future ClaimBuster, future custom fine-tunes) under one common API:
+Each `ClassifierBackend` subclass wraps one local classification framework (HF Transformers `zero-shot-classification` pipeline, `sentence_transformers` CrossEncoder NLI, fine-tuned `AutoModelForSequenceClassification`, future ClaimBuster) under one common API:
 
 ```python
 classify(
@@ -74,7 +77,9 @@ classify(
 ) -> list[dict[str, float]]
 ```
 
-Per text: returns `{label: score}` for every candidate label. With `multi_label=True` (the default), each label is scored independently via per-label binary entailment-vs-contradiction softmax; scores do NOT sum to 1, each is a per-label probability suitable for an absolute threshold. This is the only correct mode for non-mutually-exclusive labels (e.g. TARGET and SKIP labels that can both be weakly true).
+Per text: returns `{label: score}` for every candidate label. With `multi_label=True` (the default), each label is scored independently; scores do NOT sum to 1, each is a per-label probability suitable for an absolute threshold. Zero-shot backends use per-label entailment-vs-contradiction softmax; `MultiLabelClassifierBackend` uses sigmoid over a fine-tuned multi-label head. This is the only correct mode for non-mutually-exclusive labels (e.g. TARGET and SKIP labels that can both be weakly true).
+
+`MultiLabelClassifierBackend` raises `ValueError` when a `candidate_label` is absent from the checkpoint's `id2label`. With `multi_label=False`, `MultiLabelClassifierBackend` sum-normalizes sigmoid scores across `candidate_labels` (not logit softmax; zero-shot backends use logit softmax).
 
 Determinism contract: offline-first weight loading, per-instance pipeline singleton, CPU only by default, `eval()` mode (HF pipeline applies on construction). `HF_HUB_OFFLINE` defaults to off so first-run downloads succeed; offline-first is achieved by trying `local_files_only=True` first inside each backend's `_load()`.
 
@@ -93,6 +98,7 @@ Determinism contract: offline-first weight loading, per-instance pipeline single
 
 ## Invariants
 
+- Paper-agnostic, no internal dependencies. `pipeline` is a domain-free framework and MUST NOT import from any internal/workspace package (`paperstore`, `cli`, `agora`, `assay`, `tomd`, `mailing`, `preview`). It depends only on third-party libraries. Paper-domain orchestration (`process_paper`, stage postconditions, the `read_paper` tool) lives in `cli`, not here. If a framework module needs a shared type that currently lives in a paper package, define it here instead of importing it.
 - `ClassifierBackend` and `ModelBackend` are parallel namespaces. `[services.NAME]` / `[classifiers.NAME]` and `[defaults]` / `[classifier_defaults]` do not mix; slot resolution is independent. Override flags map to different `StepContext` dicts: `--service` populates `ctx.agents` (via `AgentBackend(slots[slot_name][1], slot_name=slot_name, service_name=slots[slot_name][0])`), `--classifier` populates `ctx.classifiers`.
 - Capability validation runs once at pipeline-construction time. `validate_capabilities()` rejects any step whose declared `meta.tools` or assigned `thinking_budget` would land on a backend whose class attributes do not support it. The runtime `NotImplementedError` in `AgentBackend.run` is secondary defense, retained for custom hooks that pass ad-hoc tools via `run_task` outside `meta.tools`.
 - `dispatch()` and `validate_capabilities()` must use identical `stop_after` scoping logic. Today both filter by `enumerate` index against the step list; if you switch one site to `spec.meta.number`, switch both in the same commit.
@@ -100,7 +106,6 @@ Determinism contract: offline-first weight loading, per-instance pipeline single
 - Source delimiter contract. Every piece of external/untrusted text injected into an LLM prompt must be wrapped via `ctx.inject_untrusted()` (on `StepContext`). Never inject raw external content. Callers format line numbers before calling `inject_untrusted`. The guard tag is randomized per pipeline run; `inject_untrusted` escapes forged delimiter text before wrapping.
 - Step failures fail the pipeline. `dispatch()` preserves failures as `StepError`, flushes trace/debug diagnostics, and does not call `on_step_complete` for a failed step.
 - Fan-out thresholds are explicit. Custom fan-out steps may tolerate item failures only under a named threshold. Above the threshold they raise `StepError`.
-- PaperRow failure persistence. Pipeline failure updates the paper row with `status = -(stage + 1)`, stores `error = str(exc)`, and refreshes `updated_at`.
 - Status codes on everything. `search()` returns `SearchResponse` with `status_code`. `fetch()` returns `FetchResponse` with `status_code`. No bare strings or lists.
 - Backends are self-contained. Each search backend owns its own HTTP client. No shared client coupling between session and backend.
 - Backends are long-lived. `BraveBackend` holds a persistent connection pool and rate limiter. Create once, share across `WebResearcher` instances for parallel runs.

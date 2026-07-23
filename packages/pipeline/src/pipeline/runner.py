@@ -31,7 +31,7 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any, Callable
 
-from paperstore.progress import ProgressCallback, ProgressEvent
+from pipeline.progress import ProgressCallback, ProgressEvent
 
 from pipeline.agents import AgentBackend
 from pipeline.errors import (
