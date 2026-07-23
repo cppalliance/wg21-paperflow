@@ -34,11 +34,13 @@ import types
 
 import pytest
 
+from conftest import SeqClsStubModel, install_seqcls_transformers_stub
 from pipeline import transformer_backend as tb
 from pipeline.errors import TransformerConfigError
 from pipeline.transformer_backend import (
     CrossEncoderBackend,
     HFZeroShotBackend,
+    SeqClassificationBackend,
     TransformerProvider,
     default_auto_provider,
     run_mps_correctness_selftest,
@@ -427,3 +429,104 @@ def test_default_auto_provider_is_cached():
     p1 = default_auto_provider()
     p2 = default_auto_provider()
     assert p1 is p2
+
+
+# ---------------------------------------------------------------------------
+# SeqClassificationBackend
+# ---------------------------------------------------------------------------
+
+
+def test_seqcls_backend_load_caching(monkeypatch):
+    stub = SeqClsStubModel(
+        id2label={0: "x", 1: "y"},
+        logits=[1.0, -1.0],
+    )
+    install_seqcls_transformers_stub(monkeypatch, stub)
+    backend = SeqClassificationBackend("fake/seqcls")
+    backend.classify_multilabel(["a"])
+    backend.classify_multilabel(["b"])
+    assert stub.load_count == 1
+
+
+def test_seqcls_backend_async_parity(monkeypatch):
+    stub = SeqClsStubModel(
+        id2label={0: "x", 1: "y"},
+        logits=[1.0, -1.0],
+    )
+    install_seqcls_transformers_stub(monkeypatch, stub)
+    backend = SeqClassificationBackend("fake/seqcls")
+
+    async def _run() -> tuple[list[dict[str, float]], list[dict[str, float]]]:
+        sync = backend.classify_multilabel(["hello"])
+        async_ = await backend.classify_multilabel_async(["hello"])
+        return sync, async_
+
+    sync, async_ = asyncio.run(_run())
+    assert sync == async_
+    assert set(sync[0].keys()) == {"x", "y"}
+
+
+def test_seqcls_backend_raises_on_empty_id2label(monkeypatch):
+    stub = SeqClsStubModel(
+        id2label={},
+        logits=[1.0, -1.0],
+    )
+    install_seqcls_transformers_stub(monkeypatch, stub)
+    backend = SeqClassificationBackend("fake/seqcls")
+    with pytest.raises(ValueError, match="no id2label"):
+        backend.classify_multilabel(["hello"])
+    assert backend._model is None
+    with pytest.raises(ValueError, match="no id2label"):
+        backend.classify_multilabel(["hello"])
+    assert stub.load_count == 2
+
+
+def test_seqcls_backend_warns_on_wrong_problem_type(
+    monkeypatch, caplog,
+):
+    stub = SeqClsStubModel(
+        id2label={0: "x", 1: "y"},
+        logits=[1.0, -1.0],
+        problem_type="single_label_classification",
+    )
+    install_seqcls_transformers_stub(monkeypatch, stub)
+    backend = SeqClassificationBackend("fake/seqcls")
+    with caplog.at_level("WARNING"):
+        backend.classify_multilabel(["hello"])
+    assert "problem_type" in caplog.text
+    assert stub.eval_called
+
+
+def test_seqcls_backend_offline_first_fallback(monkeypatch):
+    stub = SeqClsStubModel(
+        id2label={0: "x", 1: "y"},
+        logits=[1.0, -1.0],
+    )
+    install_seqcls_transformers_stub(monkeypatch, stub, offline_first=True)
+    backend = SeqClassificationBackend("fake/seqcls")
+    result = backend.classify_multilabel(["hello"])
+    # Tokenizer local_files_only fails first; model loads once on network retry.
+    assert stub.load_count == 1
+    assert set(result[0].keys()) == {"x", "y"}
+
+
+def test_seqcls_backend_typeerror_retry_drops_model_kwargs(monkeypatch):
+    stub = SeqClsStubModel(
+        id2label={0: "x", 1: "y"},
+        logits=[1.0, -1.0],
+    )
+    install_seqcls_transformers_stub(
+        monkeypatch,
+        stub,
+        offline_first=True,
+        drop_kwargs_on_retry=True,
+    )
+    provider = TransformerProvider.from_toml("cpu", {
+        "mode": "explicit", "device": "cpu", "dtype": "fp32",
+        "batch_size": 4,
+    })
+    backend = SeqClassificationBackend("fake/seqcls", provider)
+    result = backend.classify_multilabel(["hello"])
+    # Tokenizer local miss; model network+kwargs TypeError; model network ok.
+    assert stub.load_count == 2
+    assert set(result[0].keys()) == {"x", "y"}

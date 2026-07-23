@@ -13,6 +13,7 @@ from pipeline.agents import AgentBackend
 from pipeline.classifier_backends import (
     CLASSIFIER_BACKEND_REGISTRY,
     ClassifierBackend,
+    MultiLabelClassifierBackend,
     NliCrossEncoderBackend,
     ZeroShotV2Backend,
 )
@@ -68,6 +69,7 @@ from pipeline.transformer_backend import (
     CrossEncoderBackend,
     EmbeddingBackend,
     HFZeroShotBackend,
+    SeqClassificationBackend,
     TransformerBackend,
     TransformerProvider,
     default_auto_provider,
@@ -100,9 +102,11 @@ __all__ = [
     "EmbeddingBackend",
     "extract_code_blocks",
     "HFZeroShotBackend",
+    "SeqClassificationBackend",
     "load_classifiers",
     "load_transformer_providers",
     "ModelBackend",
+    "MultiLabelClassifierBackend",
     "NliCrossEncoderBackend",
     "ProgressCallback",
     "ProgressEvent",

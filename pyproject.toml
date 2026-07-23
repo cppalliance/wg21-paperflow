@@ -33,6 +33,7 @@ dev = [
     "pyright>=1.1",
     "pillow>=11.0",
     "markdown-it-py~=4.0",
+    "pipeline[train]",
 ]
 
 [tool.uv]

@@ -15,15 +15,17 @@
 #    service-name map under ## Services; that file is the single
 #    source of truth for which service runs which step.
 #
-# 2. [classifiers.NAME] declares a local zero-shot text classifier. The
+# 2. [classifiers.NAME] declares a local text classifier. The
 #    `backend` field maps to a Python class in
-#    pipeline.classifier_backends. No api_key_env: classifiers are
-#    local-model wrappers (HF Transformers pipeline or
-#    sentence_transformers CrossEncoder). First run downloads weights
-#    into the local HF cache; subsequent runs are fully offline.
-#    [classifier_defaults] maps classifier slot names to classifier
-#    names. The orchestrator overrides via --classifier CLI flags
-#    (e.g. `--classifier selector=zeroshot-base`).
+#    pipeline.classifier_backends. Registry keys:
+#      zeroshot_v2         HF zero-shot-classification pipeline
+#      nli_cross_encoder   sentence_transformers CrossEncoder NLI
+#      multilabel_seqcls   fine-tuned AutoModelForSequenceClassification
+#    No api_key_env: classifiers are local-model wrappers. First run
+#    downloads weights into the local HF cache; subsequent runs are
+#    fully offline. [classifier_defaults] maps classifier slot names to
+#    classifier names. The orchestrator overrides via --classifier CLI
+#    flags (e.g. `--classifier selector=zeroshot-base`).
 #
 # 3. [transformer_providers.NAME] declares the device / dtype / batch
 #    settings used for transformer inference. Classifiers do NOT declare
@@ -179,6 +181,14 @@ model = "MoritzLaurer/deberta-v3-large-zeroshot-v2.0"
 [classifiers.zeroshot-base]
 backend = "zeroshot_v2"
 model = "MoritzLaurer/deberta-v3-base-zeroshot-v2.0"
+
+# Fine-tuned multi-label sequence classifier (multilabel_seqcls backend).
+# Uncomment once a checkpoint exists (train via
+# packages/pipeline/scripts/finetune_seqcls.py). Use via
+# `--classifier selector=routing-tagger`.
+# [classifiers.routing-tagger]
+# backend = "multilabel_seqcls"
+# model = "/path/to/routing-tagger-v1"
 
 # Example future addition: specialized claim detector. Demonstrates
 # that the abstraction makes adding a new classifier a config change,

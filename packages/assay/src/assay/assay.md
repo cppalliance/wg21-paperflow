@@ -331,6 +331,8 @@ Return: finding_id, survived (bool), which challenge killed it (if any), one sen
 
 LLM cross-examination replaces the former Python bag-of-words kill filters. Findings are batched by lens. Each batch includes the findings, relevant paper source lines, concessions, and scope boundary. Output: CrossExamBatchOutput.
 
+After all batches, `cross_examine` applies verdicts in Python. If any finding lacks a matching verdict (truncated or incomplete judge output), the step raises and the run aborts rather than emitting an unjudged finding. A verdict citing a nonexistent `finding_id` is logged and ignored.
+
 ## 15. Couple
 
 - **max-output:** 8192

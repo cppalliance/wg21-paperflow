@@ -363,11 +363,80 @@ def test_dedup_items_drops_duplicate_and_absorbs_substring():
 # -- cross_examine (Step 14 apply) --------------------------------------------
 
 
-def test_cross_examine_survivor_with_no_verdict_entry_survives():
+def test_cross_examine_missing_verdict_raises():
     findings = [_finding(1, "orphan finding")]
-    surviving, killed = cross_examine(findings, [])
-    assert surviving == findings
+    with pytest.raises(ValueError, match="incomplete: no verdict for \\[1\\] orphan finding"):
+        cross_examine(findings, [])
+
+
+def test_cross_examine_partial_batch_raises():
+    f1 = _finding(1, "judged")
+    f2 = _finding(2, "unjudged")
+    verdict = CrossExamVerdict(
+        finding_id=1,
+        finding_title=f1.title,
+        survived=True,
+        killed_by=None,
+        reasoning="holds up",
+    )
+    with pytest.raises(ValueError, match="incomplete: no verdict for \\[2\\] unjudged"):
+        cross_examine([f1, f2], [verdict])
+
+
+def test_cross_examine_orphan_verdict_warns(caplog):
+    finding = _finding(1, "covered finding")
+    verdicts = [
+        CrossExamVerdict(
+            finding_id=1,
+            finding_title=finding.title,
+            survived=True,
+            killed_by=None,
+            reasoning="holds up",
+        ),
+        CrossExamVerdict(
+            finding_id=99,
+            finding_title="orphan",
+            survived=False,
+            killed_by="phantom",
+            reasoning="no such finding",
+        ),
+    ]
+    with caplog.at_level("WARNING"):
+        surviving, killed = cross_examine([finding], verdicts)
+    assert surviving == [finding]
     assert killed == []
+    assert "orphan verdict finding_id(s) [99]" in caplog.text
+
+
+def test_cross_examine_orphan_only_does_not_raise(caplog):
+    finding = _finding(1, "covered finding")
+    verdict = CrossExamVerdict(
+        finding_id=1,
+        finding_title=finding.title,
+        survived=True,
+        killed_by=None,
+        reasoning="holds up",
+    )
+    with caplog.at_level("WARNING"):
+        surviving, killed = cross_examine([finding], [verdict])
+    assert surviving == [finding]
+    assert killed == []
+    assert "orphan verdict" not in caplog.text
+
+
+def test_cross_examine_empty_findings_orphan_verdict_warns(caplog):
+    verdict = CrossExamVerdict(
+        finding_id=99,
+        finding_title="orphan",
+        survived=False,
+        killed_by="phantom",
+        reasoning="no such finding",
+    )
+    with caplog.at_level("WARNING"):
+        surviving, killed = cross_examine([], [verdict])
+    assert surviving == []
+    assert killed == []
+    assert "orphan verdict finding_id(s) [99]" in caplog.text
 
 
 def test_cross_examine_survived_true_keeps_finding():
@@ -432,7 +501,6 @@ def test_cross_examine_preserves_input_order():
     f1 = _finding(10, "first survives")
     f2 = _finding(11, "second killed")
     f3 = _finding(12, "third survives")
-    f4 = _finding(13, "fourth no verdict")
     verdicts = [
         CrossExamVerdict(
             finding_id=11,
@@ -448,11 +516,18 @@ def test_cross_examine_preserves_input_order():
             killed_by=None,
             reasoning="holds up",
         ),
+        CrossExamVerdict(
+            finding_id=12,
+            finding_title=f3.title,
+            survived=True,
+            killed_by=None,
+            reasoning="holds up",
+        ),
     ]
 
-    surviving, killed = cross_examine([f1, f2, f3, f4], verdicts)
+    surviving, killed = cross_examine([f1, f2, f3], verdicts)
 
-    assert surviving == [f1, f3, f4]
+    assert surviving == [f1, f3]
     assert killed == [
         KilledFinding(
             11,
