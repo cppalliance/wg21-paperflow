@@ -194,6 +194,35 @@ class TestStripRepeatingLines:
     def test_short_doc_no_op(self):
         assert _strip_repeating_lines([]) == []
 
+    def test_keeps_content_token_repeated_many_times_per_page(self):
+        # A code keyword extracted as its own line (e.g. a green ``constexpr``
+        # insertion prefixing every declaration in a <cmath> synopsis) repeats
+        # on most pages, but many times per page: it is content, not chrome,
+        # and must be kept so a source-faithful ideal is not scored as drift.
+        pages = [
+            "constexpr\nfloat acos(float x);\nconstexpr\nfloat asin(float x);"
+            "\nconstexpr\nfloat cos(float x);",
+            "constexpr\nfloat exp(float x);\nconstexpr\nfloat log(float x);"
+            "\nconstexpr\nfloat sin(float x);",
+            "constexpr\nfloat tan(float x);\nconstexpr\nfloat sqrt(float x);"
+            "\nconstexpr\nfloat cbrt(float x);",
+        ]
+        cleaned = _strip_repeating_lines(pages)
+        assert any("constexpr" in page for page in cleaned)
+
+    def test_still_drops_once_per_page_header_amid_repeated_content(self):
+        # A once-per-page running header is still chrome even when the page
+        # also has a many-times-per-page content token.
+        pages = [
+            "Running Title\nconstexpr\nint a();\nconstexpr\nint b();\nconstexpr\nint c();",
+            "Running Title\nconstexpr\nint d();\nconstexpr\nint e();\nconstexpr\nint f();",
+            "Running Title\nconstexpr\nint g();\nconstexpr\nint h();\nconstexpr\nint i();",
+        ]
+        cleaned = _strip_repeating_lines(pages)
+        for page in cleaned:
+            assert "Running Title" not in page
+        assert any("constexpr" in page for page in cleaned)
+
 
 class TestMarkdownStream:
     def test_strips_front_matter(self):
