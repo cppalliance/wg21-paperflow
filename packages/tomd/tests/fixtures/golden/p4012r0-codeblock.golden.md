@@ -10,9 +10,11 @@ reply-to:
 
 :::wording
 
-[simd.ctor]<br>
-template&lt;class U&gt;<br>
-  constexpr <del>explicit(see below)</del> basic_vec(U&amp;&amp; value) noexcept;
+```cpp
+[simd.ctor]
+template<class U>
+  constexpr <del>explicit(see below)</del> basic_vec(U&& value) noexcept;
+```
 
 :::
 

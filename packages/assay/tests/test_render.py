@@ -169,6 +169,35 @@ def test_prepare_report_data_compounds():
     assert data.compounds[0].constituents == [1]
 
 
+def test_structural_summary_counts_compounds():
+    major = FindingOutput(
+        id=1, title="F1", severity="significant", lens="Design",
+        quote="q1", line=5, explanation="expl1", test="t1",
+    )
+    state = PipelineState(
+        paper_id="P9999R0",
+        paper_title="Test Paper",
+        compounds=[CompoundOutput(
+            name="Comp1", constituents=[1], mechanism="mech", emergent_risk="risk",
+        )],
+        synthesis=SynthesisOutput(
+            verdict_label="Weakened",
+            verdict_confidence="Medium",
+            thesis_statement="The paper argues X",
+            thesis_survives=True,
+            verdict_statement="Central thesis text",
+            dominant_dynamic="Comp1",
+            critical_count=0,
+            significant_count=1,
+            major_findings=[major],
+            regular_findings=[],
+        ),
+    )
+    data = prepare_report_data(state)
+    assert "1 participate in compound dynamics" in data.structural_summary
+    assert "overlap the thesis" not in data.structural_summary
+
+
 def test_render_report_with_template():
     state = _make_state()
     template = '```jinja\n# {{ pid }} Assay\n\n{{ verdict_label }}\n```'

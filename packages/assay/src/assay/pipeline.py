@@ -21,11 +21,10 @@ from collections import Counter
 
 from paperstore import StorageBackend
 
-from paperstore.progress import ProgressCallback
-
 from pipeline import (
     AgentBackend,
     PipelinePrompt,
+    ProgressCallback,
     StepContext,
     StepHooks,
     build_pipeline,
@@ -46,10 +45,12 @@ from assay.locs import format_numbered_lines
 from assay.models import (
     BatchClassifyOutput,
     GapOutput,
-    ChunkAnalyzeOutput,
+    ChunkAnalyzeItems,
     ChunkClassifyOutput,
+    ChunkDecideItems,
     ChunkDecideOutput,
     ChunkEntry,
+    ChunkExtractItems,
     ChunkExtractOutput,
     ClaimDecision,
     CollectedItem,
@@ -595,15 +596,18 @@ async def _custom_extract(state: PipelineState, ctx: StepContext, spec) -> None:
             paper_lines,
             ctx,
         )
-        result = await agent.run(
+        items = await agent.run(
             system_prompt=system_prompt,
             user_message=user_msg,
-            output_type=ChunkExtractOutput,
+            output_type=ChunkExtractItems,
             max_tokens=max_output,
             thinking_budget=thinking,
             label=f"extract-chunk-{chunk.index}",
             debug_log=local_log,
         )
+        # chunk_index is authoritative from the call context, not the model
+        # (see ChunkExtractItems): assign it here.
+        result = ChunkExtractOutput(chunk_index=chunk.index, items=items.items)
         return ci, result, local_log
 
     concurrency = spec.step.concurrency or ctx.default_concurrency
@@ -669,15 +673,18 @@ async def _custom_decide(state: PipelineState, ctx: StepContext, spec) -> None:
             )
             if std_context:
                 user_msg += f"\n\n{std_context}"
-        result = await agent.run(
+        decided = await agent.run(
             system_prompt=system_prompt,
             user_message=user_msg,
-            output_type=ChunkDecideOutput,
+            output_type=ChunkDecideItems,
             max_tokens=max_output,
             thinking_budget=thinking,
             label=f"decide-chunk-{chunk.index}",
             debug_log=local_log,
         )
+        # chunk_index is authoritative from the call context, not the model
+        # (see ChunkDecideItems): assign it here.
+        result = ChunkDecideOutput(chunk_index=chunk.index, decisions=decided.decisions)
         return ci, result, local_log
 
     concurrency = spec.step.concurrency or ctx.default_concurrency
@@ -1273,7 +1280,7 @@ async def _custom_analyze(state: PipelineState, ctx: StepContext, spec) -> None:
         result = await agent.run(
             system_prompt=system_prompt,
             user_message=user_msg,
-            output_type=ChunkAnalyzeOutput,
+            output_type=ChunkAnalyzeItems,
             max_tokens=max_output,
             thinking_budget=thinking,
             label=f"analyze-chunk-{chunk.index}",

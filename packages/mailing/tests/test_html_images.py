@@ -24,6 +24,7 @@ from unittest.mock import MagicMock
 from mailing.html_images import (
     _decode_data_uri,
     _ext_from_mime,
+    count_html_image_refs,
     fetch_html_images,
 )
 
@@ -80,6 +81,36 @@ def test_data_uri_malformed_returns_none():
 def test_ext_from_mime_handles_params():
     """A Content-Type like 'image/png; charset=utf-8' should still resolve to png."""
     assert _ext_from_mime("image/png; charset=utf-8") == "png"
+
+
+# ---- count_html_image_refs: no-I/O reference count --------------------------
+
+
+def test_count_html_image_refs_counts_non_empty_src():
+    html = (
+        b"<html><body>"
+        b"<img src='a.png'>"
+        b"<img src='https://cdn.example.com/b.png'>"
+        b"</body></html>"
+    )
+    assert count_html_image_refs(html) == 2
+
+
+def test_count_html_image_refs_ignores_missing_and_empty_src():
+    """Mirrors fetch_html_images: only <img> with a non-empty src count."""
+    html = (
+        b"<html><body>"
+        b"<img alt='no-src'>"
+        b"<img src=''>"
+        b"<img src='   '>"
+        b"<img src='real.png'>"
+        b"</body></html>"
+    )
+    assert count_html_image_refs(html) == 1
+
+
+def test_count_html_image_refs_zero_when_no_images():
+    assert count_html_image_refs(b"<html><body>no images here</body></html>") == 0
 
 
 # ---- fetch_html_images: HTML walking ----------------------------------------
