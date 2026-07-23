@@ -1,21 +1,22 @@
 #
-# Copyright (c) 2026 Vinnie Falco (vinnie.falco@gmail.com)
+# Copyright (c) 2026 Will Pak (will@cppalliance.org)
 #
 # Distributed under the Boost Software License, Version 1.0. (See accompanying
 # file LICENSE_1_0.txt or copy at http://www.boost.org/LICENSE_1_0.txt)
 #
 
-"""Progress callback contract for paperflow pipelines.
+"""Progress callback contract for the pipeline framework.
 
 Libraries fire ProgressEvent via an optional ProgressCallback. Rendering
-(rich, logging, nothing) is the caller's responsibility.
+(rich, logging, nothing) is the caller's responsibility. This is the
+framework-owned contract; it carries no paper-domain concepts.
 
-Intentional duplicate of ``pipeline.progress``: the framework owns its own
-copy so it need not import a paper package, while paper-only consumers use
-this one. The two definitions are structurally identical and interoperate
+Intentional duplicate of ``paperstore.progress``: the framework must not
+import a paper package, and paper-only consumers should not depend on the
+framework. The two definitions are structurally identical and interoperate
 at runtime by duck typing (no ``isinstance`` checks cross the boundary).
 Keep them in sync - any field change here must be mirrored in
-``pipeline.progress`` and vice versa.
+``paperstore.progress`` and vice versa.
 """
 
 from __future__ import annotations

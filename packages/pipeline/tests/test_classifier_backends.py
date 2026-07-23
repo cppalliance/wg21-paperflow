@@ -20,9 +20,11 @@ import types
 
 import pytest
 
+from conftest import SeqClsStubModel, install_seqcls_transformers_stub
 from pipeline.classifier_backends import (
     CLASSIFIER_BACKEND_REGISTRY,
     ClassifierBackend,
+    MultiLabelClassifierBackend,
     NliCrossEncoderBackend,
     ZeroShotV2Backend,
 )
@@ -79,8 +81,10 @@ def test_fake_backend_records_multi_label_flag():
 def test_registry_contains_known_backends():
     assert "zeroshot_v2" in CLASSIFIER_BACKEND_REGISTRY
     assert "nli_cross_encoder" in CLASSIFIER_BACKEND_REGISTRY
+    assert "multilabel_seqcls" in CLASSIFIER_BACKEND_REGISTRY
     assert CLASSIFIER_BACKEND_REGISTRY["zeroshot_v2"] is ZeroShotV2Backend
     assert CLASSIFIER_BACKEND_REGISTRY["nli_cross_encoder"] is NliCrossEncoderBackend
+    assert CLASSIFIER_BACKEND_REGISTRY["multilabel_seqcls"] is MultiLabelClassifierBackend
 
 
 # ---------------------------------------------------------------------------
@@ -403,4 +407,73 @@ def test_load_classifiers_file_not_found(tmp_path):
 
     with pytest.raises(FileNotFoundError):
         load_classifiers(tmp_path / "missing.toml")
+
+
+# ---------------------------------------------------------------------------
+# MultiLabelClassifierBackend
+# ---------------------------------------------------------------------------
+
+
+def test_multilabel_seqcls_projects_scores(monkeypatch):
+    stub_model = SeqClsStubModel(
+        id2label={0: "alpha", 1: "beta"},
+        logits=[0.0, 2.0],
+    )
+    install_seqcls_transformers_stub(monkeypatch, stub_model)
+    backend = MultiLabelClassifierBackend(model="fake/seqcls")
+    result = backend.classify(["one", "two"], ["alpha", "beta"])
+
+    assert len(result) == 2
+    for row in result:
+        assert set(row.keys()) == {"alpha", "beta"}
+        assert row["alpha"] == pytest.approx(0.5, abs=0.01)
+        assert row["beta"] == pytest.approx(0.880797, abs=0.001)
+
+
+def test_multilabel_seqcls_unknown_label_raises(monkeypatch):
+    stub_model = SeqClsStubModel(
+        id2label={0: "alpha", 1: "beta"},
+        logits=[0.0, 2.0],
+    )
+    install_seqcls_transformers_stub(monkeypatch, stub_model)
+    backend = MultiLabelClassifierBackend(model="fake/seqcls")
+    with pytest.raises(ValueError, match="Unknown candidate_labels"):
+        backend.classify(["x"], ["alpha", "missing"])
+
+
+def test_multilabel_seqcls_empty_input_short_circuits(monkeypatch):
+    stub_model = SeqClsStubModel(
+        id2label={0: "alpha", 1: "beta"},
+        logits=[0.0, 2.0],
+    )
+    install_seqcls_transformers_stub(monkeypatch, stub_model)
+    backend = MultiLabelClassifierBackend(model="fake/seqcls")
+    assert backend.classify([], ["alpha", "beta"]) == []
+    assert stub_model.load_count == 0
+
+
+def test_multilabel_seqcls_single_label_sum_normalized(monkeypatch):
+    stub_model = SeqClsStubModel(
+        id2label={0: "alpha", 1: "beta"},
+        logits=[0.0, 2.0],
+    )
+    install_seqcls_transformers_stub(monkeypatch, stub_model)
+    backend = MultiLabelClassifierBackend(model="fake/seqcls")
+    result = backend.classify(["x"], ["alpha", "beta"], multi_label=False)
+    total = sum(result[0].values())
+    assert total == pytest.approx(1.0, abs=1e-6)
+    assert result[0]["beta"] > result[0]["alpha"]
+    # Sigmoid 0.5 / ~0.881 sum-normalized preserves ratios (~0.362 / ~0.638).
+    assert result[0]["alpha"] == pytest.approx(0.5 / 1.38, abs=0.01)
+    assert result[0]["beta"] == pytest.approx(0.88 / 1.38, abs=0.01)
+
+
+def test_multilabel_seqcls_labels_property(monkeypatch):
+    stub_model = SeqClsStubModel(
+        id2label={0: "alpha", 1: "beta"},
+        logits=[0.0, 2.0],
+    )
+    install_seqcls_transformers_stub(monkeypatch, stub_model)
+    backend = MultiLabelClassifierBackend(model="fake/seqcls")
+    assert backend.labels == ("alpha", "beta")
 

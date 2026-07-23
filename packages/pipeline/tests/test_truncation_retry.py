@@ -20,6 +20,7 @@ from pydantic import BaseModel
 
 from pipeline.errors import MalformedModelOutputError
 from pipeline.model_backends import (
+    _RAW_JSON_MAX_ATTEMPTS,
     _RETRY_MAX_TOKENS_GROWTH,
     VllmThinkingBackend,
 )
@@ -130,11 +131,34 @@ def test_truncation_growth_capped_at_context_window(monkeypatch):
 
 
 def test_persistent_truncation_raises(monkeypatch):
-    # Both attempts truncate: the call ultimately fails (no infinite growth).
-    call_kwargs = _fake_openai(monkeypatch, [("{", "length"), ("{", "length")])
+    # Every attempt truncates: the call ultimately fails (no infinite growth).
+    # The budget grows once per attempt up to the cap.
+    call_kwargs = _fake_openai(
+        monkeypatch, [("{", "length")] * _RAW_JSON_MAX_ATTEMPTS
+    )
     backend = _backend()
 
     with pytest.raises(MalformedModelOutputError):
         asyncio.run(backend.run("sys", "user", _Empty, max_tokens=8192))
-    assert len(call_kwargs) == 2
-    assert call_kwargs[1]["max_tokens"] == int(8192 * _RETRY_MAX_TOKENS_GROWTH)
+    assert len(call_kwargs) == _RAW_JSON_MAX_ATTEMPTS
+    grown = 8192
+    for kw in call_kwargs[1:]:
+        grown = int(grown * _RETRY_MAX_TOKENS_GROWTH)
+        assert kw["max_tokens"] == grown
+
+
+def test_third_attempt_recovers(monkeypatch):
+    # Two malformed responses then a clean one: the bumped attempt budget
+    # (>= 3) gives the model a second corrective round, which recovers.
+    assert _RAW_JSON_MAX_ATTEMPTS >= 3
+    call_kwargs = _fake_openai(
+        monkeypatch,
+        [("not json", "stop"), ("still not json", "stop"), ("{}", "stop")],
+    )
+    backend = _backend()
+
+    result = asyncio.run(backend.run("sys", "user", _Empty, max_tokens=8192))
+    assert isinstance(result, _Empty)
+    assert len(call_kwargs) == 3
+    # Each malformed attempt appended assistant echo + user nudge (2 msgs each).
+    assert len(call_kwargs[2]["messages"]) == 6

@@ -5,7 +5,7 @@
 # file LICENSE_1_0.txt or copy at http://www.boost.org/LICENSE_1_0.txt)
 #
 
-"""Tests for ``pipeline.process.process_paper``.
+"""Tests for ``cli.process.process_paper``.
 
 Focus on the artifact-rewind behavior introduced alongside
 ``truthful_status`` and the ``ProcessResult`` return type. Each
@@ -23,8 +23,9 @@ import pytest
 
 from paperstore import SqliteBackend
 from paperstore.stages import STAGES
-from pipeline import ProcessResult, process_paper
-from pipeline import process as process_mod
+from cli.process import process_paper
+from cli.postconditions import ProcessResult
+from cli import process as process_mod
 
 
 @pytest.fixture
@@ -51,13 +52,13 @@ def _patch_stage_bodies(monkeypatch, backend: SqliteBackend):
     ProcessResult.
     """
     async def fake_download(pid, be, *, on_progress=None):
-        from pipeline.postconditions import postcondition_satisfied
+        from cli.postconditions import postcondition_satisfied
         if postcondition_satisfied(be, pid, STAGES["download"]):
             return
         be.put_source(pid, b"PDF", suffix=".pdf")
 
     async def fake_convert(pid, be, **kwargs):
-        from pipeline.postconditions import postcondition_satisfied
+        from cli.postconditions import postcondition_satisfied
         if postcondition_satisfied(be, pid, STAGES["convert"]):
             return
         be.write_paper_md(pid, "# md\n")
@@ -142,7 +143,7 @@ def test_warn_if_html_image_files_missing_fires(
     import logging
 
     from paperstore.html_manifest import HtmlImageEntry, HtmlImagesManifest
-    from pipeline.process import _warn_if_html_image_files_missing
+    from cli.process import _warn_if_html_image_files_missing
 
     pid = "P1234R0"
     backend.upsert_year("2026", [{"paper_id": pid, "title": "T"}])
@@ -164,7 +165,7 @@ def test_warn_if_html_image_files_missing_fires(
             ),
         ],
     )
-    caplog.set_level(logging.WARNING, logger="pipeline.process")
+    caplog.set_level(logging.WARNING, logger="cli.process")
     missing = _warn_if_html_image_files_missing(
         backend, pid, manifest, source_path,
     )
@@ -187,7 +188,7 @@ def test_warn_if_html_image_files_missing_silent_when_present(
     import logging
 
     from paperstore.html_manifest import HtmlImageEntry, HtmlImagesManifest
-    from pipeline.process import _warn_if_html_image_files_missing
+    from cli.process import _warn_if_html_image_files_missing
 
     pid = "P1234R0"
     backend.upsert_year("2026", [{"paper_id": pid, "title": "T"}])
@@ -205,7 +206,7 @@ def test_warn_if_html_image_files_missing_silent_when_present(
             ),
         ],
     )
-    caplog.set_level(logging.WARNING, logger="pipeline.process")
+    caplog.set_level(logging.WARNING, logger="cli.process")
     missing = _warn_if_html_image_files_missing(
         backend, pid, manifest, source_path,
     )

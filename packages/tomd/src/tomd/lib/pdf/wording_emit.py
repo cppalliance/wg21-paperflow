@@ -11,7 +11,8 @@
 
 A wording section (``:::wording-add`` / ``:::wording-remove`` / neutral
 ``:::wording``) renders in one of three shapes, fidelity first: a
-wholesale fenced code block, a code-shaped ``<br>`` diff, or prose. All
+wholesale fenced code block, a fenced code diff (a code fence carrying
+inline ``<ins>`` / ``<del>`` markers), or prose. All
 three live here so :mod:`emit` keeps to general block dispatch. The
 uniform-role boundary shared with the post-render cleanup pass lives in
 :mod:`lib.wording_policy`; the code-promotion knobs below are emit-only
@@ -106,16 +107,20 @@ def _group_wording_spans(line: Line) -> list[tuple[str | None, list[Span]]]:
 
 def _role_tag(
     role: str, spans: list[Span], *, normalize: bool = False,
+    escape: bool = True,
 ) -> str:
     """Wrap a same-role run in its ``<ins>`` / ``<del>`` tag.
 
     Leading and trailing whitespace stay outside the tag so adjacent
-    segments join cleanly; the inner text is HTML-escaped. When
-    ``normalize`` is true (the code-diff path), the inner text is also
-    run through :func:`normalize_code_line` so edited tokens get the
-    same PDF kerning cleanup the surrounding role-less context already
-    receives. The prose path keeps ``normalize=False`` because its
-    inner text is natural-language, not C++.
+    segments join cleanly. When ``normalize`` is true (the code paths),
+    the inner text is run through :func:`normalize_code_line` so edited
+    tokens get the same PDF kerning cleanup the surrounding role-less
+    context already receives; the prose path keeps ``normalize=False``
+    because its inner text is natural-language, not C++. When ``escape``
+    is true (prose, an inline-HTML context) the inner text is HTML-escaped
+    so a literal ``<`` / ``>`` renders; the fenced code-diff path passes
+    ``escape=False`` because a code fence is already literal and escaping
+    would surface raw entities.
     """
     text = "".join(s.text for s in spans)
     inner = text.strip()
@@ -123,7 +128,9 @@ def _role_tag(
     trail = text[len(text.rstrip()):]
     if normalize:
         inner = normalize_code_line(inner)
-    return f"{lead}<{role}>{_escape_wording_text(inner)}</{role}>{trail}"
+    if escape:
+        inner = _escape_wording_text(inner)
+    return f"{lead}<{role}>{inner}</{role}>{trail}"
 
 
 def _render_wording_line(line: Line) -> str:
@@ -214,49 +221,54 @@ def _render_wording_code_block(sec: Section, lang: str) -> str:
 
 
 def _render_wording_code_diff_line(line: Line) -> str:
-    """Render one wording line as code: raw text + inline role tags.
+    """Render one wording line for a fenced code block: raw text + tags.
 
-    Unlike :func:`_render_wording_line`, non-role monospace runs are
-    emitted verbatim (no surrounding backticks) and passed through
-    :func:`normalize_code_line` to clean PDF kerning artifacts. Role
-    runs (``ins`` / ``del``) keep their HTML tags so the intra-block
-    diff survives. This is the per-line primitive for the code-diff
-    shape, which a fenced code block cannot represent.
+    Emitted verbatim into a ``cpp`` fence: non-role monospace runs are
+    passed through :func:`normalize_code_line` to clean PDF kerning
+    artifacts, and role runs (``ins`` / ``del``) keep their tags so the
+    intra-block diff survives as literal markers of what changed. Nothing
+    is HTML-escaped: inside a code fence ``<`` / ``>`` / ``&`` are already
+    literal (the code stays copy-pasteable), and escaping them would
+    surface raw entities. Rendering those ``<ins>`` / ``<del>`` markers as
+    anything other than literal text is a separate wording concern.
     """
     def _emit(role: str | None, spans: list[Span]) -> str:
         if role in ("ins", "del"):
-            return _role_tag(role, spans, normalize=True)
+            return _role_tag(role, spans, normalize=True, escape=False)
         text = "".join(s.text for s in spans)
-        return _escape_wording_text(normalize_code_line(text))
+        return normalize_code_line(text)
 
     parts = [_emit(role, spans) for role, spans in _group_wording_spans(line)]
     return "".join(parts).rstrip()
 
 
-def _render_wording_code_diff(sec: Section) -> str:
-    """Render a code-shaped wording section preserving line structure.
+def _render_wording_code_diff(sec: Section, lang: str) -> str:
+    """Render a code-shaped wording section as a fenced code block.
 
     Used when the section is monospace-dominant and multi-line but is
     NOT a uniform single-role block: it carries an intra-block edit
     (mixed ins/del, or one struck/inserted token amid unchanged
     context), or its role coloring is too sparse to safely promote to
-    a fence. A fenced code block cannot carry ``<ins>`` / ``<del>``
-    (they would render literally), so each source line is emitted on
-    its own line, joined with ``<br>``, inline tags intact. Leading
-    indentation is reconstructed from glyph x-positions, with an
-    implausibly deep indent (a right-margin element split onto its own
-    line) pinned to column zero via ``_MAX_CODE_DIFF_INDENT``.
+    the directional-fence path. The block is emitted as a real ``cpp``
+    fence so the code stays copy-pasteable (raw ``<`` / ``>`` / ``&``,
+    real newlines); the ``<ins>`` / ``<del>`` tags survive inside the
+    fence as literal markers of what changed. Leading indentation is
+    reconstructed from glyph x-positions, with an implausibly deep indent
+    (a right-margin element split onto its own line) pinned to column
+    zero via ``_MAX_CODE_DIFF_INDENT``.
     """
     grid = CodeGrid.for_code_section(sec)
 
-    out_lines: list[str] = []
+    code_lines: list[str] = []
     for line in sec.lines:
         rendered = _render_wording_code_diff_line(line)
         if not rendered.strip():
             continue
         indent = grid.indent(line, max_indent=_MAX_CODE_DIFF_INDENT)
-        out_lines.append(" " * indent + rendered.lstrip())
-    return "<br>\n".join(out_lines)
+        code_lines.append(" " * indent + rendered.lstrip())
+    if not code_lines:
+        return ""
+    return f"```{lang}\n" + "\n".join(code_lines) + "\n```"
 
 
 def _render_wording_section(sec: Section) -> str:
@@ -268,13 +280,13 @@ def _render_wording_section(sec: Section) -> str:
     1. **Wholesale code (fence).** Monospace-dominant, multi-line, and
        uniformly the div's role: emit a fenced ``cpp`` block inside the
        directional div, dropping the now-redundant inline tags.
-    2. **Code-shaped diff (``<br>``).** Monospace-dominant and
-       multi-line but not uniform: a *partial* change. Emit a neutral
-       ``:::wording`` div (never the directional ``wording-add`` /
-       ``wording-remove``, which would paint the unchanged context as
-       inserted/removed) and carry the diff entirely through inline
-       ``<ins>`` / ``<del>`` tags, one source line per output line
-       joined with ``<br>``.
+    2. **Fenced code diff.** Monospace-dominant and multi-line but not
+       uniform: a *partial* change. Emit a neutral ``:::wording`` div
+       (never the directional ``wording-add`` / ``wording-remove``, which
+       would paint the unchanged context as inserted/removed) wrapping a
+       real ``cpp`` fence, so the code stays copy-pasteable; the intra-
+       block edit is carried by inline ``<ins>`` / ``<del>`` markers that
+       survive inside the fence as literal text.
     3. **Prose (default).** Render each span faithfully in the
        directional div; the post-render pass in ``lib.wording_cleanup``
        decides whether the inline tags are redundant with the div role.
@@ -283,16 +295,16 @@ def _render_wording_section(sec: Section) -> str:
     implicit_role = implicit_role_for(div_class)
 
     total, mono, roles = _wording_glyph_stats(sec.lines)
-    # A fence cannot carry inline ``<ins>`` / ``<del>`` tags (they would
-    # render literally), so the fence path collapses every span into the
-    # div's implicit role. Promotion is therefore gated on two clauses:
-    # the dominant role must clear ``UNIFORM_ROLE_THRESHOLD`` (the share
-    # contract with ``lib.wording_cleanup``), AND no contrarian-role
-    # chars may exist. The strict zero check prevents a small ``<del>``
-    # inside an otherwise-uniform ``<ins>`` block from being silently
-    # flattened into the implicit role; when one is present the section
-    # falls through to ``_render_wording_code_diff`` (the ``<br>`` diff
-    # path), which preserves the contrarian tag verbatim.
+    # The directional-fence path (shape 1) drops the inline tags and lets
+    # the ``:::wording-add`` / ``:::wording-remove`` div carry the role for
+    # the whole block, so it is gated on two clauses: the dominant role
+    # must clear ``UNIFORM_ROLE_THRESHOLD`` (the share contract with
+    # ``lib.wording_cleanup``), AND no contrarian-role chars may exist. The
+    # strict zero check prevents a small ``<del>`` inside an otherwise-
+    # uniform ``<ins>`` block from being silently flattened into the div
+    # role; when one is present the section falls through to
+    # ``_render_wording_code_diff`` (shape 2), a neutral fence that keeps
+    # every ``<ins>`` / ``<del>`` marker verbatim inside the code.
     contrarian_chars = sum(
         n for role, n in roles.items() if role != implicit_role
     )
@@ -316,7 +328,8 @@ def _render_wording_section(sec: Section) -> str:
             return f"{wording_fence_open(div_class)}\n\n{code}\n\n{WORDING_FENCE_CLOSE}"
 
     if code_shaped:
-        diff = _render_wording_code_diff(sec)
+        lang = sec.fence_lang or DEFAULT_FENCE_LANG
+        diff = _render_wording_code_diff(sec, lang)
         if diff:
             neutral = SectionKind.WORDING.value
             return f"{wording_fence_open(neutral)}\n\n{diff}\n\n{WORDING_FENCE_CLOSE}"
