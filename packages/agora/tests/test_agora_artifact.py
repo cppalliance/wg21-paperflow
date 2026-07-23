@@ -209,6 +209,64 @@ def test_unknown_role_rejected(rich_artifact: dict):
         validate_artifact(rich_artifact)
 
 
+def test_depth_beyond_max_rejected(rich_artifact: dict):
+    # A validly-chained run out past the depth cap: every parent/depth
+    # consistency check passes, only the out-of-range check trips.
+    parent_slot = "r5"  # depth 3 in the fixture
+    for depth in range(4, 8):
+        slot = f"deep{depth}"
+        rich_artifact["comments"].append(
+            {
+                "slot_id": slot,
+                "parent_slot_id": parent_slot,
+                "depth": depth,
+                "role": "noise",
+                "persona": "ranges_andy",
+                "body": "even deeper",
+                "votes": [],
+            }
+        )
+        parent_slot = slot
+    with pytest.raises(ArtifactError, match="out-of-range depth"):
+        validate_artifact(rich_artifact)
+
+
+def test_comments_not_a_list_rejected(rich_artifact: dict):
+    rich_artifact["comments"] = {"r1": {}}
+    with pytest.raises(ArtifactError, match="non-empty list"):
+        validate_artifact(rich_artifact)
+
+
+def test_empty_comments_rejected(rich_artifact: dict):
+    rich_artifact["comments"] = []
+    with pytest.raises(ArtifactError, match="non-empty list"):
+        validate_artifact(rich_artifact)
+
+
+def test_comment_missing_slot_id_rejected(rich_artifact: dict):
+    del rich_artifact["comments"][0]["slot_id"]
+    with pytest.raises(ArtifactError, match="non-empty slot_id"):
+        validate_artifact(rich_artifact)
+
+
+def test_comment_missing_persona_rejected(rich_artifact: dict):
+    rich_artifact["comments"][0]["persona"] = None
+    with pytest.raises(ArtifactError, match="no persona"):
+        validate_artifact(rich_artifact)
+
+
+def test_votes_not_a_list_rejected(rich_artifact: dict):
+    rich_artifact["submission_votes"] = "many"
+    with pytest.raises(ArtifactError, match="must be a list"):
+        validate_artifact(rich_artifact)
+
+
+def test_vote_missing_persona_rejected(rich_artifact: dict):
+    rich_artifact["comments"][0]["votes"].append({"direction": 1})
+    with pytest.raises(ArtifactError, match="no persona username"):
+        validate_artifact(rich_artifact)
+
+
 # -- Serialization from a Thread ---------------------------------------------
 
 
