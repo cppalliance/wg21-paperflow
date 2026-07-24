@@ -16,6 +16,7 @@ dependencies = [
     "preview",
     "cpp-mcp",
     "promptforge",
+    "papergate",
 ]
 
 [dependency-groups]
@@ -54,6 +55,7 @@ cli          = {workspace = true}
 preview      = {workspace = true}
 cpp-mcp      = {workspace = true}
 promptforge  = {workspace = true}
+papergate    = {workspace = true}
 scrivener  = {git = "https://github.com/gregjkal/wg21-scrivener.git"}
 
 [tool.pytest.ini_options]
@@ -68,6 +70,7 @@ testpaths = [
     "packages/preview/tests",
     "packages/cpp-mcp/tests",
     "packages/promptforge/tests",
+    "packages/papergate/tests",
     "tests",
 ]
 markers = [

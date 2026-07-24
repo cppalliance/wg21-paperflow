@@ -17,6 +17,7 @@ members = [
     "cli",
     "cpp-mcp",
     "mailing",
+    "papergate",
     "paperstore",
     "pipeline",
     "preview",
@@ -2699,6 +2700,21 @@ wheels = [
 ]
 
 [[package]]
+name = "papergate"
+version = "0.4.1"
+source = { editable = "packages/papergate" }
+dependencies = [
+    { name = "httpx" },
+    { name = "promptforge" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "httpx" },
+    { name = "promptforge", editable = "packages/promptforge" },
+]
+
+[[package]]
 name = "paperstore"
 version = "0.4.1"
 source = { editable = "packages/paperstore" }
@@ -4803,6 +4819,7 @@ dependencies = [
     { name = "cli" },
     { name = "cpp-mcp" },
     { name = "mailing" },
+    { name = "papergate" },
     { name = "paperstore" },
     { name = "pipeline" },
     { name = "preview" },
@@ -4827,6 +4844,7 @@ requires-dist = [
     { name = "cli", editable = "packages/cli" },
     { name = "cpp-mcp", editable = "packages/cpp-mcp" },
     { name = "mailing", editable = "packages/mailing" },
+    { name = "papergate", editable = "packages/papergate" },
     { name = "paperstore", editable = "packages/paperstore" },
     { name = "pipeline", editable = "packages/pipeline" },
     { name = "preview", editable = "packages/preview" },
