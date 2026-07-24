@@ -107,10 +107,12 @@ _CONTROL_SCHEMAS: dict[str, dict[str, Any]] = {
 
 @dataclass
 class ExecContext:
-    """Ambient handles for domain tools. ``store`` is swapped per section."""
+    """Ambient handles for domain tools. ``store`` and ``params`` are swapped
+    per section so a tool always sees the current section's state and inputs."""
 
     store: MemStore
     vfs: MemVFS
+    params: dict[str, Any] = field(default_factory=dict)
     presented: str | None = None
     extras: dict[str, Any] = field(default_factory=dict)
 
@@ -188,6 +190,7 @@ class Runtime:
     def _begin_run(self) -> None:
         self._task_count = 0
         self.ctx.store = self.store
+        self.ctx.params = {}
         self.ctx.presented = None
 
     def _run_flow(
@@ -217,6 +220,7 @@ class Runtime:
                 section.lua, store=store, params=params, document=self.document
             )
             self.ctx.store = store
+            self.ctx.params = params
             try:
                 if config.fanout is not None:
                     self._run_fanout(config.fanout, store, depth)
@@ -273,10 +277,12 @@ class Runtime:
 
         child_store = MemStore()
         previous_store = self.ctx.store
+        previous_params = self.ctx.params
         try:
             self._run_flow(section, params, child_store, depth + 1)
         finally:
             self.ctx.store = previous_store
+            self.ctx.params = previous_params
         parent_store.merge(child_store)
         return child_store
 

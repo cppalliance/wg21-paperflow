@@ -99,6 +99,16 @@ def test_openai_model_builds_request_and_parses_tool_calls() -> None:
     assert result.tool_calls[0].id == "call_1"
 
 
+def test_openai_model_omits_top_p_and_seed_when_none() -> None:
+    # Some compat endpoints reject top_p/seed; None must omit them.
+    client = _FakeClient(_make_response("hi", None))
+    model = OpenAIToolModel(model="m", client=client, top_p=None, seed=None)
+    model.complete([{"role": "user", "content": "x"}])
+    sent = client.chat.completions.last_kwargs
+    assert "top_p" not in sent
+    assert "seed" not in sent
+
+
 def test_openai_model_omits_tools_when_none() -> None:
     client = _FakeClient(_make_response("hi", None))
     model = OpenAIToolModel(model="m", client=client)

@@ -117,7 +117,13 @@ def register_tools(runtime: Any) -> None:
 
     def write_report(path: str) -> str:
         "Render the filed sections and the Missing paragraph into the report."
-        report = _render_report(ctx.store)
+        # Metadata is filed in Digest's isolated store, so it reaches Evaluate as
+        # the ``meta`` parameter, not in this section's store. Prefer whichever
+        # is present.
+        meta = ctx.store.get("metadata")
+        if not meta and isinstance(ctx.params.get("meta"), dict):
+            meta = ctx.params["meta"]
+        report = _render_report(meta or {}, ctx.store)
         ctx.vfs.create(path, report)
         ctx.store.put("report_path", path)
         return f"wrote report to {path}"
@@ -127,9 +133,8 @@ def register_tools(runtime: Any) -> None:
         registry.register(fn)
 
 
-def _render_report(store: Any) -> str:
+def _render_report(meta: dict[str, Any], store: Any) -> str:
     """Assemble the report deterministically from filed state, no model tokens."""
-    meta = store.get("metadata", {}) or {}
     sections = store.get("sections", []) or []
     missing = store.get("missing", []) or []
 
@@ -151,8 +156,12 @@ def _render_report(store: Any) -> str:
 
     lines += ["## Missing From The Paper", ""]
     if missing:
+        # Each item's reason is one sentence; normalize to a single trailing
+        # period so the joined paragraph does not accumulate "..".
         lines.append(
-            " ".join(f"{item['criterion']}: {item['why']}." for item in missing)
+            " ".join(
+                f"{item['criterion']}: {item['why'].rstrip('.')}." for item in missing
+            )
         )
     else:
         lines.append("The paper addresses the applicable criteria for its tier.")

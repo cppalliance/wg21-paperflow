@@ -108,11 +108,18 @@ class OpenAIToolModel:
         client: Any = None,
         max_tokens: int = 4096,
         temperature: float = 0.0,
+        top_p: float | None = 1.0,
+        seed: int | None = 0,
         timeout: float = 120.0,
     ) -> None:
         self._model = model
         self._max_tokens = max_tokens
         self._temperature = temperature
+        # top_p and seed pin determinism on vLLM, but some OpenAI-compatible
+        # servers reject them (Anthropic's compat layer forbids top_p alongside
+        # temperature). Pass None to omit either for such an endpoint.
+        self._top_p = top_p
+        self._seed = seed
         if client is None:
             from openai import OpenAI
 
@@ -132,11 +139,13 @@ class OpenAIToolModel:
             "model": self._model,
             "messages": messages,
             "temperature": self._temperature,
-            "top_p": 1.0,
-            "seed": 0,
             "max_tokens": self._max_tokens,
             "stream": False,
         }
+        if self._top_p is not None:
+            kwargs["top_p"] = self._top_p
+        if self._seed is not None:
+            kwargs["seed"] = self._seed
         if tools:
             kwargs["tools"] = tools
             kwargs["tool_choice"] = "auto"

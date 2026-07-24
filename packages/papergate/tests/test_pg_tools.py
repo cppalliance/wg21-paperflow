@@ -95,6 +95,20 @@ def test_write_report_renders_sections_and_missing() -> None:
     assert rt.store.get("report_path") == "out.md"
 
 
+def test_write_report_uses_meta_param_when_store_lacks_metadata() -> None:
+    # Evaluate's isolated store has no metadata; it arrives as the meta param.
+    rt = _runtime()
+    rt.ctx.params = {"meta": {
+        "document": "P2", "title": "Traits", "classification": "language",
+        "tier": "small", "tier_justification": "1 new keyword",
+    }}
+    rt.registry.dispatch("file_section", {"criterion": "Prior Art Survey", "assessment": "names 3 languages"})
+    rt.registry.dispatch("write_report", {"path": "r.md"})
+    report = rt.vfs.read("r.md")
+    assert report.startswith("# P2 Traits")
+    assert "language proposal at small tier" in report
+
+
 def test_write_report_without_missing() -> None:
     rt = _runtime()
     rt.registry.dispatch("set_metadata", {

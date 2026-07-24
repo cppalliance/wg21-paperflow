@@ -19,7 +19,7 @@ Follow these steps:
 
 1. Call task with section "## Digest" and params containing the paper you were given, for example {"paper": "P0870R8"}. It returns a metadata object and writes the stripped rationale to the virtual file "rationale.md".
 2. Look at the returned metadata. If it has a "status" field beginning with "ACQUISITION FAILED", call present with that status as the summary and then call done. Do not continue.
-3. Otherwise call task with section "## Evaluate" and params {"rationale_path": "rationale.md", "output_path": "papergate.md"} (use the output path you were given in your parameters if one was provided).
+3. Otherwise call task with section "## Evaluate" and params {"rationale_path": "rationale.md", "output_path": "papergate.md", "meta": THE_METADATA_OBJECT_RETURNED_BY_DIGEST} (use the output path you were given in your parameters if one was provided, and pass the full metadata object Digest returned so the report header is complete).
 4. Call read_file on that output path. Then call present with a one-paragraph executive summary of the report's finding and the output path. Then call done.
 
 Do not decide whether the component belongs in the standard; report only whether the paper makes the case.

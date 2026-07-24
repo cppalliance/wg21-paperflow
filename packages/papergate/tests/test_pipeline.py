@@ -31,9 +31,17 @@ def test_full_pipeline_end_to_end(tmp_path) -> None:
                       tier_justification="47 new names"),
             tool_call("done"),
         ),
-        # Main: delegate to Evaluate.
-        turn(tool_call("task", section="## Evaluate",
-                       params={"rationale_path": "rationale.md", "output_path": "out.md"})),
+        # Main: delegate to Evaluate, passing the metadata Digest returned so the
+        # report header is complete (Evaluate's store is isolated from Digest's).
+        turn(tool_call("task", section="## Evaluate", params={
+            "rationale_path": "rationale.md",
+            "output_path": "out.md",
+            "meta": {
+                "document": "P0870R8", "title": "A Proposal",
+                "classification": "library", "tier": "large",
+                "tier_justification": "47 new names",
+            },
+        })),
         # Evaluate: read, then file + write + done.
         turn(tool_call("read_file", path="rationale.md")),
         turn(
@@ -56,6 +64,9 @@ def test_full_pipeline_end_to_end(tmp_path) -> None:
     assert result.ok
     assert result.vfs.exists("out.md")
     report = result.vfs.read("out.md")
+    # Header populated from the metadata passed through to Evaluate.
+    assert report.startswith("# P0870R8 A Proposal")
+    assert "library proposal at large tier" in report
     assert "## The GitHub Test" in report
     assert "## Missing From The Paper" in report
     # PaperGate reports whether the case is made; it never decides belonging.

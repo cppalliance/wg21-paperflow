@@ -74,4 +74,35 @@ isolated store merged back) both pass end to end, which validates parse ->
 configure -> execute -> dispatch and the goto/task/fanout control flow together,
 deterministically and offline.
 
+## M3 - PaperGate live on a real model
+
+PaperGate is a sibling package on the runtime: one markdown document
+(`papergate.md`) with three sections (Main orchestrator, Digest, Evaluate),
+five thin domain tools, and the criteria shipped verbatim as reference blocks.
+No orchestration Python; changing a criterion is a text edit. The full pipeline
+runs end to end against a live model and produces a real assessment (paper
+classified and sized, criteria addressed emitted as sections, absent criteria
+folded into one Missing From The Paper paragraph).
+
+Two things the live run forced, both kept:
+
+- **State crosses subagent boundaries only as parameters.** Digest files the
+  metadata into its own isolated store, so Evaluate cannot see it; the report
+  header was blank until Main passed the metadata to Evaluate as a `meta`
+  parameter. Tools now read their section's inputs through `ctx.params`, so a
+  tool can render from data that arrived as a parameter rather than from the
+  store. This is the design's isolation contract, made to work in practice.
+
+- **Sampling params are per-endpoint.** vLLM wants `temperature`, `top_p`, and
+  `seed` pinned for determinism; the Anthropic OpenAI-compatible endpoint
+  rejects `top_p` alongside `temperature`. `top_p` and `seed` are now optional
+  on the model client (pass `None` to omit), so one client serves both server
+  families.
+
+The RunPod pods were all down at build time (HTTP 404; they are ephemeral), so
+the live validation ran against the Anthropic OpenAI-compatible endpoint, which
+exercises the identical tool-calling code path a vLLM endpoint does. The
+`network`-marked live test prefers a reachable RunPod endpoint and falls back to
+Anthropic, so it validates whichever is available and is deselected by default.
+
 *2026-07-23 - Claude Opus 4.8 (Cursor agent)*
