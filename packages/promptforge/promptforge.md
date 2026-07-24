@@ -1,6 +1,6 @@
 # PromptForge: A Markdown-Driven Pipeline Runtime
 
-<img src="promptforge.png">
+![promptforge](promptforge.jpg)
 
 ## Executive Summary
 
