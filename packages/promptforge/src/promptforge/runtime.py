@@ -141,6 +141,7 @@ class Runtime:
         max_tasks: int = 64,
         max_turns: int = 16,
         retries: int = 1,
+        ask_fn: Any = None,
     ) -> None:
         self.document = _as_document(document)
         self._single_model = model
@@ -153,7 +154,14 @@ class Runtime:
         self.max_turns = max_turns
         self.retries = retries
         self.ctx = ExecContext(store=self.store, vfs=self.vfs)
+        if ask_fn is not None:
+            self.ctx.extras["ask"] = ask_fn
         self._task_count = 0
+        # Every pipeline gets the generic library tools; scoping still decides
+        # which sections actually see them.
+        from promptforge.builtins import register_builtins
+
+        register_builtins(self)
 
     # -- public entry points ------------------------------------------------
 

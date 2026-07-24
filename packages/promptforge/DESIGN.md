@@ -58,4 +58,20 @@ Decisions that shaped the whole:
   host objects, and the dangerous Lua standard libraries are niled. Adequate
   because the pipeline author is us.
 
+## M2 - Generic library tools and end-to-end runs
+
+The runtime auto-registers a small set of generic tools every pipeline can
+scope in: virtual-file I/O (`create_file`/`append_file`/`read_file`/
+`delete_file`), `present` (records the operator-facing result on the run), and
+`ask_user` (routes to a runtime `ask_fn`, or reports an unattended run). Scoping
+still decides which sections see them, so a global registry does not widen any
+section's tool set.
+
+With these in place the whole stack runs unmodified against a scripted model.
+The design's Example 1 (a two-section classifier connected by `goto`) and
+Example 3 (fan-out of one extraction subagent per chunk, each with its own
+isolated store merged back) both pass end to end, which validates parse ->
+configure -> execute -> dispatch and the goto/task/fanout control flow together,
+deterministically and offline.
+
 *2026-07-23 - Claude Opus 4.8 (Cursor agent)*
