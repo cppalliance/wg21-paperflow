@@ -13,6 +13,7 @@ import io
 import struct
 import wave
 
+import pytest
 from vox import pcm16_wav
 
 
@@ -41,3 +42,10 @@ def test_pcm16_wav_clamps_out_of_range() -> None:
     with wave.open(io.BytesIO(data), "rb") as wav:
         assert wav.getnframes() == 2
     assert _decode_int16(data) == [32767, -32767]
+
+
+def test_pcm16_wav_rejects_nonpositive_sample_rate() -> None:
+    # A zero or negative rate is invalid; reject it up front, not deep in the WAV writer.
+    for bad in (0, -1):
+        with pytest.raises(ValueError):
+            pcm16_wav([0.0], sample_rate=bad)

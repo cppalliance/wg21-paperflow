@@ -9,6 +9,8 @@
 
 from __future__ import annotations
 
+import threading
+
 from chatsmith.turnguard import TurnGuard
 
 
@@ -52,6 +54,65 @@ def test_cancel_invalidates_in_flight_turn() -> None:
     saved: list[str] = []
     assert guard.commit("s", gen, lambda: saved.append("late")) is False
     assert saved == []
+
+
+def test_commit_rejects_session_that_never_began() -> None:
+    # An unknown session has no started generation; the default sentinel 0 must not
+    # be treated as valid, so a crafted commit can never persist for it.
+    guard = TurnGuard()
+    saved: list[str] = []
+    assert guard.commit("never-began", 0, lambda: saved.append("x")) is False
+    assert saved == []
+
+
+def test_forget_drops_session_state() -> None:
+    # After a session is forgotten, a stale commit for it is rejected, and a fresh
+    # turn for the same id starts a new (non-recycled) generation that still works.
+    guard = TurnGuard()
+    gen = guard.begin("s")
+    guard.forget("s")
+    saved: list[str] = []
+    assert guard.commit("s", gen, lambda: saved.append("stale")) is False
+    assert saved == []
+
+    new_gen = guard.begin("s")
+    assert guard.commit("s", new_gen, lambda: saved.append("fresh")) is True
+    assert saved == ["fresh"]
+
+    # forget() is a no-op for an unknown id (never allocates guard state).
+    guard.forget("attacker-supplied")
+
+
+def test_commit_save_is_atomic_against_a_concurrent_cancel() -> None:
+    # The core guarantee: while commit() runs save(), a concurrent cancel() for the
+    # same session is blocked on the per-session state lock, so it cannot invalidate
+    # the turn between the generation check and the write. The cancel only lands
+    # after the save completes, so an orphaned, superseded save is impossible.
+    guard = TurnGuard()
+    gen = guard.begin("s")
+    order: list[str] = []
+    in_save = threading.Event()
+    cancel_done = threading.Event()
+
+    def canceller() -> None:
+        in_save.wait(1.0)
+        guard.cancel("s")  # blocks until commit's save() releases the state lock
+        order.append("cancel")
+        cancel_done.set()
+
+    worker = threading.Thread(target=canceller)
+    worker.start()
+
+    def save() -> None:
+        in_save.set()
+        # cancel() is now runnable but must be unable to finish while commit holds
+        # the session's state lock, regardless of thread scheduling.
+        assert not cancel_done.is_set()
+        order.append("save")
+
+    assert guard.commit("s", gen, save) is True
+    worker.join(1.0)
+    assert order == ["save", "cancel"]
 
 
 def test_session_lock_is_stable_per_session() -> None:

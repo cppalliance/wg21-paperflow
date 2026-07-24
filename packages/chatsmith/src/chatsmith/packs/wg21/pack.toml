@@ -7,8 +7,8 @@
 
 name = "wg21"
 character = "Nova"
-display_name = "Nova — WG21 Mentographist"
-title = "Chatsmith — WG21"
+display_name = "Nova: WG21 Mentographist"
+title = "Chatsmith: WG21"
 
 prompt = "prompt.md"
 keyterms = "keyterms.txt"

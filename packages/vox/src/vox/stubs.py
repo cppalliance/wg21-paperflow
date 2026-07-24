@@ -37,6 +37,8 @@ class StubTts:
     """Generate a short pulsing tone (audio/wav) sized to the text length."""
 
     def __init__(self, sample_rate: int = 16000) -> None:
+        if not isinstance(sample_rate, int) or sample_rate <= 0:
+            raise ValueError(f"sample_rate must be a positive integer, got {sample_rate!r}")
         self._sample_rate = sample_rate
 
     def synthesize(self, text: str) -> TtsResult:

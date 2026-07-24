@@ -19,6 +19,8 @@ from collections.abc import Iterable
 
 def pcm16_wav(samples: Iterable[float], sample_rate: int) -> bytes:
     """Encode float samples in [-1, 1] as a mono 16-bit PCM WAV."""
+    if sample_rate <= 0:
+        raise ValueError(f"sample_rate must be positive, got {sample_rate}")
     buffer = io.BytesIO()
     with wave.open(buffer, "wb") as wav:
         wav.setnchannels(1)

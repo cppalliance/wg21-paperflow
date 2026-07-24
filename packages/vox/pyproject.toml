@@ -20,7 +20,9 @@ dependencies = []
 
 [project.optional-dependencies]
 deepgram = ["deepgram-sdk>=7,<8"]
-cartesia = ["cartesia[websockets]>=3,<4"]
+# HTTP TTS only (CartesiaTts uses tts.bytes()); the websockets extra would pin
+# websockets<16 workspace-wide, so it is deliberately omitted.
+cartesia = ["cartesia>=3,<4"]
 
 [project.scripts]
 vox = "vox.__main__:main"

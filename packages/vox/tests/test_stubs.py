@@ -9,6 +9,7 @@
 
 from __future__ import annotations
 
+import pytest
 from vox import StubStt, StubTts, TtsResult
 
 
@@ -26,6 +27,13 @@ def test_stub_tts_longer_text_is_longer_audio() -> None:
     short = StubTts().synthesize("hi")
     long = StubTts().synthesize("hi " * 40)
     assert len(long.audio) > len(short.audio)
+
+
+def test_stub_tts_rejects_bad_sample_rate() -> None:
+    # A non-positive or non-integer rate is a construction error, caught early.
+    for bad in (0, -16000, 16000.0):
+        with pytest.raises(ValueError):
+            StubTts(sample_rate=bad)  # type: ignore[arg-type]
 
 
 def test_stub_stt_is_deterministic_text() -> None:

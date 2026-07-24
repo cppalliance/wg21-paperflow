@@ -124,10 +124,7 @@ class FileSystemPack:
         return self._load_json_map(self._manifest.get("corpus", "corpus_by_category.json"))
 
     def mishearings(self) -> dict[str, str]:
-        path = self._root / str(self._manifest.get("mishearings", "mishearings.json"))
-        if not path.is_file():
-            return {}
-        data = json.loads(path.read_text(encoding="utf-8"))
+        data = self._load_json_object(self._manifest.get("mishearings", "mishearings.json"))
         return {str(k): str(v) for k, v in data.items()}
 
     def services(self) -> dict[str, str]:
@@ -138,10 +135,7 @@ class FileSystemPack:
         return parse_services(self._sections.get("Services", ""))
 
     def branding(self) -> Branding:
-        themes_path = self._root / str(self._manifest.get("themes", "themes.json"))
-        themes: dict[str, Any] = {}
-        if themes_path.is_file():
-            themes = json.loads(themes_path.read_text(encoding="utf-8"))
+        themes = self._load_json_object(self._manifest.get("themes", "themes.json"))
         return Branding(
             name=self.name,
             character=str(self._manifest.get("character", "Nova")),
@@ -150,20 +144,33 @@ class FileSystemPack:
             themes=themes,
         )
 
-    def _load_json_map(self, filename: Any) -> dict[str, list[str]]:
+    def _load_json_object(self, filename: Any) -> dict[str, Any]:
+        """Read a pack JSON file whose top level must be an object.
+
+        Missing file -> empty dict. A non-object payload (list, string, ...) is a
+        pack-author shape mistake, so it fails loudly here rather than misbehaving
+        (or crashing obscurely) downstream.
+        """
         path = self._root / str(filename)
         if not path.is_file():
             return {}
         data = json.loads(path.read_text(encoding="utf-8"))
         if not isinstance(data, dict):
-            raise TypeError(f"pack file {path.name}: expected a JSON object, got {type(data).__name__}")
+            raise TypeError(
+                f"pack file {path.name}: expected a JSON object, got {type(data).__name__}"
+            )
+        return data
+
+    def _load_json_map(self, filename: Any) -> dict[str, list[str]]:
+        data = self._load_json_object(filename)
+        name = Path(str(filename)).name
         result: dict[str, list[str]] = {}
         for key, value in data.items():
             # A bare string would silently explode into per-character "terms"; require
             # a list so a pack author's shape mistake fails loudly instead.
             if not isinstance(value, list):
                 raise TypeError(
-                    f"pack file {path.name}: value for {str(key)!r} must be a list of "
+                    f"pack file {name}: value for {str(key)!r} must be a list of "
                     f"strings, got {type(value).__name__}"
                 )
             result[str(key)] = [str(t) for t in value]

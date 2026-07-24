@@ -31,9 +31,17 @@ GRANT_TOKEN_URL = "https://api.deepgram.com/v1/auth/grant"
 # Fallback TTL (seconds) when a caller does not specify one.
 _DEFAULT_TTL_SECONDS = 60
 
+# Network timeout (seconds) for the grant-token POST.
+_HTTP_TIMEOUT_SECONDS = 10
+
 
 class DeepgramTokenError(RuntimeError):
-    """Raised when the grant-token endpoint returns a non-200 response."""
+    """Raised for any grant-token failure.
+
+    Covers a non-200 grant-token response, a transport failure (unreachable host,
+    connection refused, or timeout), and a malformed or invalid body (non-JSON, a
+    non-object shape, or a grant missing its required fields).
+    """
 
 
 def build_grant_request(
@@ -66,7 +74,7 @@ def grant_token(
     """
     request = build_grant_request(api_key, ttl_seconds)
     try:
-        with urlopen(request, timeout=10) as response:
+        with urlopen(request, timeout=_HTTP_TIMEOUT_SECONDS) as response:
             status = getattr(response, "status", None)
             if status is None:
                 status = response.getcode()
@@ -84,4 +92,11 @@ def grant_token(
         raise DeepgramTokenError("Deepgram grant-token returned a non-JSON body") from exc
     if not isinstance(grant, dict):
         raise DeepgramTokenError("Deepgram grant-token returned an unexpected JSON shape")
+    # A 200 can still carry an empty or error-shaped object; require the documented
+    # fields so callers get a token they can actually use, not a silent {}.
+    access_token = grant.get("access_token")
+    if not isinstance(access_token, str) or not access_token or "expires_in" not in grant:
+        raise DeepgramTokenError(
+            "Deepgram grant-token response missing access_token/expires_in"
+        )
     return grant

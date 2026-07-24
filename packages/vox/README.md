@@ -12,8 +12,8 @@ concern, so it lives on its own and can be used by any package.
 from vox import VoxConfig, build_speech
 
 stt, tts = build_speech(VoxConfig(tts_provider="stub", stt_provider="stub"))
-result = tts.synthesize("hello")          # -> TtsResult(audio=..., content_type=...)
-text = stt.transcribe(audio, "audio/wav") # -> str
+result = tts.synthesize("hello")                 # -> TtsResult(audio=..., content_type=...)
+text = stt.transcribe(result.audio, "audio/wav") # -> str
 ```
 
 Install a provider extra to enable it, e.g. `uv sync --extra deepgram`. Without

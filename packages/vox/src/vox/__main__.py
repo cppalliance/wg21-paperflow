@@ -48,7 +48,7 @@ def main(argv: list[str] | None = None) -> int:
     config = _config_from_env()
 
     if command == "say":
-        if not rest:
+        if not rest or len(rest) > 2:
             print("usage: vox say TEXT [OUT.wav]", file=sys.stderr)
             return 2
         text = rest[0]
@@ -59,7 +59,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if command == "transcribe":
-        if not rest:
+        if len(rest) != 1:
             print("usage: vox transcribe CLIP.wav", file=sys.stderr)
             return 2
         clip = Path(rest[0])

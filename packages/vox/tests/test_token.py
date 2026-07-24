@@ -84,6 +84,18 @@ def test_grant_token_unreachable_is_normalized() -> None:
         grant_token("k", urlopen=timed_out)
 
 
+def test_grant_token_rejects_incomplete_grant() -> None:
+    # A 200 can still carry an empty or error-shaped object; a grant missing its
+    # documented fields must fail rather than return a token a caller cannot use.
+    for body in (b"{}", b'{"access_token": "tok"}', b'{"expires_in": 60}', b'{"error": "nope"}'):
+
+        def fake_urlopen(request, timeout=10, _body=body):
+            return _FakeResponse(_body)
+
+        with pytest.raises(DeepgramTokenError):
+            grant_token("k", urlopen=fake_urlopen)
+
+
 def test_grant_token_non_200_status_raises() -> None:
     # A response that returns without raising but reports a non-200 status still fails.
     def fake_urlopen(request, timeout=10):

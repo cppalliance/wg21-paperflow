@@ -148,6 +148,13 @@ class InterviewSession:
         pending_ts: str | None = None
         for turn in self.turns:
             if turn.role == ROLE_ASSISTANT:
+                # Two questions in a row (no subject reply between) must not drop the
+                # first: flush it as its own Q-only turn before taking the newer one.
+                if pending_question is not None:
+                    pair_index += 1
+                    body.append(f"### Turn {pair_index} ({pending_ts})")
+                    body.append(f"- **Q**: {pending_question}")
+                    body.append("")
                 pending_question = turn.text
                 pending_ts = turn.ts
                 continue

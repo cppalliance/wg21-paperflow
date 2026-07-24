@@ -78,8 +78,13 @@ def turn_record(
     timings_ms: dict[str, float],
     **extra: Any,
 ) -> dict[str, Any]:
-    """Build a normalized per-turn record (adds wall-clock ``ts`` and ``event``)."""
+    """Build a normalized per-turn record (adds wall-clock ``ts`` and ``event``).
+
+    ``extra`` is merged first so it can only add fields: the canonical keys below
+    always win and can never be clobbered by a caller-supplied collision.
+    """
     return {
+        **extra,
         "ts": round(time.time(), 3),
         "source": source,
         "event": "turn",
@@ -87,7 +92,6 @@ def turn_record(
         "turn": turn,
         "path": path,
         "timings_ms": timings_ms,
-        **extra,
     }
 
 

@@ -21,6 +21,10 @@ ELICIT = "elicit"
 WALK = "walk"
 CLOSE = "close"
 
+# Subject-turn counts that advance the coarse phase (advisory only).
+_MIN_TURNS_TO_ELICIT = 1
+_MIN_TURNS_TO_WALK = 3
+
 # Phrases from the subject or operator that end the interview.
 _CLOSE_PHRASES = (
     "done for the day",
@@ -45,8 +49,8 @@ def next_phase(current: str, subject_turns: int, close_intent: bool) -> str:
     """Advance the coarse phase. Advisory only."""
     if close_intent:
         return CLOSE
-    if current in (GREETING, "") and subject_turns >= 1:
+    if current in (GREETING, "") and subject_turns >= _MIN_TURNS_TO_ELICIT:
         return ELICIT
-    if current == ELICIT and subject_turns >= 3:
+    if current == ELICIT and subject_turns >= _MIN_TURNS_TO_WALK:
         return WALK
     return current or GREETING

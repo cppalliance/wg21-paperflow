@@ -40,6 +40,24 @@ def test_transcript_keeps_trailing_unanswered_question() -> None:
     assert "### Turn 2" in md
 
 
+def test_transcript_flushes_earlier_question_on_back_to_back_questions() -> None:
+    # Two interviewer questions with no subject reply between them must not drop the
+    # first: it renders as its own Q-only turn, then the second pairs with the reply.
+    session = InterviewSession(session_id="s1", subject="Ada")
+    session.add_turn(ROLE_ASSISTANT, "First question?")
+    session.add_turn(ROLE_ASSISTANT, "Second question?")
+    session.add_turn(ROLE_SUBJECT, "An answer.")
+
+    md = session.transcript_markdown()
+    assert "First question?" in md
+    assert "Second question?" in md
+    assert md.count("- **Q**:") == 2
+    assert md.count("- **A**:") == 1
+    # First question is a standalone Q-only turn; the second pairs with the answer.
+    assert "### Turn 1" in md
+    assert md.index("First question?") < md.index("Second question?") < md.index("An answer.")
+
+
 def test_session_round_trips_through_dict() -> None:
     # The core "any store shares the same bytes" invariant: to_dict -> from_dict
     # must reproduce the session, including nested turns and resume state.

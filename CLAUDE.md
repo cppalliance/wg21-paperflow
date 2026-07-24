@@ -15,10 +15,16 @@ packages/
   paperstore/   storage abstraction (SqliteBackend)
   mailing/      scrape open-std.org + download paper sources
   tomd/         PDF/HTML to Markdown
+  whisker/      deterministic QA verdict + benchmark for tomd (no LLM)
   pipeline/     LLM pipeline framework (pydantic-ai, web tools)
   dissect/      LLM-driven paper dissect pipeline
   agora/        LLM-driven thread planning pipeline
+  assay/        WG21 paper assay pipeline (two-pass structural analysis)
+  vox/          reusable speech (STT/TTS) clients with offline stubs
+  chatsmith/    pack-driven voice interviewer (LLM routed via pipeline)
   cli/          ingestion + conversion + dissect CLI
+  preview/      side-by-side preview server for sources + converted md
+  cpp-mcp/      MCP server for the C++ standard (ISO/IEC 14882)
 tests/          cross-package integration tests
 ```
 

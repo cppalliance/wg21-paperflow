@@ -43,6 +43,42 @@ Arriving in later PRs: `config.py` (Settings), `store/`, `llm.py`,
 `normalize.py`, `interview/engine.py`, `service.py`, `debug_audio.py`,
 `server/`, `__main__.py`, and `web/`.
 
+## Later-layer checklist (enforce when each layer lands)
+
+The foundation makes no LLM calls and has no store, so these paperflow rules are
+latent today. The PR that introduces each layer MUST satisfy them:
+
+- **LLM routing (`llm.py`, `normalize.py`, `engine.py`), D1:** every call goes
+  through `pipeline.run_agent` / `run_task` / `AgentBackend.run`. Never construct
+  a `pydantic_ai.Agent` or hit a provider SDK directly.
+- **Structured output, D6 + D10:** keep `output_type=NormalizeOutput | TurnReply`
+  (already `frozen=True`); pair each with a finite `output_retries` and use
+  `ModelRetry` in a validator to self-correct rather than parsing free text.
+- **Prompt-injection defense:** wrap every untrusted input (the subject's STT
+  utterance and prior transcript) with `pipeline.tools.wrap_source` before it
+  enters a prompt. Paper/transcript text is data, never instructions.
+- **Determinism, D7:** sort `mishearings`, `corpus`, and `state.interests` (and
+  any `set`/`dict`) before they feed a prompt. `pack/base.py`
+  `normalize_system_prompt()` and the `interview/models.py` transcript header
+  iterate unsorted today; add `sorted(...)` when they first feed an LLM.
+- **Services + model sovereignty:** add `[services.chatsmith-conversational]`
+  and `[services.chatsmith-fast]` to the root `SERVICES.toml` targeting a
+  `vllm_thinking` (open-weight) backend, not only Anthropic. Resolve them with
+  `pipeline.resolve_pipeline_models(pack.services(), registry)`, which raises
+  `ServiceConfigError` if the names are missing.
+- **Parser consolidation:** once chatsmith depends on `pipeline`, drop the local
+  `parse_services` in `pack/prompt.py` for `pipeline.parse_pipeline_services`,
+  and either adopt fence-aware section splitting or document that pack prompts
+  avoid fenced `##` / `---` zones.
+- **Schema versioning:** `interview/models.py` `from_dict` must reject or migrate
+  a payload whose `version` exceeds `SCHEMA_VERSION` (written but not yet
+  checked), matching `paperstore/html_manifest.py`.
+- **Serial LLM, D11:** the async engine keeps at most one in-flight LLM request
+  per session and must not raise pipeline's global concurrency
+  (`_task_semaphore` / `_parallel_semaphore`). Port `TurnGuard`'s
+  `threading.Lock` to an asyncio lock or queue. Session-state eviction already
+  exists via `TurnGuard.forget`.
+
 ## The pack is DATA, not code
 
 A pack is a directory (`packs/<name>/` or an external `CHATSMITH_PACK_DIR`) of:

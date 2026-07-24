@@ -30,7 +30,7 @@ reports/
 
 # chatsmith local runtime root: sessions, metrics, debug audio, exports
 .chatsmith/
-*.sqlite3
+.chatsmith/**/*.sqlite3
 
 # Assay golden dataset (negate global data/ ignore for golden/ only)
 !packages/assay/data/

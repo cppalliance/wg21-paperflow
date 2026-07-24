@@ -55,3 +55,13 @@ def test_corpus_rejects_non_list_value(tmp_path) -> None:
     pack = FileSystemPack(tmp_path)
     with pytest.raises(TypeError):
         pack.corpus_by_category()
+
+
+def test_mishearings_rejects_non_object(tmp_path) -> None:
+    # A JSON array (or any non-object) at the top level is a shape mistake and must
+    # fail loudly, consistently with the corpus loader, not crash on `.items()`.
+    (tmp_path / "pack.toml").write_text('name = "t"\n', encoding="utf-8")
+    (tmp_path / "mishearings.json").write_text('["not", "an", "object"]', encoding="utf-8")
+    pack = FileSystemPack(tmp_path)
+    with pytest.raises(TypeError):
+        pack.mishearings()

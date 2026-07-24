@@ -1,4 +1,4 @@
-# chatsmith pipeline — WG21 (Mentographist)
+# chatsmith pipeline: WG21 (Mentographist)
 
 Pack-owned prompt for the chatsmith interviewer. Sections below are consumed by the
 chatsmith engine (and parse cleanly as a wg21-paperflow pipeline prompt): `## Services`
