@@ -1,0 +1,33 @@
+#
+# Copyright (c) 2026 Will Pak (will@cppalliance.org)
+#
+# Distributed under the Boost Software License, Version 1.0. (See accompanying
+# file LICENSE_1_0.txt or copy at http://www.boost.org/LICENSE_1_0.txt)
+#
+# Official repository: https://github.com/cppalliance/wg21-paperflow
+#
+
+[project]
+name = "vox"
+version = "0.1.0"
+description = "Reusable speech clients (STT/TTS) with pluggable providers and offline stubs."
+requires-python = ">=3.12"
+license = { text = "BSL-1.0" }
+authors = [{ name = "Will Pak", email = "will@cppalliance.org" }]
+# Core is stdlib-only. Each provider is an optional extra; without it (or its
+# key) the matching adapter is unavailable and the caller falls back to a stub.
+dependencies = []
+
+[project.optional-dependencies]
+deepgram = ["deepgram-sdk>=7,<8"]
+cartesia = ["cartesia[websockets]>=3,<4"]
+
+[project.scripts]
+vox = "vox.__main__:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/vox"]

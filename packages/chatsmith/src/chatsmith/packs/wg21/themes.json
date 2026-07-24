@@ -1,0 +1,20 @@
+{
+  "storage_key": "wg21.theme",
+  "default": "cpp26",
+  "groups": [
+    { "id": "study", "label": "Study group" },
+    { "id": "venue", "label": "Venue" },
+    { "id": "era", "label": "Era" }
+  ],
+  "chips": [
+    { "id": "cwg", "label": "CWG", "group": "study" },
+    { "id": "ewg", "label": "EWG", "group": "study" },
+    { "id": "lib", "label": "Library", "group": "study" },
+    { "id": "kona", "label": "Kona", "group": "venue" },
+    { "id": "tokyo", "label": "Tokyo", "group": "venue" },
+    { "id": "wroclaw", "label": "Wroclaw", "group": "venue" },
+    { "id": "cpp11", "label": "C++11", "group": "era" },
+    { "id": "cpp20", "label": "C++20", "group": "era" },
+    { "id": "cpp26", "label": "C++26", "group": "era" }
+  ]
+}

@@ -1,0 +1,24 @@
+# WG21 (Mentographist) domain pack for chatsmith.
+#
+# This directory is DATA, not code: swap it (or point CHATSMITH_PACK_DIR at another
+# pack) to repurpose the interviewer for Boost, a different community, or any
+# field, with no code change. The on-screen character is set here, decoupled from
+# the package name.
+
+name = "wg21"
+character = "Nova"
+display_name = "Nova — WG21 Mentographist"
+title = "Chatsmith — WG21"
+
+prompt = "prompt.md"
+keyterms = "keyterms.txt"
+corpus = "corpus_by_category.json"
+mishearings = "mishearings.json"
+themes = "themes.json"
+
+# Logical model slots -> service names defined in the deployment's SERVICES.toml.
+# Only used when CHATSMITH_LLM_PROVIDER=pipeline; the stub provider ignores them.
+# `default` runs the conversational reply; `fast` runs the post-STT normalizer.
+[services]
+default = "chatsmith-conversational"
+fast = "chatsmith-fast"

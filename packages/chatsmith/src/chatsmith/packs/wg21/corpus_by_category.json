@@ -1,0 +1,121 @@
+{
+  "names": [
+    "Bjarne Stroustrup", "Herb Sutter", "Ville Voutilainen", "Gabriel Dos Reis",
+    "Daveed Vandevoorde", "Stephan T. Lavavej", "JeanHeyd Meneide", "Hana Dušíková",
+    "Corentin Jabot", "Gašper Ažman", "Andrzej Krzemieński", "Olivier Giroux",
+    "Eric Niebler", "Andrei Alexandrescu", "Victor Zverovich", "Nicolai Josuttis",
+    "Mateusz Pusz", "Gor Nishanov", "Dietmar Kühl", "Titus Winters",
+    "Chandler Carruth", "David Sankel", "Nina Ranns", "Lewis Baker", "John Lakos",
+    "Joshua Berne", "Barry Revzin", "Howard Hinnant", "Arthur O'Dwyer", "Jens Maurer",
+    "Davis Herring", "Jonathan Wakely", "Richard Smith", "Sean Parent", "Marshall Clow",
+    "Louis Dionne", "Alisdair Meredith", "Walter E. Brown", "Jason Merrill", "John Spicer",
+    "Hubert Tong", "Roger Orr", "Matthias Kretz", "Oliver Kowalke", "Paul McKenney",
+    "Younan Zhang", "Giuseppe D'Angelo", "Nevin Liber", "Guy Davidson", "Inbal Levi",
+    "Erich Keane", "Aaron Ballman", "Tim Song", "Tom Honermann", "JF Bastien",
+    "Hans Boehm", "Anthony Williams", "Christopher Kohlhoff", "Kirk Shoop", "Pablo Halpern",
+    "Jonathan Müller", "Sy Brand", "Vittorio Romeo", "Nathan Sidwell", "René Rivera",
+    "Vinnie Falco", "Mike Spertus", "Thomas Köppe", "Phil Nash", "Kate Gregory",
+    "Timur Doumler", "Bryce Adelstein Lelbach", "Eric Fiselier", "Klaus Iglberger",
+    "Bob Steagall", "Michał Dominiak", "Shafik Yaghmour", "Krystian Stasiowski",
+    "Vlad Serebrennikov", "Peter Dimov", "Boris Kolpackov", "Kris Jusiak",
+    "Michael Wong", "Billy O'Neal", "Casey Carter", "Zach Laine", "Michael Park",
+    "Ben Craig", "Ben Saks", "Steve Downey"
+  ],
+  "tooling": [
+    "GCC", "Clang", "MSVC", "Apple Clang", "EDG", "ICX", "ICC", "nvc++", "nvcc",
+    "Circle", "MinGW", "MinGW-w64", "Cygwin", "Emscripten", "clang-cl", "clangd",
+    "clang-tidy", "clang-format", "libstdc++", "libc++", "libc++abi", "MSVC STL",
+    "STLport", "compiler-rt", "AddressSanitizer", "ThreadSanitizer", "UndefinedBehaviorSanitizer",
+    "CMake", "Meson", "Ninja", "Bazel", "vcpkg", "Conan", "MSBuild", "Autotools",
+    "b2", "Boost.Build", "pkg-config",
+    "Boost", "Abseil", "fmt", "range-v3", "Catch2", "GoogleTest", "gtest", "Qt",
+    "Asio", "spdlog", "nlohmann::json", "Eigen", "stdexec", "libunifex", "cppcoro",
+    "mp-units", "protobuf", "gRPC", "oneTBB", "CUDA",
+    "Boost.Asio", "Boost.Beast", "Boost.Cobalt", "Boost.Hana", "Boost.Spirit",
+    "Boost.Fusion", "Boost.Phoenix", "Boost.MP11", "Boost.PFR", "Boost.Describe",
+    "Boost.Graph", "Boost.Geometry", "Boost.Math", "Boost.Multiprecision", "Boost.JSON",
+    "Boost.URL", "Boost.MySQL", "Boost.Unordered", "Boost.Container", "Boost.Intrusive",
+    "Boost.MultiIndex", "Boost.Fiber", "Boost.Context", "Boost.Chrono", "Boost.Filesystem",
+    "Boost.Interprocess", "Boost.Serialization", "Boost.Regex", "Boost.Preprocessor"
+  ],
+  "core_language": [
+    "constexpr", "consteval", "constinit", "noexcept", "decltype", "nullptr",
+    "if constexpr", "structured bindings", "fold expression", "[[nodiscard]]",
+    "class template argument deduction", "CTAD", "value category", "lvalue", "rvalue",
+    "xvalue", "prvalue", "glvalue", "most vexing parse", "one-definition rule", "ODR",
+    "deducing this", "aggregate initialization", "designated initializers"
+  ],
+  "templates_meta": [
+    "SFINAE", "partial specialization", "explicit specialization", "variadic templates",
+    "parameter pack", "pack expansion", "pack indexing", "non-type template parameter",
+    "NTTP", "template template parameter", "two-phase lookup", "dependent name",
+    "argument-dependent lookup", "ADL", "curiously recurring template pattern", "CRTP",
+    "tag dispatch", "type traits", "perfect forwarding", "forwarding reference"
+  ],
+  "concepts": [
+    "concept", "requires-clause", "requires-expression", "constraint",
+    "constraint subsumption", "atomic constraint", "abbreviated function template",
+    "std::same_as", "std::convertible_to", "std::regular", "std::semiregular",
+    "std::invocable", "std::derived_from"
+  ],
+  "ranges": [
+    "ranges", "views", "range adaptor", "range adaptor closure", "std::views::transform",
+    "std::views::filter", "std::ranges::to", "projection", "sentinel",
+    "contiguous iterator", "borrowed range", "sized range", "input iterator",
+    "forward iterator", "random access iterator"
+  ],
+  "coroutines": [
+    "coroutine", "co_await", "co_yield", "co_return", "awaitable", "awaiter",
+    "promise type", "std::coroutine_handle", "std::suspend_always", "std::suspend_never",
+    "initial suspend", "final suspend", "await_transform", "yield_value",
+    "symmetric transfer", "std::generator"
+  ],
+  "execution": [
+    "std::execution", "sender", "receiver", "scheduler", "operation state", "connect",
+    "start", "schedule", "then", "let_value", "bulk", "sync_wait", "when_all",
+    "completion signatures", "set_value", "set_error", "set_stopped", "std::stop_token",
+    "std::inplace_stop_token", "structured concurrency", "std::execution::task"
+  ],
+  "memory_lifetime": [
+    "RAII", "move semantics", "std::unique_ptr", "std::shared_ptr", "std::weak_ptr",
+    "reference counting", "dangling pointer", "use-after-free", "lifetime extension",
+    "placement new", "std::launder", "polymorphic allocator", "std::pmr",
+    "memory resource", "trivially copyable", "trivial relocation", "relocatable",
+    "std::start_lifetime_as", "small buffer optimization", "copy elision", "RVO",
+    "NRVO", "object slicing"
+  ],
+  "contracts": [
+    "contracts", "precondition", "postcondition", "pre", "post", "contract_assert",
+    "contract-violation handler", "contract violation", "[[assume]]",
+    "evaluation semantics", "ignore", "observe", "enforce", "contract predicate",
+    "entry_cond", "return_cond", "mandatory_assert"
+  ],
+  "modules": [
+    "modules", "import", "export", "module interface unit", "module partition",
+    "global module fragment", "private module fragment", "header unit", "import std",
+    "binary module interface", "BMI", "module linkage"
+  ],
+  "library_types": [
+    "std::optional", "std::variant", "std::expected", "std::any", "std::string_view",
+    "std::span", "std::mdspan", "std::flat_map", "std::flat_set", "std::hive",
+    "std::inplace_vector", "std::move_only_function", "std::function_ref",
+    "std::atomic_ref", "std::jthread", "std::latch", "std::barrier", "std::bit_cast",
+    "std::byte", "std::source_location", "std::stacktrace", "std::print", "std::format"
+  ],
+  "reflection": [
+    "static reflection", "std::meta::info", "reflection operator", "splice", "reflexpr",
+    "consteval metafunctions", "std::meta::members_of", "template metaprogramming"
+  ],
+  "process": [
+    "WG21", "EWG", "LEWG", "CWG", "LWG", "EWGI", "LEWGI", "SG1", "SG7", "SG14",
+    "SG15", "SG16", "SG20", "SG21", "SG23", "plenary", "straw poll", "national body",
+    "NB comment", "working draft", "committee draft", "standardese", "Mandates",
+    "Preconditions", "Effects", "Remarks", "trip report", "Direction Group",
+    "Convenor", "ISO C++", "open-std"
+  ],
+  "papers": [
+    "P2900", "P2996", "P2300", "P1240", "P2320", "P0847", "P1371", "P2688", "P2502",
+    "P3081", "P3390", "P3444", "P2771", "P2816", "P0876", "P1673", "P3097", "P3098",
+    "P0542", "P2237", "P1717", "P3090", "P2762", "P1260", "D4005", "N4950"
+  ]
+}

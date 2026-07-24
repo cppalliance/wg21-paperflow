@@ -1,0 +1,31 @@
+#
+# Copyright (c) 2026 Will Pak (will@cppalliance.org)
+#
+# Distributed under the Boost Software License, Version 1.0. (See accompanying
+# file LICENSE_1_0.txt or copy at http://www.boost.org/LICENSE_1_0.txt)
+#
+# Official repository: https://github.com/cppalliance/wg21-paperflow
+#
+
+[project]
+name = "chatsmith"
+version = "0.1.0"
+description = "Pack-driven knowledge-capture voice interviewer; LLM routed through wg21-paperflow pipeline."
+requires-python = ">=3.12"
+license = { text = "BSL-1.0" }
+authors = [{ name = "Will Pak", email = "will@cppalliance.org" }]
+# This PR lands the foundation + domain-pack layer only (data model, interview
+# transcript, swappable packs, latency metrics), which depends on nothing beyond
+# pydantic. The session store, LLM turn pipeline, Flask server, and CLI land in a
+# follow-up PR, which adds the `vox` dependency, the `server`/`llm` optional
+# extras, and the `chatsmith` console script.
+dependencies = [
+    "pydantic>=2",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/chatsmith"]
