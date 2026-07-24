@@ -75,6 +75,10 @@ class MemStore:
         """Return a deep copy of all state, for subagent return or merging."""
         return copy.deepcopy(self._data)
 
+    def reset(self, data: dict[str, Any] | None = None) -> None:
+        """Replace all state, used to roll back a failed section attempt."""
+        self._data = copy.deepcopy(dict(data)) if data else {}
+
     def merge(self, other: "MemStore | dict[str, Any]") -> None:
         """Fold another store's state in: extend list collections, overwrite
         scalars, add new keys. Used to merge a subagent's store back."""

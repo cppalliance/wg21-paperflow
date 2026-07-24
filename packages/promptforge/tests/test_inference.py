@@ -117,6 +117,16 @@ def test_openai_model_tolerates_malformed_tool_args() -> None:
     assert result.tool_calls[0].arguments == {}
 
 
+def test_tool_call_passes_id_argument_through() -> None:
+    # An argument literally named "id" must not be shadowed by the call id.
+    call = tool_call("file_verdict", id=7)
+    assert call.arguments == {"id": 7}
+    assert call.id == "call_file_verdict"
+    call2 = tool_call("f", call_id="abc", value=1)
+    assert call2.id == "abc"
+    assert call2.arguments == {"value": 1}
+
+
 def test_assistant_turn_defaults() -> None:
     t = AssistantTurn()
     assert t.text == ""

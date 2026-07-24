@@ -92,6 +92,17 @@ def test_merge_accepts_another_store() -> None:
     assert a.count("items") == 2
 
 
+def test_reset_restores_snapshot() -> None:
+    store = MemStore()
+    store.add("items", {"chunk": 0})
+    snapshot = store.serialize()
+    store.add("items", {"chunk": 1})
+    store.put("scratch", 1)
+    store.reset(snapshot)
+    assert store.count("items") == 1
+    assert not store.exists("scratch")
+
+
 def test_init_with_data_is_copied() -> None:
     seed = {"items": [{"chunk": 0}]}
     store = MemStore(seed)

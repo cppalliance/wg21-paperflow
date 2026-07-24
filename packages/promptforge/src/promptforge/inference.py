@@ -64,9 +64,13 @@ class Model(Protocol):
         ...
 
 
-def tool_call(name: str, id: str = "", **arguments: Any) -> ToolCall:
-    """Build a ToolCall, for scripting tests and builtins."""
-    return ToolCall(name=name, arguments=dict(arguments), id=id or f"call_{name}")
+def tool_call(name: str, call_id: str = "", **arguments: Any) -> ToolCall:
+    """Build a ToolCall, for scripting tests and builtins.
+
+    The call identifier is ``call_id`` (not ``id``) so a tool argument literally
+    named ``id`` is passed through as an argument rather than shadowed.
+    """
+    return ToolCall(name=name, arguments=dict(arguments), id=call_id or f"call_{name}")
 
 
 def turn(*calls: ToolCall, text: str = "") -> AssistantTurn:

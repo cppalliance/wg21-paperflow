@@ -66,6 +66,12 @@ class SectionResult:
     transition: str | None = None
     tool_counts: dict[str, int] = field(default_factory=dict)
     turns: int = 0
+    attempts: int = 1
+
+    @property
+    def ok(self) -> bool:
+        """True when the section completed by calling done()."""
+        return self.status == "done"
 
 
 def run_section(
