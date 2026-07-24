@@ -17,6 +17,7 @@ from promptforge.inference import (
     AssistantTurn,
     OpenAIToolModel,
     ScriptedModel,
+    StreamingOpenAIToolModel,
     tool_call,
     turn,
 )
@@ -141,3 +142,79 @@ def test_assistant_turn_defaults() -> None:
     t = AssistantTurn()
     assert t.text == ""
     assert t.tool_calls == []
+
+
+# -- streaming model --------------------------------------------------------
+
+def _stream_chunk(content=None, tool_calls=None):
+    delta = SimpleNamespace(content=content, tool_calls=tool_calls)
+    return SimpleNamespace(choices=[SimpleNamespace(delta=delta)])
+
+
+def _tc_delta(index, id=None, name=None, args=None):
+    return SimpleNamespace(index=index, id=id, function=SimpleNamespace(name=name, arguments=args))
+
+
+class _FakeStreamCompletions:
+    def __init__(self, chunks):
+        self._chunks = chunks
+        self.last_kwargs = None
+
+    def create(self, **kwargs):
+        self.last_kwargs = kwargs
+        return iter(self._chunks)
+
+
+class _FakeStreamClient:
+    def __init__(self, chunks):
+        self.chat = SimpleNamespace(completions=_FakeStreamCompletions(chunks))
+
+
+def test_streaming_text_streams_to_callback() -> None:
+    chunks = [_stream_chunk(content="Hello "), _stream_chunk(content="there.")]
+    client = _FakeStreamClient(chunks)
+    model = StreamingOpenAIToolModel(model="m", client=client)
+    received: list[str] = []
+    result = model.complete([{"role": "user", "content": "hi"}], on_text=received.append)
+    assert "".join(received) == "Hello there."
+    assert result.text == "Hello there."
+    assert client.chat.completions.last_kwargs["stream"] is True
+
+
+def test_streaming_suppresses_think_from_callback() -> None:
+    # The think span is split across chunk boundaries.
+    chunks = [
+        _stream_chunk(content="<thi"),
+        _stream_chunk(content="nk>planning</think>Real "),
+        _stream_chunk(content="answer."),
+    ]
+    model = StreamingOpenAIToolModel(model="m", client=_FakeStreamClient(chunks))
+    received: list[str] = []
+    result = model.complete([], on_text=received.append)
+    spoken = "".join(received)
+    assert spoken == "Real answer."
+    assert "planning" not in spoken
+    assert result.text == "Real answer."
+
+
+def test_streaming_accumulates_tool_calls() -> None:
+    chunks = [
+        _stream_chunk(content="ok"),
+        _stream_chunk(tool_calls=[_tc_delta(0, id="call_1", name="rate_answer", args='{"qual')]),
+        _stream_chunk(tool_calls=[_tc_delta(0, args='ity": "rich"}')]),
+    ]
+    client = _FakeStreamClient(chunks)
+    model = StreamingOpenAIToolModel(model="m", client=client)
+    result = model.complete([], tools=[{"type": "function", "function": {"name": "rate_answer"}}])
+    assert result.text == "ok"
+    assert result.tool_calls[0].name == "rate_answer"
+    assert result.tool_calls[0].arguments == {"quality": "rich"}
+    assert result.tool_calls[0].id == "call_1"
+    assert client.chat.completions.last_kwargs["tool_choice"] == "auto"
+
+
+def test_streaming_tolerates_malformed_tool_args() -> None:
+    chunks = [_stream_chunk(tool_calls=[_tc_delta(0, name="f", args="{bad")])]
+    model = StreamingOpenAIToolModel(model="m", client=_FakeStreamClient(chunks))
+    result = model.complete([])
+    assert result.tool_calls[0].arguments == {}
