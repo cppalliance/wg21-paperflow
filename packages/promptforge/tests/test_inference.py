@@ -218,3 +218,11 @@ def test_streaming_tolerates_malformed_tool_args() -> None:
     model = StreamingOpenAIToolModel(model="m", client=_FakeStreamClient(chunks))
     result = model.complete([])
     assert result.tool_calls[0].arguments == {}
+
+
+def test_scripted_model_simulates_stream_to_callback() -> None:
+    model = ScriptedModel([AssistantTurn(text="one chunk")])
+    received: list[str] = []
+    result = model.complete([], on_text=received.append)
+    assert received == ["one chunk"]
+    assert result.text == "one chunk"

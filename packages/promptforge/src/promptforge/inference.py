@@ -95,11 +95,17 @@ class ScriptedModel:
         self,
         messages: list[dict[str, Any]],
         tools: list[dict[str, Any]] | None = None,
+        *,
+        on_text: Callable[[str], None] | None = None,
     ) -> AssistantTurn:
         self.calls.append({"messages": messages, "tools": tools})
         if not self._turns:
             raise RuntimeError("ScriptedModel exhausted: no more turns queued")
-        return self._turns.pop(0)
+        result = self._turns.pop(0)
+        # Simulate a single-chunk stream so streaming callers are testable offline.
+        if on_text is not None and result.text:
+            on_text(result.text)
+        return result
 
 
 class OpenAIToolModel:
