@@ -240,3 +240,15 @@ def test_skipped_rerender_preserves_stats_and_reason(store: SqliteBackend):
     assert "Reference document" in report
     assert "Step 3 (Survey)" in report
     assert "Model: n/a" not in report
+
+
+def test_rerender_load_assay_state_preserves_ask_line(store: SqliteBackend):
+    store.upsert_year("2026", [{"paper_id": "P1", "title": "Test Paper"}])
+    store.store_assay_asks("P1", [
+        {"target": "committee", "quote": "do X", "type": "poll", "line": 99},
+    ])
+    state = load_assay_state("P1", store)
+    assert state.asks is not None
+    assert state.asks[0].line == 99
+    data = prepare_report_data(state)
+    assert data.asks[0]["line"] == 99
