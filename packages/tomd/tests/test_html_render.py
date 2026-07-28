@@ -495,6 +495,44 @@ class TestConservativeCodeLanguage:
         md = render_body(parse_html(html), "mpark")
         assert "```cpp" in md
 
+    def test_classless_labeled_ascii_box_unlabeled(self):
+        # A label inside the box breaks the all-chars-are-art whitelist, so the
+        # box border is the signal that must fire.
+        html = "<pre>+--------+\n| Client |\n+--------+</pre>"
+        md = render_body(parse_html(html), "mpark")
+        assert self._open_fence(md) == "```"
+        assert "```cpp" not in md
+
+    def test_classless_box_without_pipes_unlabeled(self):
+        html = "<pre>+-----+\n+-----+</pre>"
+        md = render_body(parse_html(html), "mpark")
+        assert self._open_fence(md) == "```"
+        assert "```cpp" not in md
+
+    def test_classless_cpp_with_section_sign_stays_cpp(self):
+        # WG21 cites clauses with the section sign inside ordinary C++ comments.
+        html = "<pre>int f(); // see §[basic.def]\nint g();</pre>"
+        md = render_body(parse_html(html), "mpark")
+        assert "```cpp" in md
+
+    def test_classless_cpp_ternary_over_strings_stays_cpp(self):
+        # `"yes" :` is a quoted string then a colon, not a JSON key.
+        html = (
+            "<pre>{\n"
+            '  std::string s = flag ? "yes" : "no";\n'
+            "  return;\n"
+            "}</pre>"
+        )
+        md = render_body(parse_html(html), "mpark")
+        assert "```cpp" in md
+
+    def test_classless_json_with_comment_still_unlabeled(self):
+        # Unparseable JSON (comment) still detected via the line-anchored key.
+        html = "<pre>{\n  // trailing comma below\n  \"key\": \"value\",\n}</pre>"
+        md = render_body(parse_html(html), "mpark")
+        assert self._open_fence(md) == "```"
+        assert "```cpp" not in md
+
 
 class TestCodeBlockExtended:
     def test_pre_without_code(self):

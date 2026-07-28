@@ -732,12 +732,25 @@ _SHELL_COMMAND_RE = re.compile(
     r"kubectl|gcc|clang\+\+|clang|g\+\+)(?:\s|$)"
 )
 _GIT_TRANSCRIPT_RE = re.compile(r"^\s*(?:commit [0-9a-f]{7,40}\b|Author:\s|Date:\s)")
-_JSON_KEY_RE = re.compile(r'"[^"]*"\s*:')
+# Line-anchored so it matches a pretty-printed JSON key, not any quoted string
+# followed by a colon: an unanchored search fires on the everyday C++ ternary
+# ``flag ? "yes" : "no"`` and unlabels real C++.
+_JSON_KEY_RE = re.compile(r'^\s*"[^"]*"\s*:', re.MULTILINE)
 _GRAMMAR_RULE_RE = re.compile(r"::=")
 
 # A block of >= this many ``$``-prompt lines is a shell/console transcript
 # even when the first line is preamble prose.
 _MIN_SHELL_PROMPT_LINES = 2
+
+# ASCII box border, e.g. ``+--------+`` or ``+----+----+``: only box-rule
+# characters, with at least two corners and a run of rules. ``is_diagram_block``
+# cannot see these (it requires ``|``/``\`` on the line and rejects any letter,
+# so a box with a label inside it escapes detection entirely), and real C++
+# never produces the shape.
+_BOX_BORDER_CHARS = frozenset("+-= ")
+_BOX_BORDER_RULE_CHARS = "-="
+_BOX_BORDER_MIN_CORNERS = 2
+_BOX_BORDER_MIN_RULES = 3
 
 
 def _resolve_lang_token(token: str) -> str | None:
@@ -825,9 +838,28 @@ def _looks_like_grammar(text: str) -> bool:
     return _GRAMMAR_RULE_RE.search(text) is not None
 
 
+def _is_box_border_line(line: str) -> bool:
+    """True for an ASCII box border line such as ``+--------+``."""
+    stripped = line.strip()
+    if not stripped or not all(ch in _BOX_BORDER_CHARS for ch in stripped):
+        return False
+    rules = sum(1 for ch in stripped if ch in _BOX_BORDER_RULE_CHARS)
+    return (
+        stripped.count("+") >= _BOX_BORDER_MIN_CORNERS
+        and rules >= _BOX_BORDER_MIN_RULES
+    )
+
+
 def _looks_like_diagram(text: str) -> bool:
-    """True for a text ASCII diagram (box-drawing / arrows / pipe-art)."""
-    return is_diagram_block(text.splitlines())
+    """True for a text ASCII diagram (box-drawing / arrows / box / pipe-art).
+
+    ``math_symbols=False``: ``§`` is WG21's clause-reference symbol and appears
+    in ordinary C++ comments, so it must not unlabel a block.
+    """
+    lines = text.splitlines()
+    if any(_is_box_border_line(ln) for ln in lines):
+        return True
+    return is_diagram_block(lines, math_symbols=False)
 
 
 def _lang_from_content(text: str) -> str:
