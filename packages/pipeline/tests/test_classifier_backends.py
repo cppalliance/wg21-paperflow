@@ -28,7 +28,6 @@ from pipeline.classifier_backends import (
     NliCrossEncoderBackend,
     ZeroShotV2Backend,
 )
-from pipeline.errors import ServiceConfigError
 
 
 # ---------------------------------------------------------------------------
