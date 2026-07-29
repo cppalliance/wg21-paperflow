@@ -159,7 +159,7 @@ def _is_ascii_art_line(line: str) -> bool:
     return all(ch in _ASCII_ART_CHARS for ch in stripped)
 
 
-def is_diagram_block(lines: Iterable[str]) -> bool:
+def is_diagram_block(lines: Iterable[str], *, math_symbols: bool = True) -> bool:
     """Return True when any line signals a text-layer ASCII diagram.
 
     Whole-block skip: one diagram line disables normalization for every
@@ -167,12 +167,18 @@ def is_diagram_block(lines: Iterable[str]) -> bool:
     arrows (ASCII ``->`` is deliberately excluded), math symbols
     (empty set, section sign, sub/superscript), and pipe/slash ASCII
     art whose characters are confined to spacing and diagram punctuation.
+
+    ``math_symbols=False`` drops the math-symbol signal. It is a
+    spacing-preservation signal, safe for the PDF caller (preserving
+    spacing in real C++ costs nothing), but too weak to classify a
+    block as non-code: WG21 papers cite clauses with ``§`` inside
+    ordinary C++ comments.
     """
     for line in lines:
         if (
             _has_box_drawing(line)
             or _has_unicode_arrow(line)
-            or _has_diagram_special(line)
+            or (math_symbols and _has_diagram_special(line))
             or _is_ascii_art_line(line)
         ):
             return True
