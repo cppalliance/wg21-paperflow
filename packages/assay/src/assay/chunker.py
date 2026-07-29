@@ -9,6 +9,24 @@
 Splits paper markdown into sections by heading structure and splits
 oversized sections on bold-numbered subsection patterns. All size
 parameters are in characters; the caller converts from tokens.
+
+Tree construction in ``_build_tree`` has two behaviors worth knowing
+when reading or changing this module:
+
+Skip-level fallback:
+    Child selection normally uses headings at ``parent_level + 1``. When
+    none exist in a span, the shallowest deeper heading inside the span
+    is used instead (e.g. H4 issues directly under H2 when no H3 is
+    present). Without this, such papers collapse into one monolithic
+    chunk.
+
+Prefix recursion:
+    Prose between a section's start and its first child heading becomes a
+    prefix section. That prefix is built with the same ``parent_level``
+    as the outer span (not the child's level), so skip-level fallback
+    still applies inside the prefix. This matters when many H4 issues
+    precede a later incidental H3: the issues split before the H3
+    boundary is reached.
 """
 
 from __future__ import annotations
@@ -48,6 +66,11 @@ def chunk_paper(
     max_chars: int = 6500,
 ) -> list[Section]:
     """Chunk paper markdown into leaf sections by heading structure.
+
+    Builds a heading tree (with skip-level fallback and prefix
+    recursion; see module docstring), flattens oversized nodes into
+    children or bold-subsection splits, then coalesces small adjacent
+    leaves.
 
     Parameters:
         source: Full paper markdown text (already blanked by the caller).
@@ -109,13 +132,38 @@ def _build_tree(
     end: int,
     parent_level: int,
 ) -> list[_TreeSection]:
+    """Build a heading tree for the line span ``[start, end)``.
+
+    Direct children are headings at ``parent_level + 1``. If none exist,
+    skip-level fallback selects the shallowest deeper heading in the
+    span (see module docstring).
+
+    Child headings on the span's opening line (``ln == start``) are
+    included; the strict ``start < ln`` bound would drop an H1 at line 0
+    when the root span begins there.
+
+    When the span has leading prose before its first child heading, that
+    prefix is emitted as its own section and ``_build_tree`` is called
+    again on the prefix with the same ``parent_level`` so nested
+    skip-level headings (e.g. H4 under H2) still split inside the prefix.
+    """
     children_hdgs = [
         (ln, lv, t)
         for ln, lv, t in headings
-        if start < ln < end and lv == parent_level + 1
+        if start <= ln < end and lv == parent_level + 1
     ]
     if not children_hdgs:
-        return []
+        deeper_hdgs = [
+            (ln, lv, t)
+            for ln, lv, t in headings
+            if start <= ln < end and lv > parent_level + 1
+        ]
+        if not deeper_hdgs:
+            return []
+        child_level = min(lv for _, lv, _ in deeper_hdgs)
+        children_hdgs = [
+            (ln, lv, t) for ln, lv, t in deeper_hdgs if lv == child_level
+        ]
 
     sections: list[_TreeSection] = []
 
@@ -133,7 +181,9 @@ def _build_tree(
             start_line=start + 1,
             end_line=first_child_line,
             char_count=prefix_chars,
-            children=[],
+            children=_build_tree(
+                lines, headings, start, first_child_line, parent_level,
+            ),
         ))
 
     for idx, (ln, lv, title) in enumerate(children_hdgs):
