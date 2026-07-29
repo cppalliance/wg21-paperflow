@@ -1007,12 +1007,6 @@ async def _custom_derive(state: PipelineState, ctx: StepContext, spec) -> None:
     )
 
 
-_DEFAULT_VERIFY_PROMPT = (
-    "You have a tool to search a companion paper by the same author(s). "
-    "Use it to verify claims, find supporting evidence, or identify contradictions."
-)
-
-
 def _open_gaps_remain(state: PipelineState) -> bool:
     return any(
         not g.closed_by
@@ -1180,7 +1174,7 @@ async def _custom_verify(state: PipelineState, ctx: StepContext, spec) -> None:
     agent = ctx.agents[spec.step.model]
     max_output = spec.step.max_output_tokens or agent.max_tokens
     thinking = spec.step.thinking_budget
-    system_prompt = _prompt_for(ctx, spec.step.name) or _DEFAULT_VERIFY_PROMPT
+    system_prompt = _prompt_for(ctx, spec.step.name)
 
     accumulated = VerifyOutput()
     for companion in candidates[:4]:
