@@ -114,6 +114,36 @@ def dedup_paragraphs(md: str) -> str:
 
 DEFAULT_FENCE_LANG = "cpp"
 
+# Canonical mapping from a language spelling (a CSS class token, a Pandoc
+# ``sourceCode`` suffix, or a standalone label line) to the fence language
+# tomd emits. Single source of truth shared by the PDF standalone
+# language-label detector (lib/pdf/structure.py) and the HTML class-based
+# detector (lib/html/render.py) so the recognized-language set is not
+# duplicated. Extend here, never in a consumer.
+CODE_LANG_LABELS = {
+    "c/c++": "cpp",
+    "c++": "cpp",
+    "cxx": "cpp",
+    "cplusplus": "cpp",
+    "cpp": "cpp",
+    "c": "c",
+    "python": "python",
+    "javascript": "javascript",
+    "typescript": "typescript",
+    "java": "java",
+    "rust": "rust",
+    "go": "go",
+    "swift": "swift",
+    "bash": "bash",
+    "shell": "bash",
+    "sql": "sql",
+    "json": "json",
+    "yaml": "yaml",
+    "xml": "xml",
+    "html": "html",
+    "css": "css",
+}
+
 
 def strip_leading_h1(body: str, title: str = "", max_level: int = 1) -> str:
     """Remove a leading heading from body text if it duplicates the title.
