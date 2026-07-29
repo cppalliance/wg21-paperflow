@@ -58,6 +58,7 @@ from pipeline.runner import (
 from pipeline.services import (
     ServiceRegistry,
     load_classifiers,
+    load_classifier,
     load_services,
     load_transformer_providers,
     resolve_classifier_slots,
@@ -103,6 +104,7 @@ __all__ = [
     "HFZeroShotBackend",
     "SeqClassificationBackend",
     "load_classifiers",
+    "load_classifier",
     "load_transformer_providers",
     "ModelBackend",
     "MultiLabelClassifierBackend",

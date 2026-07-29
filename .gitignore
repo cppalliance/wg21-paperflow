@@ -33,3 +33,5 @@ reports/
 packages/assay/data/*
 !packages/assay/data/golden/
 !packages/assay/data/golden/**
+packages/assay/data/golden/._*
+packages/assay/data/golden/**/._*

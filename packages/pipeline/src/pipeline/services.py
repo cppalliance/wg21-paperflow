@@ -76,9 +76,7 @@ class ServiceRegistry:
         # bleeding through the proxy. ``frozen=True`` blocks direct
         # attribute assignment in __post_init__, so go through
         # ``object.__setattr__``.
-        object.__setattr__(
-            self, "services", MappingProxyType(dict(self.services))
-        )
+        object.__setattr__(self, "services", MappingProxyType(dict(self.services)))
         object.__setattr__(
             self, "api_key_envs", MappingProxyType(dict(self.api_key_envs))
         )
@@ -204,13 +202,49 @@ def load_services(path: Path | None = None) -> ServiceRegistry:
 
         logger.info(
             "Service '%s': %s  model=%s  endpoint=%s",
-            name, backend_key, init_kwargs["model"], init_kwargs["base_url"],
+            name,
+            backend_key,
+            init_kwargs["model"],
+            init_kwargs["base_url"],
         )
 
     return ServiceRegistry(
         services=services,
         api_key_envs=api_key_envs,
     )
+
+
+def _instantiate_classifier(
+    name: str,
+    cfg: dict[str, Any],
+    provider: TransformerProvider,
+) -> ClassifierBackend:
+    backend_key = cfg.get("backend")
+    if backend_key not in CLASSIFIER_BACKEND_REGISTRY:
+        raise ServiceConfigError(
+            f"Classifier '{name}' declares backend '{backend_key}' "
+            f"which is not in the registry. "
+            f"Available: {sorted(CLASSIFIER_BACKEND_REGISTRY)}",
+        )
+
+    init_kwargs: dict[str, Any] = {
+        k: v for k, v in cfg.items() if k not in ("backend", "device")
+    }
+    init_kwargs["provider"] = provider
+
+    backend_cls = CLASSIFIER_BACKEND_REGISTRY[backend_key]
+    backend = backend_cls(**init_kwargs)
+    logger.info(
+        "Classifier '%s': %s  model=%s  provider=%s (device=%s dtype=%s batch=%d)",
+        name,
+        backend_key,
+        cfg.get("model", ""),
+        provider.name,
+        provider.device,
+        provider.dtype,
+        provider.batch_size,
+    )
+    return backend
 
 
 def load_classifiers(
@@ -264,30 +298,48 @@ def load_classifiers(
 
     classifiers: dict[str, ClassifierBackend] = {}
     for name, cfg in classifiers_config.items():
-        backend_key = cfg.get("backend")
-        if backend_key not in CLASSIFIER_BACKEND_REGISTRY:
-            raise ServiceConfigError(
-                f"Classifier '{name}' declares backend '{backend_key}' "
-                f"which is not in the registry. "
-                f"Available: {sorted(CLASSIFIER_BACKEND_REGISTRY)}"
-            )
-
-        # Drop `backend` (used above) and the legacy `device` field
-        # (now owned by the provider). Forward the rest as kwargs.
-        init_kwargs: dict[str, Any] = {
-            k: v for k, v in cfg.items() if k not in ("backend", "device")
-        }
-        init_kwargs["provider"] = provider
-
-        backend_cls = CLASSIFIER_BACKEND_REGISTRY[backend_key]
-        classifiers[name] = backend_cls(**init_kwargs)
-        logger.info(
-            "Classifier '%s': %s  model=%s  provider=%s (device=%s dtype=%s batch=%d)",
-            name, backend_key, cfg.get("model", ""),
-            provider.name, provider.device, provider.dtype, provider.batch_size,
-        )
+        classifiers[name] = _instantiate_classifier(name, cfg, provider)
 
     return classifiers, defaults
+
+
+def load_classifier(
+    name: str,
+    path: Path | None = None,
+    *,
+    provider: TransformerProvider | None = None,
+) -> ClassifierBackend:
+    """Load a single classifier by name without instantiating the full registry."""
+    if path is None:
+        path = _find_services_toml()
+    if path is None or not path.is_file():
+        raise FileNotFoundError(
+            f"{_SERVICES_FILENAME} not found. Create it at the repo root "
+            f"with at least one [services.NAME] section."
+        )
+
+    with open(path, "rb") as f:
+        config = tomllib.load(f)
+
+    classifiers_config = config.get("classifiers", {})
+    cfg = classifiers_config.get(name)
+    if cfg is None:
+        raise ServiceConfigError(
+            f"Unknown classifier {name!r}. " f"Available: {sorted(classifiers_config)}",
+        )
+
+    backend_key = cfg.get("backend")
+    if backend_key not in CLASSIFIER_BACKEND_REGISTRY:
+        raise ServiceConfigError(
+            f"Classifier '{name}' declares backend '{backend_key}' "
+            f"which is not in the registry. "
+            f"Available: {sorted(CLASSIFIER_BACKEND_REGISTRY)}",
+        )
+
+    if provider is None:
+        provider = default_auto_provider()
+
+    return _instantiate_classifier(name, cfg, provider)
 
 
 def load_embedders(
@@ -335,8 +387,12 @@ def load_embedders(
         embedders[name] = EmbeddingBackend(model_id, provider)
         logger.info(
             "Embedder '%s': model=%s  provider=%s (device=%s dtype=%s batch=%d)",
-            name, model_id,
-            provider.name, provider.device, provider.dtype, provider.batch_size,
+            name,
+            model_id,
+            provider.name,
+            provider.device,
+            provider.dtype,
+            provider.batch_size,
         )
 
     return embedders, defaults
@@ -515,5 +571,3 @@ def resolve_pipeline_models(
         out[logical_name] = registry.services[service_name]
 
     return out
-
-

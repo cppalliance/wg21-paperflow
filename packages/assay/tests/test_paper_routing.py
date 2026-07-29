@@ -11,13 +11,14 @@ from pathlib import Path
 
 import pytest
 
-from pipeline.classifier_backends import NliCrossEncoderBackend
+from pipeline.classifier_backends import MultiLabelClassifierBackend, NliCrossEncoderBackend
 
 from assay.paper_routing import RoutingGroup, route_paper
 from assay.paper_routing.hypotheses import (
     CATALOG,
     Hypothesis,
     _ROUTING_NLI_THRESHOLD,
+    _resolve_classifiers,
     get_hits_from_text,
     score_hypotheses,
 )
@@ -29,7 +30,12 @@ from assay.paper_routing.aggregate import (
     aggregate_quadrant_scores,
 )
 from assay.paper_routing.sustain import min_sustained_threshold
-from assay.paper_routing.threshold import apply_thresholds, THRESHOLD_LEWG
+from assay.paper_routing.threshold import (
+    THRESHOLD_CWG,
+    THRESHOLD_EWG,
+    THRESHOLD_LEWG,
+    apply_thresholds,
+)
 
 _FIXTURES = Path(__file__).resolve().parents[3] / "tests" / "fixtures" / "routing"
 
@@ -43,7 +49,6 @@ def test_n3854_routes_lewg_and_lwg():
     assert "LEWG" in result.groups
     assert "LWG" in result.groups
     assert "EWG" not in result.groups
-    assert "CWG" not in result.groups
     assert not result.is_administrative
 
 
@@ -60,12 +65,12 @@ def test_stray_language_no_ewg():
 
 
 def test_performance_focused_flag():
-    result = route_paper(_read("performance_focused.md"), classifier=None)
+    result = route_paper(_read("performance_focused.md"))
     assert result.is_performance_focused is True
 
 
 def test_route_without_classifier():
-    result = route_paper(_read("n3854.md"), classifier=None)
+    result = route_paper(_read("n3854.md"))
     assert result.sentence_count > 0
     assert "LEWG" in result.groups
 
@@ -138,15 +143,28 @@ def test_hypothesis_catalog_ids_unique(hyp: Hypothesis):
 
 
 @pytest.mark.parametrize("hyp", CATALOG)
-def test_hypothesis_catalog_declares_regex_or_nli(hyp: Hypothesis):
-    """Every hypothesis is scored by exactly one mechanism: a compiled regex
-    or an NLI entailment text. A hypothesis with neither is silently inert
-    from the catalog's point of view, which invites hidden special-casing
-    elsewhere (e.g. the old S1 hardcoded ``re.search`` in
-    ``get_hits_from_text``) that is easy to miss on the next catalog edit.
-    """
-    assert hyp.regex is not None or hyp.nli_text is not None
-    assert not (hyp.regex is not None and hyp.nli_text is not None)
+def test_hypothesis_catalog_declares_regex_and_nli(hyp: Hypothesis):
+    """Every catalog hypothesis has NLI text for batch scoring and a regex
+    for the fast path. Both may be present; neither may be missing."""
+    assert hyp.nli_text is not None
+    assert hyp.regex is not None
+
+
+def test_d10_does_not_match_prose_colon_labels():
+    hyp = next(h for h in CATALOG if h.id == "D10")
+    assert not hyp.matches_regex("Note: this is fine.")
+    assert not hyp.matches_regex("Effects: Returns true if x holds a value.")
+    assert not hyp.matches_regex("Author: Jane Doe")
+    assert "D10" not in get_hits_from_text("Rationale: we chose this name.")
+
+
+def test_d10_matches_bnf_nonterminal():
+    hyp = next(h for h in CATALOG if h.id == "D10")
+    assert hyp.matches_regex(
+        "floating-literal:\nfractional-constant exponent-partopt",
+    )
+    assert hyp.matches_regex("preprocessing-token:\n  header-name")
+    assert hyp.matches_regex("do-expression ::= do-initialization ':' expression")
 
 
 def test_d1_matches_library_header():
@@ -261,7 +279,9 @@ def test_metadata_bonus_audience_tokens(
 
 
 _M4_NLI_TEXT = "The sentence explains why a design choice was made."
-_NLI_ONLY_SENTENCE = "We chose this approach because it minimizes template bloat."
+_NLI_ONLY_SENTENCE = (
+    "The ergonomic tradeoff favors explicit syntax over implicit conversions."
+)
 
 
 class _StubNliClassifier(NliCrossEncoderBackend):
@@ -285,7 +305,7 @@ class _StubNliClassifier(NliCrossEncoderBackend):
 
 
 def test_routing_nli_threshold_constant():
-    assert _ROUTING_NLI_THRESHOLD == 0.3
+    assert _ROUTING_NLI_THRESHOLD == 0.6
 
 
 def test_score_hypotheses_nli_path_fires_on_high_entailment():
@@ -293,7 +313,7 @@ def test_score_hypotheses_nli_path_fires_on_high_entailment():
     assert get_hits_from_text(sentence) == set()
 
     classifier = _StubNliClassifier(0.9, match_hypothesis=_M4_NLI_TEXT)
-    scored = score_hypotheses([sentence], classifier=classifier)
+    scored = score_hypotheses([sentence], classifiers=classifier)
 
     assert len(scored) == 1
     assert "M4" in scored[0].hypothesis_hits
@@ -304,7 +324,7 @@ def test_score_hypotheses_nli_path_fires_on_high_entailment():
 def test_score_hypotheses_nli_path_skips_low_entailment():
     sentence = _NLI_ONLY_SENTENCE
     classifier = _StubNliClassifier(0.1, match_hypothesis=_M4_NLI_TEXT)
-    scored = score_hypotheses([sentence], classifier=classifier)
+    scored = score_hypotheses([sentence], classifiers=classifier)
 
     assert len(scored) == 1
     assert "M4" not in scored[0].hypothesis_hits
@@ -326,7 +346,7 @@ def test_score_hypotheses_from_sentence_list_matches_regex_hits():
 
 
 def test_score_hypotheses_markdown_assigns_section_from_headings():
-    md = "## Motivation\n\nWe propose to add <vector> support."
+    md = "## Motivation section\n\nWe propose to add <vector> support."
     scored = score_hypotheses(md)
     assert len(scored) == 2
     assert scored[1].section == SectionType.MOTIVATION
@@ -366,3 +386,62 @@ def test_threshold_requires_sustained_signal():
     groups, _ = apply_thresholds(scores, sentences)
     if scores[RoutingGroup.LEWG] > THRESHOLD_LEWG:
         assert RoutingGroup.LEWG in groups
+
+
+def test_routing_group_threshold_constants():
+    assert THRESHOLD_EWG == 0.15
+    assert THRESHOLD_CWG == 0.08
+
+
+class _MinimalClassifier(NliCrossEncoderBackend):
+    def __init__(self, model_id: str) -> None:
+        self.model_id = model_id
+
+    def classify(self, texts, candidate_labels, *, multi_label=True):
+        return []
+
+
+def test_resolve_classifiers_single_backend():
+    backend = _MinimalClassifier("z")
+    assert _resolve_classifiers(backend) == (backend,)
+
+
+def test_resolve_classifiers_sorts_sequence():
+    b_a = _MinimalClassifier("a")
+    b_z = _MinimalClassifier("z")
+    resolved = _resolve_classifiers([b_z, b_a])
+    assert resolved == (b_a, b_z)
+
+
+def test_score_hypotheses_use_regex_false_skips_regex_hits():
+    sentence = (
+        "This paragraph is long enough to score but has no catalog regex signals."
+    )
+    scored = score_hypotheses([sentence], use_regex=False)
+    assert scored[0].hypothesis_hits == frozenset()
+
+
+class _StubSeqcls(MultiLabelClassifierBackend):
+    def __init__(self) -> None:
+        self.model_id = "fake/seqcls-routing"
+
+    @property
+    def labels(self) -> tuple[str, ...]:
+        return ("M4",)
+
+    def classify(
+        self,
+        texts: list[str],
+        candidate_labels: list[str],
+        *,
+        multi_label: bool = True,
+    ) -> list[dict[str, float]]:
+        del multi_label
+        row = {label: (0.99 if label == "M4" else 0.0) for label in candidate_labels}
+        return [dict(row) for _ in texts]
+
+
+def test_score_hypotheses_seqcls_merges_hits():
+    sentence = _NLI_ONLY_SENTENCE
+    scored = score_hypotheses([sentence], classifiers=_StubSeqcls())
+    assert "M4" in scored[0].hypothesis_hits

@@ -553,7 +553,7 @@ def _run_paper_routing(state: PipelineState, ctx: StepContext) -> RoutingResult:
     result = route_paper(
         state.paper_md,
         audience=state.audience,
-        classifier=classifier,
+        classifiers=classifier,
         debug_log=debug_log,
     )
     state.routing = result

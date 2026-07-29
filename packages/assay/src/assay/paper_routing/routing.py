@@ -9,6 +9,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 
 from pipeline.classifier_backends import ClassifierBackend
@@ -40,7 +41,8 @@ def route_paper(
     paper_md: str,
     *,
     audience: list[str] | None = None,
-    classifier: ClassifierBackend | None = None,
+    classifiers: ClassifierBackend | Sequence[ClassifierBackend] | None = None,
+    use_regex: bool = True,
     debug_log: list[str] | None = None,
 ) -> RoutingResult:
     """Run the 6-stage paper routing classifier on full paper markdown.
@@ -50,11 +52,16 @@ def route_paper(
     already empty lines and do not contribute hypothesis hits. Standalone
     callers passing raw markdown may see appendix-style signals from
     those sections; see ``assay.heading_classifiers.is_appendix_heading_line``.
+
+    ``classifiers`` is an optional single backend or ordered sequence used
+    for hypothesis scoring (NLI, fine-tuned seqcls). It is not the
+    ``StepContext.classifiers`` slot dict from SERVICES.toml.
     """
     sentences = score_hypotheses(
         paper_md,
         audience=audience,
-        classifier=classifier,
+        classifiers=classifiers,
+        use_regex=use_regex,
         debug_log=debug_log,
     )
     quadrant_scores = aggregate_quadrant_scores(sentences, audience=audience)

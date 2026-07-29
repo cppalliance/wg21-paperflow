@@ -409,6 +409,34 @@ def test_load_classifiers_file_not_found(tmp_path):
         load_classifiers(tmp_path / "missing.toml")
 
 
+def test_load_classifier_happy_path(tmp_path):
+    from pipeline.services import load_classifier
+
+    p = _write_services_toml(tmp_path, """
+[classifiers.routing-tagger]
+backend = "nli_cross_encoder"
+model = "cross-encoder/nli-deberta-v3-small"
+
+[classifier_defaults]
+selector = "routing-tagger"
+""")
+    backend = load_classifier("routing-tagger", p)
+    assert isinstance(backend, NliCrossEncoderBackend)
+    assert backend.model_id == "cross-encoder/nli-deberta-v3-small"
+
+
+def test_load_classifier_unknown_name(tmp_path):
+    from pipeline.services import load_classifier
+
+    p = _write_services_toml(tmp_path, """
+[classifiers.zeroshot-base]
+backend = "zeroshot_v2"
+model = "MoritzLaurer/deberta-v3-base-zeroshot-v2.0"
+""")
+    with pytest.raises(ServiceConfigError, match="Unknown classifier"):
+        load_classifier("missing", p)
+
+
 # ---------------------------------------------------------------------------
 # MultiLabelClassifierBackend
 # ---------------------------------------------------------------------------

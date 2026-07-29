@@ -16,10 +16,10 @@ from assay.paper_routing.sustain import (
 )
 from assay.paper_routing.types import RoutingGroup, Sentence
 
-THRESHOLD_LEWG = 0.08
+THRESHOLD_LEWG = 0.25
 THRESHOLD_LWG = 0.10
-THRESHOLD_EWG = 0.08
-THRESHOLD_CWG = 0.12
+THRESHOLD_EWG = 0.15
+THRESHOLD_CWG = 0.08
 
 _GROUP_THRESHOLDS: dict[RoutingGroup, float] = {
     RoutingGroup.LEWG: THRESHOLD_LEWG,

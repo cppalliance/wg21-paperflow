@@ -47,3 +47,37 @@ has fewer than 30 `high` confidence labels (informational only; does not fail).
 
 Among non-`informational` papers, LEWG routing dominates the sample.
 Full committee rebalancing is out of scope for the initial golden set.
+
+## Sentence-level hypothesis labels
+
+Curated sentence labels for the fine-tuned multi-label routing tagger and
+regression checks. Hypothesis IDs (`D1`..`D15`, `M1`..`M13`, `W1`..`W5`,
+`S1`..`S5`) match the catalog in `assay.paper_routing.hypotheses`.
+
+| File | Role |
+|------|------|
+| `sentence_hypo_train.jsonl` | Training split |
+| `sentence_hypo_test.jsonl` | Held-out evaluation split |
+
+Each line is a JSON object:
+
+```json
+{"text": "...", "labels": ["D3", "M1"]}
+```
+
+`labels` may be empty. `paper_id` is optional provenance when known; omit it
+when sentences were exported without document identity.
+
+Exact duplicate `text` strings can appear in both splits for short boilerplate;
+the validator prints a warning but does not fail on overlap.
+
+### Validate sentence_hypo
+
+```bash
+uv run python packages/assay/study/golden/validate_sentence_hypo.py
+uv run python packages/assay/study/golden/validate_sentence_hypo.py \
+  packages/assay/data/golden/sentence_hypo_train.jsonl \
+  packages/assay/data/golden/sentence_hypo_test.jsonl
+```
+
+Exits non-zero on schema errors or unknown hypothesis labels.
