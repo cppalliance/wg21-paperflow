@@ -33,6 +33,10 @@ flowchart TD
 - **deepseek:** h200x8-deepseek-v4-pro
 - **default:** h200x8-deepseek-v4-pro
 
+## Classifiers
+
+- **selector:** nli-small
+
 ## Config
 
 - **concurrency:** 2

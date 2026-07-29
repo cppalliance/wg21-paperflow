@@ -34,7 +34,7 @@ from pipeline.errors import (
     UnknownStageError,
     ValidationStepError,
 )
-from pipeline.markdown import HEADING_RE, extract_code_blocks, sanitize_md, sections
+from pipeline.markdown import HEADING_RE, bullet_map, extract_code_blocks, sanitize_md, sections
 from pipeline.model_backends import ModelBackend
 from pipeline.progress import ProgressCallback, ProgressEvent
 from pipeline.prompt import (
@@ -57,11 +57,9 @@ from pipeline.runner import (
 )
 from pipeline.services import (
     ServiceRegistry,
-    load_classifiers,
-    load_classifier,
     load_services,
     load_transformer_providers,
-    resolve_classifier_slots,
+    resolve_classifiers,
     resolve_pipeline_models,
     resolve_transformer_provider,
 )
@@ -103,20 +101,19 @@ __all__ = [
     "extract_code_blocks",
     "HFZeroShotBackend",
     "SeqClassificationBackend",
-    "load_classifiers",
-    "load_classifier",
     "load_transformer_providers",
     "ModelBackend",
     "MultiLabelClassifierBackend",
     "NliCrossEncoderBackend",
     "ProgressCallback",
     "ProgressEvent",
-    "resolve_classifier_slots",
+    "resolve_classifiers",
     "resolve_transformer_provider",
     "run_mps_correctness_selftest",
     "TransformerBackend",
     "TransformerProvider",
     "ZeroShotV2Backend",
+    "bullet_map",
     "build_pipeline",
     "dispatch",
     "FetchResponse",

@@ -494,6 +494,7 @@ class PipelineState(BaseModel):
     wording_lines: int = 0
     targets_cwg_lwg: bool = False
     routing: RoutingResult | None = None
+    classifier_bindings: dict[str, str] = Field(default_factory=dict)
     skipped: bool = False
 
     # Step 4 - Extract

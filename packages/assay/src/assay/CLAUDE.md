@@ -4,7 +4,7 @@ Two-pass structural analysis pipeline for WG21 proposals. Project-wide rules liv
 
 ## Authority
 
-`assay.md` is the upstream authority for pipeline structure. It defines the step sequence, step metadata (model slot, max-output, thinking-budget, tools), and all LLM-facing instructions. Python conforms.
+`assay.md` is the upstream authority for pipeline structure. It defines the step sequence, step metadata (model slot, max-output, thinking-budget, tools), LLM service slots under ``## Services``, and local classifier slots under ``## Classifiers``. Assay parses ``## Classifiers`` itself and passes the binding to ``pipeline.resolve_classifiers``. Survey routing runs **every** bound slot (union of hypothesis hits); use distinct slot names per inventory entry (e.g. ``routing_nli`` and ``routing_tagger``), not duplicate keys. Python conforms.
 
 ## What this pipeline does
 

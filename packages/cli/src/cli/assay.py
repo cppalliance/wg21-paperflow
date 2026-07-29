@@ -48,6 +48,8 @@ def command(args, backend):
 
     progress_ctx, on_progress = make_progress_handler("Assay")
 
+    provider = getattr(args, "provider", None)
+
     try:
         with progress_ctx:
             report = asyncio.run(assay_paper(
@@ -55,6 +57,7 @@ def command(args, backend):
                 debug=debug, trace=trace,
                 stop_after=stop_after,
                 on_progress=on_progress,
+                provider=provider,
             ))
 
         if stop_after is None:

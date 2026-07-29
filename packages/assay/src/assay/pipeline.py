@@ -25,14 +25,15 @@ from paperstore import StorageBackend
 
 from pipeline import (
     AgentBackend,
+    ClassifierBackend,
     PipelinePrompt,
     ProgressCallback,
     StepContext,
     StepHooks,
+    bullet_map,
     build_pipeline,
     dispatch,
-    load_classifiers,
-    resolve_classifier_slots,
+    resolve_classifiers,
     resolve_pipeline_models,
     validate_capabilities,
     tokens_to_chars,
@@ -93,6 +94,42 @@ from assay.heading_classifiers import SURVEY_WORDING_HEADING_RE
 from assay.render import render_report, render_trace
 
 logger = logging.getLogger(__name__)
+
+_CLASSIFIERS_SECTION = "Classifiers"
+
+
+def _parse_classifier_binding(prompt: PipelinePrompt) -> dict[str, str]:
+    """Read assay.md ``## Classifiers`` and validate it is non-empty.
+
+    ``bullet_map`` returns ``{}`` (never ``None``) for a missing or
+    empty section, so the emptiness check -- not an identity check --
+    is what catches a missing ``## Classifiers`` block or a heading
+    typo (e.g. lowercase ``## classifiers``). Paper routing depends on
+    at least one bound classifier; failing fast here beats silently
+    falling back to ``[classifier_defaults]`` and producing a plausible
+    report from an unintended checkpoint.
+    """
+    binding = bullet_map(prompt.sections.get(_CLASSIFIERS_SECTION, ""))
+    if not binding:
+        raise ValueError(
+            f"assay.md is missing a `## {_CLASSIFIERS_SECTION}` block "
+            f"(or it parsed empty). "
+            f"Add e.g. `- **selector:** nli-small` under `## Classifiers`."
+        )
+    return binding
+
+
+def _classifiers_for_routing(
+    ctx: StepContext,
+) -> tuple[ClassifierBackend, ...] | None:
+    """All resolved classifier backends for paper routing (union scoring).
+
+    ``ctx.classifiers`` is already the deduplicated, order-stable
+    tuple :func:`pipeline.resolve_classifiers` returns -- no slot dict
+    to flatten, no re-deduplication needed here.
+    """
+    return ctx.classifiers or None
+
 
 _MCP_TOML_SECTION = "mcp"
 _MCP_ENTRY_NAME = "cpp-standard"
@@ -548,12 +585,12 @@ async def _apply_survey_skip(
 
 def _run_paper_routing(state: PipelineState, ctx: StepContext) -> RoutingResult:
     """Run Stages 1-6 and store routing on pipeline state."""
-    classifier = ctx.classifiers.get("selector")
+    classifiers = _classifiers_for_routing(ctx)
     debug_log = ctx.debug_log if ctx.debug else None
     result = route_paper(
         state.paper_md,
         audience=state.audience,
-        classifiers=classifier,
+        classifiers=classifiers,
         debug_log=debug_log,
     )
     state.routing = result
@@ -582,7 +619,9 @@ async def _custom_survey(state: PipelineState, ctx: StepContext, spec) -> None:
         for i, s in enumerate(sections)
     ]
 
-    wording_headings = [s for s in sections if SURVEY_WORDING_HEADING_RE.search(s.heading)]
+    wording_headings = [
+        s for s in sections if SURVEY_WORDING_HEADING_RE.search(s.heading)
+    ]
     state.wording_lines = sum(s.end_line - s.start_line for s in wording_headings)
     audience = " ".join(state.audience).upper()
     state.targets_cwg_lwg = "CWG" in audience or "LWG" in audience
@@ -1892,10 +1931,12 @@ async def assay_paper(
     trace: bool = False,
     stop_after: int | None = None,
     on_progress: ProgressCallback | None = None,
+    provider: str | None = None,
 ) -> str:
     """Run the assay pipeline on a WG21 paper and return the report markdown.
 
     Model selection comes from ``assay.md``'s ``## Services`` block.
+    Classifier binding comes from ``assay.md``'s ``## Classifiers`` block.
     SERVICES.toml is a pure inventory; to change which backend runs
     which step, edit ``assay.md``.
     """
@@ -1923,13 +1964,16 @@ async def assay_paper(
     embedder_name = embedder_defaults.get("default")
     embedder = embedders.get(embedder_name) if embedder_name else None
 
-    classifiers, clf_defaults = load_classifiers()
-    clf_slots = resolve_classifier_slots(classifiers, defaults=clf_defaults)
+    classifier_binding = _parse_classifier_binding(prompt)
+    classifiers = resolve_classifiers(
+        classifier_binding,
+        provider_override=provider,
+    )
 
     std_client = _load_cpp_mcp_client()
     await std_client.connect()
 
-    state = PipelineState(std_client=std_client)
+    state = PipelineState(std_client=std_client, classifier_bindings=classifier_binding)
 
     ctx = StepContext(
         prompt=prompt,
@@ -1939,7 +1983,7 @@ async def assay_paper(
         pid=pid,
         default_concurrency=default_concurrency,
         embedder=embedder,
-        classifiers=clf_slots,
+        classifiers=classifiers,
     )
 
     debug_path = backend.get_debug_md_path(pid, tool="assay")

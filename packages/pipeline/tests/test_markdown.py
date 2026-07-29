@@ -6,7 +6,33 @@
 
 from __future__ import annotations
 
-from pipeline.markdown import extract_code_blocks, sections
+import pytest
+
+from pipeline.markdown import bullet_map, extract_code_blocks, sections
+
+
+def test_bullet_map_parses_bold_items():
+    body = "- **Selector:** nli-small\n- **Other:** zeroshot-base\n"
+    assert bullet_map(body) == {
+        "selector": "nli-small",
+        "other": "zeroshot-base",
+    }
+
+
+def test_bullet_map_empty_body():
+    assert bullet_map("") == {}
+
+
+def test_bullet_map_raises_on_duplicate_key():
+    body = "- **selector:** nli-small\n- **selector:** assay-routing-tagger\n"
+    with pytest.raises(ValueError, match="duplicate bullet key 'selector'"):
+        bullet_map(body)
+
+
+def test_bullet_map_duplicate_key_case_insensitive():
+    body = "- **Selector:** nli-small\n- **selector:** assay-routing-tagger\n"
+    with pytest.raises(ValueError, match="duplicate bullet key"):
+        bullet_map(body)
 
 
 def test_sections_basic():

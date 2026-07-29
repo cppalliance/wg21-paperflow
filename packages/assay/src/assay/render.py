@@ -697,6 +697,11 @@ def render_trace(state: PipelineState, step: int, *, step_durations: list[float]
             if state.synthesis is not None and state.synthesis.verdict_label == "Skipped":
                 lines.append(f"triage: skipped ({state.synthesis.skip_reason})")
                 lines.append("")
+            if state.classifier_bindings:
+                lines.append("### Classifiers")
+                for slot in sorted(state.classifier_bindings):
+                    lines.append(f"- {slot}: {state.classifier_bindings[slot]}")
+                lines.append("")
             if state.routing is not None:
                 rt = state.routing
                 lines.append("### Routing")

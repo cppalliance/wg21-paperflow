@@ -34,6 +34,37 @@ YAML_FENCE_RE = re.compile(r"^---\s*$")
 
 HEADING_RE = re.compile(r"^(#{1,6})\s+(.*)")
 
+_MD_BOLD_ITEM_RE = re.compile(r"^\s*-\s+\*\*(\w+):\*\*\s*(.+)", re.MULTILINE)
+
+
+def bullet_map(body: str) -> dict[str, str]:
+    """Parse ``- **key:** value`` bullets into a lowercased key map.
+
+    Empty values are skipped. Returns ``{}`` for an empty body.
+
+    Raises ``ValueError`` if the same key (case-insensitive) appears
+    twice with a non-empty value. Silently keeping only the last
+    occurrence would drop the caller's first binding without any
+    signal, which is never the intent behind a Services/Config/
+    Classifiers block: repeating a key is either a typo or an attempt
+    to bind two entries under one name (which needs two distinct
+    names instead).
+    """
+    out: dict[str, str] = {}
+    for m in _MD_BOLD_ITEM_RE.finditer(body):
+        key = m.group(1).strip().lower()
+        value = m.group(2).strip()
+        if not value:
+            continue
+        if key in out:
+            raise ValueError(
+                f"duplicate bullet key {key!r} "
+                f"(first value {out[key]!r}, second value {value!r}); "
+                f"use distinct keys, e.g. two differently-named slots"
+            )
+        out[key] = value
+    return out
+
 
 def front_matter_end_index(lines: list[str]) -> int:
     """Index of the first body line after YAML front matter.

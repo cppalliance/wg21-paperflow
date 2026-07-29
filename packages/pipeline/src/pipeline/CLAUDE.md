@@ -8,14 +8,14 @@ Shared framework for the LLM analytical pipelines (`agora`). It depends only on 
 - `classifier_backends.py` - `ClassifierBackend` ABC and concrete backends (`ZeroShotV2Backend`, `NliCrossEncoderBackend`, `MultiLabelClassifierBackend`), `CLASSIFIER_BACKEND_REGISTRY`. Local text classifiers wrapping HF Transformers / sentence_transformers. Parallel namespace to `model_backends.py`; no interaction.
 - `transformer_backend.py` - `TransformerBackend` family (`HFZeroShotBackend`, `CrossEncoderBackend`, `SeqClassificationBackend`, `EmbeddingBackend`), `TransformerProvider` device/dtype/batch resolution.
 - `agents.py` - `AgentBackend`: wraps a `ModelBackend` with pipeline-level config (`thinking_budget`) and the slot/service identity (`slot_name`, `service_name`, `backend_class_name`) used by capability-mismatch error messages. The call-time `tools_capable` check remains as defense-in-depth for tools passed via `run_task` outside `meta.tools`.
-- `services.py` - `load_services()` / `resolve_slots()` for LLM `[services.NAME]` slots, and `load_classifiers()` / `resolve_classifier_slots()` for local `[classifiers.NAME]` slots. Both parse SERVICES.toml; the two namespaces are independent. `resolve_slots` returns `dict[str, tuple[str, ModelBackend]]` so callers can thread the resolved service name into each `AgentBackend`.
+- `services.py` - `load_services()` and `resolve_pipeline_models()` for LLM `[services.NAME]` slots; `resolve_classifiers(binding)` for local `[classifiers.NAME]` inventory. `[classifier_defaults]` is merged in underneath the caller's binding as a base layer (caller-bound slot names win on conflict; unbound slot names still fall back), so a caller that binds nothing gets pure `[classifier_defaults]` behavior. Returns a deduplicated, order-stable `tuple[ClassifierBackend, ...]`, not a slot dict; callers wanting an ensemble bind multiple distinct slots and get every distinct backend back. Resolver naming: `resolve_slots` (LLM, global defaults), `resolve_pipeline_models` (LLM, caller binding), `resolve_classifiers` (classifier, caller binding merged over fallback).
 - `errors.py` - exception hierarchy rooted at `PipelineError`. Includes `CapabilityMismatchError` for pipeline-construction-time slot/capability mismatches.
 - `prompt.py` - `StepHooks`, `StepMeta`, `StepSpec`, `build_pipeline`, `parse_step_meta`. Owns prompt-to-hook conformance only; capability validation lives in `validate.py`. Step-meta field-name convention: single-word fields are TitleCase (`**Model:**`, `**Execution:**`, `**Tools:**`, `**Condition:**`); new multi-word fields are kebab-case (`**max-output:**`). Pre-existing `**System prompt:**` (TitleCase + space) is grandfathered. Lookup is case-insensitive (the parser lowercases keys). `_META_RE` allows `[\w \-]+` so hyphens in field names parse correctly; adding a new punctuation character requires updating that regex.
 - `validate.py` - `validate_capabilities(specs, *, stop_after=None)`. Primary gate for capability mismatches; called by each pipeline's entry function right after `build_pipeline`.
 - `runner.py` - `dispatch`, `load_sections`, `run_agent`, `StepContext`, `write_debug_file`.
 - `progress.py` - `ProgressEvent`, `ProgressCallback`: the framework-owned progress-reporting contract. Domain-free; carries no paper concepts.
 - `tasks.py` - `run_task`, `render_debug_md`, `_task_semaphore`.
-- `markdown.py` - `sections` (H2 splitter), `sanitize_md`, `front_matter_end_index`, `YAML_FENCE_RE`, `HEADING_RE` (generic ATX heading pattern).
+- `markdown.py` - `sections` (H2 splitter), `bullet_map` (`- **key:** value` bullets), `sanitize_md`, `front_matter_end_index`, `YAML_FENCE_RE`, `HEADING_RE` (generic ATX heading pattern).
 - `nli_batch.py` - `score_entailment_pairs` for sentence-level NLI batch scoring (Tag Sentences family API).
 - `session.py` - `WebResearcher`, `SearchResult`, `SearchResponse`, `FetchResponse`, `SearchBackend` ABC.
 - `backends/` - `BraveBackend` (Brave Search API), `get_default_backend`.
@@ -31,7 +31,7 @@ from pipeline import (
     MultiLabelClassifierBackend, SeqClassificationBackend,
     CLASSIFIER_BACKEND_REGISTRY,
     load_services, resolve_slots, ServiceRegistry,
-    load_classifiers, resolve_classifier_slots,
+    resolve_classifiers,
     PipelineError, StepError, HookMismatchError, MissingMetadataError,
     CapabilityMismatchError,
     StepHooks, StepMeta, StepSpec, build_pipeline,
@@ -97,7 +97,7 @@ Determinism contract: offline-first weight loading, per-instance pipeline single
 ## Invariants
 
 - Paper-agnostic, no internal dependencies. `pipeline` is a domain-free framework and MUST NOT import from any internal/workspace package (`paperstore`, `cli`, `agora`, `assay`, `tomd`, `mailing`, `preview`). It depends only on third-party libraries. Paper-domain orchestration (`process_paper`, stage postconditions, the `read_paper` tool) lives in `cli`, not here. If a framework module needs a shared type that currently lives in a paper package, define it here instead of importing it.
-- `ClassifierBackend` and `ModelBackend` are parallel namespaces. `[services.NAME]` / `[classifiers.NAME]` and `[defaults]` / `[classifier_defaults]` do not mix; slot resolution is independent. Override flags map to different `StepContext` dicts: `--service` populates `ctx.agents` (via `AgentBackend(slots[slot_name][1], slot_name=slot_name, service_name=slots[slot_name][0])`), `--classifier` populates `ctx.classifiers`.
+- `ClassifierBackend` and `ModelBackend` are parallel namespaces. `[services.NAME]` / `[classifiers.NAME]` and `[defaults]` / `[classifier_defaults]` do not mix. Each consuming package owns its classifier slot binding (pipeline never parses another package's markdown for classifiers). `resolve_classifiers` only instantiates inventory entries referenced by the merged binding. Assay passes `--provider` through to `resolve_classifiers(provider_override=...)`.
 - Capability validation runs once at pipeline-construction time. `validate_capabilities()` rejects any step whose declared `meta.tools` or assigned `thinking_budget` would land on a backend whose class attributes do not support it. The runtime `NotImplementedError` in `AgentBackend.run` is secondary defense, retained for custom hooks that pass ad-hoc tools via `run_task` outside `meta.tools`.
 - `dispatch()` and `validate_capabilities()` must use identical `stop_after` scoping logic. Today both filter by `enumerate` index against the step list; if you switch one site to `spec.meta.number`, switch both in the same commit.
 - Three-layer system prompts. Every LLM step receives the framework floor, plus the pipeline `## System Prompt`, plus an optional per-step `### System Prompt`. Per-step mode is `append` by default, or `replace` for floor + step only. The floor always applies.

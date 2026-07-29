@@ -22,6 +22,7 @@ No network, no real LLM, no pydantic-ai. Env-var manipulation uses
 
 from __future__ import annotations
 
+from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
@@ -31,6 +32,7 @@ from pipeline.model_backends import BACKEND_REGISTRY, ModelBackend
 from pipeline.services import (
     ServiceRegistry,
     load_services,
+    resolve_classifiers,
     resolve_pipeline_models,
 )
 
@@ -246,3 +248,245 @@ def test_resolve_pipeline_models_skips_unreferenced_services(monkeypatch):
     )
     models = resolve_pipeline_models({"default": "s_a"}, registry)
     assert models == {"default": a}
+
+
+# ---------------------------------------------------------------------------
+# resolve_classifiers
+# ---------------------------------------------------------------------------
+
+
+def _classifier_toml(tmp_path, extra: str = "") -> Path:
+    body = f"""
+[classifiers.nli-small]
+backend = "nli_cross_encoder"
+model = "cross-encoder/nli-deberta-v3-small"
+
+[classifiers.zeroshot-base]
+backend = "zeroshot_v2"
+model = "MoritzLaurer/deberta-v3-base-zeroshot-v2.0"
+
+[classifiers.bad-backend]
+backend = "no_such_backend"
+model = "x"
+
+[classifier_defaults]
+selector = "nli-small"
+other = "nli-small"
+
+[transformer_providers.auto]
+mode = "auto"
+max_batch_size = 16
+max_length = 128
+executor_workers = 1
+
+[transformer_provider_defaults]
+default = "auto"
+{extra}
+"""
+    p = tmp_path / "SERVICES.toml"
+    p.write_text(body, encoding="utf-8")
+    return p
+
+
+class _ClfFake:
+    def __init__(self, model_id: str, provider) -> None:
+        self.model_id = model_id
+        self.provider = provider
+
+
+def test_resolve_classifiers_empty_when_no_defaults_and_no_binding(tmp_path):
+    p = _write_services_toml(
+        tmp_path,
+        """
+[services.s1]
+backend = "llama3"
+base_url = "http://localhost/v1"
+model = "m"
+""",
+    )
+    assert resolve_classifiers({}, path=p) == ()
+
+
+def test_resolve_classifiers_fallback_without_binding(tmp_path, monkeypatch):
+    p = _classifier_toml(tmp_path)
+    calls: list[str] = []
+
+    def fake_inst(name, cfg, provider):
+        calls.append(name)
+        return _ClfFake(cfg.get("model", name), provider)
+
+    monkeypatch.setattr(
+        "pipeline.services._instantiate_classifier",
+        fake_inst,
+    )
+    result = resolve_classifiers(None, path=p)
+    # Both defaulted slots ("selector", "other") point at the same
+    # inventory entry, so they share one instance and the tuple has
+    # exactly one element.
+    assert len(result) == 1
+    assert result[0].model_id == "cross-encoder/nli-deberta-v3-small"
+    assert calls == ["nli-small"]
+
+
+def test_resolve_classifiers_binding_overrides_fallback_slot(tmp_path, monkeypatch):
+    p = _classifier_toml(tmp_path)
+    calls: list[str] = []
+
+    def fake_inst(name, cfg, provider):
+        calls.append(name)
+        return _ClfFake(cfg.get("model", name), provider)
+
+    monkeypatch.setattr("pipeline.services._instantiate_classifier", fake_inst)
+    # Binding only overrides "selector"; "other" still falls back to
+    # [classifier_defaults], so both entries get instantiated.
+    result = resolve_classifiers({"selector": "zeroshot-base"}, path=p)
+    model_ids = {backend.model_id for backend in result}
+    assert any(m.endswith("zeroshot-v2.0") for m in model_ids)
+    assert "nli-small" in calls
+    assert "zeroshot-base" in calls
+
+
+def test_resolve_classifiers_unknown_entry_names_slot(tmp_path, monkeypatch):
+    p = _classifier_toml(tmp_path)
+    monkeypatch.setattr(
+        "pipeline.services._instantiate_classifier",
+        lambda *a, **k: _ClfFake("m", a[2]),
+    )
+    with pytest.raises(ServiceConfigError, match="missing-entry"):
+        resolve_classifiers({"slot_a": "missing-entry"}, path=p)
+
+
+def test_resolve_classifiers_lazy_skips_unbound_bad_entry(tmp_path, monkeypatch):
+    p = _write_services_toml(
+        tmp_path,
+        """
+[classifiers.nli-small]
+backend = "nli_cross_encoder"
+model = "cross-encoder/nli-deberta-v3-small"
+
+[classifiers.bad-backend]
+backend = "no_such_backend"
+model = "x"
+
+[transformer_providers.auto]
+mode = "auto"
+max_batch_size = 16
+max_length = 128
+executor_workers = 1
+""",
+    )
+    monkeypatch.setattr(
+        "pipeline.services._instantiate_classifier",
+        lambda *a, **k: _ClfFake("m", a[2]),
+    )
+    result = resolve_classifiers({"only": "nli-small"}, path=p)
+    assert len(result) == 1
+    assert result[0].model_id == "m"
+
+
+def test_resolve_classifiers_shares_instance_for_two_slots(tmp_path, monkeypatch):
+    p = _classifier_toml(tmp_path)
+    monkeypatch.setattr(
+        "pipeline.services._instantiate_classifier",
+        lambda *a, **k: _ClfFake("m", a[2]),
+    )
+    result = resolve_classifiers(
+        {"a": "nli-small", "b": "nli-small"},
+        path=p,
+    )
+    # Two slots bound to the same entry share one instance, so the
+    # deduplicated tuple has exactly one element (plus the
+    # classifier_defaults "selector"/"other" entries, which also
+    # resolve to "nli-small" and therefore share the same instance).
+    assert len(result) == 1
+
+
+def test_resolve_classifiers_provider_override_beats_entry_pin(
+    tmp_path, monkeypatch,
+):
+    p = _write_services_toml(
+        tmp_path,
+        """
+[classifiers.pinned]
+backend = "nli_cross_encoder"
+model = "cross-encoder/nli-deberta-v3-small"
+provider = "cpu-fp32"
+
+[transformer_providers.auto]
+mode = "auto"
+max_batch_size = 16
+max_length = 128
+executor_workers = 1
+
+[transformer_providers.cpu-fp32]
+mode = "explicit"
+device = "cpu"
+dtype = "fp32"
+batch_size = 8
+max_length = 128
+executor_workers = 1
+""",
+    )
+    seen: list[str] = []
+
+    def fake_inst(name, cfg, provider):
+        seen.append(provider.name)
+        return _ClfFake(cfg.get("model", name), provider)
+
+    monkeypatch.setattr("pipeline.services._instantiate_classifier", fake_inst)
+    resolve_classifiers({"s": "pinned"}, path=p, provider_override="auto")
+    assert seen == ["auto"]
+
+
+def test_resolve_classifiers_entry_pin_beats_table_default(tmp_path, monkeypatch):
+    p = _write_services_toml(
+        tmp_path,
+        """
+[classifiers.pinned]
+backend = "nli_cross_encoder"
+model = "cross-encoder/nli-deberta-v3-small"
+provider = "cpu-fp32"
+
+[transformer_providers.auto]
+mode = "auto"
+max_batch_size = 16
+max_length = 128
+executor_workers = 1
+
+[transformer_providers.cpu-fp32]
+mode = "explicit"
+device = "cpu"
+dtype = "fp32"
+batch_size = 8
+max_length = 128
+executor_workers = 1
+
+[transformer_provider_defaults]
+default = "auto"
+""",
+    )
+    monkeypatch.delenv("PAPERFLOW_TRANSFORMER_PROVIDER", raising=False)
+    seen: list[str] = []
+
+    def fake_inst(name, cfg, provider):
+        seen.append(provider.name)
+        return _ClfFake(cfg.get("model", name), provider)
+
+    monkeypatch.setattr("pipeline.services._instantiate_classifier", fake_inst)
+    resolve_classifiers({"s": "pinned"}, path=p)
+    assert seen == ["cpu-fp32"]
+
+
+def test_resolve_classifiers_unknown_entry_provider_raises(tmp_path):
+    p = _classifier_toml(
+        tmp_path,
+        """
+[classifiers.pinned]
+backend = "nli_cross_encoder"
+model = "cross-encoder/nli-deberta-v3-small"
+provider = "no-such-provider"
+""",
+    )
+    with pytest.raises(ServiceConfigError, match="no-such-provider"):
+        resolve_classifiers({"s": "pinned"}, path=p)
+

@@ -23,9 +23,13 @@
 #      multilabel_seqcls   fine-tuned AutoModelForSequenceClassification
 #    No api_key_env: classifiers are local-model wrappers. First run
 #    downloads weights into the local HF cache; subsequent runs are
-#    fully offline. [classifier_defaults] maps classifier slot names to
-#    classifier names. The orchestrator overrides via --classifier CLI
-#    flags (e.g. `--classifier selector=zeroshot-base`).
+#    fully offline. This file is a pure inventory of entries; it does
+#    not bind slot names to entries. Each consuming package declares
+#    its own slot -> entry binding under a ## Classifiers block in its
+#    pipeline markdown (e.g. assay.md), resolved via
+#    pipeline.resolve_classifiers(). See the [classifiers] section
+#    below for [classifier_defaults]'s narrow role as a framework
+#    fallback.
 #
 # 3. [transformer_providers.NAME] declares the device / dtype / batch
 #    settings used for transformer inference. Classifiers do NOT declare
@@ -149,46 +153,49 @@ thinking_capable = true
 tools_capable = true
 
 # ---------------------------------------------------------------------------
-# Local zero-shot classifiers (dissect Step 1 Tag Sentences)
+# Local text classifiers (HF / CrossEncoder / fine-tuned seqcls)
 # ---------------------------------------------------------------------------
+#
+# Each entry is one model plus runtime parameters for a specific use.
+# Name an entry <package>-<use>-<family> when its model or provider
+# settings diverge from a shared inventory entry. Binding (which slot
+# maps to which entry) is owned by each consuming package, typically
+# via a ``## Classifiers`` block in that package's pipeline markdown.
+#
+# [classifier_defaults] is the framework fallback layer: resolve_classifiers()
+# merges it underneath the caller's binding, so slot names the caller
+# does not bind still resolve from here, and a caller that binds
+# nothing gets pure [classifier_defaults] behavior. No in-repo pipeline
+# depends on that fallback today (every bound slot name is also set
+# explicitly by its caller); it is guarded by tests.
 
-# Default: small NLI cross-encoder. ~150MB, ~15-25ms/sentence on CPU.
-# With the cross-validated TARGET hypothesis label and structural
-# pre-filter in harness.py, this model achieves 96% TARGET recall and
-# 92% SKIP recall across three WG21 corpora -- matching or beating
-# zeroshot-large on the decisions that matter (TARGET recall) at
-# 1/85th the cost. See study/ensemble/results/final_findings.md for
-# the apples-to-apples ablation.
+# Small NLI cross-encoder. ~150MB, ~15-25ms/sentence on CPU.
 [classifiers.nli-small]
 backend = "nli_cross_encoder"
 model = "cross-encoder/nli-deberta-v3-small"
 
 # Large alternative: DeBERTa-v3-large fine-tuned for zero-shot
 # classification on 5 NLI + 28 non-NLI datasets. ~1.7GB FP32, ~1.5s
-# per sentence on CPU. Sharper raw scores than nli-small but the
-# final-decision quality is equivalent once the alt TARGET hypothesis
-# is in place. Use via `--classifier selector=zeroshot-large` when
-# you want the model's confidence numbers themselves (e.g. for the
-# Tier 3 cascade oracle slot described in study/ensemble/).
+# per sentence on CPU. Bind via the consuming package's ``## Classifiers``
+# block when sharper raw scores are needed for experimentation.
 [classifiers.zeroshot-large]
 backend = "zeroshot_v2"
 model = "MoritzLaurer/deberta-v3-large-zeroshot-v2.0"
 
 # Mid-tier: DeBERTa-v3-base, same fine-tune family as zeroshot-large.
-# ~700MB FP32, sub-second per chunk on CPU. Use via `--classifier
-# selector=zeroshot-base` when you need a faster iteration loop than
-# zeroshot-large but want sharper scores than nli-small.
+# ~700MB FP32, sub-second per chunk on CPU.
 [classifiers.zeroshot-base]
 backend = "zeroshot_v2"
 model = "MoritzLaurer/deberta-v3-base-zeroshot-v2.0"
 
 # Fine-tuned multi-label sequence classifier (multilabel_seqcls backend).
 # Uncomment once a checkpoint exists (train via
-# packages/pipeline/scripts/finetune_seqcls.py). Use via
-# `--classifier selector=routing-tagger`.
-# [classifiers.routing-tagger]
+# packages/pipeline/scripts/finetune_seqcls.py). Assay binds via
+# ``assay.md`` ``## Classifiers`` (e.g. selector: assay-routing-tagger).
+# [classifiers.assay-routing-tagger]
 # backend = "multilabel_seqcls"
 # model = "/path/to/routing-tagger-v1"
+# provider = "cpu-fp32"
 
 # Example future addition: specialized claim detector. Demonstrates
 # that the abstraction makes adding a new classifier a config change,
