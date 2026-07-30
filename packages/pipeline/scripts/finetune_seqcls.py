@@ -24,7 +24,8 @@ The dev dependency group includes ``pipeline[train]``.
 
 Usage (from repo root)::
 
-    uv run python packages/pipeline/scripts/finetune_seqcls.py \\
+    uv run --extra train --directory packages/pipeline \\
+        python scripts/finetune_seqcls.py \\
         --train data/train.jsonl \\
         --output artifacts/my-tagger-v1 \\
         --base-model microsoft/deberta-v3-base
@@ -33,6 +34,7 @@ Usage (from repo root)::
 from __future__ import annotations
 
 import argparse
+import inspect
 import json
 import logging
 from pathlib import Path
@@ -40,7 +42,7 @@ from pathlib import Path
 _log = logging.getLogger(__name__)
 
 _TRAIN_SEED = 0
-_DEFAULT_MAX_LENGTH = 192
+_DEFAULT_MAX_LENGTH = 128
 _EVAL_PREDICTION_THRESHOLD = 0.5
 _TRAIN_LOGGING_STEPS = 50
 _TRAIN_EXTRA_HINT = (
@@ -104,6 +106,77 @@ def _collect_label_names(rows: list[dict[str, object]]) -> list[str]:
                 raise ValueError("each label must be a non-empty string")
             names.add(label)
     return sorted(names)
+
+
+def _training_precision_kwargs(*, cpu_only: bool) -> dict[str, bool]:
+    """Mixed-precision flags for :class:`TrainingArguments`.
+
+    Transformers 5.x may load CUDA weights in fp16 by default; that is
+    unstable for DeBERTa multi-label fine-tuning on this corpus.  We always
+    load the model in fp32 (see :func:`_load_model_for_training`) and enable
+    bf16 autocast on Ampere+ CUDA for speed.
+    """
+    if cpu_only:
+        return {"bf16": False, "fp16": False}
+    try:
+        import torch  # type: ignore[import-untyped]
+    except ImportError:
+        return {"bf16": False, "fp16": False}
+    if torch.cuda.is_available() and torch.cuda.is_bf16_supported():
+        return {"bf16": True, "fp16": False}
+    return {"bf16": False, "fp16": False}
+
+
+def _load_model_for_training(
+    model_cls: type,
+    base_model: str,
+    *,
+    num_labels: int,
+    id2label: dict[int, str],
+    label2id: dict[str, int],
+) -> object:
+    """Load a sequence-classification head in fp32 for stable fine-tuning."""
+    import torch  # type: ignore[import-untyped]
+
+    load_kwargs: dict[str, object] = {
+        "num_labels": num_labels,
+        "problem_type": "multi_label_classification",
+        "id2label": id2label,
+        "label2id": label2id,
+        "dtype": torch.float32,
+    }
+    sig = inspect.signature(model_cls.from_pretrained)
+    dtype_param = "torch_dtype" if "torch_dtype" in sig.parameters else "dtype"
+    if dtype_param == "torch_dtype":
+        load_kwargs.pop("dtype", None)
+        load_kwargs["torch_dtype"] = torch.float32
+    try:
+        return model_cls.from_pretrained(base_model, **load_kwargs)
+    except TypeError as exc:
+        msg = str(exc).lower()
+        if "dtype" not in msg and "torch_dtype" not in msg:
+            raise
+        alt = "dtype" if dtype_param == "torch_dtype" else "torch_dtype"
+        load_kwargs.pop(dtype_param, None)
+        load_kwargs[alt] = torch.float32
+        return model_cls.from_pretrained(base_model, **load_kwargs)
+
+
+def _assert_finite_parameters(model: object) -> None:
+    """Fail before persisting a checkpoint whose weights contain NaN/Inf."""
+    import torch  # type: ignore[import-untyped]
+
+    bad: list[str] = []
+    for name, param in model.named_parameters():  # type: ignore[union-attr]
+        if not torch.isfinite(param).all():
+            bad.append(name)
+    if bad:
+        sample = ", ".join(bad[:5])
+        suffix = "..." if len(bad) > 5 else ""
+        raise RuntimeError(
+            f"training produced non-finite weights in {len(bad)} parameter "
+            f"tensor(s) (e.g. {sample}{suffix}); refusing to save checkpoint",
+        )
 
 
 def _rows_to_dataset(
@@ -185,13 +258,18 @@ def finetune_multilabel_seqcls(
     label2id = {name: i for i, name in enumerate(label_names)}
 
     tokenizer = AutoTokenizer.from_pretrained(base_model)
-    model = AutoModelForSequenceClassification.from_pretrained(
+    model = _load_model_for_training(
+        AutoModelForSequenceClassification,
         base_model,
         num_labels=len(label_names),
-        problem_type="multi_label_classification",
         id2label=id2label,
         label2id=label2id,
     )
+    precision_kwargs = _training_precision_kwargs(cpu_only=cpu_only)
+    if precision_kwargs.get("bf16"):
+        _log.info("CUDA bf16 training enabled (fp32 weight load)")
+    elif not cpu_only:
+        _log.info("CUDA fp32 training (no bf16)")
 
     train_ds = _rows_to_dataset(
         train_rows,
@@ -242,7 +320,28 @@ def finetune_multilabel_seqcls(
         logging_steps=_TRAIN_LOGGING_STEPS,
         report_to=[],
         use_cpu=cpu_only,
+        **precision_kwargs,
     )
+
+    from transformers import TrainerCallback  # type: ignore[import-untyped]
+
+    class _AbortOnNonFiniteCallback(TrainerCallback):
+        """Stop early when the Trainer logs a non-finite loss or grad norm."""
+
+        def on_log(self, args, state, control, logs=None, **kwargs):  # type: ignore[no-untyped-def]
+            del args, state, kwargs
+            if not logs:
+                return
+            grad_norm = logs.get("grad_norm")
+            if grad_norm is not None and grad_norm != grad_norm:
+                raise RuntimeError(
+                    "training diverged: grad_norm is NaN; aborting",
+                )
+            loss = logs.get("loss")
+            if loss is not None and loss != loss:
+                raise RuntimeError(
+                    "training diverged: loss is NaN; aborting",
+                )
 
     trainer = Trainer(
         model=model,
@@ -251,8 +350,10 @@ def finetune_multilabel_seqcls(
         eval_dataset=eval_ds,
         processing_class=tokenizer,
         compute_metrics=_compute_metrics if eval_ds is not None else None,
+        callbacks=[_AbortOnNonFiniteCallback()],
     )
     trainer.train()
+    _assert_finite_parameters(trainer.model)
     trainer.save_model(str(output_dir))
     tokenizer.save_pretrained(str(output_dir))
     _log.info("saved checkpoint to %s (%d labels)", output_dir, len(label_names))
@@ -264,51 +365,70 @@ def _build_parser() -> argparse.ArgumentParser:
         description="Fine-tune a multi-label sequence classifier from JSONL.",
     )
     parser.add_argument(
-        "--train", type=Path, required=True,
+        "--train",
+        type=Path,
+        required=True,
         help="Training JSONL path ({text, labels}).",
     )
     parser.add_argument(
-        "--val", type=Path, default=None,
+        "--val",
+        type=Path,
+        default=None,
         help="Optional validation JSONL path.",
     )
     parser.add_argument(
-        "--output", type=Path, required=True,
+        "--output",
+        type=Path,
+        required=True,
         help="Directory for the saved checkpoint.",
     )
     parser.add_argument(
-        "--base-model", default="microsoft/deberta-v3-base",
+        "--base-model",
+        default="microsoft/deberta-v3-base",
         help="HF model id or local path to fine-tune.",
     )
     parser.add_argument(
-        "--max-length", type=int, default=_DEFAULT_MAX_LENGTH,
+        "--max-length",
+        type=int,
+        default=_DEFAULT_MAX_LENGTH,
         help="Tokenizer max_length (default: %(default)s).",
     )
     parser.add_argument(
-        "--epochs", type=int, default=3,
+        "--epochs",
+        type=int,
+        default=3,
         help="Training epochs (default: %(default)s).",
     )
     parser.add_argument(
-        "--learning-rate", type=float, default=2e-5,
+        "--learning-rate",
+        type=float,
+        default=2e-5,
         help="Learning rate (default: %(default)s).",
     )
     parser.add_argument(
-        "--batch-size", type=int, default=16,
+        "--batch-size",
+        type=int,
+        default=16,
         help="Per-device train batch size (default: %(default)s).",
     )
     parser.add_argument(
-        "--seed", type=int, default=_TRAIN_SEED,
+        "--seed",
+        type=int,
+        default=_TRAIN_SEED,
         help="Random seed (default: %(default)s).",
     )
     parser.add_argument(
-        "--cpu-only", action="store_true",
+        "--cpu-only",
+        action="store_true",
         help="Force CPU training, bypassing CUDA/MPS auto-detection "
-             "(useful when the accelerator lacks headroom for the batch size).",
+        "(useful when the accelerator lacks headroom for the batch size).",
     )
     parser.add_argument(
-        "--fixed-padding", action="store_true",
+        "--fixed-padding",
+        action="store_true",
         help="Pad every batch to --max-length instead of the batch's longest "
-             "sequence. Trades some compute for stable tensor shapes, which "
-             "avoids MPS allocator fragmentation on memory-constrained hosts.",
+        "sequence. Trades some compute for stable tensor shapes, which "
+        "avoids MPS allocator fragmentation on memory-constrained hosts.",
     )
     return parser
 
