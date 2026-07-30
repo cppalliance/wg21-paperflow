@@ -22,11 +22,12 @@ a ``claim_uid`` (the paperstore integer key) and an optional
 
 from __future__ import annotations
 
+import math
 from datetime import datetime
 from typing import Literal, Optional
 
 from paperstore import SourceLoc
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 # -- Enumerations ------------------------------------------------------------
 
@@ -374,6 +375,41 @@ class SmellTestOutput(BaseModel, frozen=True):
     design_tensions: list[DesignTension] = Field(default_factory=list)
 
 
+# Calibration arithmetic (the-mod.md 2.3/2.4/5b, mirrored by agora.md
+# Step 3). The Step 3 validator holds the model's output to these
+# tables; the backend's retry loop feeds violations back to the model.
+
+HEAT_BASELINE: dict[str, tuple[int, int]] = {
+    "cold": (5, 10),
+    "warm": (15, 30),
+    "hot": (30, 60),
+    "thermonuclear": (60, 150),
+}
+INTEREST_MULTIPLIER: dict[str, float] = {
+    "niche": 1.0,
+    "relevant": 1.5,
+    "magnetic": 2.0,
+    "gravitational": 3.0,
+}
+TARGET_COMMENT_CAP = 90
+"""One thread's generation ceiling; the scaled baseline clamps here."""
+SIGNAL_RATIO_FLOOR: dict[str, float] = {
+    "niche": 0.25,
+    "relevant": 0.35,
+    "magnetic": 0.45,
+    "gravitational": 0.55,
+}
+MOD_ACTION_RESERVE: dict[str, tuple[int, int]] = {
+    "cold": (0, 0),
+    "warm": (0, 1),
+    "hot": (1, 2),
+    "thermonuclear": (3, 5),
+}
+ENCOUNTER_TURNS = (3, 5)
+"""Turns per encounter chain (the-mod.md section 11: never more than 5)."""
+ENCOUNTER_COUNT_MAX = 3
+
+
 class CalibrationOutput(BaseModel, frozen=True):
     """Step 3 (Calibrate) output."""
 
@@ -387,6 +423,68 @@ class CalibrationOutput(BaseModel, frozen=True):
         description="One paragraph: why this heat/interest combination, citing "
         "the paper-type floors and any author-gravity adjustments.",
     )
+
+    @model_validator(mode="after")
+    def _check_target_bounds(self) -> "CalibrationOutput":
+        base_low, base_high = HEAT_BASELINE[self.heat]
+        multiplier = INTEREST_MULTIPLIER[self.interest]
+        target_low = min(round(base_low * multiplier), TARGET_COMMENT_CAP)
+        target_high = min(round(base_high * multiplier), TARGET_COMMENT_CAP)
+        if not target_low <= self.target_comment_count <= target_high:
+            raise ValueError(
+                f"target_comment_count={self.target_comment_count} is outside "
+                f"[{target_low}, {target_high}] for heat={self.heat} x "
+                f"interest={self.interest} (baseline {base_low}-{base_high} x "
+                f"{multiplier}, capped at {TARGET_COMMENT_CAP})"
+            )
+        return self
+
+    @model_validator(mode="after")
+    def _check_encounter_count(self) -> "CalibrationOutput":
+        if self.encounter_count > ENCOUNTER_COUNT_MAX:
+            raise ValueError(
+                f"encounter_count={self.encounter_count} exceeds the maximum "
+                f"of {ENCOUNTER_COUNT_MAX}"
+            )
+        if self.heat == "cold" and self.encounter_count != 0:
+            raise ValueError("cold threads have no encounters")
+        if self.heat == "warm" and self.encounter_count > 1:
+            raise ValueError("warm threads carry at most 1 encounter")
+        if self.heat in ("hot", "thermonuclear") and self.encounter_count < 1:
+            raise ValueError(f"{self.heat} threads need at least 1 encounter")
+        return self
+
+    @model_validator(mode="after")
+    def _check_slot_arithmetic(self) -> "CalibrationOutput":
+        """The signal/noise pool plus the encounter/mod reserve is the target."""
+        turns_low, turns_high = ENCOUNTER_TURNS
+        mods_low, mods_high = MOD_ACTION_RESERVE[self.heat]
+        reserve = self.target_comment_count - self.signal_count - self.noise_count
+        reserve_low = self.encounter_count * turns_low + mods_low
+        reserve_high = self.encounter_count * turns_high + mods_high
+        if not reserve_low <= reserve <= reserve_high:
+            raise ValueError(
+                f"signal_count + noise_count leaves {reserve} of "
+                f"target_comment_count={self.target_comment_count} for "
+                f"encounters and mod actions, but {self.encounter_count} "
+                f"encounter(s) at {turns_low}-{turns_high} turns plus "
+                f"{mods_low}-{mods_high} mod action(s) for heat={self.heat} "
+                f"needs {reserve_low}-{reserve_high}"
+            )
+        return self
+
+    @model_validator(mode="after")
+    def _check_signal_ratio(self) -> "CalibrationOutput":
+        pool = self.signal_count + self.noise_count
+        floor = math.ceil(SIGNAL_RATIO_FLOOR[self.interest] * pool)
+        if pool and self.signal_count < floor:
+            raise ValueError(
+                f"signal_count={self.signal_count} is below the "
+                f"interest={self.interest} minimum signal share "
+                f"({SIGNAL_RATIO_FLOOR[self.interest]:.0%} of the "
+                f"{pool}-slot signal+noise pool = {floor})"
+            )
+        return self
 
 
 class SubmissionOutput(BaseModel, frozen=True):

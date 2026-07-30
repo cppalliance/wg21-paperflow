@@ -645,6 +645,12 @@ _INTEREST_LENS_FLOOR: dict[str, int] = {
     "gravitational": 4,
 }
 
+# Step 5 may drift from the Step 3 composition by this much before the
+# blueprint is rejected: +/-25% of the planned count, or +/-2 slots for
+# small plans, whichever is larger.
+_COMPOSITION_TOLERANCE_RATIO = 0.25
+_COMPOSITION_TOLERANCE_MIN = 2
+
 
 def _validate_blueprint(state: PipelineState, replies: list, encounters: list) -> None:
     """Sanity-check the Thread structure before serialisation."""
@@ -744,6 +750,28 @@ def _validate_blueprint(state: PipelineState, replies: list, encounters: list) -
                 f"({sorted(lens_used)})."
             ),
         )
+
+    if state.signal_count is not None and state.noise_count is not None:
+        signal_class = sum(1 for r in replies if r.role in ("signal", "teaser"))
+        noise_class = sum(1 for r in replies if r.role in ("noise", "tangent"))
+        for label, planned, delivered in (
+            ("signal-class (signal+teaser)", state.signal_count, signal_class),
+            ("noise-class (noise+tangent)", state.noise_count, noise_class),
+        ):
+            tolerance = max(
+                _COMPOSITION_TOLERANCE_MIN,
+                round(_COMPOSITION_TOLERANCE_RATIO * planned),
+            )
+            if abs(delivered - planned) > tolerance:
+                raise ValidationStepError(
+                    7, _STEP_7_SERIALIZE,
+                    ValueError(
+                        f"the skeleton delivered {delivered} {label} slots "
+                        f"against a plan of {planned} (tolerance "
+                        f"+/-{tolerance}); Step 5 must honor the Step 3 "
+                        f"composition."
+                    ),
+                )
 
     if state.revision_case == "C" and not state.prior_revision:
         raise ValidationStepError(

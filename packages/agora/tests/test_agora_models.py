@@ -170,6 +170,90 @@ def test_calibration_output_negative_count_rejected():
         )
 
 
+def test_calibration_output_consistent_plan_accepted():
+    o = CalibrationOutput(
+        heat="warm", interest="relevant",
+        target_comment_count=30,
+        encounter_count=0, signal_count=12, noise_count=18,
+        rationale="r",
+    )
+    assert o.target_comment_count == 30
+
+
+def test_calibration_output_multiplied_target_capped_at_90():
+    # thermonuclear x gravitational would be 180-450 uncapped; the only
+    # admissible target is the 90-comment ceiling.
+    with pytest.raises(ValidationError, match="capped at 90"):
+        CalibrationOutput(
+            heat="thermonuclear", interest="gravitational",
+            target_comment_count=180,
+            encounter_count=2, signal_count=60, noise_count=100,
+            rationale="r",
+        )
+    o = CalibrationOutput(
+        heat="thermonuclear", interest="gravitational",
+        target_comment_count=90,
+        encounter_count=2, signal_count=45, noise_count=35,
+        rationale="r",
+    )
+    assert o.target_comment_count == 90
+
+
+def test_calibration_output_target_below_tier_range_rejected():
+    # hot x relevant scales the 30-60 baseline to 45-90.
+    with pytest.raises(ValidationError, match="outside"):
+        CalibrationOutput(
+            heat="hot", interest="relevant",
+            target_comment_count=30,
+            encounter_count=1, signal_count=10, noise_count=16,
+            rationale="r",
+        )
+
+
+def test_calibration_output_signal_share_floor_rejected():
+    # The 2026-07-15 failure shape: a noise-swamped pool at an interest
+    # tier whose minimum signal share is 35%.
+    with pytest.raises(ValidationError, match="signal share"):
+        CalibrationOutput(
+            heat="warm", interest="relevant",
+            target_comment_count=30,
+            encounter_count=0, signal_count=6, noise_count=24,
+            rationale="r",
+        )
+
+
+def test_calibration_output_unexplained_reserve_rejected():
+    # 8 slots of the target are unaccounted for: no encounters, and
+    # warm reserves at most 1 mod action.
+    with pytest.raises(ValidationError, match="encounters and mod actions"):
+        CalibrationOutput(
+            heat="warm", interest="relevant",
+            target_comment_count=30,
+            encounter_count=0, signal_count=12, noise_count=10,
+            rationale="r",
+        )
+
+
+def test_calibration_output_cold_encounter_rejected():
+    with pytest.raises(ValidationError, match="no encounters"):
+        CalibrationOutput(
+            heat="cold", interest="niche",
+            target_comment_count=8,
+            encounter_count=1, signal_count=2, noise_count=3,
+            rationale="r",
+        )
+
+
+def test_calibration_output_hot_without_encounter_rejected():
+    with pytest.raises(ValidationError, match="at least 1 encounter"):
+        CalibrationOutput(
+            heat="hot", interest="relevant",
+            target_comment_count=45,
+            encounter_count=0, signal_count=16, noise_count=28,
+            rationale="r",
+        )
+
+
 def test_submission_output_default_case_A():
     o = SubmissionOutput(
         submission_title="t", submission_body="b",

@@ -161,12 +161,16 @@ Author gravity is a floor. Sub-agent findings can push interest higher but never
 
 **2.2 Controversy scan.** The three parallel sub-agents from section 0 launch here. Each returns findings and a heat signal. Wait for all three before proceeding.
 
+**2.2b Combining the three signals.** Public reception is the primary heat signal. Committee history and author/ecosystem findings adjust it by at most one tier in either direction; never take the loudest of the three. Committee-history drama is historical color — revision churn, past poll splits, and design pivots do not on their own push heat above hot. Thermonuclear requires evidence of *current* public controversy: active flame threads, implementer pushback, competing blog posts. A paper already adopted or merged whose discussion is retrospective reads as settled — cap heat at warm unless the research shows the adoption itself is currently drawing fire.
+
 **2.3 Heat tier.** Combine audience baseline, paper type floors, and controversy scan:
 
-- **Cold** (CWG bugfix, no public discussion) - 5-10 comments, 0 encounters, 0-1 signal comments
-- **Warm** (LEWG proposal, some discussion) - 15-30 comments, maybe 1 encounter, 2-4 signal comments
-- **Hot** (LEWG/EWG, competing proposals, public debate) - 30-60 comments, 1 encounter likely, 4-8 signal comments
-- **Thermonuclear** (contracts, executors, ABI, safety) - 60-150 comments, 1-2 encounters, 8-15 signal comments, multiple sub-threads, at least one [removed by moderator]
+- **Cold** (CWG bugfix, no public discussion) - 5-10 comments, 0 encounters
+- **Warm** (LEWG proposal, some discussion) - 15-30 comments, maybe 1 encounter
+- **Hot** (LEWG/EWG, competing proposals, public debate) - 30-60 comments, 1 encounter likely
+- **Thermonuclear** (contracts, executors, ABI, safety) - 60-150 comments, 1-2 encounters, multiple sub-threads, at least one [removed by moderator]
+
+How many of those comments are signal is governed by the interest tier's minimum signal share (2.4), not by heat — heat sets the size and temperature of the room, interest sets how much of the room is saying something.
 
 Directional papers cannot be assigned cold or warm - their heat floor is hot regardless of audience or controversy scan results.
 
@@ -179,14 +183,14 @@ Four tiers with comment-count multipliers applied to the heat tier baseline:
 - **Magnetic** (directional paper, affects major language surface area, touches a topic people have opinions about - async, safety, allocators, reflection, modules) - multiplier: 2x
 - **Gravitational** (directions group paper, Bjarne paper, papers that reframe an entire problem space, papers with no concrete wording but maximum scope) - multiplier: 3x
 
-The multiplier scales the comment count from the heat tier baseline. A cold paper (5-10 comments) at gravitational interest becomes 15-30. A warm paper (15-30) at gravitational becomes 45-90.
+The multiplier scales the comment count from the heat tier baseline. A cold paper (5-10 comments) at gravitational interest becomes 15-30. A warm paper (15-30) at gravitational becomes 45-90. The scaled count is capped at **90 comments** — one thread's generation ceiling. When the whole scaled range exceeds the cap (a hot or thermonuclear paper at high interest), the target is 90.
 
 Interest also governs:
 
 - **Thread depth** - higher interest produces deeper signal chains and more encounters
 - **Link density** - see section 8
 - **Number of distinct angles** - magnetic and gravitational papers get analyzed from multiple domain lenses (embedded, finance, game, library design, compiler, pedagogy, etc.). Gravitational papers must include signal comments from at least 4 different Table C domains
-- **Noise-to-signal shift** - as interest rises, signal ratio increases. Gravitational threads are signal-heavy with noise serving as pacing, not filler
+- **Noise-to-signal shift** - as interest rises, signal's share of the signal+noise pool (the comments left after encounter turns and mod actions) rises. Minimum signal share: niche 25%, relevant 35%, magnetic 45%, gravitational 55%. Gravitational threads are signal-heavy with noise serving as pacing, not filler
 
 Both heat and interest govern downstream parameters. Heat sets the emotional register; interest sets the intellectual engagement depth.
 
