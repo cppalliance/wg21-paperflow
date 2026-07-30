@@ -52,8 +52,6 @@ async def process_paper(
     trace: bool = False,
     stop_after: int | None = None,
     chunk_index: int | None = None,
-    classifier_overrides: dict[str, str] | None = None,
-    provider_override: str | None = None,
     force: bool = False,
     keep_downstream: bool = False,
     extract_vector: bool = False,
@@ -136,8 +134,6 @@ async def process_paper(
             stage_result = await _run_stage(
                 pid, status, backend, debug=debug, trace=trace,
                 stop_after=stop_after, chunk_index=chunk_index,
-                classifier_overrides=classifier_overrides,
-                provider_override=provider_override,
                 keep_downstream=keep_downstream,
                 extract_vector=extract_vector,
                 whiteout_text=whiteout_text,
@@ -217,8 +213,6 @@ async def _run_stage(
     trace: bool = False,
     stop_after: int | None = None,
     chunk_index: int | None = None,
-    classifier_overrides: dict[str, str] | None = None,
-    provider_override: str | None = None,
     keep_downstream: bool = False,
     extract_vector: bool = False,
     whiteout_text: bool = False,
@@ -236,7 +230,6 @@ async def _run_stage(
         )
     elif stage == STAGES["agora"]:
         await _stage_agora(pid, backend, debug=debug, trace=trace,
-                           provider_override=provider_override,
                            on_progress=on_progress)
     elif stage == STAGES["herald"]:
         pass
@@ -513,7 +506,6 @@ async def _stage_convert(
 
 async def _stage_agora(
     pid: str, backend: StorageBackend, *, debug: bool = False, trace: bool = False,
-    provider_override: str | None = None,
     on_progress: object = None,
 ) -> None:
     """Run agora pipeline on the paper.
@@ -528,4 +520,3 @@ async def _stage_agora(
         pid, backend, debug=debug, trace=trace,
         on_progress=on_progress,
     )
-    _ = provider_override

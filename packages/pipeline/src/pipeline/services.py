@@ -76,9 +76,7 @@ class ServiceRegistry:
         # bleeding through the proxy. ``frozen=True`` blocks direct
         # attribute assignment in __post_init__, so go through
         # ``object.__setattr__``.
-        object.__setattr__(
-            self, "services", MappingProxyType(dict(self.services))
-        )
+        object.__setattr__(self, "services", MappingProxyType(dict(self.services)))
         object.__setattr__(
             self, "api_key_envs", MappingProxyType(dict(self.api_key_envs))
         )
@@ -204,7 +202,10 @@ def load_services(path: Path | None = None) -> ServiceRegistry:
 
         logger.info(
             "Service '%s': %s  model=%s  endpoint=%s",
-            name, backend_key, init_kwargs["model"], init_kwargs["base_url"],
+            name,
+            backend_key,
+            init_kwargs["model"],
+            init_kwargs["base_url"],
         )
 
     return ServiceRegistry(
@@ -213,37 +214,110 @@ def load_services(path: Path | None = None) -> ServiceRegistry:
     )
 
 
-def load_classifiers(
+def _instantiate_classifier(
+    name: str,
+    cfg: dict[str, Any],
+    provider: TransformerProvider,
+) -> ClassifierBackend:
+    backend_key = cfg.get("backend")
+    if backend_key not in CLASSIFIER_BACKEND_REGISTRY:
+        raise ServiceConfigError(
+            f"Classifier '{name}' declares backend '{backend_key}' "
+            f"which is not in the registry. "
+            f"Available: {sorted(CLASSIFIER_BACKEND_REGISTRY)}",
+        )
+
+    init_kwargs: dict[str, Any] = {
+        k: v for k, v in cfg.items() if k not in ("backend", "device", "provider")
+    }
+    init_kwargs["provider"] = provider
+
+    backend_cls = CLASSIFIER_BACKEND_REGISTRY[backend_key]
+    backend = backend_cls(**init_kwargs)
+    logger.info(
+        "Classifier '%s': %s  model=%s  provider=%s (device=%s dtype=%s batch=%d)",
+        name,
+        backend_key,
+        cfg.get("model", ""),
+        provider.name,
+        provider.device,
+        provider.dtype,
+        provider.batch_size,
+    )
+    return backend
+
+
+def _provider_for_classifier_entry(
+    entry_cfg: Mapping[str, Any],
+    providers: dict[str, TransformerProvider],
+    provider_defaults: Mapping[str, str],
+    *,
+    provider_override: str | None,
+) -> TransformerProvider:
+    """Resolve transformer provider for one classifier inventory entry.
+
+    Precedence, top wins:
+
+    1. ``provider_override`` (e.g. ``--provider`` on the assay CLI).
+    2. ``PAPERFLOW_TRANSFORMER_PROVIDER`` env var.
+    3. The entry's ``provider = "<name>"`` in SERVICES.toml.
+    4. ``[transformer_provider_defaults].default``.
+    5. The hardcoded ``"auto"`` entry.
+    """
+    entry_pin = entry_cfg.get("provider")
+    if isinstance(entry_pin, str):
+        entry_pin = entry_pin.strip() or None
+    else:
+        entry_pin = None
+
+    name = (
+        provider_override
+        or os.environ.get(_TRANSFORMER_PROVIDER_ENV)
+        or entry_pin
+        or provider_defaults.get("default")
+        or "auto"
+    )
+    if name not in providers:
+        raise ServiceConfigError(
+            f"Classifier entry declares transformer provider {name!r} "
+            f"which is not defined in SERVICES.toml. "
+            f"Available: {sorted(providers)}"
+        )
+    return providers[name]
+
+
+def resolve_classifiers(
+    binding: Mapping[str, str] | None = None,
     path: Path | None = None,
     *,
-    provider: TransformerProvider | None = None,
-) -> tuple[dict[str, ClassifierBackend], dict[str, str]]:
-    """Parse SERVICES.toml, build ClassifierBackend instances.
+    provider_override: str | None = None,
+) -> tuple[ClassifierBackend, ...]:
+    """Resolve classifier inventory entries to :class:`ClassifierBackend` instances.
 
-    Parallel to :func:`load_services`. Returns ``(classifiers,
-    defaults)`` where ``classifiers`` maps names to
-    :class:`pipeline.classifier_backends.ClassifierBackend` instances
-    and ``defaults`` maps slot names (e.g. ``selector``) to classifier
-    names from ``[classifier_defaults]``.
+    ``binding`` is an opaque slot-name -> inventory-entry-name map from
+    the caller (e.g. assay's ``## Classifiers`` block). The framework
+    does not parse pipeline markdown or know slot semantics; it only
+    instantiates the entries the caller names. ``[classifier_defaults]``
+    is merged in underneath ``binding`` as a base layer: slot names the
+    caller does not bind still fall back to the table default, and a
+    caller that binds nothing gets pure ``[classifier_defaults]``
+    behavior (the historical single-classifier default). Caller-bound
+    slot names always win on conflict.
 
-    No API keys: classifier backends are local-model wrappers. Per-
-    entry fields (``model`` plus any optional fields the specific
-    backend reads) are forwarded as kwargs to the backend constructor.
+    The return value is a tuple, not a slot dict: callers that want an
+    ensemble (multiple distinct entries bound to different slots) get
+    every distinct backend, each instantiated once, in a stable order
+    (sorted by slot name, first occurrence wins when two slots share
+    one entry). Callers that only care about one classifier take
+    ``result[0]`` or pass the whole tuple straight into a scorer that
+    accepts a sequence.
 
-    The runtime device / dtype / batch settings come from a
-    :class:`TransformerProvider`. Resolve one with
-    :func:`load_transformer_providers` + :func:`resolve_transformer_provider`
-    and pass it via the ``provider`` kwarg; when omitted, the
-    process-wide host-auto provider is used. The legacy per-classifier
-    ``device`` field is silently dropped: configure it via the provider
-    instead.
+    Provider selection for each entry follows
+    :func:`_provider_for_classifier_entry`.
 
-    Missing ``[classifiers.*]`` and ``[classifier_defaults]`` are not
-    an error -- this lets pre-Step-1 callers ignore the new sections
-    entirely. The returned dicts are empty in that case.
-
-    Raises ``FileNotFoundError`` if the config file is not found.
-    Raises :class:`ServiceConfigError` for unknown backend types.
+    Raises ``FileNotFoundError`` if SERVICES.toml is missing.
+    Raises :class:`ServiceConfigError` for unknown backends, unknown
+    inventory entries, or unknown per-entry provider names.
     """
     if path is None:
         path = _find_services_toml()
@@ -257,37 +331,52 @@ def load_classifiers(
         config = tomllib.load(f)
 
     classifiers_config = config.get("classifiers", {})
-    defaults = config.get("classifier_defaults", {})
+    # [classifier_defaults] is a base layer, not an all-or-nothing
+    # fallback: a caller binding a subset of slots still gets the
+    # other framework-default slots filled in. Caller-bound slot names
+    # win on conflict.
+    defaults = dict(config.get("classifier_defaults", {}))
+    merged_binding: dict[str, str] = {**defaults, **(binding or {})}
 
-    if provider is None:
-        provider = default_auto_provider()
+    if not merged_binding:
+        return ()
 
-    classifiers: dict[str, ClassifierBackend] = {}
-    for name, cfg in classifiers_config.items():
-        backend_key = cfg.get("backend")
-        if backend_key not in CLASSIFIER_BACKEND_REGISTRY:
+    providers, provider_defaults = load_transformer_providers(path)
+
+    instances: dict[str, ClassifierBackend] = {}
+    # Ordered dedupe: a plain ``set`` would make the return order
+    # nondeterministic across runs (hash-order, not insertion-order),
+    # which conflicts with the repo's determinism rules and with
+    # ``score_hypotheses``, which relies on a stable input sequence
+    # before it applies its own type/model_id sort.
+    ordered: list[ClassifierBackend] = []
+
+    for slot_name, entry_name in sorted(merged_binding.items()):
+        if entry_name not in classifiers_config:
             raise ServiceConfigError(
-                f"Classifier '{name}' declares backend '{backend_key}' "
-                f"which is not in the registry. "
-                f"Available: {sorted(CLASSIFIER_BACKEND_REGISTRY)}"
+                f"Classifier slot {slot_name!r} references entry "
+                f"{entry_name!r} which is not defined in SERVICES.toml. "
+                f"Available: {sorted(classifiers_config)}"
+            )
+        if entry_name not in instances:
+            cfg = classifiers_config[entry_name]
+            provider = _provider_for_classifier_entry(
+                cfg,
+                providers,
+                provider_defaults,
+                provider_override=provider_override,
+            )
+            backend = _instantiate_classifier(entry_name, cfg, provider)
+            instances[entry_name] = backend
+            ordered.append(backend)
+            logger.info(
+                "Classifier entry %r model=%s provider=%s",
+                entry_name,
+                backend.model_id,
+                backend.provider.name,
             )
 
-        # Drop `backend` (used above) and the legacy `device` field
-        # (now owned by the provider). Forward the rest as kwargs.
-        init_kwargs: dict[str, Any] = {
-            k: v for k, v in cfg.items() if k not in ("backend", "device")
-        }
-        init_kwargs["provider"] = provider
-
-        backend_cls = CLASSIFIER_BACKEND_REGISTRY[backend_key]
-        classifiers[name] = backend_cls(**init_kwargs)
-        logger.info(
-            "Classifier '%s': %s  model=%s  provider=%s (device=%s dtype=%s batch=%d)",
-            name, backend_key, cfg.get("model", ""),
-            provider.name, provider.device, provider.dtype, provider.batch_size,
-        )
-
-    return classifiers, defaults
+    return tuple(ordered)
 
 
 def load_embedders(
@@ -297,7 +386,7 @@ def load_embedders(
 ) -> tuple[dict[str, EmbeddingBackend], dict[str, str]]:
     """Parse SERVICES.toml ``[embedders.*]``, build EmbeddingBackend instances.
 
-    Parallel to :func:`load_classifiers`. Returns ``(embedders, defaults)``
+    Parallel to :func:`resolve_classifiers`. Returns ``(embedders, defaults)``
     where ``embedders`` maps names to
     :class:`pipeline.transformer_backend.EmbeddingBackend` instances and
     ``defaults`` maps slot names to embedder names from
@@ -335,8 +424,12 @@ def load_embedders(
         embedders[name] = EmbeddingBackend(model_id, provider)
         logger.info(
             "Embedder '%s': model=%s  provider=%s (device=%s dtype=%s batch=%d)",
-            name, model_id,
-            provider.name, provider.device, provider.dtype, provider.batch_size,
+            name,
+            model_id,
+            provider.name,
+            provider.device,
+            provider.dtype,
+            provider.batch_size,
         )
 
     return embedders, defaults
@@ -406,7 +499,7 @@ def resolve_transformer_provider(
 
     Raises ``KeyError`` if the resolved name is not in ``providers``.
     Mirrors the slot-resolution pattern used by :func:`resolve_slots`
-    and :func:`resolve_classifier_slots`.
+    and :func:`resolve_classifiers`.
     """
     name = (
         override
@@ -420,41 +513,6 @@ def resolve_transformer_provider(
             f"SERVICES.toml. Available: {sorted(providers)}"
         )
     return providers[name]
-
-
-def resolve_classifier_slots(
-    classifiers: dict[str, ClassifierBackend],
-    defaults: dict[str, str],
-    overrides: dict[str, str] | None = None,
-) -> dict[str, ClassifierBackend]:
-    """Map classifier slot names to ClassifierBackend instances.
-
-    Parallel to :func:`resolve_slots`. ``overrides`` (from
-    ``--classifier`` CLI flags) beat ``defaults`` (from
-    ``[classifier_defaults]`` in SERVICES.toml).
-
-    When a single override has no ``=`` (e.g., ``--classifier
-    zeroshot-base``), it applies to all slots in ``defaults``.
-
-    Raises ``KeyError`` if a slot references a classifier name that
-    doesn't exist.
-    """
-    merged = dict(defaults)
-    if overrides:
-        merged.update(overrides)
-
-    slots: dict[str, ClassifierBackend] = {}
-    for slot_name, classifier_name in merged.items():
-        if classifier_name not in classifiers:
-            raise KeyError(
-                f"Slot '{slot_name}' references classifier "
-                f"'{classifier_name}' which is not defined in "
-                f"SERVICES.toml. "
-                f"Available classifiers: {sorted(classifiers)}"
-            )
-        slots[slot_name] = classifiers[classifier_name]
-
-    return slots
 
 
 def resolve_pipeline_models(
@@ -515,5 +573,3 @@ def resolve_pipeline_models(
         out[logical_name] = registry.services[service_name]
 
     return out
-
-

@@ -48,16 +48,16 @@ def _spec(
 
 
 def test_step_context_classifiers_defaults_to_empty():
-    """StepContext gains a classifiers slot parallel to agents."""
+    """StepContext.classifiers defaults to an empty tuple."""
     ctx = StepContext()
-    assert ctx.classifiers == {}
+    assert ctx.classifiers == ()
 
 
 def test_step_context_classifiers_populated_from_orchestrator():
-    """Smoke: pass a resolved classifier dict; it lands keyed by slot name."""
+    """Smoke: pass the resolved classifier tuple straight through."""
     sentinel = object()
-    ctx = StepContext(classifiers={"selector": sentinel})
-    assert ctx.classifiers["selector"] is sentinel
+    ctx = StepContext(classifiers=(sentinel,))
+    assert ctx.classifiers[0] is sentinel
 
 
 def test_compose_system_prompt_append():

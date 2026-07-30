@@ -38,7 +38,7 @@ from pipeline.errors import (
     MissingMetadataError,
     MissingSystemPromptError,
 )
-from pipeline.markdown import sections as _split_sections
+from pipeline.markdown import bullet_map, sections as _split_sections
 
 _STEP_RE = re.compile(r"^(?:Step\s+)?(\d+)")
 _META_RE = re.compile(r"^-\s+\*\*([\w \-]+):\*\*\s*(.+)$")
@@ -46,8 +46,6 @@ _STEP_SYSTEM_RE = re.compile(
     r"^### System Prompt\s*\n(?P<body>.*?)(?=^### |\Z)",
     re.MULTILINE | re.DOTALL,
 )
-_MD_BOLD_ITEM_RE = re.compile(r"^\s*-\s+\*\*(\w+):\*\*\s*(.+)", re.MULTILINE)
-
 _PREAMBLE_KEY = "_preamble"
 _SECTION_SERVICES = "Services"
 _SECTION_CONFIG = "Config"
@@ -300,13 +298,7 @@ def parse_pipeline_services(body: str) -> dict[str, str]:
     ``{"default": "anthropic-opus"}``. Keys are lowercased; empty
     values are skipped.
     """
-    out: dict[str, str] = {}
-    for m in _MD_BOLD_ITEM_RE.finditer(body):
-        name = m.group(1).strip().lower()
-        service = m.group(2).strip()
-        if service:
-            out[name] = service
-    return out
+    return bullet_map(body)
 
 
 def parse_pipeline_config(body: str) -> dict[str, str]:
@@ -315,13 +307,7 @@ def parse_pipeline_config(body: str) -> dict[str, str]:
     Same ``- **key:** value`` format as Services. Returns
     ``{"concurrency": "2", ...}``. Keys are lowercased.
     """
-    out: dict[str, str] = {}
-    for m in _MD_BOLD_ITEM_RE.finditer(body):
-        key = m.group(1).strip().lower()
-        value = m.group(2).strip()
-        if value:
-            out[key] = value
-    return out
+    return bullet_map(body)
 
 
 def parse_step_prompt(name: str, body: str) -> StepPrompt:
