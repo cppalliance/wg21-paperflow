@@ -83,7 +83,7 @@ from assay.rag import (
 )
 from assay.standard import StandardClient, from_service_config
 from assay.triage import should_analyze
-from pipeline.heading_classifiers import SURVEY_WORDING_HEADING_RE
+from assay.heading_classifiers import SURVEY_WORDING_HEADING_RE
 from pipeline import tokens_to_chars
 from assay.render import render_report, render_trace
 
