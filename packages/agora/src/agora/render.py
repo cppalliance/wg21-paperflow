@@ -308,4 +308,39 @@ def render_trace(state: PipelineState, stop_step: int) -> str:
             lines.append("- (no comments written)")
         lines.append("")
 
+    if stop_step >= 10:
+        lines.append("## 10. Reactor\n")
+        t = state.thread
+        if t is not None and t.submission_votes is not None:
+            submission_up = sum(
+                1 for v in t.submission_votes if v.direction == 1
+            )
+            lines.append(
+                f"- submission: {len(t.submission_votes)} votes "
+                f"({submission_up} up, "
+                f"{len(t.submission_votes) - submission_up} down)"
+            )
+            comment_votes = sum(len(r.votes) for r in t.replies)
+            lines.append(
+                f"- comments: {comment_votes} votes across "
+                f"{len(t.replies)} comments"
+            )
+            nets = sorted(
+                (
+                    (sum(v.direction for v in r.votes), r.slot_id, r.role)
+                    for r in t.replies
+                ),
+                reverse=True,
+            )
+            if nets:
+                top_net, top_slot, top_role = nets[0]
+                low_net, low_slot, low_role = nets[-1]
+                lines.append(
+                    f"- highest net: {top_slot} ({top_role}) at {top_net:+d};"
+                    f" lowest: {low_slot} ({low_role}) at {low_net:+d}"
+                )
+        else:
+            lines.append("- (no votes cast)")
+        lines.append("")
+
     return "\n".join(lines).rstrip() + "\n"

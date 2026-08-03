@@ -4,10 +4,11 @@ Plan and write a fake r/wg21 Reddit thread for a WG21 paper. Steps
 0-7 plan: they read paperstore extract tables, research the public
 landscape, calibrate discussion heat and intellectual interest, and
 lay out every reply slot with a brief describing what that reply must
-accomplish. Steps 8-9 generate: they cast a roster persona on every
-slot and write each comment body in that persona's voice. Votes,
-scores, and time labels are **not** produced here; the reactor pass
-owns votes, and everything display-side derives from them.
+accomplish. Steps 8-10 generate: they cast a roster persona on every
+slot, write each comment body in that persona's voice, and run the
+reactor pass — every persona's individual votes on every comment and
+the submission. Scores, orderings, and time labels are **not**
+produced here; everything display-side derives from revealed votes.
 
 ```mermaid
 flowchart TD
@@ -30,6 +31,7 @@ flowchart TD
     subgraph generate [Phase E Generate]
         S8[8 Cast]
         S9[9 Voice]
+        S10[10 Reactor]
     end
     S0 --> S1
     S1 --> S2
@@ -40,6 +42,7 @@ flowchart TD
     S6 --> S7
     S7 --> S8
     S8 --> S9
+    S9 --> S10
 ```
 
 ## Services
@@ -57,7 +60,7 @@ a structural plan — anchors, calibration, submission, every reply
 slot with its brief. While planning you do **not** invent reply text,
 character voices, votes, or any other Reddit furniture; the voice
 pass (Step 9) writes the comments later under per-persona
-instructions, and votes belong to the reactor pass.
+instructions, and the reactor pass (Step 10) casts the votes.
 
 You speak in the Mod's voice when shaping submissions and slot briefs:
 even-handed, technically precise, allergic to hype, willing to call
@@ -90,9 +93,10 @@ calibration tiers, and structural rules.
   explicitly leaves these ``None``. Step 8 (Cast) then fills
   ``character_username``, ``is_mod``, ``is_op``, ``edited``, and
   ``controversial``; Step 9 (Voice) fills ``content`` and
-  ``deleted``. ``score``, votes, ``ordering``, ``collapsed``,
-  ``removed``, and time labels stay ``None``/empty for the reactor
-  pass and the website. There are no awards anywhere in the system.
+  ``deleted``; Step 10 (Reactor) fills the per-persona votes.
+  ``score``, ``ordering``, ``collapsed``, ``removed``, and time
+  labels stay ``None``/empty for the website, which derives them
+  from revealed votes. There are no awards anywhere in the system.
 - **No noise furniture.** Noise slots get ``noise_tone`` and
   ``noise_stance`` labels and a one-line brief. Do not write the
   noise reply itself; the generation phase will.
@@ -534,3 +538,39 @@ view, so the pair always fits together.
 
 Output one ``content`` string per call: the comment body only, no
 username, no metadata.
+
+---
+
+## Step 10 - Reactor
+
+- **Model:** none
+- **Execution:** main
+
+Pure-Python reactor pass. Every roster persona and human mod casts
+individual ``+1``/``-1`` votes across the finished thread — each
+comment and the submission itself — recorded as ``Reply.votes`` and
+``submission_votes``. This decides **who voted how**, never when:
+reveal timing, aggregate scores, and ordering are website-side,
+derived from the votes recorded here.
+
+The pass is a deterministic heuristic seeded by the roster's reactor
+floats; no model is called:
+
+- Two stable-hash draws decide each ``(persona, target)`` pair: one
+  gates participation (base rate by heat tier, plus a bonus when the
+  persona commented in the thread, decaying with reply depth — a
+  top-level quip is seen by everyone, a depth-5 turn by whoever
+  expanded the subthread), one picks the direction.
+- ``upvote_bias`` sets the base upvote probability;
+  ``snark_affinity`` swings the vote on snarky noise (high rewards
+  the quip, low punishes it); ``contrarianism`` counts against
+  consensus targets — signal, teaser, encounter, and mod comments,
+  and the submission. Deleted slots vote as if deleted for cause.
+- The the-mod.md section 4 dynamics emerge: snark outscores
+  substance, which usually stays above water but never wins, and a
+  correct technical take can occasionally sit buried.
+
+Constraints: at most one vote per ``(persona, target)``; every voter
+is a roster username; AutoModerator never votes; nobody votes on
+their own comment or submission. Re-running the same thread yields
+the identical vote set.

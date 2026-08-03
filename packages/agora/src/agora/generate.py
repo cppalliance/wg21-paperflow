@@ -33,9 +33,9 @@ Two steps appended after the planner's Serialize step:
   never reach the LLM: their body is the literal ``[deleted]`` and
   the flag is set here.
 
-Votes, scores, orderings, and time labels stay ``None``/empty: the
-reactor pass owns votes and everything display-side derives from
-them.
+Votes, scores, orderings, and time labels stay ``None``/empty here:
+the reactor pass (Step 10, :mod:`agora.reactor`) owns votes and
+everything display-side derives from them.
 """
 
 from __future__ import annotations

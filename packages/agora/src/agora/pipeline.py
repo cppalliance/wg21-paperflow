@@ -14,14 +14,16 @@ structure; this module conforms to it.
 
 One-shot, fully batch. No human-in-the-loop.
 
-The pipeline runs Steps 0-7 (analysis phase) followed by Steps 8-9
-(generation phase, :mod:`agora.generate`). Steps 0-7 plan the thread
-and write the blueprint ``{pid}.agora.json`` to paperstore; Step 8
-casts a roster persona on every slot and Step 9 writes the comment
-bodies in those voices, mutating the ``Thread`` in place. Votes,
-scores, orderings, and time labels remain ``None``/empty — the
-reactor pass owns votes, and the full-artifact emit happens with the
-integration work.
+The pipeline runs Steps 0-7 (analysis phase) followed by Steps 8-10
+(generation phase, :mod:`agora.generate` and :mod:`agora.reactor`).
+Steps 0-7 plan the thread and write the blueprint
+``{pid}.agora.json`` to paperstore; Step 8 casts a roster persona on
+every slot, Step 9 writes the comment bodies in those voices, and
+Step 10 runs the reactor pass — every persona's individual votes —
+mutating the ``Thread`` in place. Scores, orderings, and time labels
+remain ``None``/empty (the website derives them from revealed
+votes), and the full-artifact emit happens with the integration
+work.
 """
 
 from __future__ import annotations
@@ -59,6 +61,7 @@ from agora import mod_reference
 from agora.casting import MISCONCEPTION_STANCE
 from agora.errors import PaperNotConvertedError, PaperNotFoundError
 from agora.generate import _pure_cast, _pure_voice
+from agora.reactor import _pure_react
 from agora.models import (
     CalibrationOutput,
     Committee,
@@ -89,6 +92,7 @@ _STEP_6_ENCOUNTERS = "Step 6 - Encounters"
 _STEP_7_SERIALIZE = "Step 7 - Serialize"
 _STEP_8_CAST = "Step 8 - Cast"
 _STEP_9_VOICE = "Step 9 - Voice"
+_STEP_10_REACTOR = "Step 10 - Reactor"
 
 
 # -- Committee routing -------------------------------------------------------
@@ -834,6 +838,7 @@ def _build_hooks(*, research: bool = True) -> dict[str, StepHooks]:
         _STEP_7_SERIALIZE: StepHooks(custom=_pure_serialize),
         _STEP_8_CAST: StepHooks(custom=_pure_cast),
         _STEP_9_VOICE: StepHooks(custom=_pure_voice),
+        _STEP_10_REACTOR: StepHooks(custom=_pure_react),
     }
 
 
@@ -853,12 +858,13 @@ async def agora_paper(
     """Plan and generate a Reddit thread for a dissected WG21 paper.
 
     Loads ``agora.md``, resolves its ``## Services`` block against
-    SERVICES.toml, builds agents, and runs the 10-step pipeline:
+    SERVICES.toml, builds agents, and runs the 11-step pipeline:
     Steps 0-7 plan the thread and write the blueprint
-    ``{pid}.agora.json`` via ``backend.write_agora_json``; Steps 8-9
-    cast personas and write every comment body onto the returned
-    :class:`Thread`. Votes and scores stay ``None``/empty for the
-    reactor pass.
+    ``{pid}.agora.json`` via ``backend.write_agora_json``; Steps
+    8-10 cast personas, write every comment body, and fill the
+    per-persona votes onto the returned :class:`Thread`. Scores and
+    time labels stay ``None`` — the website derives them from
+    revealed votes.
 
     ``research=False`` turns Step 2 off for this run: no web search
     or MCP traffic; the thread calibrates from paper signals alone
