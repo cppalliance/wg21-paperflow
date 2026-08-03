@@ -64,6 +64,19 @@ def _linkify_stable_labels(text: str) -> str:
 SEVERITY_ORDER = {"critical": 0, "significant": 1, "minor": 2}
 
 
+def _unique_gaps(gaps_by_lens: dict[str, list[GapOutput]] | None) -> list[GapOutput]:
+    """One entry per gap.id across all lens buckets."""
+    by_id: dict[int, GapOutput] = {}
+    for lens_list in (gaps_by_lens or {}).values():
+        for g in lens_list:
+            prev = by_id.get(g.id)
+            if prev is None:
+                by_id[g.id] = g
+            elif SEVERITY_ORDER.get(g.severity, 3) < SEVERITY_ORDER.get(prev.severity, 3):
+                by_id[g.id] = g
+    return list(by_id.values())
+
+
 # -- Report data model -------------------------------------------------------
 
 
@@ -281,9 +294,7 @@ def prepare_report_data(state: PipelineState) -> ReportData:
         for s in (state.strengths or [])
     ]
 
-    all_gaps: list[GapOutput] = []
-    for lens_list in (state.gaps_by_lens or {}).values():
-        all_gaps.extend(lens_list)
+    all_gaps = _unique_gaps(state.gaps_by_lens)
     gap_sev = Counter(b.severity for b in all_gaps)
 
     killed_list = state.killed or []
@@ -480,10 +491,12 @@ def load_assay_state(pid: str, backend) -> PipelineState:
     for b in gap_rows:
         lens = b.primary_lens or "Other"
         g = GapOutput(
+            id=b.uid,
             chunk_index=b.chunk_index, item_quote="", line=b.loc_line,
             gap=b.gap, why_important=b.why_important,
             primary_lens=b.primary_lens, secondary_lens=b.secondary_lens or None,
             severity=b.severity,
+            closed_by=list(b.closed_by or []),
         )
         gaps_by_lens.setdefault(lens, []).append(g)
 
@@ -767,14 +780,12 @@ def render_trace(state: PipelineState, step: int, *, step_durations: list[float]
                         lines.append(f"- [{lb.id}] {_q(lb.quote)}")
                     lines.append("")
             if state.gaps_by_lens is not None:
-                all_bcs_derive: list[GapOutput] = []
-                for lens_list in state.gaps_by_lens.values():
-                    all_bcs_derive.extend(lens_list)
+                all_bcs_derive = _unique_gaps(state.gaps_by_lens)
                 if all_bcs_derive:
                     bc_sev = Counter(b.severity for b in all_bcs_derive)
                     lines.append(f"### Gaps ({len(all_bcs_derive)}: {bc_sev.get('critical', 0)} critical, {bc_sev.get('significant', 0)} significant, {bc_sev.get('minor', 0)} minor)")
                     lines.append("")
-                    for b in sorted(all_bcs_derive, key=lambda x: {"critical": 0, "significant": 1, "minor": 2}.get(x.severity, 3)):
+                    for b in sorted(all_bcs_derive, key=lambda x: SEVERITY_ORDER.get(x.severity, 3)):
                         lines.append(f"- [{b.id}] [{b.severity}] {b.gap} (line {b.line})")
                     lines.append("")
 
