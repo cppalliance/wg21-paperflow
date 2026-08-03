@@ -294,6 +294,10 @@ class TestIsDiagramBlock:
     def test_subscript_line(self):
         assert is_diagram_block(["x₀ + y₁"])
 
+    def test_math_symbols_opt_out_keeps_other_signals(self):
+        assert not is_diagram_block(["int f(); // §[basic.def]"], math_symbols=False)
+        assert is_diagram_block(["┌─────┐"], math_symbols=False)
+
     def test_pipe_only_art_line(self):
         assert is_diagram_block(["             |", "  code();"])
 

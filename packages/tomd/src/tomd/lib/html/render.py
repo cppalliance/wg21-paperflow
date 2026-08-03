@@ -1,15 +1,17 @@
 """DOM-to-Markdown rendering for WG21 HTML papers."""
 
 import html as _html
+import json
 import re
 import urllib.parse
 from collections import deque
 
 from bs4 import BeautifulSoup, CData, Comment, Tag, NavigableString
 
-from .. import strip_format_chars, ALLOWED_LINK_SCHEMES
+from .. import CODE_LANG_LABELS, strip_format_chars, ALLOWED_LINK_SCHEMES
 from ..wording_markup import WORDING_FENCE_CLOSE, wording_fence_open, wording_tag_open
 from .. import tables as _tables
+from ..pdf.code_format import is_diagram_block
 
 _BOLD_WRAP_RE = re.compile(r"^\*\*(.+)\*\*$")
 _LOSSY_TABLE_MARKER = "<!-- tomd:lossy-table -->"
@@ -536,7 +538,7 @@ def _render_element(el: Tag, generator: str) -> str | None:
         return _render_paragraph(el)
 
     if tag == "pre":
-        return _render_pre(el, generator)
+        return _render_pre(el)
 
     if tag == "code-block":
         return _render_code_block_custom(el)
@@ -704,16 +706,185 @@ def _collapse_whitespace(text: str) -> str:
     return _COLLAPSE_WS_RE.sub(" ", text).strip()
 
 
-def _render_pre(el: Tag, generator: str) -> str:
+# WG21 papers are C++ by default: a classless code block with no non-C++
+# signal is labeled ``cpp`` so downstream pipelines (dissect/agora) can parse
+# it as code. The default is conservative (issue #297): recognized non-C++/
+# neutral classes and obvious non-C++ classless shapes are NOT relabeled
+# ``cpp``, since the defect being fixed is false ``cpp`` labels. The recognized
+# language set is shared with the PDF detector (``CODE_LANG_LABELS``).
+_WG21_DEFAULT_CODE_LANG = "cpp"
+
+# Recognized CSS classes that carry no programming language: prose/data,
+# grammar, and ASCII-diagram blocks. A code element wearing one emits an
+# unlabeled fence rather than a false ``cpp`` (corpus-observed on ``text``,
+# ``txt``, ``ebnf``, ``diagram`` blocks). ``swift`` and other real languages
+# stay in ``CODE_LANG_LABELS`` and are labeled with their own name.
+_NEUTRAL_CODE_CLASSES = frozenset({"text", "txt", "ebnf", "diagram"})
+
+# Classless-block content heuristics (high precision, avoid unlabeling real
+# C++). Shell/console: a ``$`` prompt, a shebang, a ``git log`` transcript
+# header, or a line-leading non-ambiguous shell command. JSON/data: an object
+# or array. Grammar: a BNF ``::=`` rule.
+_SHELL_PROMPT_RE = re.compile(r"^\s*\$ ")
+_SHELL_COMMAND_RE = re.compile(
+    r"^\s*(?:sudo\s+)?(?:git|cd|mkdir|rmdir|apt|apt-get|yum|dnf|brew|cmake|"
+    r"curl|wget|chmod|chown|tar|unzip|ssh|scp|pip|pip3|npm|yarn|docker|"
+    r"kubectl|gcc|clang\+\+|clang|g\+\+)(?:\s|$)"
+)
+_GIT_TRANSCRIPT_RE = re.compile(r"^\s*(?:commit [0-9a-f]{7,40}\b|Author:\s|Date:\s)")
+# Line-anchored so it matches a pretty-printed JSON key, not any quoted string
+# followed by a colon: an unanchored search fires on the everyday C++ ternary
+# ``flag ? "yes" : "no"`` and unlabels real C++.
+_JSON_KEY_RE = re.compile(r'^\s*"[^"]*"\s*:', re.MULTILINE)
+_GRAMMAR_RULE_RE = re.compile(r"::=")
+
+# A block of >= this many ``$``-prompt lines is a shell/console transcript
+# even when the first line is preamble prose.
+_MIN_SHELL_PROMPT_LINES = 2
+
+# ASCII box border, e.g. ``+--------+`` or ``+----+----+``: only box-rule
+# characters, with at least two corners and a run of rules. ``is_diagram_block``
+# cannot see these (it requires ``|``/``\`` on the line and rejects any letter,
+# so a box with a label inside it escapes detection entirely), and real C++
+# never produces the shape.
+_BOX_BORDER_CHARS = frozenset("+-= ")
+_BOX_BORDER_RULE_CHARS = "-="
+_BOX_BORDER_MIN_CORNERS = 2
+_BOX_BORDER_MIN_RULES = 3
+
+
+def _resolve_lang_token(token: str) -> str | None:
+    """Map a lowercased language token to a fence lang, "" (neutral), or None.
+
+    Returns ``""`` for a recognized neutral/non-code class (kept unlabeled),
+    the canonical fence language for a recognized language, or ``None`` when
+    the token is not recognized.
+    """
+    if token in _NEUTRAL_CODE_CLASSES:
+        return ""
+    return CODE_LANG_LABELS.get(token)
+
+
+def _resolve_explicit_lang(token: str) -> str:
+    """Resolve an author-declared token (``language-*`` / ``sourceCode*``).
+
+    An unrecognized declaration is honored verbatim: an explicit class is the
+    author's statement of intent, so ``language-fortran`` stays ``fortran``.
+    """
+    resolved = _resolve_lang_token(token)
+    return resolved if resolved is not None else token
+
+
+def _lang_from_classes(classes: list[str]) -> str | None:
+    """Resolve a code-fence language from a code element's CSS classes.
+
+    Returns the fence language for a recognized language class, ``""`` for a
+    recognized neutral/non-code class (prose, grammar, diagram) that must stay
+    unlabeled, or ``None`` when no class is recognized (the caller then applies
+    the content heuristic / cpp default). A bare class token counts only when
+    it is a recognized language or neutral class, so styling classes such as
+    ``highlight`` do not suppress detection on a sibling ``language-*`` class.
+    """
+    for cls in classes:
+        if cls.startswith("sourceCode"):
+            token = cls[len("sourceCode"):].lower()
+            if token:
+                return _resolve_explicit_lang(token)
+            continue
+        if cls.startswith("language-"):
+            return _resolve_explicit_lang(cls[len("language-"):].lower())
+        resolved = _resolve_lang_token(cls.lower())
+        if resolved is not None:
+            return resolved
+    return None
+
+
+def _looks_like_shell(text: str) -> bool:
+    """True for an obvious shell/console/git transcript classless block."""
+    lines = [ln for ln in text.splitlines() if ln.strip()]
+    if not lines:
+        return False
+    first = lines[0]
+    if first.lstrip().startswith("#!"):
+        return True
+    if _GIT_TRANSCRIPT_RE.match(first):
+        return True
+    if _SHELL_PROMPT_RE.match(first) or _SHELL_COMMAND_RE.match(first):
+        return True
+    prompt_lines = sum(1 for ln in lines if _SHELL_PROMPT_RE.match(ln))
+    return prompt_lines >= _MIN_SHELL_PROMPT_LINES
+
+
+def _looks_like_json(text: str) -> bool:
+    """True for an obvious JSON/data classless block."""
+    stripped = text.strip()
+    if not stripped or stripped[0] not in "{[":
+        return False
+    try:
+        parsed = json.loads(stripped)
+    except (ValueError, RecursionError):
+        parsed = None
+    if isinstance(parsed, dict):
+        return True
+    if isinstance(parsed, list) and any(isinstance(x, (dict, str)) for x in parsed):
+        return True
+    # JSON with comments or trailing commas will not parse; a brace-opened
+    # block with quoted keys is still a strong structural signal.
+    return stripped[0] == "{" and _JSON_KEY_RE.search(stripped) is not None
+
+
+def _looks_like_grammar(text: str) -> bool:
+    """True for a BNF/EBNF grammar block (``::=`` production rule)."""
+    return _GRAMMAR_RULE_RE.search(text) is not None
+
+
+def _is_box_border_line(line: str) -> bool:
+    """True for an ASCII box border line such as ``+--------+``."""
+    stripped = line.strip()
+    if not stripped or not all(ch in _BOX_BORDER_CHARS for ch in stripped):
+        return False
+    rules = sum(1 for ch in stripped if ch in _BOX_BORDER_RULE_CHARS)
+    return (
+        stripped.count("+") >= _BOX_BORDER_MIN_CORNERS
+        and rules >= _BOX_BORDER_MIN_RULES
+    )
+
+
+def _looks_like_diagram(text: str) -> bool:
+    """True for a text ASCII diagram (box-drawing / arrows / box / pipe-art).
+
+    ``math_symbols=False``: ``§`` is WG21's clause-reference symbol and appears
+    in ordinary C++ comments, so it must not unlabel a block.
+    """
+    lines = text.splitlines()
+    if any(_is_box_border_line(ln) for ln in lines):
+        return True
+    return is_diagram_block(lines, math_symbols=False)
+
+
+def _lang_from_content(text: str) -> str:
+    """Pick a fence language for a classless code block.
+
+    WG21 papers are C++ by default, so an ambiguous classless block is
+    ``cpp``. Obvious non-C++ shapes (shell/console, JSON/data, grammar, ASCII
+    diagrams) are detected first and left unlabeled rather than mislabeled.
+    """
+    if (
+        _looks_like_shell(text)
+        or _looks_like_json(text)
+        or _looks_like_grammar(text)
+        or _looks_like_diagram(text)
+    ):
+        return ""
+    return _WG21_DEFAULT_CODE_LANG
+
+
+def _render_pre(el: Tag) -> str:
     """Render a preformatted block as a fenced code block."""
     code_el = el.find("code")
-    if code_el:
-        lang = _detect_code_language(code_el, generator)
-        text = code_el.get_text()
-    else:
-        lang = ""
-        text = el.get_text()
-    text = text.strip("\n")
+    source = code_el or el
+    lang = _detect_code_language(source)
+    text = source.get_text().strip("\n")
     return f"```{lang}\n{text}\n```"
 
 
@@ -724,29 +895,24 @@ def _render_code_block_custom(el: Tag) -> str:
     return f"```cpp\n{text}\n```"
 
 
-def _detect_code_language(code_el: Tag, generator: str) -> str:
-    """Detect the programming language from code element classes."""
-    classes = code_el.get("class", [])
-    for cls in classes:
-        if cls.startswith("sourceCode"):
-            lang = cls[len("sourceCode"):]
-            if lang:
-                return lang.lower()
-        if cls.startswith("language-"):
-            return cls[len("language-"):].lower()
-        if cls in ("cpp", "c", "python", "javascript", "rust", "go",
-                    "java", "bash", "shell", "json", "yaml", "xml"):
-            return cls
-    parent = code_el.parent
-    if parent and parent.name == "pre":
-        for cls in parent.get("class", []):
-            if cls.startswith("sourceCode"):
-                lang = cls[len("sourceCode"):]
-                if lang:
-                    return lang.lower()
-    if generator == "mpark":
-        return "cpp"
-    return ""
+def _detect_code_language(el: Tag) -> str:
+    """Detect the fenced-code language for a ``<pre>``/``<code>`` element.
+
+    An explicit language class on the element (or, for a ``<code>``, its parent
+    ``<pre>``) wins, mapping recognized languages to their fence name and
+    recognized neutral classes (``text``, ``ebnf``, ``diagram``, ...) to an
+    unlabeled fence. Absent a recognized class, the block's content is
+    inspected: obvious non-C++ shapes stay unlabeled and everything else falls
+    back to the WG21 ``cpp`` default.
+    """
+    lang = _lang_from_classes(el.get("class", []))
+    if lang is None and el.name == "code":
+        parent = el.parent
+        if parent and parent.name == "pre":
+            lang = _lang_from_classes(parent.get("class", []))
+    if lang is not None:
+        return lang
+    return _lang_from_content(el.get_text())
 
 
 def _render_div(el: Tag, generator: str) -> str | None:
@@ -756,7 +922,7 @@ def _render_div(el: Tag, generator: str) -> str | None:
     if "sourceCode" in classes:
         pre = el.find("pre")
         if pre:
-            return _render_pre(pre, generator)
+            return _render_pre(pre)
 
     if "code" in classes:
         text = el.get_text()

@@ -2,6 +2,7 @@
 
 from tomd.lib.shared import (  # noqa: F401
     ALLOWED_LINK_SCHEMES,
+    CODE_LANG_LABELS,
     DATE_RE,
     DEFAULT_FENCE_LANG,
     DOC_NUM_PATTERN,
@@ -36,6 +37,7 @@ from tomd.lib.metadata_yaml.format import (  # noqa: F401
 
 __all__ = [
     "ALLOWED_LINK_SCHEMES",
+    "CODE_LANG_LABELS",
     "DATE_RE",
     "DEFAULT_FENCE_LANG",
     "DOC_NUM_PATTERN",

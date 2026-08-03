@@ -96,8 +96,9 @@ The converter handles six generator families (mpark/wg21, Bikeshed, hand-written
 **T11. Code block rendering**
 - `render.py:_render_pre`, `_detect_code_language`
 - `<pre><code>` -> fenced block with language tag
-- Language detection: `sourceCode*` class prefix, `language-*` prefix, known language class names
-- Default language: `"cpp"` for mpark generator, `""` otherwise
+- Language detection: `sourceCode*` class prefix, `language-*` prefix, or known language class names, read from the `<code>` or (for `<code>`) its parent `<pre>`, resolved against the shared `CODE_LANG_LABELS` set (`c++`/`cxx` -> `cpp`; `swift`/`typescript`/`sql`/`css`/... keep their own name). Recognized neutral classes (`text`, `txt`, `ebnf`, `diagram`) -> unlabeled fence
+- Default language: `"cpp"` (WG21 papers are C++ by default) for a **classless** block, unless its content is an obvious non-C++ shape (shell/console or git transcript via `_looks_like_shell`, JSON/data via `_looks_like_json`, BNF grammar via `_looks_like_grammar`, ASCII diagram via `_looks_like_diagram`), which stays unlabeled. Conservative by design (issue #297): the defect is false `cpp` labels, so when in doubt leave unlabeled
+- Two carve-outs keep these predicates from unlabeling real C++, and from missing a real diagram. Do not widen either without a corpus check: (a) `_looks_like_diagram` calls the shared `is_diagram_block` with `math_symbols=False`, because `§` is WG21's clause-reference symbol and appears in ordinary C++ comments; it adds `_is_box_border_line` (`+--------+`), which `is_diagram_block` cannot see because it requires `|`/`\` on the line and rejects any letter, so a *labeled* box escapes it. (b) `_JSON_KEY_RE` is line-anchored, because an unanchored quoted-string-then-colon search fires on the everyday C++ ternary `flag ? "yes" : "no"`
 - Code text extracted via `get_text()` (strips all HTML spans/highlighting)
 
 **T12. Table rendering**

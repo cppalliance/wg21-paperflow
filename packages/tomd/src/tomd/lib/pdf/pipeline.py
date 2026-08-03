@@ -1775,7 +1775,8 @@ def run_pipeline(
 
     # --- Phase 1b: Body structuring (may detect title for metadata) ---
     body_metadata, sections, nesting_corrections = structure_body(
-        sections, has_title=has_title, figure_regions=all_figure_regions or None
+        sections, has_title=has_title, figure_regions=all_figure_regions or None,
+        metadata_title=metadata.get("title"),
     )
     for k, v in body_metadata.items():
         if k not in metadata:
