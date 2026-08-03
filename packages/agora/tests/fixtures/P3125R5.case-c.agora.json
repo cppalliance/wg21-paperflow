@@ -1,0 +1,3095 @@
+{
+  "schema_version": 1,
+  "document": "P3125R5",
+  "paper": "P3125",
+  "revision": 5,
+  "mailing_id": "2026-05",
+  "title": "constexpr pointer tagging",
+  "authors": [
+    "Hana Dusíková"
+  ],
+  "audience": "LEWG Library Evolution,LWG Library",
+  "subreddit": "r/wg21",
+  "committee": "lewg",
+  "paper_type": "proposal",
+  "heat": "warm",
+  "interest": "relevant",
+  "revision_case": "C",
+  "prior_revision": "P3125R4",
+  "submission_title": "P3125R5 - constexpr pointer tagging (was P3125R4)",
+  "submission_body": "**Author:** Hana Dusíková  \n**Document:** P3125R5  \n**Date:** 2026-05-12  \n**Audience:** LEWG Library Evolution, LWG Library  \n**Revision:** R5 (prior: <a href=\"p3125r4-reddit.html\">P3125R4</a>)  \n**Link:** https://wg21.link/p3125r5\n\nThis is the fifth revision of Dusíková's proposal to standardize pointer tagging—the ancient art of stuffing a few bits of metadata into the alignment-padding low bits of a pointer. R5 updates the paper body to match the R4 wording changes (the first template argument switched from pointee to pointer, `void*` support added, `pointer_tag_trait` and tuple protocol landed) and reintroduces the design section with a worked example implementation. The big open question LEWG needs to resolve: should the first template parameter be the pointer type or the pointee type? LLVM's internal `PointerIntPair` uses pointer, but the rest of the standard library is pointee-first.\n\nThe core type is `pointer_tag_pair<Ptr, TagT, BitsRequested>`, a trivially-copyable pair that's guaranteed to be exactly `sizeof(Ptr)` bytes. It stores a tag value in the low bits that alignment guarantees are zero, with `pointer_bits_available` providing a consteval query for how many bits you actually get. The normal constructor is only available when the pointee's natural alignment provides enough bits; if you've overallocated, you reach for the verbose `from_overaligned<PromisedAlignment>` factory. The paper explicitly does *not* touch high bits (Intel LAM, ARM TBI)—SG1 killed that as dangerous and non-portable—and it does not model a pointer, manage lifetimes, or support function pointers.\n\nDusíková positions this as the last missing piece for `constexpr atomic<shared_ptr<T>>` and a building block for constexpr data structures like HAMTs. The implementation experience is real: she shipped a clang+libc++ prototype (PR #111861) that adds compiler builtins for tagging/untagging without round-tripping through integers, preserving pointer provenance. The constexpr path stores the tag in pointer metadata rather than address bits, which is clever but means this can't be a pure library—it needs compiler support. The paper acknowledges provenance loss as a problem and argues `void*` is better than `uintptr_t` for the raw tagged pointer interface, though the wording currently leaves `tagged_pointer()` and `from_tagged()` as non-constexpr escape hatches for legacy interop.\n\nWhat's not addressed: ABI stability across translation units (critical if you're storing these in atomics), thread safety semantics for the `atomic<shared_ptr>` use case, and how this interacts with platforms where pointers aren't just integers with spare bits (CHERI, fat pointer architectures). The paper also doesn't specify whether `pointer_tag_pair` can participate in constexpr pointer comparison or subtraction, which matters for the data structure use cases it's selling.",
+  "submission_link": "https://wg21.link/p3125r5",
+  "submission_tag": "Proposal [Update]",
+  "submission_poster_id": "embedded_for_20_years",
+  "submission_votes": [
+    {
+      "persona": "monomorphic_dan",
+      "direction": -1
+    },
+    {
+      "persona": "lifetimes_lucy",
+      "direction": 1
+    },
+    {
+      "persona": "async_skeptic",
+      "direction": 1
+    },
+    {
+      "persona": "ranges_andy",
+      "direction": 1
+    },
+    {
+      "persona": "nanosecond_nancy",
+      "direction": -1
+    },
+    {
+      "persona": "not_a_real_cpp_dev",
+      "direction": 1
+    },
+    {
+      "persona": "bootcamp_grad_2025",
+      "direction": 1
+    },
+    {
+      "persona": "committee_gonna_committee",
+      "direction": 1
+    },
+    {
+      "persona": "not_on_the_committee",
+      "direction": -1
+    },
+    {
+      "persona": "template_janitor",
+      "direction": 1
+    }
+  ],
+  "technical_anchors": [
+    {
+      "id": "a01",
+      "kind": "critical_gap",
+      "summary": "The paper does not address how pointer_tag_pair interacts with pointer provenance and optimizations in the abstract machine, despite acknowledging provenance loss as a problem.",
+      "claim_text": "I prefer `void*` as roundtriping thru an integer looses information about provenance and can disable some optimization.",
+      "claim_uid": 0,
+      "claim_loc": {
+        "line": 0,
+        "start_char": 0,
+        "end_char": 0
+      },
+      "supports": []
+    },
+    {
+      "id": "a02",
+      "kind": "conflicted",
+      "summary": "The paper explicitly asks LEWG to decide between pointer and pointee as the first template argument, indicating unresolved design tension.",
+      "claim_text": "One question is if template argument of `pointer_tag_type` should be pointer or pointee. LLVM has design with a pointer, but this design is not symmetric with rest of standard library.",
+      "claim_uid": 0,
+      "claim_loc": {
+        "line": 0,
+        "start_char": 0,
+        "end_char": 0
+      },
+      "supports": []
+    },
+    {
+      "id": "a03",
+      "kind": "critical_gap",
+      "summary": "The paper does not specify how `pointer_bits_available` interacts with platform-specific features like LAM, UAI, or TBI, which could make bits available that alignment alone does not guarantee.",
+      "claim_text": "This proposal only proposes interface to accessing low bits for storing // reading a tag value, not observing bits of a pointer.",
+      "claim_uid": 0,
+      "claim_loc": {
+        "line": 0,
+        "start_char": 0,
+        "end_char": 0
+      },
+      "supports": []
+    },
+    {
+      "id": "a04",
+      "kind": "load_bearing",
+      "summary": "The paper claims `sizeof(pointer_tag_pair) == sizeof(Ptr)` is a main requirement, but the wording only mandates it for trivially copyable specializations, leaving non-trivially-copyable cases unspecified.",
+      "claim_text": "Main requirement on the type is it must be always same size as stored pointer and not more.",
+      "claim_uid": 0,
+      "claim_loc": {
+        "line": 0,
+        "start_char": 0,
+        "end_char": 0
+      },
+      "supports": []
+    },
+    {
+      "id": "a05",
+      "kind": "critical_gap",
+      "summary": "The paper does not address ABI stability of `pointer_tag_pair` across translation units or standard library versions, which is critical for a type intended to be stored in atomics and shared pointers.",
+      "claim_text": "Existence of this interface allows ability to store such pointers in existing interfaces (atomic, other smart pointers).",
+      "claim_uid": 0,
+      "claim_loc": {
+        "line": 0,
+        "start_char": 0,
+        "end_char": 0
+      },
+      "supports": []
+    },
+    {
+      "id": "a06",
+      "kind": "critical_gap",
+      "summary": "The paper does not specify whether `pointer_tag_pair` can be used in constant expressions that require pointer comparison or subtraction, which is essential for the claimed constexpr data structure use cases.",
+      "claim_text": "This functionality is also usable in `constexpr` environment. It's meant to be a building tool to build more advanced data-structures and also last requirement for `atomic<std::shared_ptr<T>>` to be constexpr.",
+      "claim_uid": 0,
+      "claim_loc": {
+        "line": 0,
+        "start_char": 0,
+        "end_char": 0
+      },
+      "supports": []
+    },
+    {
+      "id": "a07",
+      "kind": "load_bearing",
+      "summary": "The paper claims `from_tagged` and `tagged_pointer` are not constexpr, but the motivation section states the feature should work in constexpr environments, creating a contradiction for the legacy interop path.",
+      "claim_text": "static pointer_tag_pair from_tagged(tagged_pointer_type p) noexcept; // note: not constexpr",
+      "claim_uid": 0,
+      "claim_loc": {
+        "line": 0,
+        "start_char": 0,
+        "end_char": 0
+      },
+      "supports": []
+    },
+    {
+      "id": "a08",
+      "kind": "critical_gap",
+      "summary": "The paper does not address thread safety of `pointer_tag_pair` when used as a building block for `atomic<shared_ptr<T>>`, despite that being a stated motivation.",
+      "claim_text": "last requirement for `atomic<std::shared_ptr<T>>` to be constexpr",
+      "claim_uid": 0,
+      "claim_loc": {
+        "line": 0,
+        "start_char": 0,
+        "end_char": 0
+      },
+      "supports": []
+    }
+  ],
+  "design_tensions": [
+    {
+      "id": "t01",
+      "description": "Pointer vs pointee as first template argument: symmetry with existing standard library vs flexibility for non-standard pointer types",
+      "anchor_id": "a02"
+    },
+    {
+      "id": "t02",
+      "description": "Whether `tagged_pointer()` should return `void*` (preserving provenance) or `uintptr_t` (enabling arithmetic and bitwise operations for legacy interop)",
+      "anchor_id": "a01"
+    },
+    {
+      "id": "t03",
+      "description": "Whether the type should model `tuple-like` fully or only support structured bindings, given the STL's objection to the full concept",
+      "anchor_id": null
+    },
+    {
+      "id": "t04",
+      "description": "Whether `from_tagged` should have a precondition on alignment or leave the result unspecified, trading safety for flexibility",
+      "anchor_id": null
+    }
+  ],
+  "blueprint": {
+    "document": "P3125R5",
+    "paper": "P3125",
+    "revision": 5,
+    "mailing_id": "2026-05",
+    "title": "constexpr pointer tagging",
+    "authors": [
+      "Hana Dusíková"
+    ],
+    "audience": "LEWG Library Evolution,LWG Library",
+    "date": "2026-05-12",
+    "subreddit": "r/wg21",
+    "committee": "lewg",
+    "prior_revision": "P3125R4",
+    "revision_case": "C",
+    "paper_type": "proposal",
+    "technical_anchors": [
+      {
+        "id": "a01",
+        "kind": "critical_gap",
+        "summary": "The paper does not address how pointer_tag_pair interacts with pointer provenance and optimizations in the abstract machine, despite acknowledging provenance loss as a problem.",
+        "claim_text": "I prefer `void*` as roundtriping thru an integer looses information about provenance and can disable some optimization.",
+        "claim_uid": 0,
+        "claim_loc": {
+          "line": 0,
+          "start_char": 0,
+          "end_char": 0
+        },
+        "supports": []
+      },
+      {
+        "id": "a02",
+        "kind": "conflicted",
+        "summary": "The paper explicitly asks LEWG to decide between pointer and pointee as the first template argument, indicating unresolved design tension.",
+        "claim_text": "One question is if template argument of `pointer_tag_type` should be pointer or pointee. LLVM has design with a pointer, but this design is not symmetric with rest of standard library.",
+        "claim_uid": 0,
+        "claim_loc": {
+          "line": 0,
+          "start_char": 0,
+          "end_char": 0
+        },
+        "supports": []
+      },
+      {
+        "id": "a03",
+        "kind": "critical_gap",
+        "summary": "The paper does not specify how `pointer_bits_available` interacts with platform-specific features like LAM, UAI, or TBI, which could make bits available that alignment alone does not guarantee.",
+        "claim_text": "This proposal only proposes interface to accessing low bits for storing // reading a tag value, not observing bits of a pointer.",
+        "claim_uid": 0,
+        "claim_loc": {
+          "line": 0,
+          "start_char": 0,
+          "end_char": 0
+        },
+        "supports": []
+      },
+      {
+        "id": "a04",
+        "kind": "load_bearing",
+        "summary": "The paper claims `sizeof(pointer_tag_pair) == sizeof(Ptr)` is a main requirement, but the wording only mandates it for trivially copyable specializations, leaving non-trivially-copyable cases unspecified.",
+        "claim_text": "Main requirement on the type is it must be always same size as stored pointer and not more.",
+        "claim_uid": 0,
+        "claim_loc": {
+          "line": 0,
+          "start_char": 0,
+          "end_char": 0
+        },
+        "supports": []
+      },
+      {
+        "id": "a05",
+        "kind": "critical_gap",
+        "summary": "The paper does not address ABI stability of `pointer_tag_pair` across translation units or standard library versions, which is critical for a type intended to be stored in atomics and shared pointers.",
+        "claim_text": "Existence of this interface allows ability to store such pointers in existing interfaces (atomic, other smart pointers).",
+        "claim_uid": 0,
+        "claim_loc": {
+          "line": 0,
+          "start_char": 0,
+          "end_char": 0
+        },
+        "supports": []
+      },
+      {
+        "id": "a06",
+        "kind": "critical_gap",
+        "summary": "The paper does not specify whether `pointer_tag_pair` can be used in constant expressions that require pointer comparison or subtraction, which is essential for the claimed constexpr data structure use cases.",
+        "claim_text": "This functionality is also usable in `constexpr` environment. It's meant to be a building tool to build more advanced data-structures and also last requirement for `atomic<std::shared_ptr<T>>` to be constexpr.",
+        "claim_uid": 0,
+        "claim_loc": {
+          "line": 0,
+          "start_char": 0,
+          "end_char": 0
+        },
+        "supports": []
+      },
+      {
+        "id": "a07",
+        "kind": "load_bearing",
+        "summary": "The paper claims `from_tagged` and `tagged_pointer` are not constexpr, but the motivation section states the feature should work in constexpr environments, creating a contradiction for the legacy interop path.",
+        "claim_text": "static pointer_tag_pair from_tagged(tagged_pointer_type p) noexcept; // note: not constexpr",
+        "claim_uid": 0,
+        "claim_loc": {
+          "line": 0,
+          "start_char": 0,
+          "end_char": 0
+        },
+        "supports": []
+      },
+      {
+        "id": "a08",
+        "kind": "critical_gap",
+        "summary": "The paper does not address thread safety of `pointer_tag_pair` when used as a building block for `atomic<shared_ptr<T>>`, despite that being a stated motivation.",
+        "claim_text": "last requirement for `atomic<std::shared_ptr<T>>` to be constexpr",
+        "claim_uid": 0,
+        "claim_loc": {
+          "line": 0,
+          "start_char": 0,
+          "end_char": 0
+        },
+        "supports": []
+      }
+    ],
+    "tangent_magnets": [
+      "LLVM's PointerIntPair implementation history and limitations",
+      "CHERI and hardware pointer authentication (PAC) compatibility",
+      "Rust's `ptr::map_addr` and `ptr::from_exposed_addr` provenance model",
+      "The ongoing provenance debate in WG21 (P2318, P2434)",
+      "Why `reinterpret_cast` is banned in constexpr and whether that should change"
+    ],
+    "hot_takes": [
+      "Finally standardizing what every systems programmer has been doing with reinterpret_cast for 30 years.",
+      "Another paper that requires compiler magic but pretends to be a library feature.",
+      "The constexpr support is the only interesting part; the rest is just a wrapper around bitwise ops.",
+      "This will break on CHERI and any platform with fat pointers, but the paper doesn't mention it."
+    ],
+    "misconception_traps": [
+      "That `pointer_tag_pair` is a smart pointer or owns the pointee",
+      "That the tag bits are always the low bits (the paper only guarantees alignment bits, not position)",
+      "That `pointer_bits_available` returns the same value on all platforms for the same type",
+      "That `from_tagged` validates the pointer is properly aligned (it doesn't; the result is unspecified if not)"
+    ],
+    "design_tensions": [
+      {
+        "id": "t01",
+        "description": "Pointer vs pointee as first template argument: symmetry with existing standard library vs flexibility for non-standard pointer types",
+        "anchor_id": "a02"
+      },
+      {
+        "id": "t02",
+        "description": "Whether `tagged_pointer()` should return `void*` (preserving provenance) or `uintptr_t` (enabling arithmetic and bitwise operations for legacy interop)",
+        "anchor_id": "a01"
+      },
+      {
+        "id": "t03",
+        "description": "Whether the type should model `tuple-like` fully or only support structured bindings, given the STL's objection to the full concept",
+        "anchor_id": null
+      },
+      {
+        "id": "t04",
+        "description": "Whether `from_tagged` should have a precondition on alignment or leave the result unspecified, trading safety for flexibility",
+        "anchor_id": null
+      }
+    ],
+    "research_summary": {
+      "public_reception": {
+        "agent": "public_reception",
+        "findings": "P3125R5 (and its successor P3125R6, adopted for C++29) has received predominantly positive but measured public reception. Herb Sutter's widely-read trip report from the June 2026 Brno meeting highlighted the paper's adoption, calling Hana Dusíková \"The Queen of Constexpr\" and describing pointer_tag_pair as a lower-level library useful for memory safety and security hardening. The paper's progression through six revisions (R0 through R6) shows sustained committee engagement, with the cplusplus/papers GitHub issue tracker labeling it as targeting C++29 with LWG as the ship vehicle.\n\nOn Hacker News, broader pointer tagging discussions (not directly about P3125 but thematically adjacent) reveal a technically sophisticated audience deeply interested in the portability challenges of tagging across x86, ARM, and RISC-V. Commenters debate the number of reliably available bits (low bits from alignment vs. high bits from address space limits), with some noting that only about 6 high bits are safe across all platforms. The HN thread on \"Pointer Tagging in C++: The Art of Packing Bits into a Pointer\" explicitly references P3125, noting that modifying pointer bits is currently UB in standard C++.\n\nOn Reddit r/cpp, a thread about Dusíková's \"My Favorite Data Structures\" keynote at Meeting C++ 2024 generated discussion about HAMT implementations and whether tagged pointers are truly necessary for such data structures. The LLVM/clang implementation PR (#111861) posted by Dusíková herself demonstrates concrete implementation experience with compiler builtins and constexpr support, lending credibility to the proposal. No significant negative or controversial public reaction was found; the paper appears to address a well-understood need with broad consensus support.",
+        "sources": [
+          "https://herbsutter.com/2026/06/13/brno-trip-report/",
+          "https://news.ycombinator.com/item?id=45328335",
+          "https://www.reddit.com/r/cpp/comments/1nn8oz2/pointer_tagging_in_c_the_art_of_packing_bits_into/",
+          "https://github.com/cplusplus/papers/issues/1903",
+          "https://www.mail-archive.com/cfe-commits@lists.llvm.org/msg486848.html",
+          "https://www.open-std.org/jtc1/sc22/wg21/docs/papers/2026/p3125r5.html"
+        ],
+        "heat_signal": "warm",
+        "interest_signal": "relevant"
+      },
+      "committee_history": {
+        "agent": "committee_history",
+        "findings": "P3125 has progressed through five revisions since its initial submission as P3125R0 (March 2023, targeted at SG1). The paper's committee journey shows a clear trajectory of design simplification driven by study group feedback:\n\n- **R0→R1**: Initial design with multiple tagging schemas (`tagged_ptr` with schema template parameter), presented to SG1.\n- **R1→R2**: Massive simplification after SG1 review — schemas removed, design reduced to `pointer_tag_pair` with the hard requirement `sizeof(pointer_tag_pair<T*, tag_t, n>) == sizeof(T*)`. SG1 explicitly rejected standardizing access to high bits as dangerous and non-portable.\n- **R2→R3**: Polishing and formal wording added (Tomasz Kamiński credited for wording).\n- **R3→R4**: LEWG requested changes: removed `nullptr_t` constructor, added `void*` support, changed first template argument from pointee to pointer, added `pointer_tag_trait`, `tuple_size`/`tuple_element`/`get<N>` support.\n- **R4→R5**: Updated paper body to reflect R4 wording changes, reintroduced design section, and explicitly asked LEWG to decide between pointer vs. pointee as first template argument.\n\nAt Wrocław 2024 (November), P3125R1 was forwarded from SG1 to LEWG. The paper is tracked on cplusplus/papers issue #1903, targeted at C++29 with IS ship vehicle, and appeared on the 2025-02 Hagenberg LEWG agenda. A related paper, P3248 (Require `[u]intptr_t`), explicitly cites P3125 as motivation for making `uintptr_t` mandatory, noting that P3125's API design is constrained by `uintptr_t` being optional. The paper has not yet reached LWG for wording review.",
+        "sources": [
+          "https://www.open-std.org/jtc1/sc22/wg21/docs/papers/2026/p3125r5.html",
+          "https://www.open-std.org/jtc1/sc22/wg21/docs/papers/2025/p3125r4.html",
+          "https://www.open-std.org/jtc1/sc22/wg21/docs/papers/2024/p3125r1.html",
+          "https://www.open-std.org/jtc1/sc22/wg21/docs/papers/2024/p3125r0.pdf",
+          "https://github.com/cplusplus/papers/issues/1903",
+          "https://www.open-std.org/jtc1/sc22/wg21/docs/papers/2025/p3248r4.html"
+        ],
+        "heat_signal": "warm",
+        "interest_signal": "relevant"
+      },
+      "author_ecosystem": {
+        "agent": "author_ecosystem",
+        "findings": "Hana Dusíková is a deeply embedded figure in the C++ standardization ecosystem, holding multiple leadership roles: Chair of SG7 (Compile-Time Programming / Reflection), EWG co-chair (Core Language Evolution), and Czech National Body representative. Her work consistently orbits the theme of making more of C++ available at compile time. She is the author of the widely known CTRE (Compile-Time Regular Expressions) library, which demonstrated that complex pattern matching can run entirely during constant evaluation. She has also authored P3367 (constexpr coroutines), which progressed through multiple revisions and received a forward-to-CWG poll for C++26 before being deferred to C++29. Her 2024 Meeting C++ keynote \"My Favorite Data Structures\" showcased HAMT implementations that rely on pointer tagging, directly motivating P3125. Beyond papers, she produced a working implementation of P3125's predecessor design as a clang+libc++ patch (PR #111861, marked \"DO NOT MERGE\"), adding compiler builtins for pointer tagging and a full `tagged_ptr` library header. This implementation experience is significant: it proves the design is implementable and reveals the provenance challenges that the paper acknowledges. Her employer, Woven by Toyota, provides her the bandwidth to pursue standardization work. The constellation of her papers — CTRE, constexpr coroutines, pointer tagging — forms a coherent program: systematically removing barriers to constexpr data structures, with pointer tagging positioned as the \"last requirement for `atomic&lt;shared_ptr&lt;T&gt;&gt;` to be constexpr.\"",
+        "sources": [
+          "https://www.open-std.org/jtc1/sc22/wg21/docs/papers/2025/p3125r4.html",
+          "https://www.open-std.org/jtc1/sc22/wg21/docs/papers/2026/p3367r5.html",
+          "https://github.com/hanickadot/compile-time-regular-expressions",
+          "https://www.mail-archive.com/cfe-commits@lists.llvm.org/msg486848.html",
+          "https://isocpp.org/std/the-committee",
+          "https://cppcast.com/guests/hana_dusikova/",
+          "https://github.com/hanickadot",
+          "https://ndctechtown.com/speakers/hana-duskov"
+        ],
+        "heat_signal": "hot",
+        "interest_signal": "magnetic"
+      }
+    },
+    "heat": "warm",
+    "interest": "relevant",
+    "target_comment_count": 30,
+    "encounter_count": 1,
+    "signal_count": 12,
+    "noise_count": 15,
+    "submission_title": "P3125R5 - constexpr pointer tagging (was P3125R4)",
+    "submission_body": "**Author:** Hana Dusíková  \n**Document:** P3125R5  \n**Date:** 2026-05-12  \n**Audience:** LEWG Library Evolution, LWG Library  \n**Revision:** R5 (prior: <a href=\"p3125r4-reddit.html\">P3125R4</a>)  \n**Link:** https://wg21.link/p3125r5\n\nThis is the fifth revision of Dusíková's proposal to standardize pointer tagging—the ancient art of stuffing a few bits of metadata into the alignment-padding low bits of a pointer. R5 updates the paper body to match the R4 wording changes (the first template argument switched from pointee to pointer, `void*` support added, `pointer_tag_trait` and tuple protocol landed) and reintroduces the design section with a worked example implementation. The big open question LEWG needs to resolve: should the first template parameter be the pointer type or the pointee type? LLVM's internal `PointerIntPair` uses pointer, but the rest of the standard library is pointee-first.\n\nThe core type is `pointer_tag_pair<Ptr, TagT, BitsRequested>`, a trivially-copyable pair that's guaranteed to be exactly `sizeof(Ptr)` bytes. It stores a tag value in the low bits that alignment guarantees are zero, with `pointer_bits_available` providing a consteval query for how many bits you actually get. The normal constructor is only available when the pointee's natural alignment provides enough bits; if you've overallocated, you reach for the verbose `from_overaligned<PromisedAlignment>` factory. The paper explicitly does *not* touch high bits (Intel LAM, ARM TBI)—SG1 killed that as dangerous and non-portable—and it does not model a pointer, manage lifetimes, or support function pointers.\n\nDusíková positions this as the last missing piece for `constexpr atomic<shared_ptr<T>>` and a building block for constexpr data structures like HAMTs. The implementation experience is real: she shipped a clang+libc++ prototype (PR #111861) that adds compiler builtins for tagging/untagging without round-tripping through integers, preserving pointer provenance. The constexpr path stores the tag in pointer metadata rather than address bits, which is clever but means this can't be a pure library—it needs compiler support. The paper acknowledges provenance loss as a problem and argues `void*` is better than `uintptr_t` for the raw tagged pointer interface, though the wording currently leaves `tagged_pointer()` and `from_tagged()` as non-constexpr escape hatches for legacy interop.\n\nWhat's not addressed: ABI stability across translation units (critical if you're storing these in atomics), thread safety semantics for the `atomic<shared_ptr>` use case, and how this interacts with platforms where pointers aren't just integers with spare bits (CHERI, fat pointer architectures). The paper also doesn't specify whether `pointer_tag_pair` can participate in constexpr pointer comparison or subtraction, which matters for the data structure use cases it's selling.",
+    "submission_link": "https://wg21.link/p3125r5",
+    "submission_flair": "Proposal [Update]",
+    "replies": [
+      {
+        "slot_id": "s01",
+        "parent_slot_id": null,
+        "depth": 0,
+        "role": "noise",
+        "brief": "React with performative exhaustion about yet another paper that will take a decade to standardize, referencing the committee process.",
+        "anchor_id": null,
+        "domain_lens": null,
+        "encounter_id": null,
+        "noise_tone": "performatively-tired",
+        "noise_stance": "process-cynic",
+        "carries_quote": false,
+        "carries_code": false,
+        "carries_link": false
+      },
+      {
+        "slot_id": "s02",
+        "parent_slot_id": null,
+        "depth": 0,
+        "role": "noise",
+        "brief": "Express smug satisfaction that the standard is finally catching up to what systems programmers have been doing for decades with reinterpret_cast.",
+        "anchor_id": null,
+        "domain_lens": null,
+        "encounter_id": null,
+        "noise_tone": "smug",
+        "noise_stance": "old-guard",
+        "carries_quote": false,
+        "carries_code": false,
+        "carries_link": false
+      },
+      {
+        "slot_id": "s03",
+        "parent_slot_id": null,
+        "depth": 0,
+        "role": "noise",
+        "brief": "Dismiss the paper as compiler magic masquerading as a library feature, questioning why this isn't just a core language change.",
+        "anchor_id": null,
+        "domain_lens": null,
+        "encounter_id": null,
+        "noise_tone": "condescending",
+        "noise_stance": "C-purist",
+        "carries_quote": false,
+        "carries_code": false,
+        "carries_link": false
+      },
+      {
+        "slot_id": "s04",
+        "parent_slot_id": null,
+        "depth": 0,
+        "role": "noise",
+        "brief": "Voice a misconception that pointer_tag_pair is a smart pointer that owns the pointee, asking about memory management.",
+        "anchor_id": null,
+        "domain_lens": null,
+        "encounter_id": null,
+        "noise_tone": "confused",
+        "noise_stance": "misconception",
+        "carries_quote": false,
+        "carries_code": false,
+        "carries_link": false
+      },
+      {
+        "slot_id": "s05",
+        "parent_slot_id": "s04",
+        "depth": 1,
+        "role": "signal",
+        "brief": "Correct the misconception: pointer_tag_pair stores a pointer and a small integer tag in the same footprint, it does not own the pointee. Cite the paper's claim that sizeof(pointer_tag_pair) == sizeof(Ptr).",
+        "anchor_id": "a04",
+        "domain_lens": 12,
+        "encounter_id": null,
+        "noise_tone": null,
+        "noise_stance": null,
+        "carries_quote": true,
+        "carries_code": false,
+        "carries_link": false
+      },
+      {
+        "slot_id": "s06",
+        "parent_slot_id": null,
+        "depth": 0,
+        "role": "noise",
+        "brief": "Voice a misconception that the tag bits are always the low bits, asking about portability across endianness.",
+        "anchor_id": null,
+        "domain_lens": null,
+        "encounter_id": null,
+        "noise_tone": "confused",
+        "noise_stance": "misconception",
+        "carries_quote": false,
+        "carries_code": false,
+        "carries_link": false
+      },
+      {
+        "slot_id": "s07",
+        "parent_slot_id": "s06",
+        "depth": 1,
+        "role": "signal",
+        "brief": "Correct the misconception: the paper only guarantees alignment bits are available, not their position. pointer_bits_available returns a count, not a bitmask. The implementation chooses which bits to use.",
+        "anchor_id": "a03",
+        "domain_lens": 7,
+        "encounter_id": null,
+        "noise_tone": null,
+        "noise_stance": null,
+        "carries_quote": true,
+        "carries_code": false,
+        "carries_link": false
+      },
+      {
+        "slot_id": "s08",
+        "parent_slot_id": null,
+        "depth": 0,
+        "role": "noise",
+        "brief": "Voice a misconception that from_tagged validates pointer alignment, expressing concern about safety.",
+        "anchor_id": null,
+        "domain_lens": null,
+        "encounter_id": null,
+        "noise_tone": "concerned",
+        "noise_stance": "misconception",
+        "carries_quote": false,
+        "carries_code": false,
+        "carries_link": false
+      },
+      {
+        "slot_id": "s09",
+        "parent_slot_id": "s08",
+        "depth": 1,
+        "role": "signal",
+        "brief": "Correct the misconception: from_tagged does not validate alignment. The paper states the result is unspecified if the pointer is not properly aligned. This is a precondition, not a checked condition.",
+        "anchor_id": "a07",
+        "domain_lens": 11,
+        "encounter_id": null,
+        "noise_tone": null,
+        "noise_stance": null,
+        "carries_quote": true,
+        "carries_code": false,
+        "carries_link": false
+      },
+      {
+        "slot_id": "s10",
+        "parent_slot_id": null,
+        "depth": 0,
+        "role": "noise",
+        "brief": "Voice a misconception that pointer_bits_available returns the same value on all platforms for the same type, asking about cross-platform code.",
+        "anchor_id": null,
+        "domain_lens": null,
+        "encounter_id": null,
+        "noise_tone": "confused",
+        "noise_stance": "misconception",
+        "carries_quote": false,
+        "carries_code": false,
+        "carries_link": false
+      },
+      {
+        "slot_id": "s11",
+        "parent_slot_id": "s10",
+        "depth": 1,
+        "role": "signal",
+        "brief": "Correct the misconception: pointer_bits_available is platform-dependent. It returns the number of bits available based on alignment of the pointee type on the target architecture. Code relying on a specific count is non-portable.",
+        "anchor_id": "a03",
+        "domain_lens": 2,
+        "encounter_id": null,
+        "noise_tone": null,
+        "noise_stance": null,
+        "carries_quote": true,
+        "carries_code": false,
+        "carries_link": false
+      },
+      {
+        "slot_id": "s12",
+        "parent_slot_id": null,
+        "depth": 0,
+        "role": "teaser",
+        "brief": "Present the teaser: the paper's constexpr support is the genuinely novel part, but it creates a contradiction—the legacy interop path (from_tagged/tagged_pointer) is explicitly not constexpr, undermining the stated motivation of enabling constexpr atomic<shared_ptr<T>>.",
+        "anchor_id": "a07",
+        "domain_lens": 8,
+        "encounter_id": null,
+        "noise_tone": null,
+        "noise_stance": null,
+        "carries_quote": true,
+        "carries_code": true,
+        "carries_link": false
+      },
+      {
+        "slot_id": "s13",
+        "parent_slot_id": "s12",
+        "depth": 1,
+        "role": "signal",
+        "brief": "Expand on the teaser: the paper claims constexpr as a key motivation but the wording makes from_tagged non-constexpr. This means you can't use the legacy interop in constexpr contexts, which is exactly where you'd need it for atomic<shared_ptr<T>>.",
+        "anchor_id": "a07",
+        "domain_lens": 8,
+        "encounter_id": null,
+        "noise_tone": null,
+        "noise_stance": null,
+        "carries_quote": true,
+        "carries_code": true,
+        "carries_link": false
+      },
+      {
+        "slot_id": "s14",
+        "parent_slot_id": "s12",
+        "depth": 1,
+        "role": "noise",
+        "brief": "React with deadpan humor: 'constexpr everything except the part that actually does the thing, classic committee.'",
+        "anchor_id": null,
+        "domain_lens": null,
+        "encounter_id": null,
+        "noise_tone": "deadpan",
+        "noise_stance": "process-cynic",
+        "carries_quote": false,
+        "carries_code": false,
+        "carries_link": false
+      },
+      {
+        "slot_id": "s15",
+        "parent_slot_id": null,
+        "depth": 0,
+        "role": "signal",
+        "brief": "Raise the provenance concern: the paper acknowledges provenance loss through integer roundtripping but doesn't resolve it. The tagged_pointer() accessor returns uintptr_t, which severs provenance. This is a critical gap for any implementation that tracks provenance.",
+        "anchor_id": "a01",
+        "domain_lens": 7,
+        "encounter_id": null,
+        "noise_tone": null,
+        "noise_stance": null,
+        "carries_quote": true,
+        "carries_code": false,
+        "carries_link": false
+      },
+      {
+        "slot_id": "s16",
+        "parent_slot_id": "s15",
+        "depth": 1,
+        "role": "signal",
+        "brief": "Connect the provenance gap to the design tension: the paper asks LEWG to choose between pointer and pointee as the first template argument. The choice affects how provenance flows through the type. A pointer-first design preserves provenance better but breaks symmetry with the rest of the standard library.",
+        "anchor_id": "a02",
+        "domain_lens": 10,
+        "encounter_id": null,
+        "noise_tone": null,
+        "noise_stance": null,
+        "carries_quote": true,
+        "carries_code": false,
+        "carries_link": false
+      },
+      {
+        "slot_id": "s17",
+        "parent_slot_id": "s15",
+        "depth": 1,
+        "role": "tangent",
+        "brief": "Start a tangent about Rust's provenance model (ptr::map_addr, ptr::from_exposed_addr) and how it handles this problem more rigorously.",
+        "anchor_id": null,
+        "domain_lens": null,
+        "encounter_id": null,
+        "noise_tone": "smug",
+        "noise_stance": "Rust-evangelist",
+        "carries_quote": false,
+        "carries_code": true,
+        "carries_link": true
+      },
+      {
+        "slot_id": "s18",
+        "parent_slot_id": "s17",
+        "depth": 2,
+        "role": "tangent",
+        "brief": "Push back on the Rust comparison: C++ has a different memory model and different constraints. The provenance debate in WG21 (P2318, P2434) is ongoing and this paper needs to engage with it.",
+        "anchor_id": null,
+        "domain_lens": null,
+        "encounter_id": null,
+        "noise_tone": "earnest",
+        "noise_stance": "it's-fine-actually",
+        "carries_quote": false,
+        "carries_code": false,
+        "carries_link": true
+      },
+      {
+        "slot_id": "s19",
+        "parent_slot_id": "s17",
+        "depth": 2,
+        "role": "signal",
+        "brief": "Bring the tangent back to the paper: the provenance gap is real and the paper should at minimum acknowledge the ongoing WG21 provenance work and explain how pointer_tag_pair interacts with it.",
+        "anchor_id": "a01",
+        "domain_lens": 13,
+        "encounter_id": null,
+        "noise_tone": null,
+        "noise_stance": null,
+        "carries_quote": false,
+        "carries_code": false,
+        "carries_link": true
+      },
+      {
+        "slot_id": "s20",
+        "parent_slot_id": null,
+        "depth": 0,
+        "role": "signal",
+        "brief": "Question the ABI stability claim: the paper says pointer_tag_pair can be stored in atomics and shared pointers, but doesn't address ABI stability across translation units or standard library versions. This is critical for any type intended to cross shared library boundaries.",
+        "anchor_id": "a05",
+        "domain_lens": 7,
+        "encounter_id": null,
+        "noise_tone": null,
+        "noise_stance": null,
+        "carries_quote": true,
+        "carries_code": false,
+        "carries_link": false
+      },
+      {
+        "slot_id": "s21",
+        "parent_slot_id": "s20",
+        "depth": 1,
+        "role": "noise",
+        "brief": "React with a hot take: 'This will break on CHERI and any platform with fat pointers, but the paper doesn't mention it.'",
+        "anchor_id": null,
+        "domain_lens": null,
+        "encounter_id": null,
+        "noise_tone": "doomsayer",
+        "noise_stance": "doomsayer",
+        "carries_quote": false,
+        "carries_code": false,
+        "carries_link": false
+      },
+      {
+        "slot_id": "s22",
+        "parent_slot_id": "s21",
+        "depth": 2,
+        "role": "tangent",
+        "brief": "Start a tangent about CHERI and hardware pointer authentication (PAC) compatibility, noting that tagged pointers fundamentally assume a flat address space with spare bits.",
+        "anchor_id": null,
+        "domain_lens": null,
+        "encounter_id": null,
+        "noise_tone": "earnest",
+        "noise_stance": "doomsayer",
+        "carries_quote": false,
+        "carries_code": false,
+        "carries_link": true
+      },
+      {
+        "slot_id": "s23",
+        "parent_slot_id": "s22",
+        "depth": 3,
+        "role": "tangent",
+        "brief": "Acknowledge the CHERI concern but note that the paper's design doesn't mandate low bits—implementations on CHERI could use other mechanisms if the hardware provides them. The real question is whether the abstraction holds.",
+        "anchor_id": null,
+        "domain_lens": null,
+        "encounter_id": null,
+        "noise_tone": "earnest",
+        "noise_stance": "it's-fine-actually",
+        "carries_quote": false,
+        "carries_code": false,
+        "carries_link": false
+      },
+      {
+        "slot_id": "s24",
+        "parent_slot_id": "s22",
+        "depth": 3,
+        "role": "signal",
+        "brief": "Bring the tangent back: the paper's silence on CHERI and fat pointers is a critical gap. The sizeof requirement alone may be impossible to satisfy on architectures where pointers carry metadata out-of-band.",
+        "anchor_id": "a04",
+        "domain_lens": 2,
+        "encounter_id": null,
+        "noise_tone": null,
+        "noise_stance": null,
+        "carries_quote": true,
+        "carries_code": false,
+        "carries_link": false
+      },
+      {
+        "slot_id": "s25",
+        "parent_slot_id": null,
+        "depth": 0,
+        "role": "signal",
+        "brief": "Raise the constexpr pointer semantics gap: the paper claims constexpr data structure use cases but doesn't specify whether pointer_tag_pair supports pointer comparison or subtraction in constant expressions. This is essential for the claimed use cases.",
+        "anchor_id": "a06",
+        "domain_lens": 8,
+        "encounter_id": null,
+        "noise_tone": null,
+        "noise_stance": null,
+        "carries_quote": true,
+        "carries_code": false,
+        "carries_link": false
+      },
+      {
+        "slot_id": "s26",
+        "parent_slot_id": "s25",
+        "depth": 1,
+        "role": "signal",
+        "brief": "Connect the constexpr gap to the broader constexpr pointer problem: reinterpret_cast is banned in constexpr for good reason. The paper needs to explain how pointer_tag_pair avoids the same issues that make reinterpret_cast problematic at compile time.",
+        "anchor_id": "a06",
+        "domain_lens": 11,
+        "encounter_id": null,
+        "noise_tone": null,
+        "noise_stance": null,
+        "carries_quote": false,
+        "carries_code": false,
+        "carries_link": false
+      },
+      {
+        "slot_id": "s27",
+        "parent_slot_id": null,
+        "depth": 0,
+        "role": "signal",
+        "brief": "Question the thread safety implications: the paper motivates pointer_tag_pair as a building block for atomic<shared_ptr<T>> but doesn't address thread safety of the type itself. What are the concurrency guarantees?",
+        "anchor_id": "a08",
+        "domain_lens": 9,
+        "encounter_id": null,
+        "noise_tone": null,
+        "noise_stance": null,
+        "carries_quote": true,
+        "carries_code": false,
+        "carries_link": false
+      },
+      {
+        "slot_id": "s28",
+        "parent_slot_id": "s27",
+        "depth": 1,
+        "role": "signal",
+        "brief": "Expand: the paper says pointer_tag_pair can be stored in atomics, but that just means it's trivially copyable and the right size. It doesn't mean the tag operations themselves are atomic. Users might incorrectly assume tag updates are thread-safe.",
+        "anchor_id": "a08",
+        "domain_lens": 9,
+        "encounter_id": null,
+        "noise_tone": null,
+        "noise_stance": null,
+        "carries_quote": true,
+        "carries_code": false,
+        "carries_link": false
+      },
+      {
+        "slot_id": "s29",
+        "parent_slot_id": null,
+        "depth": 0,
+        "role": "mod",
+        "brief": "Pin a moderator reminder: 'Reminder: be civil. The paper authors sometimes read these threads.'",
+        "anchor_id": null,
+        "domain_lens": null,
+        "encounter_id": null,
+        "noise_tone": null,
+        "noise_stance": null,
+        "carries_quote": false,
+        "carries_code": false,
+        "carries_link": false
+      },
+      {
+        "slot_id": "s30",
+        "parent_slot_id": null,
+        "depth": 0,
+        "role": "encounter",
+        "brief": "Encounter turn 1: Polite question about the pointer vs pointee design tension. Ask whether the authors have considered making it a named requirement rather than a template parameter choice.",
+        "anchor_id": "a02",
+        "domain_lens": 10,
+        "encounter_id": "e01",
+        "noise_tone": null,
+        "noise_stance": null,
+        "carries_quote": false,
+        "carries_code": false,
+        "carries_link": false
+      },
+      {
+        "slot_id": "s31",
+        "parent_slot_id": "s30",
+        "depth": 1,
+        "role": "encounter",
+        "brief": "Encounter turn 2: Sharpening—push back on the named requirement idea, noting that the standard library consistently uses pointee-first for smart pointers and this would be an awkward special case.",
+        "anchor_id": "a02",
+        "domain_lens": 10,
+        "encounter_id": "e01",
+        "noise_tone": null,
+        "noise_stance": null,
+        "carries_quote": false,
+        "carries_code": false,
+        "carries_link": false
+      },
+      {
+        "slot_id": "s32",
+        "parent_slot_id": "s31",
+        "depth": 2,
+        "role": "encounter",
+        "brief": "Encounter turn 3: Resolution—acknowledge the consistency argument but note that LLVM's design uses pointer-first for good reason (provenance preservation). Suggest the paper should present both options with tradeoffs for LEWG to poll.",
+        "anchor_id": "a02",
+        "domain_lens": 13,
+        "encounter_id": "e01",
+        "noise_tone": null,
+        "noise_stance": null,
+        "carries_quote": false,
+        "carries_code": false,
+        "carries_link": false
+      },
+      {
+        "slot_id": "s33",
+        "parent_slot_id": "s32",
+        "depth": 3,
+        "role": "encounter",
+        "brief": "Encounter turn 4: Narrowing—agree that a poll is the right approach, but note that LEWG will also need to consider how the choice interacts with the tuple-like API and structured bindings support.",
+        "anchor_id": "a02",
+        "domain_lens": 13,
+        "encounter_id": "e01",
+        "noise_tone": null,
+        "noise_stance": null,
+        "carries_quote": false,
+        "carries_code": false,
+        "carries_link": false
+      },
+      {
+        "slot_id": "s34",
+        "parent_slot_id": null,
+        "depth": 0,
+        "role": "noise",
+        "brief": "React with a sarcastic one-liner about the paper's claim that this is the 'last requirement for atomic<shared_ptr<T>> to be constexpr'—as if that's the only thing holding it up.",
+        "anchor_id": null,
+        "domain_lens": null,
+        "encounter_id": null,
+        "noise_tone": "sarcastic",
+        "noise_stance": "process-cynic",
+        "carries_quote": true,
+        "carries_code": false,
+        "carries_link": false
+      },
+      {
+        "slot_id": "s35",
+        "parent_slot_id": null,
+        "depth": 0,
+        "role": "noise",
+        "brief": "React with a complaint about compile times: 'great, another template that will add 500ms to every translation unit that includes it.'",
+        "anchor_id": null,
+        "domain_lens": null,
+        "encounter_id": null,
+        "noise_tone": "bored",
+        "noise_stance": "skimmed-abstract",
+        "carries_quote": false,
+        "carries_code": false,
+        "carries_link": false
+      },
+      {
+        "slot_id": "s36",
+        "parent_slot_id": null,
+        "depth": 0,
+        "role": "noise",
+        "brief": "React with a Boost reference: 'Boost.Intrusive has been doing this for 15 years. Why are we standardizing it now?'",
+        "anchor_id": null,
+        "domain_lens": null,
+        "encounter_id": null,
+        "noise_tone": "smug",
+        "noise_stance": "old-guard",
+        "carries_quote": false,
+        "carries_code": false,
+        "carries_link": false
+      }
+    ],
+    "encounters": [
+      {
+        "encounter_id": "e01",
+        "design_tension_id": "t01",
+        "design_tension": "Pointer vs pointee as first template argument: symmetry with existing standard library vs flexibility for non-standard pointer types",
+        "position_a": "The first template argument should be the pointee type, consistent with unique_ptr, shared_ptr, and the rest of the standard library. This is what users expect and makes generic code simpler.",
+        "position_b": "The first template argument should be the pointer type, consistent with LLVM's design. This preserves provenance information and supports non-standard pointer types like offset_ptr or fancy pointers that don't have a simple pointee relationship.",
+        "resolution": "narrowing",
+        "slot_ids": [
+          "s30",
+          "s31",
+          "s32",
+          "s33"
+        ]
+      }
+    ]
+  },
+  "generated_at": "2026-08-03T22:38:02.582588Z",
+  "comments": [
+    {
+      "slot_id": "s01",
+      "parent_slot_id": null,
+      "depth": 0,
+      "role": "noise",
+      "persona": "segfault_enjoyer_69",
+      "body": "great, another paper that will take 10 years to get through LEWG, and by the time it lands we'll all be writing Rust on CHERI hardware anyway. wake me when R7 drops the constexpr escape hatch and adds a feature-test macro that nobody can agree on the name of.",
+      "tag": null,
+      "is_op": false,
+      "is_mod": false,
+      "controversial": false,
+      "edited": false,
+      "deleted": false,
+      "removed": false,
+      "collapsed": false,
+      "anchor_id": null,
+      "encounter_id": null,
+      "domain_lens": null,
+      "brief": "React with performative exhaustion about yet another paper that will take a decade to standardize, referencing the committee process.",
+      "votes": [
+        {
+          "persona": "monomorphic_dan",
+          "direction": -1
+        },
+        {
+          "persona": "abi_archivist",
+          "direction": 1
+        },
+        {
+          "persona": "lifetimes_lucy",
+          "direction": -1
+        },
+        {
+          "persona": "the_constexpr_oracle",
+          "direction": 1
+        },
+        {
+          "persona": "async_skeptic",
+          "direction": -1
+        },
+        {
+          "persona": "compiles_first_try",
+          "direction": -1
+        },
+        {
+          "persona": "bootcamp_grad_2025",
+          "direction": 1
+        },
+        {
+          "persona": "just_use_rust_lol",
+          "direction": 1
+        },
+        {
+          "persona": "committee_gonna_committee",
+          "direction": -1
+        },
+        {
+          "persona": "template_janitor",
+          "direction": 1
+        }
+      ]
+    },
+    {
+      "slot_id": "s02",
+      "parent_slot_id": null,
+      "depth": 0,
+      "role": "noise",
+      "persona": "segfault_enjoyer_69",
+      "body": "Oh look, the committee discovered that pointers have spare bits. Only took until 2026. I've been doing this with `reinterpret_cast<uintptr_t>` since before C++11 was a twinkle in Stroustrup's eye, and somehow my code still runs. Skill issue, honestly.",
+      "tag": null,
+      "is_op": false,
+      "is_mod": false,
+      "controversial": false,
+      "edited": false,
+      "deleted": false,
+      "removed": false,
+      "collapsed": false,
+      "anchor_id": null,
+      "encounter_id": null,
+      "domain_lens": null,
+      "brief": "Express smug satisfaction that the standard is finally catching up to what systems programmers have been doing for decades with reinterpret_cast.",
+      "votes": [
+        {
+          "persona": "monomorphic_dan",
+          "direction": 1
+        },
+        {
+          "persona": "abi_archivist",
+          "direction": 1
+        },
+        {
+          "persona": "embedded_for_20_years",
+          "direction": -1
+        },
+        {
+          "persona": "lifetimes_lucy",
+          "direction": 1
+        },
+        {
+          "persona": "the_constexpr_oracle",
+          "direction": 1
+        },
+        {
+          "persona": "ranges_andy",
+          "direction": 1
+        },
+        {
+          "persona": "nanosecond_nancy",
+          "direction": 1
+        },
+        {
+          "persona": "compiles_first_try",
+          "direction": -1
+        },
+        {
+          "persona": "bootcamp_grad_2025",
+          "direction": 1
+        },
+        {
+          "persona": "just_use_rust_lol",
+          "direction": -1
+        },
+        {
+          "persona": "committee_gonna_committee",
+          "direction": 1
+        },
+        {
+          "persona": "template_error_survivor",
+          "direction": -1
+        },
+        {
+          "persona": "standards_shepherd",
+          "direction": -1
+        },
+        {
+          "persona": "cwg_watcher",
+          "direction": -1
+        },
+        {
+          "persona": "template_janitor",
+          "direction": -1
+        }
+      ]
+    },
+    {
+      "slot_id": "s03",
+      "parent_slot_id": null,
+      "depth": 0,
+      "role": "noise",
+      "persona": "segfault_enjoyer_69",
+      "body": "Ah yes, the classic \"we need compiler builtins but we're going to pretend this is a library feature\" maneuver. Just make `[[trivially_relocatable]]` look decisive by comparison. If you're reaching into the compiler to stash tag bits in pointer metadata for constexpr anyway, what exactly is the library abstraction buying us that a core language facility wouldn't? *laughs in compile times*",
+      "tag": null,
+      "is_op": false,
+      "is_mod": false,
+      "controversial": false,
+      "edited": false,
+      "deleted": false,
+      "removed": false,
+      "collapsed": false,
+      "anchor_id": null,
+      "encounter_id": null,
+      "domain_lens": null,
+      "brief": "Dismiss the paper as compiler magic masquerading as a library feature, questioning why this isn't just a core language change.",
+      "votes": [
+        {
+          "persona": "abi_archivist",
+          "direction": -1
+        },
+        {
+          "persona": "lifetimes_lucy",
+          "direction": -1
+        },
+        {
+          "persona": "async_skeptic",
+          "direction": 1
+        },
+        {
+          "persona": "ranges_andy",
+          "direction": 1
+        },
+        {
+          "persona": "compiles_first_try",
+          "direction": 1
+        },
+        {
+          "persona": "paper_trail_2019",
+          "direction": 1
+        }
+      ]
+    },
+    {
+      "slot_id": "s04",
+      "parent_slot_id": null,
+      "depth": 0,
+      "role": "noise",
+      "persona": "bootcamp_grad_2025",
+      "body": "Wait, I'm a little confused here — maybe I'm just too used to TypeScript and Python where everything with a generic parameter that wraps a reference is basically a smart pointer or an `Option` type. So `pointer_tag_pair<Ptr, TagT, BitsRequested>` — this owns the pointee, right? Like, when the pair goes out of scope, does it call `delete` on the underlying pointer? Or is there some kind of `release()` method I'm supposed to call? I skimmed the paper and saw the `sizeof` guarantee and the tag bits stuff, but I didn't catch the part about destructor semantics. In Rust this would be super explicit with `Drop` and ownership annotations — is this one of those C++ things where you just have to know whether it's owning or non-owning from context? Because if I'm building a constexpr HAMT and I store these in an `atomic`, I really need to understand who's responsible for freeing the memory.",
+      "tag": null,
+      "is_op": false,
+      "is_mod": false,
+      "controversial": false,
+      "edited": false,
+      "deleted": false,
+      "removed": false,
+      "collapsed": false,
+      "anchor_id": null,
+      "encounter_id": null,
+      "domain_lens": null,
+      "brief": "Voice a misconception that pointer_tag_pair is a smart pointer that owns the pointee, asking about memory management.",
+      "votes": [
+        {
+          "persona": "abi_archivist",
+          "direction": 1
+        },
+        {
+          "persona": "embedded_for_20_years",
+          "direction": 1
+        },
+        {
+          "persona": "ranges_andy",
+          "direction": 1
+        },
+        {
+          "persona": "committee_gonna_committee",
+          "direction": 1
+        },
+        {
+          "persona": "segfault_enjoyer_69",
+          "direction": 1
+        },
+        {
+          "persona": "template_error_survivor",
+          "direction": 1
+        },
+        {
+          "persona": "paper_trail_2019",
+          "direction": 1
+        }
+      ]
+    },
+    {
+      "slot_id": "s05",
+      "parent_slot_id": "s04",
+      "depth": 1,
+      "role": "signal",
+      "persona": "compiles_first_try",
+      "body": "I think there's a small but important distinction to make here, and it's one the paper itself is very clear about:\n\n> Main requirement on the type is it must be always same size as stored pointer and not more.\n\n`pointer_tag_pair` is not a smart pointer. It doesn't own anything, it doesn't manage lifetimes, and it doesn't do any allocation or deallocation. It's a *pair* — a pointer and a small integer tag — that happens to be packed into the same footprint as the pointer alone. The trick is that if your pointee has alignment N, the low log2(N) bits of the pointer are always zero, so you can steal them for the tag without losing any address information.\n\nThink of it this way:\n\n1. You have a `T*` pointing to something you already own (or that's static, or on the stack — the paper doesn't care).\n2. You also have a small integer — maybe an enum discriminator, a refcount bit, a color for a red-black tree node.\n3. You want to carry both around in a single machine word, because you're building a lock-free data structure and every byte of footprint matters.\n\nThat's the whole pitch. The paper explicitly says it does *not* model a pointer, does *not* support function pointers, and does *not* manage lifetimes. The `sizeof` guarantee is the headline feature because it's what makes the type usable in atomics and cache-line-conscious layouts — you're not paying a word of overhead for the tag.\n\nSo no, there's no memory management question to answer here. The pointer inside the pair points to something whose lifetime is managed elsewhere. The pair just lets you smuggle a few extra bits alongside it without growing the footprint.",
+      "tag": null,
+      "is_op": false,
+      "is_mod": false,
+      "controversial": false,
+      "edited": false,
+      "deleted": false,
+      "removed": false,
+      "collapsed": false,
+      "anchor_id": "a04",
+      "encounter_id": null,
+      "domain_lens": 12,
+      "brief": "Correct the misconception: pointer_tag_pair stores a pointer and a small integer tag in the same footprint, it does not own the pointee. Cite the paper's claim that sizeof(pointer_tag_pair) == sizeof(Ptr).",
+      "votes": [
+        {
+          "persona": "embedded_for_20_years",
+          "direction": -1
+        },
+        {
+          "persona": "nanosecond_nancy",
+          "direction": -1
+        },
+        {
+          "persona": "not_a_real_cpp_dev",
+          "direction": 1
+        },
+        {
+          "persona": "bootcamp_grad_2025",
+          "direction": 1
+        },
+        {
+          "persona": "committee_gonna_committee",
+          "direction": -1
+        },
+        {
+          "persona": "template_error_survivor",
+          "direction": 1
+        },
+        {
+          "persona": "standards_shepherd",
+          "direction": 1
+        },
+        {
+          "persona": "template_janitor",
+          "direction": 1
+        }
+      ]
+    },
+    {
+      "slot_id": "s06",
+      "parent_slot_id": null,
+      "depth": 0,
+      "role": "noise",
+      "persona": "not_a_real_cpp_dev",
+      "body": "Probably a dumb question, but I'm trying to figure out how this works on big-endian platforms. If the tag bits are always the low bits of the pointer, and the pointer is just an integer under the hood, wouldn't the tag end up in the *most* significant byte on a big-endian system? Like, if I have a 4-byte-aligned pointer on a 32-bit big-endian ARM chip, the two zero bits are at the *top* of the word, not the bottom. Does `pointer_tag_pair` handle that automatically, or is this one of those things where the paper just assumes x86 little-endian and calls it a day? I've been bitten by endianness assumptions in serialization code before and now I'm paranoid about anything that touches pointer representations.",
+      "tag": null,
+      "is_op": false,
+      "is_mod": false,
+      "controversial": false,
+      "edited": false,
+      "deleted": false,
+      "removed": false,
+      "collapsed": false,
+      "anchor_id": null,
+      "encounter_id": null,
+      "domain_lens": null,
+      "brief": "Voice a misconception that the tag bits are always the low bits, asking about portability across endianness.",
+      "votes": [
+        {
+          "persona": "monomorphic_dan",
+          "direction": 1
+        },
+        {
+          "persona": "embedded_for_20_years",
+          "direction": -1
+        },
+        {
+          "persona": "lifetimes_lucy",
+          "direction": 1
+        },
+        {
+          "persona": "the_constexpr_oracle",
+          "direction": -1
+        },
+        {
+          "persona": "async_skeptic",
+          "direction": 1
+        },
+        {
+          "persona": "ranges_andy",
+          "direction": 1
+        },
+        {
+          "persona": "compiles_first_try",
+          "direction": 1
+        },
+        {
+          "persona": "bootcamp_grad_2025",
+          "direction": 1
+        },
+        {
+          "persona": "just_use_rust_lol",
+          "direction": 1
+        },
+        {
+          "persona": "segfault_enjoyer_69",
+          "direction": 1
+        },
+        {
+          "persona": "paper_trail_2019",
+          "direction": -1
+        },
+        {
+          "persona": "cwg_watcher",
+          "direction": 1
+        },
+        {
+          "persona": "template_janitor",
+          "direction": 1
+        }
+      ]
+    },
+    {
+      "slot_id": "s07",
+      "parent_slot_id": "s06",
+      "depth": 1,
+      "role": "signal",
+      "persona": "monomorphic_dan",
+      "body": "You are treating a symptom. The root cause is a category error about what `pointer_bits_available` actually models.\n\n> \"This proposal only proposes interface to accessing low bits for storing // reading a tag value, not observing bits of a pointer.\"\n\nThe paper's domain is the set of bits that alignment guarantees are zero. That is the precondition. The implementation is free to choose *which* of those bits become the tag storage — low bits, yes, but not necessarily *the lowest* bits, and certainly not a fixed bitmask. `pointer_bits_available` returns a cardinality, not a geometry. It says \"you get N bits,\" not \"you get bits at positions 0 through N-1.\" The mapping from tag value to bit pattern is an implementation detail, and the only guarantee is that `tagged_pointer()` round-trips through `from_tagged()`.\n\nThis is not a portability problem. It is the correct abstraction. The alternative — exposing bit positions — would be the portability disaster, because it would bake platform-specific layout into the type's invariants. Endianness is irrelevant here: the tag is not stored as an integer at an address, it is stored as a bit pattern in a pointer. The pointer's representation is opaque. The standard does not specify pointer bit layout, and it should not start now.\n\nThree prior design mistakes led to this confusion:\n\n1. C's `uintptr_t` round-trip guarantee, which taught programmers to think of pointers as integers with spare bits, rather than as abstract capabilities with implementation-defined representations.\n2. The widespread \"tagged pointer\" idiom that hardcodes `& 0x3` masking, conflating the *mechanism* (low-bit masking on x86) with the *concept* (metadata stored in alignment-padding bits).\n3. The paper's own R0-R3 wording, which used `pointer` as the first template parameter and made the low-bit assumption more prominent in examples before R4 cleaned this up.\n\nThe standard should say: `pointer_bits_available<Ptr>()` returns the number of bits available for tagging, with no guarantee about which bits those are. The only valid operation on a tagged pointer is untagging it through the same `pointer_tag_pair` type that created it. Everything else is undefined behavior.",
+      "tag": null,
+      "is_op": false,
+      "is_mod": false,
+      "controversial": false,
+      "edited": false,
+      "deleted": false,
+      "removed": false,
+      "collapsed": false,
+      "anchor_id": "a03",
+      "encounter_id": null,
+      "domain_lens": 7,
+      "brief": "Correct the misconception: the paper only guarantees alignment bits are available, not their position. pointer_bits_available returns a count, not a bitmask. The implementation chooses which bits to use.",
+      "votes": [
+        {
+          "persona": "async_skeptic",
+          "direction": -1
+        },
+        {
+          "persona": "ranges_andy",
+          "direction": -1
+        },
+        {
+          "persona": "nanosecond_nancy",
+          "direction": -1
+        },
+        {
+          "persona": "compiles_first_try",
+          "direction": 1
+        },
+        {
+          "persona": "not_a_real_cpp_dev",
+          "direction": 1
+        },
+        {
+          "persona": "bootcamp_grad_2025",
+          "direction": 1
+        },
+        {
+          "persona": "committee_gonna_committee",
+          "direction": -1
+        },
+        {
+          "persona": "segfault_enjoyer_69",
+          "direction": 1
+        },
+        {
+          "persona": "template_error_survivor",
+          "direction": 1
+        },
+        {
+          "persona": "paper_trail_2019",
+          "direction": 1
+        },
+        {
+          "persona": "cwg_watcher",
+          "direction": 1
+        },
+        {
+          "persona": "template_janitor",
+          "direction": -1
+        }
+      ]
+    },
+    {
+      "slot_id": "s08",
+      "parent_slot_id": null,
+      "depth": 0,
+      "role": "noise",
+      "persona": "bootcamp_grad_2025",
+      "body": "Wait, I'm confused about something. The paper says `from_tagged` is noexcept and returns a `pointer_tag_pair`, and the wording says the result is unspecified if the pointer isn't properly aligned. But if I'm reading this right, doesn't `from_tagged` actually *validate* the alignment at runtime? Like, it takes a raw `void*` with bits already stuffed in, and it has to check that those low bits are actually zero before it can safely extract the tag, right? Otherwise how would it even know which bits are the tag and which are the pointer? In TypeScript you'd get a type guard that narrows the type after validation, and in Rust you'd have a `Result` that forces you to handle the error path. But here it's just noexcept with unspecified results? That seems... really dangerous for something that's supposed to be the building block for `constexpr atomic<shared_ptr<T>>`. Are we really standardizing a function that looks safe (noexcept! returns a value! no error code!) but can silently give you garbage if you pass it a pointer that isn't aligned? Or am I misunderstanding what `from_tagged` actually does internally?",
+      "tag": null,
+      "is_op": false,
+      "is_mod": false,
+      "controversial": false,
+      "edited": false,
+      "deleted": false,
+      "removed": false,
+      "collapsed": false,
+      "anchor_id": null,
+      "encounter_id": null,
+      "domain_lens": null,
+      "brief": "Voice a misconception that from_tagged validates pointer alignment, expressing concern about safety.",
+      "votes": [
+        {
+          "persona": "abi_archivist",
+          "direction": 1
+        },
+        {
+          "persona": "embedded_for_20_years",
+          "direction": -1
+        },
+        {
+          "persona": "ranges_andy",
+          "direction": 1
+        },
+        {
+          "persona": "nanosecond_nancy",
+          "direction": 1
+        },
+        {
+          "persona": "not_a_real_cpp_dev",
+          "direction": 1
+        },
+        {
+          "persona": "segfault_enjoyer_69",
+          "direction": 1
+        },
+        {
+          "persona": "template_error_survivor",
+          "direction": 1
+        },
+        {
+          "persona": "standards_shepherd",
+          "direction": 1
+        },
+        {
+          "persona": "template_janitor",
+          "direction": 1
+        }
+      ]
+    },
+    {
+      "slot_id": "s09",
+      "parent_slot_id": "s08",
+      "depth": 1,
+      "role": "signal",
+      "persona": "lifetimes_lucy",
+      "body": "> \"static pointer_tag_pair from_tagged(tagged_pointer_type p) noexcept; // note: not constexpr\"\n\nThis is not a safety check. It's a precondition, and the paper is explicit about what happens when you violate it.\n\n1. The wording in [pointer.tag.pair.cons] paragraph 8 states the result is *unspecified* if the pointer is not properly aligned for the stored tag. Not undefined behavior—unspecified. That's a deliberate choice, but it's also a trap: unspecified means the implementation can do anything from returning a garbage tag to producing a pointer that crashes on dereference, and it doesn't have to tell you which.\n\n2. The `from_tagged` factory is the escape hatch for legacy interop—you've got a `void*` with bits already stuffed in the low order, and you want to wrap it. The paper can't validate alignment at compile time because it's not constexpr, and it can't validate at runtime because that would require a branch on every construction, which defeats the purpose of a zero-overhead abstraction. So it just... doesn't.\n\n3. Compare this to the normal constructor, which is constrained by `pointer_bits_available` and only participates in overload resolution when the pointee type's natural alignment provides enough bits. That's a compile-time guard. `from_tagged` has no such guard because it takes a raw `tagged_pointer_type` (which is `void*` or `uintptr_t` depending on the template parameter), and there's no alignment information in a raw pointer.\n\n4. The real danger is the `constexpr` gap. The paper's motivation section says this should work in constexpr data structures, but `from_tagged` is explicitly not constexpr. So in a constexpr context you're forced through the normal constructor path, which *does* validate alignment via the pointee type. But in runtime code, you can call `from_tagged` with a misaligned pointer and get unspecified results with no diagnostic required. That's a footgun shaped exactly like the one `reinterpret_cast` gives you, and we're standardizing it.\n\n5. The paper acknowledges provenance loss as a problem and argues `void*` is better than `uintptr_t` for the raw interface, but provenance is orthogonal to alignment. A `void*` can carry provenance and still be misaligned. The `from_tagged` precondition doesn't mention provenance at all—it only cares about the low bits being zero.\n\nI'll concede that the normal constructor path is sound: if you construct from a typed pointer, the alignment constraint is enforced by the type system. But `from_tagged` is the interface you reach for when you're deserializing a tagged pointer from a network buffer, or reading one from an atomic, or interoping with C code that's been doing pointer tagging since before the committee existed. Those are exactly the cases where you can't rely on the type system, and the paper gives you an unspecified-result footgun with a noexcept signature that looks safe.",
+      "tag": null,
+      "is_op": false,
+      "is_mod": false,
+      "controversial": false,
+      "edited": false,
+      "deleted": false,
+      "removed": false,
+      "collapsed": false,
+      "anchor_id": "a07",
+      "encounter_id": null,
+      "domain_lens": 11,
+      "brief": "Correct the misconception: from_tagged does not validate alignment. The paper states the result is unspecified if the pointer is not properly aligned. This is a precondition, not a checked condition.",
+      "votes": [
+        {
+          "persona": "monomorphic_dan",
+          "direction": 1
+        },
+        {
+          "persona": "abi_archivist",
+          "direction": 1
+        },
+        {
+          "persona": "the_constexpr_oracle",
+          "direction": 1
+        },
+        {
+          "persona": "async_skeptic",
+          "direction": 1
+        },
+        {
+          "persona": "not_a_real_cpp_dev",
+          "direction": -1
+        },
+        {
+          "persona": "bootcamp_grad_2025",
+          "direction": 1
+        },
+        {
+          "persona": "standards_shepherd",
+          "direction": -1
+        }
+      ]
+    },
+    {
+      "slot_id": "s10",
+      "parent_slot_id": null,
+      "depth": 0,
+      "role": "noise",
+      "persona": "not_a_real_cpp_dev",
+      "body": "Probably a dumb question, but I'm trying to understand how this works for cross-platform code. If I write `pointer_bits_available<MyStruct>` in my library, does that return the same number on every platform? Like, if I test on my x86 Linux box and it says 3 bits are available, can I just assume that's what I'll get everywhere and bake that into my data structure layout? Or do I need to check it at compile time on every target? The paper talks about alignment guarantees but I'm not sure if those are the same across all ABIs or if this is one of those things where it silently changes depending on what you're compiling for.",
+      "tag": null,
+      "is_op": false,
+      "is_mod": false,
+      "controversial": false,
+      "edited": false,
+      "deleted": false,
+      "removed": false,
+      "collapsed": false,
+      "anchor_id": null,
+      "encounter_id": null,
+      "domain_lens": null,
+      "brief": "Voice a misconception that pointer_bits_available returns the same value on all platforms for the same type, asking about cross-platform code.",
+      "votes": [
+        {
+          "persona": "monomorphic_dan",
+          "direction": -1
+        },
+        {
+          "persona": "abi_archivist",
+          "direction": -1
+        },
+        {
+          "persona": "embedded_for_20_years",
+          "direction": -1
+        },
+        {
+          "persona": "async_skeptic",
+          "direction": -1
+        },
+        {
+          "persona": "nanosecond_nancy",
+          "direction": -1
+        },
+        {
+          "persona": "bootcamp_grad_2025",
+          "direction": 1
+        },
+        {
+          "persona": "just_use_rust_lol",
+          "direction": -1
+        },
+        {
+          "persona": "committee_gonna_committee",
+          "direction": 1
+        },
+        {
+          "persona": "segfault_enjoyer_69",
+          "direction": 1
+        },
+        {
+          "persona": "template_error_survivor",
+          "direction": 1
+        },
+        {
+          "persona": "standards_shepherd",
+          "direction": 1
+        },
+        {
+          "persona": "paper_trail_2019",
+          "direction": 1
+        }
+      ]
+    },
+    {
+      "slot_id": "s11",
+      "parent_slot_id": "s10",
+      "depth": 1,
+      "role": "signal",
+      "persona": "embedded_for_20_years",
+      "body": "> This proposal only proposes interface to accessing low bits for storing // reading a tag value, not observing bits of a pointer.\n\nAnd that's exactly the problem. `pointer_bits_available` doesn't tell you how many bits the *hardware* gives you — it tells you how many bits the *alignment of the pointee type* gives you on the target ABI. Those are different numbers, and the paper's deliberate refusal to observe platform bits means you can't query the real answer.\n\nI've shipped tagged pointers on three architectures in production firmware. On ARMv8 with TBI enabled, you get 8 high bits for free regardless of alignment — `pointer_bits_available<int>` returns 2 (alignof 4), but the silicon gives you 8. On x86-64 with LAM, you get 15 or 57 high bits depending on the mode. On a plain Cortex-M4 with no such features, you get exactly what alignment provides and nothing else.\n\nCode that calls `pointer_bits_available` and assumes the answer is portable is broken. The function returns a compile-time constant that depends on the target triple, not on what the hardware actually supports. If you're writing a HAMT that needs 3 tag bits and you test on x86-64 where `pointer_bits_available<node>` returns 3 because your allocator overaligns to 8 bytes, that same code silently breaks on a platform where the allocator gives you 4-byte alignment and you only get 2 bits.\n\nThe paper needs to either (a) add a separate query for platform-available bits that returns 0 when the feature isn't detectable at compile time, or (b) state explicitly that `pointer_bits_available` is a *minimum* guarantee and users must test on their actual targets. Right now it does neither, and the \"not observing bits\" stance means the committee is standardizing a query that looks portable but isn't.",
+      "tag": null,
+      "is_op": true,
+      "is_mod": false,
+      "controversial": false,
+      "edited": false,
+      "deleted": false,
+      "removed": false,
+      "collapsed": false,
+      "anchor_id": "a03",
+      "encounter_id": null,
+      "domain_lens": 2,
+      "brief": "Correct the misconception: pointer_bits_available is platform-dependent. It returns the number of bits available based on alignment of the pointee type on the target architecture. Code relying on a specific count is non-portable.",
+      "votes": [
+        {
+          "persona": "monomorphic_dan",
+          "direction": 1
+        },
+        {
+          "persona": "abi_archivist",
+          "direction": 1
+        },
+        {
+          "persona": "lifetimes_lucy",
+          "direction": -1
+        },
+        {
+          "persona": "async_skeptic",
+          "direction": 1
+        },
+        {
+          "persona": "nanosecond_nancy",
+          "direction": -1
+        },
+        {
+          "persona": "bootcamp_grad_2025",
+          "direction": 1
+        },
+        {
+          "persona": "just_use_rust_lol",
+          "direction": -1
+        },
+        {
+          "persona": "segfault_enjoyer_69",
+          "direction": -1
+        },
+        {
+          "persona": "paper_trail_2019",
+          "direction": -1
+        },
+        {
+          "persona": "not_on_the_committee",
+          "direction": 1
+        }
+      ]
+    },
+    {
+      "slot_id": "s12",
+      "parent_slot_id": null,
+      "depth": 0,
+      "role": "teaser",
+      "persona": "monomorphic_dan",
+      "body": "The paper is treating a symptom. The root cause is that the standard library has no vocabulary for pointer provenance, so every proposal that touches tagged pointers ends up splitting into two incompatible domains: the constexpr domain where the compiler can track metadata out-of-band, and the runtime domain where you're stuck round-tripping through integers and praying. P3125R5 makes this split explicit and then pretends it isn't a problem.\n\n> \"static pointer_tag_pair from_tagged(tagged_pointer_type p) noexcept; // note: not constexpr\"\n\nThis is not a minor omission. The entire motivation section sells constexpr `atomic<shared_ptr<T>>` as the killer app. But `shared_ptr`'s control block already stores a raw pointer, and the obvious implementation strategy is to tag that pointer with a reference count or a lock bit. If the only way to recover a tagged pointer from the wild is a non-constexpr escape hatch, then the constexpr path is a closed universe. You can construct tagged pairs from scratch inside constant evaluation, but you cannot ingest a pointer that crossed a translation-unit boundary, a shared-memory region, or even a function call that wasn't inlined and constexpr-evaluated. That is not a building block. That is a sandbox.\n\nThe genealogy of this mistake runs:\n\n1. The standard declined to specify pointer provenance semantics, leaving `reinterpret_cast<uintptr_t>` as the only portable(ish) round-trip mechanism.\n2. Compiler vendors filled the gap with builtins (`__builtin_ptrauth_strip`, LLVM's `inttoptr`/`ptrtoint` with provenance tracking) that are mutually incompatible.\n3. P3125R5 attempts to paper over (1) and (2) with a library type that is simultaneously a thin wrapper over compiler magic and a standard-layout type you can `memcpy`.\n4. The constexpr path adds a third representation—pointer metadata stored in the interpreter's shadow state—that has no runtime equivalent and no serialization contract.\n\nThe result is a type with three disjoint invariants: the runtime-alignment-tagging invariant (low bits are zero, tag lives there), the compiler-builtin invariant (provenance is preserved through opaque intrinsics), and the constexpr-metadata invariant (tag is stored in an abstract side-channel). The paper guarantees that `sizeof(pointer_tag_pair<T>) == sizeof(T*)`, but it does not guarantee that the bit pattern of a constexpr-constructed pair matches the bit pattern of the equivalent runtime-constructed pair. That means you cannot `bit_cast` between them, you cannot persist them, and you cannot reason about them across the constexpr boundary.\n\nThe standard should say: `pointer_tag_pair` is a constexpr type only when the tag value is a constant expression and the pointer value is a constant expression. The `from_tagged` and `tagged_pointer` accessors shall be constexpr under those same preconditions. If the compiler cannot guarantee provenance preservation in constant evaluation, then the feature should not claim constexpr support at all. Half a constexpr type is worse than none.",
+      "tag": null,
+      "is_op": false,
+      "is_mod": false,
+      "controversial": false,
+      "edited": false,
+      "deleted": false,
+      "removed": false,
+      "collapsed": false,
+      "anchor_id": "a07",
+      "encounter_id": null,
+      "domain_lens": 8,
+      "brief": "Present the teaser: the paper's constexpr support is the genuinely novel part, but it creates a contradiction—the legacy interop path (from_tagged/tagged_pointer) is explicitly not constexpr, undermining the stated motivation of enabling constexpr atomic<shared_ptr<T>>.",
+      "votes": [
+        {
+          "persona": "embedded_for_20_years",
+          "direction": 1
+        },
+        {
+          "persona": "the_constexpr_oracle",
+          "direction": -1
+        },
+        {
+          "persona": "nanosecond_nancy",
+          "direction": -1
+        },
+        {
+          "persona": "not_a_real_cpp_dev",
+          "direction": -1
+        },
+        {
+          "persona": "bootcamp_grad_2025",
+          "direction": 1
+        },
+        {
+          "persona": "just_use_rust_lol",
+          "direction": -1
+        },
+        {
+          "persona": "committee_gonna_committee",
+          "direction": -1
+        },
+        {
+          "persona": "segfault_enjoyer_69",
+          "direction": 1
+        },
+        {
+          "persona": "standards_shepherd",
+          "direction": 1
+        },
+        {
+          "persona": "not_on_the_committee",
+          "direction": -1
+        },
+        {
+          "persona": "template_janitor",
+          "direction": 1
+        }
+      ]
+    },
+    {
+      "slot_id": "s13",
+      "parent_slot_id": "s12",
+      "depth": 1,
+      "role": "signal",
+      "persona": "monomorphic_dan",
+      "body": "You've identified the symptom. I'll identify the disease.\n\n> \"static pointer_tag_pair from_tagged(tagged_pointer_type p) noexcept; // note: not constexpr\"\n\nThe paper's authors understand this is a problem. The note is an admission of guilt. But the real failure is not that `from_tagged` is non-constexpr. The real failure is that the paper defines `tagged_pointer_type` as a typedef for `void*` (or `T*` depending on template argument choice) and then expects that type to carry tagged-pointer semantics without any static guarantee that the value actually *is* a tagged pointer. You have a type whose entire purpose is to prevent you from dereferencing a tagged pointer by accident, and the escape hatch gives you back a raw pointer with no such protection. The constexpr prohibition is just the compiler telling you what you should already know: you cannot reason about provenance in constant evaluation when you've thrown provenance away.\n\nThe genealogy of this specific mistake:\n\n1. The paper needs a way to round-trip through existing APIs that store tagged pointers in `void*` or `uintptr_t` (mmap, shared memory, atomic intrinsics, legacy code).\n2. Rather than specify a tagged-pointer vocabulary type with provenance-preserving semantics, the paper typedefs `tagged_pointer_type` to a raw pointer and adds a note saying \"don't dereference this.\"\n3. The constexpr evaluator, which actually *tracks* provenance, refuses to participate in this fiction. You cannot launder a pointer through `void*` in constant evaluation and expect the tag bits to survive, because the evaluator sees `void*` as an opaque address, not a bit pattern with spare low bits.\n4. The paper marks `from_tagged` non-constexpr and moves on, leaving the constexpr `atomic<shared_ptr<T>>` use case broken at exactly the point where it needs to ingest a pointer from the runtime world.\n\nHere is the breakage in code:\n\ncpp\nconstexpr auto make_tagged() {\n    alignas(8) int x = 42;\n    auto pair = pointer_tag_pair<int*, int, 3>::from_pointer(&x, 5);\n    // This works: we're inside constexpr, the compiler tracks the tag in metadata.\n    auto raw = pair.tagged_pointer(); // non-constexpr! Compile error.\n    return pair;\n}\n// You cannot serialize a constexpr-constructed tagged pointer\n// to pass it to a non-constexpr context, because the only accessor\n// that gives you the raw bits is forbidden in constant evaluation.\n\n\nThe standard should say: `tagged_pointer_type` is not `void*`. It is an opaque type that models `trivially_copyable`, has size equal to the pointer type, and supports exactly one operation: being passed to `pointer_tag_pair::from_tagged`. That operation shall be constexpr when the tag value and pointer value are both constant expressions. If the implementation cannot guarantee that the bit pattern of a constexpr-constructed tagged pointer matches the runtime bit pattern, then the implementation shall not claim constexpr support for `from_tagged`, and the paper shall not claim constexpr `atomic<shared_ptr<T>>` as a motivation. You do not get to sell the feature on a use case you have made impossible.",
+      "tag": null,
+      "is_op": false,
+      "is_mod": false,
+      "controversial": false,
+      "edited": false,
+      "deleted": false,
+      "removed": false,
+      "collapsed": false,
+      "anchor_id": "a07",
+      "encounter_id": null,
+      "domain_lens": 8,
+      "brief": "Expand on the teaser: the paper claims constexpr as a key motivation but the wording makes from_tagged non-constexpr. This means you can't use the legacy interop in constexpr contexts, which is exactly where you'd need it for atomic<shared_ptr<T>>.",
+      "votes": [
+        {
+          "persona": "embedded_for_20_years",
+          "direction": -1
+        },
+        {
+          "persona": "lifetimes_lucy",
+          "direction": 1
+        },
+        {
+          "persona": "ranges_andy",
+          "direction": -1
+        },
+        {
+          "persona": "not_a_real_cpp_dev",
+          "direction": 1
+        },
+        {
+          "persona": "committee_gonna_committee",
+          "direction": 1
+        },
+        {
+          "persona": "segfault_enjoyer_69",
+          "direction": 1
+        },
+        {
+          "persona": "template_error_survivor",
+          "direction": 1
+        },
+        {
+          "persona": "paper_trail_2019",
+          "direction": 1
+        },
+        {
+          "persona": "not_on_the_committee",
+          "direction": -1
+        },
+        {
+          "persona": "cwg_watcher",
+          "direction": -1
+        },
+        {
+          "persona": "template_janitor",
+          "direction": -1
+        }
+      ]
+    },
+    {
+      "slot_id": "s14",
+      "parent_slot_id": "s12",
+      "depth": 1,
+      "role": "noise",
+      "persona": "just_use_rust_lol",
+      "body": "constexpr everything except the part that actually does the thing, classic committee. The borrow checker solved provenance in 2015 and we're still here arguing about whether the first template parameter should be the pointer or the pointee.",
+      "tag": null,
+      "is_op": false,
+      "is_mod": false,
+      "controversial": false,
+      "edited": false,
+      "deleted": false,
+      "removed": false,
+      "collapsed": false,
+      "anchor_id": null,
+      "encounter_id": null,
+      "domain_lens": null,
+      "brief": "React with deadpan humor: 'constexpr everything except the part that actually does the thing, classic committee.'",
+      "votes": [
+        {
+          "persona": "embedded_for_20_years",
+          "direction": -1
+        },
+        {
+          "persona": "the_constexpr_oracle",
+          "direction": -1
+        },
+        {
+          "persona": "nanosecond_nancy",
+          "direction": -1
+        },
+        {
+          "persona": "committee_gonna_committee",
+          "direction": 1
+        },
+        {
+          "persona": "cwg_watcher",
+          "direction": 1
+        }
+      ]
+    },
+    {
+      "slot_id": "s15",
+      "parent_slot_id": null,
+      "depth": 0,
+      "role": "signal",
+      "persona": "monomorphic_dan",
+      "body": "The paper identifies the disease and then prescribes a placebo.\n\n> I prefer `void*` as roundtriping thru an integer looses information about provenance and can disable some optimization.\n\nThis sentence is the entire provenance analysis in P3125R5. It acknowledges the problem and then walks away from it. The `tagged_pointer()` accessor returns `uintptr_t`. That is not a preference for `void*` — that is a hard severing of the provenance chain at the exact point where the abstract machine needs it preserved. The compiler builtins described in the clang prototype (PR #111861) do the right thing: they tag and untag without round-tripping through integers, keeping the pointer in the pointer domain. But the standard wording exposes `uintptr_t` as the primary escape hatch, and the paper's own design section treats the integer representation as the ground truth.\n\nThis is a category error. Pointer tagging is an operation on the *address* domain, not the integer domain. The fact that alignment-padding low bits happen to be zero in a flat address space is an implementation detail of the hardware, not a property of the C++ abstract machine. The abstract machine has pointer provenance. When you cast a pointer to `uintptr_t` and back, you have not \"round-tripped\" — you have destroyed the original pointer and manufactured a new one from an integer. The compiler is permitted to treat the resulting pointer as having no provenance relationship to the original object. This is not a theoretical concern; it is the operational semantics that enables TBAA, alias analysis, and dead store elimination.\n\nThere are three layers of failure here:\n\n1. The paper treats provenance as an optimization concern rather than a correctness concern. The quote says \"can disable some optimization.\" No. It can introduce undefined behavior. A tagged pointer reconstructed from `uintptr_t` may not alias the original object. A store through it may be reordered past a load through the untagged original. This is not a missed optimization — it is a silent semantic corruption.\n\n2. The `tagged_pointer()` accessor returning `uintptr_t` is the wrong primitive. The correct primitive is a `void*` accessor that preserves the provenance chain through the compiler builtin, with the integer accessor being the escape hatch for legacy interop, not the primary interface. The paper has this inverted.\n\n3. The constexpr path stores the tag in \"pointer metadata rather than address bits,\" which is clever but means the constexpr semantics and the runtime semantics operate in different domains. At constexpr time, the tag is metadata. At runtime, the tag is bits. The provenance guarantees must hold across both, and the paper does not specify what happens when a constexpr-constructed `pointer_tag_pair` is used at runtime or vice versa.\n\nThe standard should say: `pointer_tag_pair` preserves pointer provenance. The `tagged_pointer()` accessor returns `void*` with the provenance of the stored pointer intact. The integer accessor is named `tagged_pointer_as_integer()` and is explicitly documented as severing provenance. The constexpr path must guarantee that the provenance model is consistent with the runtime model, not merely that the bits match.",
+      "tag": null,
+      "is_op": false,
+      "is_mod": false,
+      "controversial": false,
+      "edited": false,
+      "deleted": false,
+      "removed": false,
+      "collapsed": false,
+      "anchor_id": "a01",
+      "encounter_id": null,
+      "domain_lens": 7,
+      "brief": "Raise the provenance concern: the paper acknowledges provenance loss through integer roundtripping but doesn't resolve it. The tagged_pointer() accessor returns uintptr_t, which severs provenance. This is a critical gap for any implementation that tracks provenance.",
+      "votes": [
+        {
+          "persona": "embedded_for_20_years",
+          "direction": 1
+        },
+        {
+          "persona": "lifetimes_lucy",
+          "direction": 1
+        },
+        {
+          "persona": "the_constexpr_oracle",
+          "direction": 1
+        },
+        {
+          "persona": "async_skeptic",
+          "direction": 1
+        },
+        {
+          "persona": "not_a_real_cpp_dev",
+          "direction": 1
+        },
+        {
+          "persona": "bootcamp_grad_2025",
+          "direction": 1
+        },
+        {
+          "persona": "just_use_rust_lol",
+          "direction": 1
+        },
+        {
+          "persona": "standards_shepherd",
+          "direction": -1
+        }
+      ]
+    },
+    {
+      "slot_id": "s16",
+      "parent_slot_id": "s15",
+      "depth": 1,
+      "role": "signal",
+      "persona": "ranges_andy",
+      "body": "> One question is if template argument of `pointer_tag_type` should be pointer or pointee. LLVM has design with a pointer, but this design is not symmetric with rest of standard library.\n\nThis is the wrong framing, and it's exactly the provenance gap u/monomorphic_dan identified, just wearing a different hat. The question isn't \"what looks symmetric with the rest of the library\" — it's \"which parameterization makes provenance flow through the type correctly.\" Those two goals are in tension, and the paper is asking LEWG to pick one without acknowledging that the choice has semantic consequences.\n\nLet's rebuild from first principles. You have a pointer. You want to stash a few bits in the low end. The bits are there because the pointee's alignment guarantees zeros. So the *reason* the bits exist is a property of the pointee. That's the argument for pointee-first: `pointer_tag_pair<T, Tag, N>` reads like \"a tagged pointer to T,\" which is what every other pointer-like thing in the standard library does. `unique_ptr<T>`, `shared_ptr<T>`, `span<T>` — the pointee is the first thing you see. Symmetry.\n\nBut here's the thing: provenance attaches to the *pointer*, not the pointee. When you tag a `T*`, you're operating on the pointer value — its address, its provenance, its identity in the abstract machine. The pointee type is just the thing that happens to give you the spare bits. If you parameterize on the pointee, you're saying \"the type of the thing pointed to is the primary organizing principle of this tagged pointer.\" But it isn't. The primary organizing principle is \"I have a pointer, and I'm borrowing its low bits.\" The pointer is the thing being transformed; the pointee is downstream.\n\nLLVM got this right with `PointerIntPair<PointerTy, ...>`. The pointer type is the first parameter because the operation is fundamentally a pointer operation. The integer tag is payload. The pointee is recoverable from the pointer type if you need it. This isn't an aesthetic choice — it's a provenance choice. When the template is parameterized on the pointer type, the compiler can see the full pointer type through the entire abstraction. It knows this is a `T*` that's been bit-twiddled, not some opaque bag of bits that happens to be pointer-sized. The builtins that do the tagging and untagging operate on the pointer domain directly; they never round-trip through `uintptr_t`. The type system carries the provenance forward.\n\nPointee-first breaks that chain. `pointer_tag_pair<T, Tag, N>` has to internally store *something* — and if the template doesn't know the pointer type, it's going to store a `void*` or a `uintptr_t`. The paper's current design stores a `uintptr_t` and exposes it through `tagged_pointer()`. That's the provenance severing u/monomorphic_dan is talking about. The template parameter choice isn't just about API aesthetics — it's about whether the internal representation preserves the pointer or flattens it to an integer.\n\nSo the real question LEWG should be asking is: do we want a type that preserves pointer provenance through the abstraction, or do we want a type that looks like the rest of the standard library but silently destroys provenance information? Because right now the paper is offering the latter and asking us to debate the parameter order as if it's a style question.\n\nEdit: I should clarify — the paper does have a `void*` accessor path in the design discussion, but the wording still exposes `uintptr_t` as the primary interface. The tension between the design intent and the wording is exactly the problem.",
+      "tag": null,
+      "is_op": false,
+      "is_mod": false,
+      "controversial": false,
+      "edited": false,
+      "deleted": false,
+      "removed": false,
+      "collapsed": false,
+      "anchor_id": "a02",
+      "encounter_id": null,
+      "domain_lens": 10,
+      "brief": "Connect the provenance gap to the design tension: the paper asks LEWG to choose between pointer and pointee as the first template argument. The choice affects how provenance flows through the type. A pointer-first design preserves provenance better but breaks symmetry with the rest of the standard library.",
+      "votes": [
+        {
+          "persona": "monomorphic_dan",
+          "direction": 1
+        },
+        {
+          "persona": "lifetimes_lucy",
+          "direction": -1
+        },
+        {
+          "persona": "async_skeptic",
+          "direction": -1
+        },
+        {
+          "persona": "compiles_first_try",
+          "direction": 1
+        },
+        {
+          "persona": "committee_gonna_committee",
+          "direction": -1
+        },
+        {
+          "persona": "segfault_enjoyer_69",
+          "direction": 1
+        },
+        {
+          "persona": "template_janitor",
+          "direction": 1
+        }
+      ]
+    },
+    {
+      "slot_id": "s17",
+      "parent_slot_id": "s15",
+      "depth": 1,
+      "role": "tangent",
+      "persona": "committee_gonna_committee",
+      "body": "Rust's provenance model already solved this. `ptr::map_addr` lets you do arithmetic on the address bits without severing provenance, and `ptr::from_exposed_addr` is the explicit escape hatch that screams \"I know what I'm doing and I accept the consequences.\" The C++ paper has exactly one sentence about provenance and then hands you `uintptr_t` as the primary interface. That's not a design choice, that's a surrender.\n\nrust\n// Rust: tag stays in pointer domain, provenance intact\nlet tagged = ptr.map_addr(|addr| addr | tag_bits);\nlet untagged = ptr.map_addr(|addr| addr & !tag_mask);\n// vs C++: congratulations, your pointer is now an integer\nuintptr_t raw = pair.tagged_pointer(); // provenance: gone\n\n\nThe constexpr path storing tags in \"pointer metadata\" is just reinventing what `ptr::map_addr` does at the MIR level, except now you have two different semantics depending on whether the compiler feels like evaluating your code at compile time. Rust picked one model and made it work everywhere. https://doc.rust-lang.org/std/primitive.pointer.html#method.map_addr",
+      "tag": null,
+      "is_op": false,
+      "is_mod": false,
+      "controversial": false,
+      "edited": false,
+      "deleted": false,
+      "removed": false,
+      "collapsed": false,
+      "anchor_id": null,
+      "encounter_id": null,
+      "domain_lens": null,
+      "brief": "Start a tangent about Rust's provenance model (ptr::map_addr, ptr::from_exposed_addr) and how it handles this problem more rigorously.",
+      "votes": [
+        {
+          "persona": "monomorphic_dan",
+          "direction": -1
+        },
+        {
+          "persona": "the_constexpr_oracle",
+          "direction": -1
+        },
+        {
+          "persona": "ranges_andy",
+          "direction": -1
+        },
+        {
+          "persona": "nanosecond_nancy",
+          "direction": -1
+        },
+        {
+          "persona": "not_a_real_cpp_dev",
+          "direction": 1
+        },
+        {
+          "persona": "just_use_rust_lol",
+          "direction": -1
+        },
+        {
+          "persona": "segfault_enjoyer_69",
+          "direction": 1
+        },
+        {
+          "persona": "standards_shepherd",
+          "direction": 1
+        },
+        {
+          "persona": "paper_trail_2019",
+          "direction": 1
+        },
+        {
+          "persona": "not_on_the_committee",
+          "direction": 1
+        },
+        {
+          "persona": "cwg_watcher",
+          "direction": -1
+        },
+        {
+          "persona": "template_janitor",
+          "direction": -1
+        }
+      ]
+    },
+    {
+      "slot_id": "s18",
+      "parent_slot_id": "s17",
+      "depth": 2,
+      "role": "tangent",
+      "persona": "template_error_survivor",
+      "body": "I appreciate the Rust comparison, but it's a bit like saying \"my bicycle solved the pothole problem by being lighter\" — the constraints are just different. Rust's provenance model was designed from scratch with pointer-integer separation as a first principle; C++ has thirty years of code that assumes `uintptr_t` round-trips work, and WG21 can't just declare that world nonexistent. The ongoing provenance debate (P2318, P2434) is exactly about how to retrofit a coherent model onto an ecosystem where `reinterpret_cast<uintptr_t>(p)` is practically a dialect feature. P3125R5 is trying to thread a needle: provide a tagged pointer abstraction that *can* preserve provenance through compiler builtins, while not breaking every codebase that currently does `(T*)((uintptr_t)p | tag)`. The `tagged_pointer()` returning `uintptr_t` is the escape hatch for that existing world; the `void*` path through the builtins is the forward-looking one. Is the paper's provenance analysis thin? Absolutely — one sentence is not a model. But the Rust comparison misses that C++ has to solve the migration problem, not just the greenfield one. https://wg21.link/p2318",
+      "tag": null,
+      "is_op": false,
+      "is_mod": false,
+      "controversial": false,
+      "edited": false,
+      "deleted": false,
+      "removed": false,
+      "collapsed": false,
+      "anchor_id": null,
+      "encounter_id": null,
+      "domain_lens": null,
+      "brief": "Push back on the Rust comparison: C++ has a different memory model and different constraints. The provenance debate in WG21 (P2318, P2434) is ongoing and this paper needs to engage with it.",
+      "votes": [
+        {
+          "persona": "abi_archivist",
+          "direction": -1
+        },
+        {
+          "persona": "the_constexpr_oracle",
+          "direction": 1
+        },
+        {
+          "persona": "just_use_rust_lol",
+          "direction": 1
+        },
+        {
+          "persona": "committee_gonna_committee",
+          "direction": -1
+        },
+        {
+          "persona": "standards_shepherd",
+          "direction": 1
+        },
+        {
+          "persona": "cwg_watcher",
+          "direction": -1
+        },
+        {
+          "persona": "template_janitor",
+          "direction": -1
+        }
+      ]
+    },
+    {
+      "slot_id": "s19",
+      "parent_slot_id": "s17",
+      "depth": 2,
+      "role": "signal",
+      "persona": "abi_archivist",
+      "body": "1. The provenance gap is not a tangent — it is the central semantic question for this facility, and the paper's treatment of it is demonstrably incomplete.\n\n> I prefer `void*` as roundtriping thru an integer looses information about provenance and can disable some optimization.\n\nThis sentence appears in §5.1 (Design Decisions: Raw Tagged Pointer Interface) and constitutes the entirety of the paper's provenance analysis. It is a single sentence. It frames provenance loss as an optimization concern — \"can disable some optimization\" — rather than a correctness concern. This is a category error. The C++ abstract machine does not have a \"disable optimization\" mode; it has defined behavior and undefined behavior. When you cast a pointer to `uintptr_t` and back, the resulting pointer has implementation-defined provenance (see [expr.reinterpret.cast] p5 and the ongoing provenance work in the SG12/P1796 lineage). The compiler is permitted to treat it as unrelated to the original object for alias analysis purposes. This is not a missed optimization opportunity; it is a semantic gap that can produce incorrect program behavior.\n\n2. The paper should, at minimum, acknowledge the ongoing WG21 provenance work and explain how `pointer_tag_pair` interacts with it.\n\nThe provenance model for C++ is not settled. P1796 (Pointer provenance) and its successors have been before SG12 and EWG for multiple cycles. The direction of that work — whether we adopt a PNVI-ae-udi model, a variant of the TS, or something else — directly affects what it means to \"tag\" a pointer by manipulating its address bits. If the eventual model says that a pointer formed by masking low bits of a valid pointer retains provenance to the original object, then `pointer_tag_pair`'s runtime implementation is sound. If it says that any pointer formed by integer manipulation is a \"provenance-free\" pointer that can only be used to access objects it was originally derived from, then the current design is unsound. The paper does not mention this work, does not cite P1796 or any of its revisions, and does not specify which provenance model it assumes.\n\n3. What this means: the paper is proposing to standardize a facility whose correctness depends on a semantic model that WG21 has not yet adopted. The responsible thing is to add a section — even a brief one — that says: \"This proposal assumes a provenance model in which masking low bits of a valid pointer preserves provenance to the original object. This is consistent with the direction of P1796R(N+1) and with the operational semantics of the compiler builtins described in §6. If WG21 adopts a different provenance model, the specification of `pointer_tag_pair` will need to be revised accordingly.\"\n\n4. What this doesn't mean: I am not arguing that the paper should solve provenance. I am not arguing that the paper should block on provenance. I am arguing that a paper which acknowledges provenance loss as a problem and then walks away from it — with a single sentence — has not done its due diligence. The committee has a responsibility to ensure that facilities standardized now do not paint us into a corner when the provenance work lands. Acknowledging the dependency is the minimum bar.\n\n5. Precedent: this is exactly the pattern we followed with `std::launder` (P0137R1) and `std::bless` (P0593R6). Both papers acknowledged that they were proposing facilities whose full semantic justification depended on ongoing core language work, and both included explicit sections discussing that dependency. P3125R5 should do the same.\n\nSee also: the clang prototype (PR #111861) uses `__builtin_ptrauth_strip`-style intrinsics that operate in the pointer domain, never round-tripping through integers. The implementation knows the right answer. The wording should reflect it. https://wg21.link/p3125r5",
+      "tag": null,
+      "is_op": false,
+      "is_mod": false,
+      "controversial": false,
+      "edited": false,
+      "deleted": false,
+      "removed": false,
+      "collapsed": false,
+      "anchor_id": "a01",
+      "encounter_id": null,
+      "domain_lens": 13,
+      "brief": "Bring the tangent back to the paper: the provenance gap is real and the paper should at minimum acknowledge the ongoing WG21 provenance work and explain how pointer_tag_pair interacts with it.",
+      "votes": [
+        {
+          "persona": "embedded_for_20_years",
+          "direction": 1
+        },
+        {
+          "persona": "the_constexpr_oracle",
+          "direction": -1
+        },
+        {
+          "persona": "bootcamp_grad_2025",
+          "direction": 1
+        },
+        {
+          "persona": "just_use_rust_lol",
+          "direction": -1
+        },
+        {
+          "persona": "paper_trail_2019",
+          "direction": -1
+        }
+      ]
+    },
+    {
+      "slot_id": "s20",
+      "parent_slot_id": null,
+      "depth": 0,
+      "role": "signal",
+      "persona": "monomorphic_dan",
+      "body": "You are asking about ABI stability. That is the wrong question. The right question is: what is the *domain* of `pointer_tag_pair`, and what invariants does the standard guarantee across translation-unit boundaries?\n\nThe paper asserts:\n\n> \"Existence of this interface allows ability to store such pointers in existing interfaces (atomic, other smart pointers).\"\n\nThis is not a guarantee. It is a hope dressed in passive voice. Storing a type in an atomic does not make it ABI-stable. It makes it *storable*. The distinction is the entire problem.\n\nLet us trace the genealogy of this mistake.\n\n1. The paper defines `pointer_tag_pair<Ptr, TagT, BitsRequested>` as trivially-copyable and exactly `sizeof(Ptr)` bytes. This is a layout guarantee, not an ABI guarantee. Layout is a property of a single translation unit compiled with a single compiler version. ABI is the contract across units that may disagree on everything else.\n\n2. The paper relies on compiler builtins for tagging and untagging. The constexpr path stores the tag in \"pointer metadata rather than address bits.\" This metadata has no specified representation. Two compilers, or two versions of the same compiler, may choose different metadata layouts. The type remains trivially-copyable. The bits that cross the boundary are now gibberish to the receiver.\n\n3. The paper does not specify the value representation of the stored tag. It specifies the *interface* — `tag()`, `pointer()`, `from_tagged()` — but never says what bits constitute the object representation. Without that, `atomic<pointer_tag_pair<...>>` is a type whose `compare_exchange_strong` compares bits whose meaning is implementation-defined. That is not a portable atomic. That is a portability hazard with a standard library wrapper.\n\n4. The `from_overaligned<PromisedAlignment>` factory introduces a precondition that the caller has overallocated. This precondition is not checkable at the ABI boundary. The caller in one shared library promises alignment; the callee in another receives a `pointer_tag_pair` and has no way to verify that the promise was kept. The invariant is unenforceable across translation units.\n\nThe standard should say: `pointer_tag_pair` has an unspecified object representation. It may not be used as the value type of `atomic` unless the implementation documents that the object representation is stable across the versions of that implementation that claim ABI compatibility. Absent that documentation, the type is a local optimization, not a cross-boundary communication primitive. The paper's claim about atomics is, as written, false.",
+      "tag": null,
+      "is_op": false,
+      "is_mod": false,
+      "controversial": false,
+      "edited": false,
+      "deleted": false,
+      "removed": false,
+      "collapsed": false,
+      "anchor_id": "a05",
+      "encounter_id": null,
+      "domain_lens": 7,
+      "brief": "Question the ABI stability claim: the paper says pointer_tag_pair can be stored in atomics and shared pointers, but doesn't address ABI stability across translation units or standard library versions. This is critical for any type intended to cross shared library boundaries.",
+      "votes": [
+        {
+          "persona": "abi_archivist",
+          "direction": -1
+        },
+        {
+          "persona": "embedded_for_20_years",
+          "direction": -1
+        },
+        {
+          "persona": "lifetimes_lucy",
+          "direction": -1
+        },
+        {
+          "persona": "the_constexpr_oracle",
+          "direction": -1
+        },
+        {
+          "persona": "async_skeptic",
+          "direction": -1
+        },
+        {
+          "persona": "not_a_real_cpp_dev",
+          "direction": 1
+        },
+        {
+          "persona": "just_use_rust_lol",
+          "direction": -1
+        },
+        {
+          "persona": "committee_gonna_committee",
+          "direction": -1
+        },
+        {
+          "persona": "template_janitor",
+          "direction": -1
+        }
+      ]
+    },
+    {
+      "slot_id": "s21",
+      "parent_slot_id": "s20",
+      "depth": 1,
+      "role": "noise",
+      "persona": "committee_gonna_committee",
+      "body": "great, another paper that will take 10 years to get through LEWG and it still won't work on CHERI. the entire design assumes pointers are integers with spare low bits, which is just not true on any platform with fat pointers or hardware-enforced provenance. the paper doesn't even mention it. see you all at the R14 thread in 2034 when someone finally notices.",
+      "tag": null,
+      "is_op": false,
+      "is_mod": false,
+      "controversial": false,
+      "edited": false,
+      "deleted": false,
+      "removed": false,
+      "collapsed": false,
+      "anchor_id": null,
+      "encounter_id": null,
+      "domain_lens": null,
+      "brief": "React with a hot take: 'This will break on CHERI and any platform with fat pointers, but the paper doesn't mention it.'",
+      "votes": [
+        {
+          "persona": "the_constexpr_oracle",
+          "direction": 1
+        },
+        {
+          "persona": "ranges_andy",
+          "direction": 1
+        },
+        {
+          "persona": "not_a_real_cpp_dev",
+          "direction": 1
+        },
+        {
+          "persona": "bootcamp_grad_2025",
+          "direction": 1
+        },
+        {
+          "persona": "template_error_survivor",
+          "direction": -1
+        },
+        {
+          "persona": "standards_shepherd",
+          "direction": -1
+        },
+        {
+          "persona": "not_on_the_committee",
+          "direction": 1
+        },
+        {
+          "persona": "cwg_watcher",
+          "direction": 1
+        },
+        {
+          "persona": "template_janitor",
+          "direction": 1
+        }
+      ]
+    },
+    {
+      "slot_id": "s22",
+      "parent_slot_id": "s21",
+      "depth": 2,
+      "role": "tangent",
+      "persona": "just_use_rust_lol",
+      "body": "The CHERI silence is genuinely alarming, not just a portability footnote. This paper's entire design rests on the axiom that a pointer is an integer with spare low bits. On Morello or any CHERI-derived architecture, a pointer is a 128-bit capability with hardware-enforced bounds, permissions, and a sealed/unsealed state. There are no \"spare low bits\" because the address is only part of the capability, and the hardware will trap if you try to mask bits into the metadata fields. Same story with ARM PAC: the high bits contain an authentication code, and modifying them produces a pointer that will fault on dereference. The paper's \"we don't touch high bits\" carve-out doesn't help when the *entire pointer representation* is opaque. This isn't a theoretical concern—CHERI is shipping in Arm's Morello board, and the UK government is actively funding CHERI adoption. A standard library type that silently corrupts capabilities is worse than no type at all, because it will appear to work until it doesn't. https://www.cl.cam.ac.uk/research/security/ctsrd/cheri/",
+      "tag": null,
+      "is_op": false,
+      "is_mod": false,
+      "controversial": false,
+      "edited": false,
+      "deleted": false,
+      "removed": false,
+      "collapsed": false,
+      "anchor_id": null,
+      "encounter_id": null,
+      "domain_lens": null,
+      "brief": "Start a tangent about CHERI and hardware pointer authentication (PAC) compatibility, noting that tagged pointers fundamentally assume a flat address space with spare bits.",
+      "votes": [
+        {
+          "persona": "monomorphic_dan",
+          "direction": 1
+        },
+        {
+          "persona": "embedded_for_20_years",
+          "direction": 1
+        },
+        {
+          "persona": "lifetimes_lucy",
+          "direction": -1
+        },
+        {
+          "persona": "the_constexpr_oracle",
+          "direction": 1
+        },
+        {
+          "persona": "ranges_andy",
+          "direction": -1
+        },
+        {
+          "persona": "bootcamp_grad_2025",
+          "direction": -1
+        },
+        {
+          "persona": "committee_gonna_committee",
+          "direction": 1
+        },
+        {
+          "persona": "paper_trail_2019",
+          "direction": -1
+        },
+        {
+          "persona": "template_janitor",
+          "direction": 1
+        }
+      ]
+    },
+    {
+      "slot_id": "s23",
+      "parent_slot_id": "s22",
+      "depth": 3,
+      "role": "tangent",
+      "persona": "template_error_survivor",
+      "body": "The CHERI concern is real, but I think it's worth noting that the paper's design doesn't actually mandate low bits as the storage mechanism—it mandates that the pair fits in `sizeof(Ptr)` bytes and provides a tag. On a platform where pointers are 128-bit capabilities with no spare low bits, an implementation could store the tag in the capability's metadata fields if the hardware provides them, or fall back to the constexpr metadata path that the clang prototype already uses. The abstraction is \"a tag and a pointer in pointer-sized storage,\" not \"we will bitwise AND your pointer and hope for the best.\" Whether that abstraction actually holds across all the platforms we care about is the real question, and I'd like to see someone try the implementation on Morello before we declare it dead on arrival.",
+      "tag": null,
+      "is_op": false,
+      "is_mod": false,
+      "controversial": false,
+      "edited": false,
+      "deleted": false,
+      "removed": false,
+      "collapsed": false,
+      "anchor_id": null,
+      "encounter_id": null,
+      "domain_lens": null,
+      "brief": "Acknowledge the CHERI concern but note that the paper's design doesn't mandate low bits—implementations on CHERI could use other mechanisms if the hardware provides them. The real question is whether the abstraction holds.",
+      "votes": [
+        {
+          "persona": "abi_archivist",
+          "direction": -1
+        },
+        {
+          "persona": "ranges_andy",
+          "direction": -1
+        },
+        {
+          "persona": "nanosecond_nancy",
+          "direction": -1
+        },
+        {
+          "persona": "bootcamp_grad_2025",
+          "direction": 1
+        },
+        {
+          "persona": "segfault_enjoyer_69",
+          "direction": 1
+        },
+        {
+          "persona": "standards_shepherd",
+          "direction": 1
+        },
+        {
+          "persona": "cwg_watcher",
+          "direction": -1
+        }
+      ]
+    },
+    {
+      "slot_id": "s24",
+      "parent_slot_id": "s22",
+      "depth": 3,
+      "role": "signal",
+      "persona": "embedded_for_20_years",
+      "body": "I'll bring this back to the concrete problem.\n\n> \"Main requirement on the type is it must be always same size as stored pointer and not more.\"\n\nThis requirement is the paper's own, and it's the one that makes CHERI a hard blocker, not a portability footnote. On CHERI Morello, a pointer is 128 bits: 64 bits of address, 64 bits of capability metadata (bounds, permissions, object type). The metadata lives *in the pointer representation*, not in the high bits of a flat address. There are no spare low bits to steal because alignment padding doesn't exist in the capability encoding—the address field is just an address, and the capability bits are a separate architectural quantity.\n\nSo `sizeof(pointer_tag_pair<Ptr, TagT, N>) == sizeof(Ptr)` is 16 bytes. Where do the tag bits go? The paper's constexpr path stores them in \"pointer metadata rather than address bits,\" but CHERI's metadata is already fully occupied by the hardware capability encoding. You can't just add a few more bits to the side channel—the compiler would need to invent an entirely new pointer representation, which means `sizeof` can't stay 16 bytes, which means the main requirement fails.\n\nThis isn't theoretical. Arm's Morello board shipped. CheriBSD runs on it. If the paper wants to claim this is a general-purpose pointer abstraction, it needs to say what happens when `pointer_bits_available` returns zero at consteval time. Does the specialization simply not exist? Is it a hard error? The paper is silent. I've shipped firmware on architectures where pointers were 48-bit virtual addresses with 16 bits of ASN in the top—same problem, different decade. The `sizeof` requirement is the canary. If it can't be met, the whole design collapses.",
+      "tag": null,
+      "is_op": true,
+      "is_mod": false,
+      "controversial": false,
+      "edited": false,
+      "deleted": false,
+      "removed": false,
+      "collapsed": false,
+      "anchor_id": "a04",
+      "encounter_id": null,
+      "domain_lens": 2,
+      "brief": "Bring the tangent back: the paper's silence on CHERI and fat pointers is a critical gap. The sizeof requirement alone may be impossible to satisfy on architectures where pointers carry metadata out-of-band.",
+      "votes": [
+        {
+          "persona": "monomorphic_dan",
+          "direction": -1
+        },
+        {
+          "persona": "lifetimes_lucy",
+          "direction": -1
+        },
+        {
+          "persona": "the_constexpr_oracle",
+          "direction": 1
+        },
+        {
+          "persona": "not_a_real_cpp_dev",
+          "direction": 1
+        },
+        {
+          "persona": "bootcamp_grad_2025",
+          "direction": 1
+        },
+        {
+          "persona": "segfault_enjoyer_69",
+          "direction": 1
+        },
+        {
+          "persona": "template_error_survivor",
+          "direction": 1
+        },
+        {
+          "persona": "template_janitor",
+          "direction": 1
+        }
+      ]
+    },
+    {
+      "slot_id": "s25",
+      "parent_slot_id": null,
+      "depth": 0,
+      "role": "signal",
+      "persona": "monomorphic_dan",
+      "body": "The paper is treating a symptom — \"we need tagged pointers in constexpr\" — while ignoring the precondition that makes the entire constexpr data-structure claim coherent. The root cause is that the standard has never specified what pointer operations are permitted in constant expressions when the pointer value has been decomposed and recomposed through a non-pointer type. `pointer_tag_pair` is exactly that decomposition.\n\n> \"This functionality is also usable in `constexpr` environment. It's meant to be a building tool to build more advanced data-structures and also last requirement for `atomic<std::shared_ptr<T>>` to be constexpr.\"\n\nThis is a guarantee with no domain. A HAMT node needs to compare two tagged pointers for equality. A constexpr `shared_ptr` control block needs to subtract a tagged pointer from its base to recover the offset. Neither operation is specified to work after the pointer has been round-tripped through the tag storage. The paper's clever constexpr implementation stores the tag in compiler metadata rather than address bits — but metadata is not address bits, and the constant evaluator's pointer value model has no rule that says \"a pointer reconstructed from metadata-preserved provenance compares equal to the original.\"\n\nThe genealogy of this gap is straightforward:\n\n1. The constant expression model was designed for pure values — integers, floats, pointers to complete objects with known lifetimes. Pointer comparison and subtraction are permitted only when both operands point into the same array or to the same object.\n2. `bit_cast` and `reinterpret_cast` are forbidden in constexpr because they break the provenance chain. The evaluator cannot track a pointer value through an integer representation.\n3. This paper introduces a compiler builtin that sidesteps the integer round-trip — the tag is stored in an opaque metadata field. But the wording never states that the resulting `pointer_tag_pair` preserves the original pointer's identity for the purposes of [expr.const] paragraph 5.\n4. Therefore, a constexpr function that extracts the pointer from a `pointer_tag_pair` and compares it to the original has undefined behavior in the constant evaluator — not because the operation is ill-formed, but because the evaluator has no rule that says the two pointers are the same pointer.\n\nThe standard must say, explicitly, that the pointer value recovered from `pointer_tag_pair::pointer()` is the same pointer value that was stored, with full provenance intact, and that all constant-expression pointer operations that were valid on the original remain valid on the recovered pointer. Without that sentence, the constexpr data structure claim is false.",
+      "tag": null,
+      "is_op": false,
+      "is_mod": false,
+      "controversial": false,
+      "edited": false,
+      "deleted": false,
+      "removed": false,
+      "collapsed": false,
+      "anchor_id": "a06",
+      "encounter_id": null,
+      "domain_lens": 8,
+      "brief": "Raise the constexpr pointer semantics gap: the paper claims constexpr data structure use cases but doesn't specify whether pointer_tag_pair supports pointer comparison or subtraction in constant expressions. This is essential for the claimed use cases.",
+      "votes": [
+        {
+          "persona": "abi_archivist",
+          "direction": 1
+        },
+        {
+          "persona": "embedded_for_20_years",
+          "direction": 1
+        },
+        {
+          "persona": "the_constexpr_oracle",
+          "direction": -1
+        },
+        {
+          "persona": "async_skeptic",
+          "direction": -1
+        },
+        {
+          "persona": "ranges_andy",
+          "direction": 1
+        },
+        {
+          "persona": "compiles_first_try",
+          "direction": 1
+        },
+        {
+          "persona": "not_a_real_cpp_dev",
+          "direction": 1
+        },
+        {
+          "persona": "bootcamp_grad_2025",
+          "direction": -1
+        },
+        {
+          "persona": "committee_gonna_committee",
+          "direction": -1
+        },
+        {
+          "persona": "segfault_enjoyer_69",
+          "direction": 1
+        },
+        {
+          "persona": "template_error_survivor",
+          "direction": 1
+        },
+        {
+          "persona": "standards_shepherd",
+          "direction": -1
+        },
+        {
+          "persona": "cwg_watcher",
+          "direction": -1
+        },
+        {
+          "persona": "template_janitor",
+          "direction": 1
+        }
+      ]
+    },
+    {
+      "slot_id": "s26",
+      "parent_slot_id": "s25",
+      "depth": 1,
+      "role": "signal",
+      "persona": "lifetimes_lucy",
+      "body": "> The paper's clever constexpr implementation stores the tag in compiler metadata rather than address bits — but metadata is not address bits, and the constant evaluator's pointer value model has no rule that says \"a pointer reconstructed from metadata-preserved provenance compares equal to the original.\"\n\nThis is exactly right, and it's the same problem that got `reinterpret_cast` banned from constant expressions in the first place. The constant evaluator's pointer model is built on a provenance chain that must be traceable through the abstract machine. [expr.const]/5.16 says a `reinterpret_cast` is not a core constant expression because the evaluator can't track the pointer value through the cast — the provenance is severed. The committee didn't ban `reinterpret_cast` in constexpr because they hate bit-twiddling; they banned it because the constant evaluator has no semantics for \"this integer used to be a pointer, trust me.\"\n\nNow look at what `pointer_tag_pair` does in constexpr. The paper says:\n\n> \"This functionality is also usable in `constexpr` environment.\"\n\nBut the constexpr path doesn't store the tag in address bits — it can't, because the constant evaluator doesn't model alignment-padding bits the way hardware does. Instead, the prototype stores the tag in compiler metadata attached to the pointer value. That metadata is invisible to the abstract machine. When you call `pointer()` to extract the pointer back out, the compiler builtin reconstitutes a pointer from the metadata — but the constant evaluator has no rule in [expr.const] that says the reconstituted pointer is the *same* pointer for purposes of pointer comparison, pointer subtraction, or any other operation that depends on pointer identity.\n\nThis isn't a wording oversight. It's a fundamental gap in the constant expression model:\n\n1. [expr.const]/5 defines what operations are permitted in constant expressions. Pointer comparison ([expr.eq]) is permitted when both pointers point to the same object or are both null, one-past-the-end, etc. Pointer subtraction ([expr.add]) is permitted when both pointers point to elements of the same array.\n\n2. These rules depend on the evaluator knowing the *provenance* of each pointer — which allocation it came from, where it points within that allocation. The evaluator tracks this through construction, assignment, and function calls.\n\n3. `pointer_tag_pair`'s constexpr implementation breaks that chain. The tag is stored outside the pointer value itself, in metadata that the evaluator doesn't understand as part of the pointer's identity. When you extract the pointer, the evaluator sees a new pointer value with no documented relationship to the original.\n\n4. Therefore, `p == q` where `q` was round-tripped through `pointer_tag_pair` is not guaranteed to be a core constant expression — or worse, it's accepted by the implementation but produces `false` when it should produce `true`, because the evaluator treats them as pointers to different objects.\n\nCompare this to what the standard actually requires for pointer round-tripping. [basic.compound]/4 says:\n\n> Two objects with overlapping lifetimes that are not bit-fields may have the same address if one is nested within the other, or if at least one is a base class subobject of zero size and they are of different types; otherwise, they have distinct addresses and occupy disjoint bytes of storage.\n\nThat's the rule for object identity. There is no analogous rule for pointer identity after metadata-preserving round-trips. The paper needs to add wording to [expr.const] that says, explicitly, that a pointer extracted from a `pointer_tag_pair` via `pointer()` is the same pointer value that was originally stored, with full provenance intact, and that all constant-expression operations valid on the original remain valid on the extracted pointer.\n\nWithout that, the constexpr HAMT can't compare tagged pointers. The constexpr `shared_ptr` control block can't compute offsets. The entire constexpr data-structure claim collapses into \"it compiles, but the results are unspecified.\" That's worse than `reinterpret_cast` — at least `reinterpret_cast` is honest about being banned.",
+      "tag": null,
+      "is_op": false,
+      "is_mod": false,
+      "controversial": false,
+      "edited": false,
+      "deleted": false,
+      "removed": false,
+      "collapsed": false,
+      "anchor_id": "a06",
+      "encounter_id": null,
+      "domain_lens": 11,
+      "brief": "Connect the constexpr gap to the broader constexpr pointer problem: reinterpret_cast is banned in constexpr for good reason. The paper needs to explain how pointer_tag_pair avoids the same issues that make reinterpret_cast problematic at compile time.",
+      "votes": [
+        {
+          "persona": "monomorphic_dan",
+          "direction": -1
+        },
+        {
+          "persona": "async_skeptic",
+          "direction": -1
+        },
+        {
+          "persona": "ranges_andy",
+          "direction": 1
+        },
+        {
+          "persona": "not_a_real_cpp_dev",
+          "direction": -1
+        },
+        {
+          "persona": "bootcamp_grad_2025",
+          "direction": -1
+        },
+        {
+          "persona": "template_error_survivor",
+          "direction": 1
+        },
+        {
+          "persona": "template_janitor",
+          "direction": 1
+        }
+      ]
+    },
+    {
+      "slot_id": "s27",
+      "parent_slot_id": null,
+      "depth": 0,
+      "role": "signal",
+      "persona": "async_skeptic",
+      "body": "> \"last requirement for `atomic<std::shared_ptr<T>>` to be constexpr\"\n\nAgreed that constexpr atomic<shared_ptr> is a worthy goal, and pointer tagging is genuinely the missing piece. But the paper's silence on concurrency semantics is deafening.\n\n1. `pointer_tag_pair` is trivially copyable and exactly `sizeof(Ptr)` bytes — that's the whole sales pitch. Trivially copyable plus size-of-pointer means people *will* shove it into lock-free atomics. The paper even names that use case.\n\n2. Yet there is no discussion of whether `store()`/`load()` on a `pointer_tag_pair` is a single atomic operation. On x86 with aligned 8-byte pointers, sure, the hardware gives you that for free. On a 32-bit ARM with `uint64_t` pointers? You're now in the LDREX/STREX business, and the compiler needs to know.\n\n3. The constexpr path stores the tag in \"pointer metadata rather than address bits\" — which means the representation in constant evaluation is *different* from the runtime representation. What happens when a `constexpr`-constructed `pointer_tag_pair` crosses the constexpr/runtime boundary and lands in an atomic? Two different bit patterns, same logical value, compare-and-swap fails spuriously, hilarity ensues.\n\n4. The paper provides `tagged_pointer()` and `from_tagged()` as non-constexpr escape hatches. Are those hatches atomic? If I extract the raw tagged pointer, do I get a tear-free read, or have I just invented a new UB flavor where the tag and address come from different epochs?\n\nSo the real question for LEWG: is `pointer_tag_pair` intended to be atomic-friendly, or is it a building block that someone *else* will wrap in `atomic<...>` and discover the sharp edges? Because \"last requirement for constexpr atomic<shared_ptr>\" implies the former, but the wording describes the latter. That gap is a race condition waiting to happen. 😶",
+      "tag": null,
+      "is_op": false,
+      "is_mod": false,
+      "controversial": false,
+      "edited": false,
+      "deleted": false,
+      "removed": false,
+      "collapsed": false,
+      "anchor_id": "a08",
+      "encounter_id": null,
+      "domain_lens": 9,
+      "brief": "Question the thread safety implications: the paper motivates pointer_tag_pair as a building block for atomic<shared_ptr<T>> but doesn't address thread safety of the type itself. What are the concurrency guarantees?",
+      "votes": [
+        {
+          "persona": "abi_archivist",
+          "direction": 1
+        },
+        {
+          "persona": "embedded_for_20_years",
+          "direction": -1
+        },
+        {
+          "persona": "the_constexpr_oracle",
+          "direction": -1
+        },
+        {
+          "persona": "ranges_andy",
+          "direction": 1
+        },
+        {
+          "persona": "not_a_real_cpp_dev",
+          "direction": -1
+        },
+        {
+          "persona": "bootcamp_grad_2025",
+          "direction": 1
+        },
+        {
+          "persona": "segfault_enjoyer_69",
+          "direction": -1
+        },
+        {
+          "persona": "template_error_survivor",
+          "direction": 1
+        },
+        {
+          "persona": "paper_trail_2019",
+          "direction": 1
+        },
+        {
+          "persona": "not_on_the_committee",
+          "direction": -1
+        },
+        {
+          "persona": "template_janitor",
+          "direction": 1
+        }
+      ]
+    },
+    {
+      "slot_id": "s28",
+      "parent_slot_id": "s27",
+      "depth": 1,
+      "role": "signal",
+      "persona": "async_skeptic",
+      "body": "> \"last requirement for `atomic<std::shared_ptr<T>>` to be constexpr\"\n\nAgreed on the facts. Trivially copyable, exactly `sizeof(Ptr)` bytes — the paper delivers that. But let's follow the thread.\n\n1. The paper says `pointer_tag_pair` is the *last requirement* for constexpr `atomic<shared_ptr>`. That's a claim about sufficiency, not just necessity. It implies that once you have this type, the rest of the machinery already works.\n\n2. But `atomic<T>` requires `T` to be trivially copyable *and* for the implementation to know whether it can be made lock-free. The paper provides the first. It says nothing about the second. On a platform where `sizeof(pointer_tag_pair)` is 16 bytes and lock-free atomics max out at 8, you're getting a mutex in your `atomic<shared_ptr>` — which is decidedly not constexpr-friendly.\n\n3. The constexpr path stores the tag in \"pointer metadata rather than address bits\" — a different object representation from runtime. So when you `store()` a constexpr-constructed value into an atomic, what bit pattern actually lands? If the compiler picks the runtime representation, the constexpr value must be converted at the boundary. If that conversion isn't atomic, you've just introduced a torn write into what the user believes is a single atomic store.\n\n4. The paper provides `tagged_pointer()` as a non-constexpr escape hatch. If I call that on one thread while another thread is `store()`-ing a new tag, do I get the old pointer with the new tag? The new pointer with the old tag? A tag from one and an address from the other? The paper doesn't say, because it doesn't acknowledge that these operations might interleave.\n\nSo the question isn't whether `pointer_tag_pair` *can* be stored in an atomic — it can. The question is whether the operations that *produce* and *consume* its value are safe to use with atomics. The paper's silence on that point means the answer is \"no, unless you prove otherwise for your specific platform.\" That's not a building block for `atomic<shared_ptr>`. That's a trapdoor. 😶",
+      "tag": null,
+      "is_op": false,
+      "is_mod": false,
+      "controversial": false,
+      "edited": false,
+      "deleted": false,
+      "removed": false,
+      "collapsed": false,
+      "anchor_id": "a08",
+      "encounter_id": null,
+      "domain_lens": 9,
+      "brief": "Expand: the paper says pointer_tag_pair can be stored in atomics, but that just means it's trivially copyable and the right size. It doesn't mean the tag operations themselves are atomic. Users might incorrectly assume tag updates are thread-safe.",
+      "votes": [
+        {
+          "persona": "abi_archivist",
+          "direction": 1
+        },
+        {
+          "persona": "lifetimes_lucy",
+          "direction": -1
+        },
+        {
+          "persona": "the_constexpr_oracle",
+          "direction": 1
+        },
+        {
+          "persona": "not_a_real_cpp_dev",
+          "direction": 1
+        },
+        {
+          "persona": "bootcamp_grad_2025",
+          "direction": -1
+        },
+        {
+          "persona": "template_error_survivor",
+          "direction": -1
+        },
+        {
+          "persona": "not_on_the_committee",
+          "direction": -1
+        }
+      ]
+    },
+    {
+      "slot_id": "s29",
+      "parent_slot_id": null,
+      "depth": 0,
+      "role": "mod",
+      "persona": "template_janitor",
+      "body": "**Reminder: be civil. The paper authors sometimes read these threads.**",
+      "tag": null,
+      "is_op": false,
+      "is_mod": true,
+      "controversial": false,
+      "edited": false,
+      "deleted": false,
+      "removed": false,
+      "collapsed": false,
+      "anchor_id": null,
+      "encounter_id": null,
+      "domain_lens": null,
+      "brief": "Pin a moderator reminder: 'Reminder: be civil. The paper authors sometimes read these threads.'",
+      "votes": [
+        {
+          "persona": "embedded_for_20_years",
+          "direction": -1
+        },
+        {
+          "persona": "lifetimes_lucy",
+          "direction": -1
+        },
+        {
+          "persona": "the_constexpr_oracle",
+          "direction": -1
+        },
+        {
+          "persona": "async_skeptic",
+          "direction": -1
+        },
+        {
+          "persona": "nanosecond_nancy",
+          "direction": -1
+        },
+        {
+          "persona": "compiles_first_try",
+          "direction": 1
+        },
+        {
+          "persona": "bootcamp_grad_2025",
+          "direction": 1
+        },
+        {
+          "persona": "just_use_rust_lol",
+          "direction": -1
+        },
+        {
+          "persona": "committee_gonna_committee",
+          "direction": -1
+        },
+        {
+          "persona": "segfault_enjoyer_69",
+          "direction": 1
+        },
+        {
+          "persona": "template_error_survivor",
+          "direction": -1
+        },
+        {
+          "persona": "standards_shepherd",
+          "direction": -1
+        },
+        {
+          "persona": "cwg_watcher",
+          "direction": -1
+        }
+      ]
+    },
+    {
+      "slot_id": "s30",
+      "parent_slot_id": null,
+      "depth": 0,
+      "role": "encounter",
+      "persona": "the_constexpr_oracle",
+      "body": "I appreciate the paper explicitly surfacing this design tension rather than burying it in a design-decision section three pages deep. That said, I think framing it as \"pointer or pointee\" might be asking the wrong question.\n\n> One question is if template argument of `pointer_tag_type` should be pointer or pointee. LLVM has design with a pointer, but this design is not symmetric with rest of standard library.\n\nThe standard library precedent is clear: `unique_ptr<T>`, `shared_ptr<T>`, `weak_ptr<T>`, `observer_ptr<T>` all take the pointee type as their first parameter. A user reaching for `pointer_tag_pair` will write `pointer_tag_pair<int, my_tag, 2>` and expect it to work, because that's what every other pointer-like vocabulary type in the standard does. Making the first parameter the pointer type would be the odd one out, and odd-ones-out in the standard library create a permanent tax on every C++ programmer's intuition.\n\nBut here's the thing: the tension exists because the paper wants to support fancy pointers—`boost::interprocess::offset_ptr`, custom `FancyPtr<T>` types from allocator-aware data structures, and so on. If the first parameter is the pointee, how do you spell \"I want this to work with my custom pointer type\"? You'd need a second template parameter, and now you're in `unique_ptr<T, Deleter>` territory where the default is fine for 95% of users but the 5% who need the second parameter have to type it every time.\n\nHas the author considered making this a named requirement rather than a template parameter choice? Something like:\n\ncpp\ntemplate <typename Ptr>\nconcept taggable_pointer = requires {\n    typename std::pointer_traits<Ptr>::element_type;\n    { std::pointer_alignment_v<Ptr> } -> std::same_as<std::size_t>;\n};\n\n\nThen `pointer_tag_pair` takes the pointer type directly, but `std::pointer_traits` gives you the pointee for free, and the default can be `T*` so users write `pointer_tag_pair<int, my_tag, 2>` and get `pointer_tag_pair<int*, my_tag, 2>` through a default template argument. Best of both worlds: symmetry with existing vocabulary types for the common case, explicit pointer-type control for the fancy-pointer case, and no \"which parameter comes first\" question because there's only one parameter that matters.\n\nThe paper already leans on `pointer_traits` in the wording for `to_address`-style operations. Extending that to the template parameter design seems like the natural next step.",
+      "tag": null,
+      "is_op": false,
+      "is_mod": false,
+      "controversial": false,
+      "edited": false,
+      "deleted": false,
+      "removed": false,
+      "collapsed": false,
+      "anchor_id": "a02",
+      "encounter_id": "e01",
+      "domain_lens": 10,
+      "brief": "Encounter turn 1: Polite question about the pointer vs pointee design tension. Ask whether the authors have considered making it a named requirement rather than a template parameter choice.",
+      "votes": [
+        {
+          "persona": "monomorphic_dan",
+          "direction": 1
+        },
+        {
+          "persona": "embedded_for_20_years",
+          "direction": -1
+        },
+        {
+          "persona": "lifetimes_lucy",
+          "direction": -1
+        },
+        {
+          "persona": "ranges_andy",
+          "direction": 1
+        },
+        {
+          "persona": "compiles_first_try",
+          "direction": 1
+        },
+        {
+          "persona": "bootcamp_grad_2025",
+          "direction": 1
+        },
+        {
+          "persona": "just_use_rust_lol",
+          "direction": 1
+        },
+        {
+          "persona": "committee_gonna_committee",
+          "direction": -1
+        },
+        {
+          "persona": "segfault_enjoyer_69",
+          "direction": 1
+        },
+        {
+          "persona": "cwg_watcher",
+          "direction": 1
+        },
+        {
+          "persona": "template_janitor",
+          "direction": 1
+        }
+      ]
+    },
+    {
+      "slot_id": "s31",
+      "parent_slot_id": "s30",
+      "depth": 1,
+      "role": "encounter",
+      "persona": "ranges_andy",
+      "body": "I'm going to push back on the named-requirement escape hatch, because I think it papers over the real structural problem here.\n\n> One question is if template argument of `pointer_tag_type` should be pointer or pointee. LLVM has design with a pointer, but this design is not symmetric with rest of standard library.\n\nThe symmetry argument sounds reasonable until you actually try to *use* the thing. `unique_ptr<T>`, `shared_ptr<T>`, `observer_ptr<T>` — yes, they all take the pointee. But they also all *own the pointer type*. `unique_ptr<T>` is `unique_ptr<T, default_delete<T>>` under the hood; the pointer type is `T*` and you can't change it without reaching for the second template parameter. `pointer_tag_pair` is fundamentally different: it's not managing a pointer, it's *decorating* one. The pointer type is the thing you're decorating. Making the pointee the first parameter means you're asking the type system to work backward from `T` to \"whatever pointer type the user meant,\" and the only sane default is `T*`, which throws away provenance information and breaks the fancy-pointer use case the paper explicitly wants to support.\n\nHere's the concrete problem. Say I'm writing allocator-aware code with `boost::interprocess::offset_ptr<int>`. Under a pointee-first design, I write:\n\ncpp\npointer_tag_pair<int, my_tag, 2, offset_ptr<int>> pair;\n\n\nFour template arguments, and the fourth one silently changes the meaning of the first. If I forget the fourth, I get `int*` and my code compiles fine but explodes at runtime when the offset pointer gets round-tripped through a raw pointer and loses its segment base. Under a pointer-first design:\n\ncpp\npointer_tag_pair<offset_ptr<int>, my_tag, 2> pair;\n\n\nThree arguments, no silent defaults, the type I'm actually storing is the first thing I write. The pointee is recoverable through `pointer_traits<offset_ptr<int>>::element_type` if I need it, which I usually don't, because I'm doing bit-twiddling on the pointer representation, not dereferencing through it.\n\nThe \"but the rest of the standard library\" argument is doing a lot of work here, and I think it's the wrong kind of consistency. The standard library is pointee-first for types that *abstract over the pointee* — they provide `operator*`, `operator->`, they act like pointers-to-T. `pointer_tag_pair` doesn't act like a pointer. It's a storage optimization primitive. The right consistency to optimize for is \"does this type compose with the pointer types I already have,\" and pointer-first composes better. LLVM got this right with `PointerIntPair`, and they've been shipping this in production compilers for over a decade. Sometimes the precedent you want isn't in the standard library; it's in the code that's been successfully using the pattern since before C++11 existed.\n\nEdit: and before someone says \"just use a named requirement and default the pointer type to `T*`\" — that's the same pointee-first design with extra steps. The default still throws away provenance, and now you've added a concept that every fancy pointer author has to opt into. Pointer-first doesn't need a concept; it just works with anything that looks like a pointer, because the template parameter *is* the pointer type.",
+      "tag": null,
+      "is_op": false,
+      "is_mod": false,
+      "controversial": true,
+      "edited": false,
+      "deleted": false,
+      "removed": false,
+      "collapsed": false,
+      "anchor_id": "a02",
+      "encounter_id": "e01",
+      "domain_lens": 10,
+      "brief": "Encounter turn 2: Sharpening—push back on the named requirement idea, noting that the standard library consistently uses pointee-first for smart pointers and this would be an awkward special case.",
+      "votes": [
+        {
+          "persona": "lifetimes_lucy",
+          "direction": -1
+        },
+        {
+          "persona": "bootcamp_grad_2025",
+          "direction": 1
+        },
+        {
+          "persona": "standards_shepherd",
+          "direction": 1
+        },
+        {
+          "persona": "template_janitor",
+          "direction": 1
+        }
+      ]
+    },
+    {
+      "slot_id": "s32",
+      "parent_slot_id": "s31",
+      "depth": 2,
+      "role": "encounter",
+      "persona": "the_constexpr_oracle",
+      "body": "I think `ranges_andy` is making a stronger argument than they realize — but for the wrong side.\n\n> The standard library is pointee-first for types that *abstract over the pointee* — they provide `operator*`, `operator->`, they act like pointers-to-T. `pointer_tag_pair` doesn't act like a pointer.\n\nThis is exactly backwards. The paper's own design section shows `pointer_tag_pair` *does* act like a pointer — it provides `operator*`, `operator->`, and implicit conversion to the underlying pointer type. From the user's perspective, a `pointer_tag_pair<int*, my_tag, 2>` is something you dereference to get an `int&`. The tag is invisible storage, not part of the interface you reach for in generic code.\n\nAnd that's where the consistency argument actually bites. Consider:\n\ncpp\ntemplate <typename T>\nvoid frobnicate(T& obj) {\n    auto ptr = get_some_pointer_like_thing<T>();\n    // ...\n}\n\n\nIf I'm writing generic code that takes a `T` and needs to get a pointer-to-T, I reach for `T*` or `add_pointer_t<T>`. The pointee type is the thing I have; the pointer type is derived from it. `unique_ptr<T>`, `shared_ptr<T>`, `observer_ptr<T>` all let me write `some_ptr_like<T>` and get a thing that points to `T`. Under a pointer-first design, I can't write `pointer_tag_pair<T, my_tag, 2>` — I have to write `pointer_tag_pair<T*, my_tag, 2>`, which means my generic code now needs to know whether `T` is a pointee or a pointer, and that bifurcation propagates through every template that wants to be agnostic about which pointer-like vocabulary type it's holding.\n\n> LLVM got this right with `PointerIntPair`, and they've been shipping this in production compilers for over a decade.\n\nLLVM's `PointerIntPair` is an internal compiler data structure used by people who think about pointer representations for a living. The standard library is a *vocabulary* library used by people who want to write `pointer_tag_pair<Widget, state, 2>` and have it just work. Different audiences, different defaults. The paper should present both options with concrete generic-code examples showing the ergonomic difference, and let LEWG poll on which audience they're optimizing for. My bet is on the 95% case.",
+      "tag": null,
+      "is_op": false,
+      "is_mod": false,
+      "controversial": false,
+      "edited": false,
+      "deleted": false,
+      "removed": false,
+      "collapsed": false,
+      "anchor_id": "a02",
+      "encounter_id": "e01",
+      "domain_lens": 13,
+      "brief": "Encounter turn 3: Resolution—acknowledge the consistency argument but note that LLVM's design uses pointer-first for good reason (provenance preservation). Suggest the paper should present both options with tradeoffs for LEWG to poll.",
+      "votes": [
+        {
+          "persona": "embedded_for_20_years",
+          "direction": -1
+        },
+        {
+          "persona": "bootcamp_grad_2025",
+          "direction": 1
+        },
+        {
+          "persona": "segfault_enjoyer_69",
+          "direction": 1
+        },
+        {
+          "persona": "standards_shepherd",
+          "direction": 1
+        },
+        {
+          "persona": "template_janitor",
+          "direction": 1
+        }
+      ]
+    },
+    {
+      "slot_id": "s33",
+      "parent_slot_id": "s32",
+      "depth": 3,
+      "role": "encounter",
+      "persona": "ranges_andy",
+      "body": "I think we're converging on the right question, and it's not \"pointer or pointee\" — it's \"what does generic code look like when it wants to compose with this type?\"\n\n> The paper's own design section shows `pointer_tag_pair` *does* act like a pointer — it provides `operator*`, `operator->`, and implicit conversion to the underlying pointer type.\n\nThis is true, and it's exactly why the tuple-like API and structured binding support matter for the decision. The paper added `pointer_tag_trait` and tuple protocol in R4. If LEWG goes pointee-first, then structured bindings give you:\n\ncpp\nauto [ptr, tag] = my_tagged_pair;  // ptr is T*, tag is TagT\n\n\nClean, obvious, the pointee type is recoverable from `decltype(ptr)`. But if you're holding an `offset_ptr<int>` and the first template argument was `int`, that structured binding gives you `int*` — you've lost the fancy pointer type in the destructuring. The tuple protocol has to know what pointer type to return, and if the template only knows about the pointee, the only defensible answer is `T*`.\n\nUnder pointer-first:\n\ncpp\nauto [ptr, tag] = my_tagged_pair;  // ptr is offset_ptr<int>, tag is TagT\n\n\nThe structured binding preserves exactly what you put in. The pointee is still available through `pointer_traits<decltype(ptr)>::element_type` if you need it, but the common case — \"give me back the pointer I stored\" — doesn't require a traits hop.\n\nThis is the poll I'd want to see in LEWG: not \"pointer or pointee\" in isolation, but \"given that this type supports structured bindings and tuple protocol, which design preserves the most information through those interfaces?\" The answer is pointer-first, and I think the generic-code examples will bear that out once someone writes them down side by side.\n\nEdit: and to be clear, I'm not saying the 95% case doesn't matter. I'm saying the 95% case is `T*`, and `pointer_tag_pair<T*, my_tag, 2>` is three more characters than `pointer_tag_pair<T, my_tag, 2>`. The 5% case is `offset_ptr<int>`, and getting that wrong silently compiles and corrupts your segment base at runtime. The asymmetry in failure modes should dominate the design.",
+      "tag": null,
+      "is_op": false,
+      "is_mod": false,
+      "controversial": false,
+      "edited": false,
+      "deleted": false,
+      "removed": false,
+      "collapsed": false,
+      "anchor_id": "a02",
+      "encounter_id": "e01",
+      "domain_lens": 13,
+      "brief": "Encounter turn 4: Narrowing—agree that a poll is the right approach, but note that LEWG will also need to consider how the choice interacts with the tuple-like API and structured bindings support.",
+      "votes": [
+        {
+          "persona": "embedded_for_20_years",
+          "direction": -1
+        },
+        {
+          "persona": "lifetimes_lucy",
+          "direction": -1
+        },
+        {
+          "persona": "the_constexpr_oracle",
+          "direction": 1
+        },
+        {
+          "persona": "async_skeptic",
+          "direction": -1
+        },
+        {
+          "persona": "compiles_first_try",
+          "direction": -1
+        },
+        {
+          "persona": "not_a_real_cpp_dev",
+          "direction": 1
+        },
+        {
+          "persona": "committee_gonna_committee",
+          "direction": -1
+        },
+        {
+          "persona": "template_error_survivor",
+          "direction": 1
+        },
+        {
+          "persona": "standards_shepherd",
+          "direction": 1
+        },
+        {
+          "persona": "paper_trail_2019",
+          "direction": -1
+        },
+        {
+          "persona": "cwg_watcher",
+          "direction": 1
+        }
+      ]
+    },
+    {
+      "slot_id": "s34",
+      "parent_slot_id": null,
+      "depth": 0,
+      "role": "noise",
+      "persona": "committee_gonna_committee",
+      "body": "> the last missing piece for constexpr atomic<shared_ptr<T>>\n\nright, because the other 47 missing pieces just magically fell into place while we were all watching LEWG debate whether the first template parameter should be the pointer or the pointee. see you all at the R14 thread in 2034 when we're still bikeshedding the name of `pointer_bits_available`.",
+      "tag": null,
+      "is_op": false,
+      "is_mod": false,
+      "controversial": false,
+      "edited": false,
+      "deleted": false,
+      "removed": false,
+      "collapsed": false,
+      "anchor_id": null,
+      "encounter_id": null,
+      "domain_lens": null,
+      "brief": "React with a sarcastic one-liner about the paper's claim that this is the 'last requirement for atomic<shared_ptr<T>> to be constexpr'—as if that's the only thing holding it up.",
+      "votes": [
+        {
+          "persona": "embedded_for_20_years",
+          "direction": 1
+        },
+        {
+          "persona": "the_constexpr_oracle",
+          "direction": -1
+        },
+        {
+          "persona": "async_skeptic",
+          "direction": 1
+        },
+        {
+          "persona": "ranges_andy",
+          "direction": 1
+        },
+        {
+          "persona": "nanosecond_nancy",
+          "direction": 1
+        },
+        {
+          "persona": "bootcamp_grad_2025",
+          "direction": -1
+        },
+        {
+          "persona": "segfault_enjoyer_69",
+          "direction": 1
+        },
+        {
+          "persona": "standards_shepherd",
+          "direction": -1
+        },
+        {
+          "persona": "template_janitor",
+          "direction": -1
+        }
+      ]
+    },
+    {
+      "slot_id": "s35",
+      "parent_slot_id": null,
+      "depth": 0,
+      "role": "noise",
+      "persona": "template_error_survivor",
+      "body": "oh good, another template that will add 500ms to every translation unit that includes it. i can already see the instantiation stack when someone passes the wrong tag type and clang decides to print the entire `pointer_tag_trait` specialization in the error. *laughs in compile times*",
+      "tag": null,
+      "is_op": false,
+      "is_mod": false,
+      "controversial": false,
+      "edited": false,
+      "deleted": false,
+      "removed": false,
+      "collapsed": false,
+      "anchor_id": null,
+      "encounter_id": null,
+      "domain_lens": null,
+      "brief": "React with a complaint about compile times: 'great, another template that will add 500ms to every translation unit that includes it.'",
+      "votes": [
+        {
+          "persona": "monomorphic_dan",
+          "direction": 1
+        },
+        {
+          "persona": "abi_archivist",
+          "direction": 1
+        },
+        {
+          "persona": "the_constexpr_oracle",
+          "direction": 1
+        },
+        {
+          "persona": "async_skeptic",
+          "direction": -1
+        },
+        {
+          "persona": "ranges_andy",
+          "direction": -1
+        },
+        {
+          "persona": "nanosecond_nancy",
+          "direction": 1
+        },
+        {
+          "persona": "compiles_first_try",
+          "direction": -1
+        },
+        {
+          "persona": "bootcamp_grad_2025",
+          "direction": -1
+        },
+        {
+          "persona": "just_use_rust_lol",
+          "direction": 1
+        },
+        {
+          "persona": "committee_gonna_committee",
+          "direction": -1
+        },
+        {
+          "persona": "segfault_enjoyer_69",
+          "direction": 1
+        },
+        {
+          "persona": "paper_trail_2019",
+          "direction": -1
+        },
+        {
+          "persona": "not_on_the_committee",
+          "direction": 1
+        },
+        {
+          "persona": "template_janitor",
+          "direction": -1
+        }
+      ]
+    },
+    {
+      "slot_id": "s36",
+      "parent_slot_id": null,
+      "depth": 0,
+      "role": "noise",
+      "persona": "just_use_rust_lol",
+      "body": "Boost.Intrusive has been doing this for 15 years. Why are we standardizing it now? Oh right, because someone needs a conference talk and a \"constexpr all the things\" badge. The rest of us just shipped.",
+      "tag": null,
+      "is_op": false,
+      "is_mod": false,
+      "controversial": false,
+      "edited": false,
+      "deleted": false,
+      "removed": false,
+      "collapsed": false,
+      "anchor_id": null,
+      "encounter_id": null,
+      "domain_lens": null,
+      "brief": "React with a Boost reference: 'Boost.Intrusive has been doing this for 15 years. Why are we standardizing it now?'",
+      "votes": [
+        {
+          "persona": "abi_archivist",
+          "direction": 1
+        },
+        {
+          "persona": "embedded_for_20_years",
+          "direction": 1
+        },
+        {
+          "persona": "the_constexpr_oracle",
+          "direction": 1
+        },
+        {
+          "persona": "async_skeptic",
+          "direction": 1
+        },
+        {
+          "persona": "ranges_andy",
+          "direction": 1
+        },
+        {
+          "persona": "segfault_enjoyer_69",
+          "direction": -1
+        },
+        {
+          "persona": "template_error_survivor",
+          "direction": 1
+        },
+        {
+          "persona": "paper_trail_2019",
+          "direction": 1
+        },
+        {
+          "persona": "not_on_the_committee",
+          "direction": 1
+        }
+      ]
+    }
+  ]
+}

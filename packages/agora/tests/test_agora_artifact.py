@@ -5,7 +5,21 @@
 # file LICENSE_1_0.txt or copy at http://www.boost.org/LICENSE_1_0.txt)
 #
 
-"""Tests for .agora.json serialization and producer validation."""
+"""Tests for .agora.json serialization and producer validation.
+
+Two kinds of fixture live under ``fixtures/``:
+
+- **Hand-authored synthetic doubles** (``P2987R0`` rich Case-A,
+  ``P2611R3`` compact Case-C): small, purpose-built threads the
+  mutation tests below deep-copy and break one invariant at a time.
+  They also exercise contract states the producer does not emit
+  today (``removed``, ``collapsed``). Their blueprints are condensed
+  stubs and their anchors use fictional string ids; the producer-shape
+  guarantees live in the serialization tests instead.
+- **Generated fixtures** (``P3125R5*``): real pipeline output,
+  refreshed from live generation. Never hand-edited — they pin what
+  the producer actually emits against the full roster.
+"""
 
 from __future__ import annotations
 
@@ -43,21 +57,13 @@ def _load_fixture(name: str) -> dict:
 
 @pytest.fixture()
 def rich_artifact() -> dict:
-    """The hand-authored rich Case-A fixture (hot, 15 comments).
-
-    A synthetic double, not producer output: its blueprint is a
-    condensed stub and its anchors use fictional string ids. The
-    producer-shape guarantees live in the serialization tests below.
-    """
+    """The hand-authored rich Case-A synthetic double (hot, 15 comments)."""
     return _load_fixture("P2987R0.agora.json")
 
 
 @pytest.fixture()
 def revision_artifact() -> dict:
-    """The hand-authored compact Case-C revision fixture.
-
-    A synthetic double like ``rich_artifact``.
-    """
+    """The hand-authored compact Case-C synthetic double."""
     return _load_fixture("P2611R3.agora.json")
 
 
@@ -92,6 +98,42 @@ def test_unknown_username_rejected_with_roster(rich_artifact: dict):
     roster.discard(rich_artifact["comments"][0]["persona"])
     with pytest.raises(ArtifactError, match="not.*in the roster"):
         validate_artifact(rich_artifact, roster=roster)
+
+
+# -- Generated fixtures (real producer output) ---------------------------------
+
+
+_GENERATED_FIXTURES = (
+    "P3125R5.agora.json",
+    "P3125R5.case-c.agora.json",
+)
+
+
+@pytest.mark.parametrize("name", _GENERATED_FIXTURES)
+def test_generated_fixtures_validate_with_the_full_roster(name: str):
+    from agora.roster import roster_usernames
+
+    artifact = _load_fixture(name)
+    validate_artifact(artifact, roster=roster_usernames())
+
+
+def test_generated_case_a_fixture_is_a_full_thread():
+    artifact = _load_fixture("P3125R5.agora.json")
+    assert artifact["revision_case"] == "A"
+    assert artifact["prior_revision"] is None
+    assert artifact["generated_at"]
+    assert len(artifact["comments"]) >= 30
+    assert all(c["body"] and c["persona"] for c in artifact["comments"])
+    assert sum(len(c["votes"]) for c in artifact["comments"]) > 0
+    for slot in artifact["blueprint"]["replies"]:
+        assert "body" not in slot and "votes" not in slot
+
+
+def test_generated_case_c_fixture_carries_lineage():
+    artifact = _load_fixture("P3125R5.case-c.agora.json")
+    assert artifact["revision_case"] == "C"
+    assert artifact["prior_revision"] == "P3125R4"
+    assert artifact["document"] == "P3125R5"
 
 
 # -- Invariant violations ----------------------------------------------------

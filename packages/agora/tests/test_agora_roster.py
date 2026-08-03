@@ -174,8 +174,14 @@ def test_out_of_range_float_rejected():
 
 
 def test_frozen_fixtures_validate_against_the_real_roster():
-    """Every persona in the frozen v1 samples is a roster member."""
-    for name in ("P2987R0.agora.json", "P2611R3.agora.json"):
+    """Every persona in the v1 fixtures — the hand-authored synthetic
+    doubles and the generated samples — is a roster member."""
+    for name in (
+        "P2987R0.agora.json",
+        "P2611R3.agora.json",
+        "P3125R5.agora.json",
+        "P3125R5.case-c.agora.json",
+    ):
         artifact = json.loads((_FIXTURES / name).read_text())
         validate_artifact(artifact, roster=set(roster_usernames()))
 
