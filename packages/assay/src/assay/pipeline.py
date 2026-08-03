@@ -993,13 +993,16 @@ def _challenge_quote_grounding_entries(
     return entries
 
 
+_QUOTE_GROUNDING_LOG_SAMPLES_LEN = 200
+
+
 def _log_quote_grounding(report: QuoteGroundingReport, *, step: str) -> None:
     if report.ungrounded == 0:
         return
     samples = ", ".join(
         f"{f.kind or 'quote'}:{f.ref_id or '?'} {_truncate_quote(f.quote)}"
         for f in report.failures
-    )[:200]
+    )[:_QUOTE_GROUNDING_LOG_SAMPLES_LEN]
     logger.warning(
         "%s quote grounding: %d ungrounded / %d checked (%s)",
         step,
