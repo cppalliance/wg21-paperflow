@@ -862,7 +862,7 @@ class SqliteBackend(StorageBackend):
         return final_path
 
     def write_agora_json(self, paper_id: str, payload: Any) -> Path:
-        """Write the agora thread blueprint as JSON atomically; record the path."""
+        """Write the ``.agora.json`` artifact atomically; record the path."""
         pid = paper_id.strip().upper()
         final_path = self._atomic_write_text(
             self._papers_dir / f"{pid.lower()}.agora.json",

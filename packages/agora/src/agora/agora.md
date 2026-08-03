@@ -7,7 +7,9 @@ lay out every reply slot with a brief describing what that reply must
 accomplish. Steps 8-10 generate: they cast a roster persona on every
 slot, write each comment body in that persona's voice, and run the
 reactor pass — every persona's individual votes on every comment and
-the submission. Scores, orderings, and time labels are **not**
+the submission. Step 11 emits: it maps the finished thread to the
+``.agora.json`` artifact, validates the producer contract, and writes
+it to paperstore. Scores, orderings, and time labels are **not**
 produced here; everything display-side derives from revealed votes.
 
 ```mermaid
@@ -33,6 +35,9 @@ flowchart TD
         S9[9 Voice]
         S10[10 Reactor]
     end
+    subgraph emit [Phase F Emit]
+        S11[11 Emit]
+    end
     S0 --> S1
     S1 --> S2
     S2 --> S3
@@ -43,6 +48,7 @@ flowchart TD
     S7 --> S8
     S8 --> S9
     S9 --> S10
+    S10 --> S11
 ```
 
 ## Services
@@ -444,8 +450,9 @@ Every check is mandatory: a violation fails the run and nothing is
 serialized.
 
 Construct the ``Thread`` with all analysis-phase fields populated
-and every generation-phase field left as ``None``. Write
-``{pid}.agora.json`` to paperstore via ``backend.write_agora_json``.
+and every generation-phase field left as ``None``. Nothing is
+persisted here: the artifact write happens in Step 11 (Emit) after
+generation, so a failed run never leaves a partial artifact on disk.
 
 ---
 
@@ -574,3 +581,29 @@ Constraints: at most one vote per ``(persona, target)``; every voter
 is a roster username; AutoModerator never votes; nobody votes on
 their own comment or submission. Re-running the same thread yields
 the identical vote set.
+
+---
+
+## Step 11 - Emit
+
+- **Model:** none
+- **Execution:** main
+
+Pure-Python emit step. The thread is finished — cast, voiced, and
+voted — so map it to the ``.agora.json`` artifact and persist it:
+
+- Stamp ``generated_at`` (UTC now). It is provenance — when
+  generation ran — never pacing; the website owns reveal timing.
+- Run the generation QA report (``agora.qa``): flag ``u/`` handles
+  outside the roster, personal-attack phrasing, typo-nitpick
+  comments (the-mod.md 1.3b exclusion list), and fourth-wall leaks.
+  Findings are logged and recorded in the trace; they do not fail
+  the run — they surface issues ahead of the website's reveal-time
+  moderation window.
+- Map the thread through ``thread_to_artifact`` and validate with
+  ``validate_artifact`` against the full roster username set. A
+  violation fails the run and nothing is written.
+- Write ``{pid}.agora.json`` to paperstore via
+  ``backend.write_agora_json``. This is the pipeline's only artifact
+  write: the file's existence means the thread is fully generated
+  and ready for website ingest.

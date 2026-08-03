@@ -63,10 +63,11 @@ _VERB_DESCRIPTION = {
         "Idempotent: skips already-complete work unless --force is given."
     ),
     "agora": (
-        "Plan a fake r/wg21 Reddit thread for a paper. "
-        "Produces a structural blueprint (anchors, calibration, submission, "
-        "every reply slot with a brief) as JSON; reply text and characters "
-        "are filled by a later generation phase."
+        "Plan and generate a fake r/wg21 Reddit thread for a paper. "
+        "Plans the structure (anchors, calibration, submission, every "
+        "reply slot with a brief), casts roster personas, writes every "
+        "comment body, casts per-persona votes, and writes the full "
+        ".agora.json artifact the website ingests."
     ),
     "assay": (
         "Run the 12-step assay pipeline on a paper. Produces a two-pass "
@@ -105,7 +106,7 @@ _VERB_FLAGS: dict[str, set[str]] = {
     "download":  {"force", "concurrency"},
     "convert":   {"force", "concurrency", "check_content", "check_content_json", "keep_downstream", "yes", "extract_vector_images", "vector_whiteout_text"},
     "full":      {"force", "verify", "concurrency", "extract_vector_images", "vector_whiteout_text"},
-    "agora":     {"debug", "trace", "step", "force"},
+    "agora":     {"debug", "trace", "step", "force", "no_research"},
     "assay":     {"debug", "trace", "step", "force", "rerender"},
     "status":    set(),
 }
@@ -147,6 +148,11 @@ _FLAG_DEFS: list[dict] = [
          help="On convert: skip the batch confirmation prompt that fires "
               "when a multi-paper invocation would invalidate downstream "
               "artifacts."),
+    dict(name="no_research", flags=["--no-research"], action="store_true",
+         default=False,
+         help="On agora: skip the web research step. The thread "
+              "calibrates from paper signals alone; no web search or "
+              "MCP traffic is generated."),
     dict(name="rerender", flags=["--rerender"], action="store_true",
          default=False,
          help="Regenerate report from stored data without re-running "

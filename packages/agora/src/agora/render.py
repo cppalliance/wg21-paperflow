@@ -343,4 +343,22 @@ def render_trace(state: PipelineState, stop_step: int) -> str:
             lines.append("- (no votes cast)")
         lines.append("")
 
+    if stop_step >= 11:
+        lines.append("## 11. Emit\n")
+        t = state.thread
+        if state.artifact_path:
+            lines.append(f"- artifact: {state.artifact_path}")
+            if t is not None and t.generated_at is not None:
+                lines.append(f"- generated_at: {t.generated_at.isoformat()}")
+            findings = state.qa_findings or []
+            if findings:
+                lines.append(f"- QA findings: {len(findings)}")
+                for finding in findings:
+                    lines.append(f"  - {sanitize_md(finding)}")
+            else:
+                lines.append("- QA findings: none")
+        else:
+            lines.append("- (no artifact written)")
+        lines.append("")
+
     return "\n".join(lines).rstrip() + "\n"

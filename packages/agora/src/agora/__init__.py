@@ -5,7 +5,7 @@
 # file LICENSE_1_0.txt or copy at http://www.boost.org/LICENSE_1_0.txt)
 #
 
-"""Agora: WG21 paper thread planning pipeline (the analytical phase of the Mod)."""
+"""Agora: the Mod's WG21 paper thread pipeline — plan, generate, emit."""
 
 from __future__ import annotations
 

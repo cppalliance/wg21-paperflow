@@ -45,6 +45,7 @@ def run_process_command(
     skip_prompt = getattr(args, "yes", False)
     extract_vector = getattr(args, "extract_vector_images", False)
     whiteout_text = getattr(args, "vector_whiteout_text", False)
+    research = not getattr(args, "no_research", False)
 
     verb = STAGE_NAMES.get(through - 1, "process")
 
@@ -131,6 +132,7 @@ def run_process_command(
                         keep_downstream=keep_downstream,
                         extract_vector=extract_vector,
                         whiteout_text=whiteout_text,
+                        research=research,
                         on_progress=None if show_outer else on_progress,
                     )
                 )
