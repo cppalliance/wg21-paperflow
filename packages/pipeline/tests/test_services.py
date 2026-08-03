@@ -304,7 +304,7 @@ base_url = "http://localhost/v1"
 model = "m"
 """,
     )
-    assert resolve_classifiers({}, path=p) == ()
+    assert resolve_classifiers({}, path=p) == {}
 
 
 def test_resolve_classifiers_fallback_without_binding(tmp_path, monkeypatch):
@@ -321,14 +321,16 @@ def test_resolve_classifiers_fallback_without_binding(tmp_path, monkeypatch):
     )
     result = resolve_classifiers(None, path=p)
     # Both defaulted slots ("selector", "other") point at the same
-    # inventory entry, so they share one instance and the tuple has
-    # exactly one element.
-    assert len(result) == 1
-    assert result[0].model_id == "cross-encoder/nli-deberta-v3-small"
+    # inventory entry, so they share one instance.
+    assert set(result) == {"selector", "other"}
+    assert result["selector"] is result["other"]
+    assert result["selector"].model_id == "cross-encoder/nli-deberta-v3-small"
     assert calls == ["nli-small"]
 
 
-def test_resolve_classifiers_binding_overrides_fallback_slot(tmp_path, monkeypatch):
+def test_resolve_classifiers_explicit_binding_does_not_merge_defaults(
+    tmp_path, monkeypatch,
+):
     p = _classifier_toml(tmp_path)
     calls: list[str] = []
 
@@ -337,13 +339,22 @@ def test_resolve_classifiers_binding_overrides_fallback_slot(tmp_path, monkeypat
         return _ClfFake(cfg.get("model", name), provider)
 
     monkeypatch.setattr("pipeline.services._instantiate_classifier", fake_inst)
-    # Binding only overrides "selector"; "other" still falls back to
-    # [classifier_defaults], so both entries get instantiated.
+    # Explicit binding is authoritative: defaults slots ("other") are
+    # not merged in when the caller passes a non-None binding.
     result = resolve_classifiers({"selector": "zeroshot-base"}, path=p)
-    model_ids = {backend.model_id for backend in result}
-    assert any(m.endswith("zeroshot-v2.0") for m in model_ids)
-    assert "nli-small" in calls
-    assert "zeroshot-base" in calls
+    assert result == {"selector": result["selector"]}
+    assert result["selector"].model_id.endswith("zeroshot-v2.0")
+    assert calls == ["zeroshot-base"]
+
+
+def test_resolve_classifiers_empty_dict_skips_defaults(tmp_path, monkeypatch):
+    p = _classifier_toml(tmp_path)
+    monkeypatch.setattr(
+        "pipeline.services._instantiate_classifier",
+        lambda *a, **k: _ClfFake("m", a[2]),
+    )
+    # {} is not None: no framework fallback, even when defaults exist.
+    assert resolve_classifiers({}, path=p) == {}
 
 
 def test_resolve_classifiers_unknown_entry_names_slot(tmp_path, monkeypatch):
@@ -380,8 +391,8 @@ executor_workers = 1
         lambda *a, **k: _ClfFake("m", a[2]),
     )
     result = resolve_classifiers({"only": "nli-small"}, path=p)
-    assert len(result) == 1
-    assert result[0].model_id == "m"
+    assert result == {"only": result["only"]}
+    assert result["only"].model_id == "m"
 
 
 def test_resolve_classifiers_shares_instance_for_two_slots(tmp_path, monkeypatch):
@@ -394,11 +405,30 @@ def test_resolve_classifiers_shares_instance_for_two_slots(tmp_path, monkeypatch
         {"a": "nli-small", "b": "nli-small"},
         path=p,
     )
-    # Two slots bound to the same entry share one instance, so the
-    # deduplicated tuple has exactly one element (plus the
-    # classifier_defaults "selector"/"other" entries, which also
-    # resolve to "nli-small" and therefore share the same instance).
-    assert len(result) == 1
+    # Two slots bound to the same entry share one instance.
+    assert set(result) == {"a", "b"}
+    assert result["a"] is result["b"]
+
+
+def test_resolve_classifiers_two_distinct_entries_stable_order(
+    tmp_path, monkeypatch,
+):
+    p = _classifier_toml(tmp_path)
+    calls: list[str] = []
+
+    def fake_inst(name, cfg, provider):
+        calls.append(name)
+        return _ClfFake(cfg.get("model", name), provider)
+
+    monkeypatch.setattr("pipeline.services._instantiate_classifier", fake_inst)
+    result = resolve_classifiers(
+        {"routing_tagger": "zeroshot-base", "selector": "nli-small"},
+        path=p,
+    )
+    assert list(result) == ["routing_tagger", "selector"]
+    assert result["selector"].model_id == "cross-encoder/nli-deberta-v3-small"
+    assert result["routing_tagger"].model_id.endswith("zeroshot-v2.0")
+    assert calls == ["zeroshot-base", "nli-small"]
 
 
 def test_resolve_classifiers_provider_override_beats_entry_pin(
@@ -489,4 +519,47 @@ provider = "no-such-provider"
     )
     with pytest.raises(ServiceConfigError, match="no-such-provider"):
         resolve_classifiers({"s": "pinned"}, path=p)
+
+
+def test_instantiate_classifier_drops_provider_from_init_kwargs(tmp_path):
+    from pipeline.classifier_backends import CLASSIFIER_BACKEND_REGISTRY, ClassifierBackend
+    from pipeline.services import _instantiate_classifier
+    from pipeline.transformer_backend import TransformerProvider
+
+    class _StubClf(ClassifierBackend):
+        init_kwargs: dict | None = None
+
+        def __init__(self, model: str, provider: TransformerProvider, **kwargs) -> None:
+            self.model_id = model
+            self.provider = provider
+            _StubClf.init_kwargs = kwargs
+
+        def classify(self, texts, candidate_labels, *, multi_label=True):
+            return []
+
+    CLASSIFIER_BACKEND_REGISTRY["stub_clf"] = _StubClf
+    try:
+        provider = TransformerProvider.from_toml(
+            "auto",
+            {
+                "mode": "auto",
+                "max_batch_size": 16,
+                "max_length": 128,
+                "executor_workers": 1,
+            },
+        )
+        _instantiate_classifier(
+            "test-entry",
+            {
+                "backend": "stub_clf",
+                "model": "m",
+                "provider": "cpu-fp32",
+                "extra": "kept",
+            },
+            provider,
+        )
+        assert _StubClf.init_kwargs == {"extra": "kept"}
+        assert "provider" not in (_StubClf.init_kwargs or {})
+    finally:
+        CLASSIFIER_BACKEND_REGISTRY.pop("stub_clf", None)
 

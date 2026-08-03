@@ -49,11 +49,10 @@ def main() -> None:
     rows = json.loads(sentences_path.read_text(encoding="utf-8"))
     texts = [r["text"] for r in rows]
 
-    from pipeline.services import load_classifiers, resolve_classifier_slots
+    from pipeline.services import resolve_classifiers
 
     print(f"Loading classifier '{selector}'...", file=sys.stderr)
-    clfs, defaults = load_classifiers()
-    slots = resolve_classifier_slots(clfs, defaults, {"selector": selector})
+    slots = resolve_classifiers({"selector": selector})
     classifier = slots["selector"]
 
     print(f"Scoring {len(texts)} sentences...", file=sys.stderr)

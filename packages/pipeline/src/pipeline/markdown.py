@@ -27,6 +27,8 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
+from pipeline.errors import DuplicateBulletKeyError
+
 _PREAMBLE_KEY = "_preamble"
 _CODE_SPAN_RE = re.compile(r"``.+?``|`[^`]+`")
 
@@ -37,18 +39,18 @@ HEADING_RE = re.compile(r"^(#{1,6})\s+(.*)")
 _MD_BOLD_ITEM_RE = re.compile(r"^\s*-\s+\*\*(\w+):\*\*\s*(.+)", re.MULTILINE)
 
 
-def bullet_map(body: str) -> dict[str, str]:
+def bullet_map(body: str, *, source: str = "") -> dict[str, str]:
     """Parse ``- **key:** value`` bullets into a lowercased key map.
 
     Empty values are skipped. Returns ``{}`` for an empty body.
 
-    Raises ``ValueError`` if the same key (case-insensitive) appears
-    twice with a non-empty value. Silently keeping only the last
-    occurrence would drop the caller's first binding without any
-    signal, which is never the intent behind a Services/Config/
-    Classifiers block: repeating a key is either a typo or an attempt
-    to bind two entries under one name (which needs two distinct
-    names instead).
+    Raises :class:`DuplicateBulletKeyError` if the same key
+    (case-insensitive) appears twice with a non-empty value. Silently
+    keeping only the last occurrence would drop the caller's first
+    binding without any signal, which is never the intent behind a
+    Services/Config/Classifiers block: repeating a key is either a typo
+    or an attempt to bind two entries under one name (which needs two
+    distinct names instead).
     """
     out: dict[str, str] = {}
     for m in _MD_BOLD_ITEM_RE.finditer(body):
@@ -57,8 +59,9 @@ def bullet_map(body: str) -> dict[str, str]:
         if not value:
             continue
         if key in out:
-            raise ValueError(
-                f"duplicate bullet key {key!r} "
+            prefix = f"{source}: " if source else ""
+            raise DuplicateBulletKeyError(
+                f"{prefix}duplicate bullet key {key!r} "
                 f"(first value {out[key]!r}, second value {value!r}); "
                 f"use distinct keys, e.g. two differently-named slots"
             )

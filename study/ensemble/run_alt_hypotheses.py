@@ -123,11 +123,10 @@ def main() -> None:
     selector = sys.argv[1] if len(sys.argv) > 1 else "nli-small"
     filter_ids = set(sys.argv[2:]) if len(sys.argv) > 2 else None
 
-    from pipeline.services import load_classifiers, resolve_classifier_slots
+    from pipeline.services import resolve_classifiers
 
     print(f"Loading classifier '{selector}'...", file=sys.stderr)
-    clfs, defaults = load_classifiers()
-    slots = resolve_classifier_slots(clfs, defaults, {"selector": selector})
+    slots = resolve_classifiers({"selector": selector})
     classifier = slots["selector"]
 
     sentences = load_sentences()

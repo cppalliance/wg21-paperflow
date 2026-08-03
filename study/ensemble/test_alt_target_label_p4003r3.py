@@ -45,9 +45,8 @@ def main() -> None:
     texts = [s["text"] for s in sentences]
     sid_order = [s["sid"] for s in sentences]
 
-    from pipeline.services import load_classifiers, resolve_classifier_slots
-    clfs, defaults = load_classifiers()
-    slots = resolve_classifier_slots(clfs, defaults, {"selector": "nli-small"})
+    from pipeline.services import resolve_classifiers
+    slots = resolve_classifiers({"selector": "nli-small"})
     classifier = slots["selector"]
 
     print("# Cross-paper validation: alt target labels on P4003R3\n")

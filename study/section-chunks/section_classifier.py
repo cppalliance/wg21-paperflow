@@ -197,9 +197,8 @@ def classify_sections(
             all_chunks.append(chunk_text)
             chunk_map.append((sec_idx, ci))
 
-    from pipeline.services import load_classifiers, resolve_classifier_slots
-    clfs, defaults = load_classifiers()
-    slots = resolve_classifier_slots(clfs, defaults, {"selector": classifier_name})
+    from pipeline.services import resolve_classifiers
+    slots = resolve_classifiers({"selector": classifier_name})
     classifier = slots["selector"]
 
     BATCH_SIZE = 64
@@ -296,11 +295,10 @@ def main() -> None:
     print(f"Classifier: {classifier_name}", file=sys.stderr)
 
     # --- Phase 2: Classify with progress ---
-    from pipeline.services import load_classifiers, resolve_classifier_slots
+    from pipeline.services import resolve_classifiers
 
     print(f"Loading classifier '{classifier_name}'...", file=sys.stderr)
-    clfs, defaults = load_classifiers()
-    slots = resolve_classifier_slots(clfs, defaults, {"selector": classifier_name})
+    slots = resolve_classifiers({"selector": classifier_name})
     classifier = slots["selector"]
 
     BATCH_SIZE = 64

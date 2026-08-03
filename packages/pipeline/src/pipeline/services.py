@@ -248,6 +248,7 @@ def _instantiate_classifier(
 
 
 def _provider_for_classifier_entry(
+    entry_name: str,
     entry_cfg: Mapping[str, Any],
     providers: dict[str, TransformerProvider],
     provider_defaults: Mapping[str, str],
@@ -258,7 +259,7 @@ def _provider_for_classifier_entry(
 
     Precedence, top wins:
 
-    1. ``provider_override`` (e.g. ``--provider`` on the assay CLI).
+    1. ``provider_override`` (``resolve_classifiers(provider_override=...)``).
     2. ``PAPERFLOW_TRANSFORMER_PROVIDER`` env var.
     3. The entry's ``provider = "<name>"`` in SERVICES.toml.
     4. ``[transformer_provider_defaults].default``.
@@ -270,20 +271,20 @@ def _provider_for_classifier_entry(
     else:
         entry_pin = None
 
-    name = (
+    provider_name = (
         provider_override
         or os.environ.get(_TRANSFORMER_PROVIDER_ENV)
         or entry_pin
         or provider_defaults.get("default")
         or "auto"
     )
-    if name not in providers:
+    if provider_name not in providers:
         raise ServiceConfigError(
-            f"Classifier entry declares transformer provider {name!r} "
-            f"which is not defined in SERVICES.toml. "
+            f"Classifier entry {entry_name!r} declares transformer provider "
+            f"{provider_name!r} which is not defined in SERVICES.toml. "
             f"Available: {sorted(providers)}"
         )
-    return providers[name]
+    return providers[provider_name]
 
 
 def resolve_classifiers(
@@ -291,26 +292,26 @@ def resolve_classifiers(
     path: Path | None = None,
     *,
     provider_override: str | None = None,
-) -> tuple[ClassifierBackend, ...]:
+) -> dict[str, ClassifierBackend]:
     """Resolve classifier inventory entries to :class:`ClassifierBackend` instances.
 
     ``binding`` is an opaque slot-name -> inventory-entry-name map from
-    the caller (e.g. assay's ``## Classifiers`` block). The framework
+    the caller (e.g. a pipeline's ``## Classifiers`` block). The framework
     does not parse pipeline markdown or know slot semantics; it only
-    instantiates the entries the caller names. ``[classifier_defaults]``
-    is merged in underneath ``binding`` as a base layer: slot names the
-    caller does not bind still fall back to the table default, and a
-    caller that binds nothing gets pure ``[classifier_defaults]``
-    behavior (the historical single-classifier default). Caller-bound
-    slot names always win on conflict.
+    instantiates the entries the caller names.
 
-    The return value is a tuple, not a slot dict: callers that want an
-    ensemble (multiple distinct entries bound to different slots) get
-    every distinct backend, each instantiated once, in a stable order
-    (sorted by slot name, first occurrence wins when two slots share
-    one entry). Callers that only care about one classifier take
-    ``result[0]`` or pass the whole tuple straight into a scorer that
-    accepts a sequence.
+    ``binding`` is authoritative when provided: ``{}`` resolves to an
+    empty dict (no silent fallback). ``None`` is the only path that
+    loads ``[classifier_defaults]`` (framework fallback for callers
+    that declare no binding). A non-empty dict is used as-is; defaults
+    are not merged in underneath partial bindings.
+
+    Returns a slot-name -> backend dict keyed by the caller's binding.
+    Two slots bound to the same inventory entry share one backend
+    instance. Slots are processed in sorted slot-name order (D7).
+    Callers that want an ensemble pass ``set(result.values())`` or
+    ``dict.fromkeys(result.values())`` into a scorer that accepts a
+    sequence.
 
     Provider selection for each entry follows
     :func:`_provider_for_classifier_entry`.
@@ -331,52 +332,47 @@ def resolve_classifiers(
         config = tomllib.load(f)
 
     classifiers_config = config.get("classifiers", {})
-    # [classifier_defaults] is a base layer, not an all-or-nothing
-    # fallback: a caller binding a subset of slots still gets the
-    # other framework-default slots filled in. Caller-bound slot names
-    # win on conflict.
-    defaults = dict(config.get("classifier_defaults", {}))
-    merged_binding: dict[str, str] = {**defaults, **(binding or {})}
+    # [classifier_defaults] applies only when binding is None (caller
+    # declared nothing). An explicit binding -- even {} -- is authoritative
+    # and does not pull in default slots silently.
+    if binding is None:
+        binding = dict(config.get("classifier_defaults", {}))
 
-    if not merged_binding:
-        return ()
+    if not binding:
+        return {}
 
     providers, provider_defaults = load_transformer_providers(path)
 
-    instances: dict[str, ClassifierBackend] = {}
-    # Ordered dedupe: a plain ``set`` would make the return order
-    # nondeterministic across runs (hash-order, not insertion-order),
-    # which conflicts with the repo's determinism rules and with
-    # ``score_hypotheses``, which relies on a stable input sequence
-    # before it applies its own type/model_id sort.
-    ordered: list[ClassifierBackend] = []
+    entry_instances: dict[str, ClassifierBackend] = {}
+    out: dict[str, ClassifierBackend] = {}
 
-    for slot_name, entry_name in sorted(merged_binding.items()):
+    for slot_name, entry_name in sorted(binding.items()):
         if entry_name not in classifiers_config:
             raise ServiceConfigError(
                 f"Classifier slot {slot_name!r} references entry "
                 f"{entry_name!r} which is not defined in SERVICES.toml. "
                 f"Available: {sorted(classifiers_config)}"
             )
-        if entry_name not in instances:
+        if entry_name not in entry_instances:
             cfg = classifiers_config[entry_name]
             provider = _provider_for_classifier_entry(
+                entry_name,
                 cfg,
                 providers,
                 provider_defaults,
                 provider_override=provider_override,
             )
             backend = _instantiate_classifier(entry_name, cfg, provider)
-            instances[entry_name] = backend
-            ordered.append(backend)
+            entry_instances[entry_name] = backend
             logger.info(
                 "Classifier entry %r model=%s provider=%s",
                 entry_name,
                 backend.model_id,
                 backend.provider.name,
             )
+        out[slot_name] = entry_instances[entry_name]
 
-    return tuple(ordered)
+    return out
 
 
 def load_embedders(
@@ -491,7 +487,7 @@ def resolve_transformer_provider(
 
     Order, top wins:
 
-    1. ``override`` (from the ``--provider`` CLI flag).
+    1. ``override`` (caller-supplied ``provider_override`` kwarg).
     2. ``PAPERFLOW_TRANSFORMER_PROVIDER`` env var.
     3. ``[transformer_provider_defaults].default`` from SERVICES.toml.
     4. The hardcoded ``"auto"`` entry injected by

@@ -52,9 +52,8 @@ def main() -> None:
     texts = [s["text"] for s in sentences if s["sid"] in gold]
     sid_order = [s["sid"] for s in sentences if s["sid"] in gold]
 
-    from pipeline.services import load_classifiers, resolve_classifier_slots
-    clfs, defaults = load_classifiers()
-    slots = resolve_classifier_slots(clfs, defaults, {"selector": "nli-small"})
+    from pipeline.services import resolve_classifiers
+    slots = resolve_classifiers({"selector": "nli-small"})
     classifier = slots["selector"]
 
     print("# Alternative TARGET hypothesis test (nli-small, P2300R10 Phase 1)\n")

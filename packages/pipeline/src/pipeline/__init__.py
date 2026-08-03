@@ -20,6 +20,7 @@ from pipeline.classifier_backends import (
 from pipeline.errors import (
     BackendConfigError,
     CapabilityMismatchError,
+    DuplicateBulletKeyError,
     HookMismatchError,
     MalformedModelOutputError,
     MissingMetadataError,
@@ -88,6 +89,7 @@ __all__ = [
     "AgentBackend",
     "BackendConfigError",
     "CapabilityMismatchError",
+    "DuplicateBulletKeyError",
     "MalformedModelOutputError",
     "ModelBackendConfigError",
     "ServiceConfigError",

@@ -269,8 +269,14 @@ def _parse_prompt(package: str, filename: str, text: str) -> PipelinePrompt:
     it from in-memory strings."""
     section_map = _split_sections(text)
 
-    services = parse_pipeline_services(section_map.get(_SECTION_SERVICES, ""))
-    config = parse_pipeline_config(section_map.get(_SECTION_CONFIG, ""))
+    services = parse_pipeline_services(
+        section_map.get(_SECTION_SERVICES, ""),
+        source=f"{filename} ## Services",
+    )
+    config = parse_pipeline_config(
+        section_map.get(_SECTION_CONFIG, ""),
+        source=f"{filename} ## Config",
+    )
     system_prompt = section_map.get(_SECTION_SYSTEM_PROMPT, "").strip()
     preamble = section_map.get(_PREAMBLE_KEY, "")
 
@@ -291,23 +297,23 @@ def _parse_prompt(package: str, filename: str, text: str) -> PipelinePrompt:
     )
 
 
-def parse_pipeline_services(body: str) -> dict[str, str]:
+def parse_pipeline_services(body: str, *, source: str = "") -> dict[str, str]:
     """Parse a ``## Services`` markdown section into a logical-name map.
 
     Accepts lines like ``- **default:** anthropic-opus`` and returns
     ``{"default": "anthropic-opus"}``. Keys are lowercased; empty
     values are skipped.
     """
-    return bullet_map(body)
+    return bullet_map(body, source=source)
 
 
-def parse_pipeline_config(body: str) -> dict[str, str]:
+def parse_pipeline_config(body: str, *, source: str = "") -> dict[str, str]:
     """Parse a ``## Config`` markdown section into a flat config dict.
 
     Same ``- **key:** value`` format as Services. Returns
     ``{"concurrency": "2", ...}``. Keys are lowercased.
     """
-    return bullet_map(body)
+    return bullet_map(body, source=source)
 
 
 def parse_step_prompt(name: str, body: str) -> StepPrompt:

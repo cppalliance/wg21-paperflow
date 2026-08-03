@@ -95,7 +95,7 @@ Infrastructure is declared in `SERVICES.toml` at the repo root. Each `[services.
 
 `AgentBackend` wraps a `ModelBackend` with pipeline-level config (`max_tokens`, `thinking_budget`). `ModelBackend` (one class per model family) encapsulates all mechanical concerns: structured output strategy, BPE cleanup, thinking-block stripping, tool-calling workarounds. See `MODELS.md` for the workaround inventory and retire-when conditions.
 
-Local classifier inventory lives in `SERVICES.toml` under `[classifiers.NAME]`. Each consuming package owns which entry backs each slot (for assay, `assay.md` ``## Classifiers``). `SERVICES.toml` declares capacity only. `[classifier_defaults]` is a fallback layer merged underneath the caller's binding: unbound slot names still resolve from it, and a caller binding nothing gets pure `[classifier_defaults]` behavior; no in-repo pipeline depends on that fallback today (guarded by tests). `resolve_classifiers` returns a deduplicated tuple of every distinct backend the binding names, so a package can bind two or more slots to different entries to ensemble multiple classifiers.
+Local classifier inventory lives in `SERVICES.toml` under `[classifiers.NAME]`. Each consuming package owns which entry backs each slot via a ``## Classifiers`` block in that package's pipeline markdown. `SERVICES.toml` declares capacity only. `resolve_classifiers(binding)` returns a slot-name -> backend dict; when `binding` is `None`, `[classifier_defaults]` supplies the framework fallback (guarded by tests). An explicit binding, including `{}`, is authoritative and does not merge defaults underneath. No in-repo pipeline calls `resolve_classifiers` yet.
 
 Pipelines create agents by intent, not by model name. Each pipeline defines its own `MAX_OUTPUT_TOKENS` constant and passes it to `AgentBackend`:
 
@@ -105,7 +105,7 @@ synthesis_agent = AgentBackend(slots["default"], max_tokens=MAX_OUTPUT_TOKENS, t
 research_agent = AgentBackend(slots["tool"], max_tokens=MAX_OUTPUT_TOKENS)
 ```
 
-Model slot binding comes from each pipeline's markdown ``## Services`` block. Edit that file to change which service backs a logical model name. For local classifiers, edit ``## Classifiers`` in the same file; assay's paper routing runs the union of every bound slot, so adding a second slot (e.g. `routing_tagger: assay-routing-tagger` alongside `selector: nli-small`) ensembles both classifiers without touching Python code.
+Model slot binding comes from each pipeline's markdown ``## Services`` block. Edit that file to change which service backs a logical model name. Classifier slot binding uses the same ``- **slot:** entry`` bullet format under a ``## Classifiers`` block; the orchestrator passes the parsed map to `resolve_classifiers`.
 
 ## Invariants
 

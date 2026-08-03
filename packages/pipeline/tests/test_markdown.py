@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import pytest
 
+from pipeline.errors import DuplicateBulletKeyError
 from pipeline.markdown import bullet_map, extract_code_blocks, sections
 
 
@@ -25,14 +26,20 @@ def test_bullet_map_empty_body():
 
 def test_bullet_map_raises_on_duplicate_key():
     body = "- **selector:** nli-small\n- **selector:** assay-routing-tagger\n"
-    with pytest.raises(ValueError, match="duplicate bullet key 'selector'"):
+    with pytest.raises(DuplicateBulletKeyError, match="duplicate bullet key 'selector'"):
         bullet_map(body)
 
 
 def test_bullet_map_duplicate_key_case_insensitive():
     body = "- **Selector:** nli-small\n- **selector:** assay-routing-tagger\n"
-    with pytest.raises(ValueError, match="duplicate bullet key"):
+    with pytest.raises(DuplicateBulletKeyError, match="duplicate bullet key"):
         bullet_map(body)
+
+
+def test_bullet_map_duplicate_key_includes_source():
+    body = "- **selector:** nli-small\n- **selector:** zeroshot-base\n"
+    with pytest.raises(DuplicateBulletKeyError, match="assay.md ## Services"):
+        bullet_map(body, source="assay.md ## Services")
 
 
 def test_sections_basic():

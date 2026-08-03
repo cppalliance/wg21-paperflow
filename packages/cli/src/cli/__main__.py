@@ -106,7 +106,7 @@ _VERB_FLAGS: dict[str, set[str]] = {
     "convert":   {"force", "concurrency", "check_content", "check_content_json", "keep_downstream", "yes", "extract_vector_images", "vector_whiteout_text"},
     "full":      {"force", "verify", "concurrency", "extract_vector_images", "vector_whiteout_text"},
     "agora":     {"debug", "trace", "step", "force"},
-    "assay":     {"debug", "trace", "step", "force", "rerender", "provider"},
+    "assay":     {"debug", "trace", "step", "force", "rerender"},
     "status":    set(),
 }
 
@@ -137,8 +137,6 @@ _FLAG_DEFS: list[dict] = [
     dict(name="chunk", flags=["--chunk"], type=int,
          default=None, metavar="C",
          help="Run only chunk C in parallel steps."),
-    dict(name="provider", flags=["--provider"], default=None, metavar="NAME",
-         help="Override the active transformer provider (device/dtype/batch). Defaults to PAPERFLOW_TRANSFORMER_PROVIDER, then [transformer_provider_defaults].default in SERVICES.toml, then 'auto' (host-detected)."),
     dict(name="keep_downstream", flags=["--keep-downstream"], action="store_true",
          default=False,
          help="On convert: don't clear agora artifacts even "

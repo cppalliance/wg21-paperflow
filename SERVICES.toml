@@ -43,10 +43,10 @@
 #                            used verbatim. Missing required keys raise
 #                            at load. Use in cloud / provisioned hosts.
 #    [transformer_provider_defaults] maps slot names to provider names.
-#    Override precedence at runtime: --provider CLI flag (top) >
-#    PAPERFLOW_TRANSFORMER_PROVIDER env var > [transformer_provider_defaults]
-#    > the hardcoded "auto" fallback (so a fresh clone with no provider
-#    section still works).
+#    Override precedence at runtime: caller ``provider_override`` kwarg
+#    (no CLI wiring yet) > PAPERFLOW_TRANSFORMER_PROVIDER env var >
+#    [transformer_provider_defaults] > the hardcoded "auto" fallback
+#    (so a fresh clone with no provider section still works).
 #
 # The three namespaces do not mix: slot resolution is independent.
 
@@ -163,21 +163,29 @@ tools_capable = true
 # via a ``## Classifiers`` block in that package's pipeline markdown.
 #
 # [classifier_defaults] is the framework fallback layer: resolve_classifiers()
-# merges it underneath the caller's binding, so slot names the caller
-# does not bind still resolve from here, and a caller that binds
-# nothing gets pure [classifier_defaults] behavior. No in-repo pipeline
-# depends on that fallback today (every bound slot name is also set
-# explicitly by its caller); it is guarded by tests.
+# loads it only when the caller passes binding=None (no binding declared).
+# An explicit binding, including {}, is authoritative and does not merge
+# defaults underneath. No in-repo pipeline calls resolve_classifiers yet;
+# it is guarded by tests.
 
-# Small NLI cross-encoder. ~150MB, ~15-25ms/sentence on CPU.
+# Default: small NLI cross-encoder. ~150MB, ~15-25ms/sentence on CPU.
+# With the cross-validated TARGET hypothesis label and structural
+# pre-filter in harness.py, this model achieves 96% TARGET recall and
+# 92% SKIP recall across three WG21 corpora -- matching or beating
+# zeroshot-large on the decisions that matter (TARGET recall) at
+# 1/85th the cost. See study/ensemble/results/final_findings.md for
+# the apples-to-apples ablation.
 [classifiers.nli-small]
 backend = "nli_cross_encoder"
 model = "cross-encoder/nli-deberta-v3-small"
 
 # Large alternative: DeBERTa-v3-large fine-tuned for zero-shot
 # classification on 5 NLI + 28 non-NLI datasets. ~1.7GB FP32, ~1.5s
-# per sentence on CPU. Bind via the consuming package's ``## Classifiers``
-# block when sharper raw scores are needed for experimentation.
+# per sentence on CPU. Sharper raw scores than nli-small but the
+# final-decision quality is equivalent once the alt TARGET hypothesis
+# is in place. Bind via the consuming package's ``## Classifiers``
+# block when sharper raw scores are needed (e.g. the Tier 3 cascade
+# oracle slot described in study/ensemble/).
 [classifiers.zeroshot-large]
 backend = "zeroshot_v2"
 model = "MoritzLaurer/deberta-v3-large-zeroshot-v2.0"

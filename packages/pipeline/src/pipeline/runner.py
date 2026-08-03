@@ -95,13 +95,11 @@ class StepContext:
     prompt: PipelinePrompt = field(default_factory=_empty_prompt)
     agents: dict[str, AgentBackend] = field(default_factory=dict)
     # Resolved classifier backends, populated by the orchestrator via
-    # :func:`pipeline.services.resolve_classifiers`. A tuple, not a
-    # slot dict: the framework does not know or care about slot names,
-    # it only hands back every distinct backend the caller's binding
-    # named. Consuming packages that need an ensemble (e.g. NLI +
-    # fine-tuned seqcls) pass the whole tuple into a scorer that
-    # accepts a sequence.
-    classifiers: tuple[ClassifierBackend, ...] = field(default_factory=tuple)
+    # :func:`pipeline.services.resolve_classifiers`. Keyed by the
+    # caller's slot names (e.g. ``selector``, ``routing_tagger``).
+    # Two slots bound to the same inventory entry share one instance.
+    # Consumers wanting an ensemble use ``set(ctx.classifiers.values())``.
+    classifiers: dict[str, ClassifierBackend] = field(default_factory=dict)
     researcher: Any = None
     backend: Any = None
     debug: bool = False

@@ -5,7 +5,7 @@
 # file LICENSE_1_0.txt or copy at http://www.boost.org/LICENSE_1_0.txt)
 #
 
-"""Tests for removed ``--service`` / ``--classifier`` CLI flags and assay ``--provider``."""
+"""Tests for removed ``--service`` / ``--classifier`` / ``--provider`` CLI flags."""
 
 from __future__ import annotations
 
@@ -42,10 +42,12 @@ def test_classifier_flag_rejected_by_cli():
     assert "--classifier" in combined or "unrecognized" in combined
 
 
-def test_assay_help_lists_provider_flag():
+def test_provider_flag_rejected_by_cli():
+    """``paperflow assay --provider ...`` is no longer a recognized flag."""
     result = subprocess.run(
-        [sys.executable, "-m", "cli", "assay", "--help"],
+        [sys.executable, "-m", "cli", "assay", "P0000R0", "--provider", "cpu-fp32"],
         capture_output=True, text=True,
     )
-    assert result.returncode == 0
-    assert "--provider" in result.stdout
+    assert result.returncode != 0
+    combined = (result.stdout + result.stderr).lower()
+    assert "--provider" in combined or "unrecognized" in combined

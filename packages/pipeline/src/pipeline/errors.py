@@ -50,6 +50,10 @@ class HookMismatchError(PromptFileError):
     """
 
 
+class DuplicateBulletKeyError(PromptFileError):
+    """A Services/Config/Classifiers block repeats the same bullet key."""
+
+
 class ServiceConfigError(PipelineError):
     """Raised when SERVICES.toml service or slot resolution fails.
 
