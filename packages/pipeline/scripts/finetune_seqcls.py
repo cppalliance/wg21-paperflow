@@ -37,6 +37,7 @@ import argparse
 import inspect
 import json
 import logging
+import math
 from pathlib import Path
 
 _log = logging.getLogger(__name__)
@@ -176,6 +177,22 @@ def _assert_finite_parameters(model: object) -> None:
         raise RuntimeError(
             f"training produced non-finite weights in {len(bad)} parameter "
             f"tensor(s) (e.g. {sample}{suffix}); refusing to save checkpoint",
+        )
+
+
+def _abort_if_training_logs_non_finite(logs: dict[str, object] | None) -> None:
+    """Raise when Trainer logs contain a non-finite loss or grad norm (NaN/Inf)."""
+    if not logs:
+        return
+    grad_norm = logs.get("grad_norm")
+    if grad_norm is not None and not math.isfinite(float(grad_norm)):  # type: ignore[arg-type]
+        raise RuntimeError(
+            "training diverged: grad_norm is non-finite; aborting",
+        )
+    loss = logs.get("loss")
+    if loss is not None and not math.isfinite(float(loss)):  # type: ignore[arg-type]
+        raise RuntimeError(
+            "training diverged: loss is non-finite; aborting",
         )
 
 
@@ -330,18 +347,7 @@ def finetune_multilabel_seqcls(
 
         def on_log(self, args, state, control, logs=None, **kwargs):  # type: ignore[no-untyped-def]
             del args, state, kwargs
-            if not logs:
-                return
-            grad_norm = logs.get("grad_norm")
-            if grad_norm is not None and grad_norm != grad_norm:
-                raise RuntimeError(
-                    "training diverged: grad_norm is NaN; aborting",
-                )
-            loss = logs.get("loss")
-            if loss is not None and loss != loss:
-                raise RuntimeError(
-                    "training diverged: loss is NaN; aborting",
-                )
+            _abort_if_training_logs_non_finite(logs)
 
     trainer = Trainer(
         model=model,
