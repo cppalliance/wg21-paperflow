@@ -1,7 +1,8 @@
 #
-# Copyright (c) 2026 Vinnie Falco (vinnie.falco@gmail.com)
+# Copyright (c) 2026 Leo Chen (leo.chen0412@outlook.com)
 #
-# Distributed under the Boost Software License, Version 1.0.
+# Distributed under the Boost Software License, Version 1.0. (See accompanying
+# file LICENSE_1_0.txt or copy at http://www.boost.org/LICENSE_1_0.txt)
 #
 
 """Tests for assay.md prompt authority and pipeline prompt-string guards."""
