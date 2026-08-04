@@ -41,6 +41,7 @@ from assay.models import (
     FindingOutput,
     KilledFinding,
     PipelineState,
+    QuoteGroundingReport,
     StrengthOutput,
     SynthesisOutput,
 )
@@ -62,6 +63,19 @@ def _linkify_stable_labels(text: str) -> str:
 
 
 SEVERITY_ORDER = {"critical": 0, "significant": 1, "minor": 2}
+
+
+def _unique_gaps(gaps_by_lens: dict[str, list[GapOutput]] | None) -> list[GapOutput]:
+    """One entry per gap.id across all lens buckets."""
+    by_id: dict[int, GapOutput] = {}
+    for lens_list in (gaps_by_lens or {}).values():
+        for g in lens_list:
+            prev = by_id.get(g.id)
+            if prev is None:
+                by_id[g.id] = g
+            elif SEVERITY_ORDER.get(g.severity, 3) < SEVERITY_ORDER.get(prev.severity, 3):
+                by_id[g.id] = g
+    return list(by_id.values())
 
 
 # -- Report data model -------------------------------------------------------
@@ -281,9 +295,7 @@ def prepare_report_data(state: PipelineState) -> ReportData:
         for s in (state.strengths or [])
     ]
 
-    all_gaps: list[GapOutput] = []
-    for lens_list in (state.gaps_by_lens or {}).values():
-        all_gaps.extend(lens_list)
+    all_gaps = _unique_gaps(state.gaps_by_lens)
     gap_sev = Counter(b.severity for b in all_gaps)
 
     killed_list = state.killed or []
@@ -480,10 +492,12 @@ def load_assay_state(pid: str, backend) -> PipelineState:
     for b in gap_rows:
         lens = b.primary_lens or "Other"
         g = GapOutput(
+            id=b.uid,
             chunk_index=b.chunk_index, item_quote="", line=b.loc_line,
             gap=b.gap, why_important=b.why_important,
             primary_lens=b.primary_lens, secondary_lens=b.secondary_lens or None,
             severity=b.severity,
+            closed_by=list(b.closed_by or []),
         )
         gaps_by_lens.setdefault(lens, []).append(g)
 
@@ -622,6 +636,21 @@ def render_trace(state: PipelineState, step: int, *, step_durations: list[float]
             return f'"{text[:_QUOTE_LEN]}..."'
         return f'"{text}"'
 
+    def _append_quote_grounding(report: QuoteGroundingReport | None) -> None:
+        if report is None:
+            return
+        lines.append(f"### Quote grounding ({report.ungrounded} ungrounded / {report.checked} checked)")
+        lines.append("")
+        if report.line_mismatches:
+            lines.append(f"- line mismatches: {report.line_mismatches}")
+            lines.append("")
+        if report.ungrounded:
+            for failure in report.failures:
+                ref = f"[{failure.ref_id}] " if failure.ref_id is not None else ""
+                kind = f"{failure.kind} " if failure.kind else ""
+                lines.append(f"- {kind}{ref}line {failure.line}: {_q(failure.quote)}")
+            lines.append("")
+
     lines: list[str] = []
 
     for i in range(min(step + 1, len(_TRACE_STEPS))):
@@ -751,6 +780,7 @@ def render_trace(state: PipelineState, step: int, *, step_durations: list[float]
                 if state.inactive_lenses:
                     lines.append(f"inactive lenses: {', '.join(state.inactive_lenses)}")
                 lines.append("")
+                _append_quote_grounding(state.quote_grounding_collect)
 
         elif i == 8:
             if state.derive is not None:
@@ -767,14 +797,12 @@ def render_trace(state: PipelineState, step: int, *, step_durations: list[float]
                         lines.append(f"- [{lb.id}] {_q(lb.quote)}")
                     lines.append("")
             if state.gaps_by_lens is not None:
-                all_bcs_derive: list[GapOutput] = []
-                for lens_list in state.gaps_by_lens.values():
-                    all_bcs_derive.extend(lens_list)
+                all_bcs_derive = _unique_gaps(state.gaps_by_lens)
                 if all_bcs_derive:
                     bc_sev = Counter(b.severity for b in all_bcs_derive)
                     lines.append(f"### Gaps ({len(all_bcs_derive)}: {bc_sev.get('critical', 0)} critical, {bc_sev.get('significant', 0)} significant, {bc_sev.get('minor', 0)} minor)")
                     lines.append("")
-                    for b in sorted(all_bcs_derive, key=lambda x: {"critical": 0, "significant": 1, "minor": 2}.get(x.severity, 3)):
+                    for b in sorted(all_bcs_derive, key=lambda x: SEVERITY_ORDER.get(x.severity, 3)):
                         lines.append(f"- [{b.id}] [{b.severity}] {b.gap} (line {b.line})")
                     lines.append("")
 
@@ -867,6 +895,7 @@ def render_trace(state: PipelineState, step: int, *, step_durations: list[float]
                     for k in killed:
                         lines.append(f"- [{k.finding_id}] [{k.challenge}] {k.finding_title} - {k.reasoning[:80]}")
                     lines.append("")
+                _append_quote_grounding(state.quote_grounding_challenge)
 
         elif i == 15:
             if state.compounds is not None:

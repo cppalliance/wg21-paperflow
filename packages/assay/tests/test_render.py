@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -28,7 +29,7 @@ from assay.models import (
     SynthesisOutput,
 )
 from assay.references import RefEntry, UrlEntry
-from assay.render import load_assay_state, prepare_report_data, render_report
+from assay.render import load_assay_state, prepare_report_data, render_report, render_trace
 
 
 @pytest.fixture
@@ -47,11 +48,13 @@ def _make_state() -> PipelineState:
         ),
         gaps_by_lens={
             "Design": [GapOutput(
+                id=1,
                 chunk_index=0, item_quote="iq1", line=10,
                 gap="gap1", why_important="matters", primary_lens="Design",
                 severity="critical",
             )],
             "Performance": [GapOutput(
+                id=2,
                 chunk_index=1, item_quote="iq2", line=20,
                 gap="gap2", why_important="matters", primary_lens="Performance",
                 severity="minor",
@@ -152,6 +155,88 @@ def test_prepare_report_data_inventory():
     assert "resolution" in data.inventory.killed_breakdown
 
 
+def test_prepare_report_data_dedupes_dual_lens_gaps():
+    shared = GapOutput(
+        id=1,
+        chunk_index=0,
+        item_quote="q",
+        line=10,
+        gap="API shape unclear",
+        why_important="matters",
+        primary_lens="Performance",
+        secondary_lens="Design",
+        severity="significant",
+    )
+    state = PipelineState(
+        paper_id="P9999R0",
+        paper_title="Test",
+        gaps_by_lens={
+            "Performance": [shared],
+            "Design": [shared.model_copy()],
+        },
+    )
+    data = prepare_report_data(state)
+    assert data.inventory.gap_total == 1
+    assert data.inventory.gap_significant == 1
+    assert data.inventory.gap_critical == 0
+    assert data.inventory.gap_minor == 0
+
+
+def test_prepare_report_data_dedupes_dual_lens_gaps_keeps_highest_severity():
+    base = dict(
+        id=1,
+        chunk_index=0,
+        item_quote="q",
+        line=10,
+        gap="API shape unclear",
+        why_important="matters",
+        primary_lens="Performance",
+        secondary_lens="Design",
+    )
+    state = PipelineState(
+        paper_id="P9999R0",
+        paper_title="Test",
+        gaps_by_lens={
+            "Performance": [GapOutput(**base, severity="critical")],
+            "Design": [GapOutput(**base, severity="significant")],
+        },
+    )
+    data = prepare_report_data(state)
+    assert data.inventory.gap_total == 1
+    assert data.inventory.gap_critical == 1
+    assert data.inventory.gap_significant == 0
+
+
+def test_render_trace_dedupes_dual_lens_gaps():
+    shared = GapOutput(
+        id=1,
+        chunk_index=0,
+        item_quote="q",
+        line=10,
+        gap="API shape unclear",
+        why_important="matters",
+        primary_lens="Performance",
+        secondary_lens="Design",
+        severity="significant",
+    )
+    state = PipelineState(
+        paper_id="P9999R0",
+        paper_title="Test",
+        derive=DeriveOutput(
+            central_claim="thesis",
+            problem_statement="problem",
+            scope_boundary="scope",
+        ),
+        gaps_by_lens={
+            "Performance": [shared],
+            "Design": [shared.model_copy()],
+        },
+    )
+    trace = render_trace(state, step=8)
+    assert "### Gaps (1:" in trace
+    assert trace.count("- [1]") == 1
+
+
 def test_prepare_report_data_checklist():
     state = _make_state()
     data = prepare_report_data(state)
@@ -211,6 +296,34 @@ def test_render_report_no_template_raises():
     import pytest
     with pytest.raises(RuntimeError, match="No Jinja template"):
         render_report(state, "No code blocks here")
+
+
+def test_load_assay_state_restores_gap_uids_for_rerender_inventory(store: SqliteBackend):
+    """Persisted gap UIDs must round-trip so _unique_gaps does not collapse rerender counts."""
+    store.upsert_year("2026", [{"paper_id": "P1R0", "title": "Test Paper"}])
+    store.store_assay_gaps("P1R0", [
+        SimpleNamespace(
+            uid=10, chunk_index=0, loc_line=5, gap="gap one",
+            why_important="matters", primary_lens="Design", secondary_lens="",
+            severity="minor", closed_by=[],
+        ),
+        SimpleNamespace(
+            uid=20, chunk_index=1, loc_line=15, gap="gap two",
+            why_important="matters", primary_lens="Performance", secondary_lens="",
+            severity="significant", closed_by=[],
+        ),
+        SimpleNamespace(
+            uid=30, chunk_index=2, loc_line=25, gap="gap three",
+            why_important="matters", primary_lens="Specification", secondary_lens="",
+            severity="critical", closed_by=[],
+        ),
+    ])
+    state = load_assay_state("P1R0", store)
+    data = prepare_report_data(state)
+    assert data.inventory.gap_total == 3
+    assert data.inventory.gap_critical == 1
+    assert data.inventory.gap_significant == 1
+    assert data.inventory.gap_minor == 1
 
 
 def test_skipped_rerender_preserves_stats_and_reason(store: SqliteBackend):
