@@ -15,6 +15,14 @@
     "table": 1.0,
     "text": 0.53
   },
+  "p1122r3": {
+    "code": 0.58,
+    "frontmatter": 0.75,
+    "heading": 0.86,
+    "list": 0.3,
+    "table": 0.0,
+    "text": 0.84
+  },
   "p2040r0": {
     "code": 0.44,
     "frontmatter": 1.0,
