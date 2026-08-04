@@ -41,6 +41,7 @@ from assay.models import (
     FindingOutput,
     KilledFinding,
     PipelineState,
+    QuoteGroundingReport,
     StrengthOutput,
     SynthesisOutput,
 )
@@ -635,6 +636,21 @@ def render_trace(state: PipelineState, step: int, *, step_durations: list[float]
             return f'"{text[:_QUOTE_LEN]}..."'
         return f'"{text}"'
 
+    def _append_quote_grounding(report: QuoteGroundingReport | None) -> None:
+        if report is None:
+            return
+        lines.append(f"### Quote grounding ({report.ungrounded} ungrounded / {report.checked} checked)")
+        lines.append("")
+        if report.line_mismatches:
+            lines.append(f"- line mismatches: {report.line_mismatches}")
+            lines.append("")
+        if report.ungrounded:
+            for failure in report.failures:
+                ref = f"[{failure.ref_id}] " if failure.ref_id is not None else ""
+                kind = f"{failure.kind} " if failure.kind else ""
+                lines.append(f"- {kind}{ref}line {failure.line}: {_q(failure.quote)}")
+            lines.append("")
+
     lines: list[str] = []
 
     for i in range(min(step + 1, len(_TRACE_STEPS))):
@@ -764,6 +780,7 @@ def render_trace(state: PipelineState, step: int, *, step_durations: list[float]
                 if state.inactive_lenses:
                     lines.append(f"inactive lenses: {', '.join(state.inactive_lenses)}")
                 lines.append("")
+                _append_quote_grounding(state.quote_grounding_collect)
 
         elif i == 8:
             if state.derive is not None:
@@ -878,6 +895,7 @@ def render_trace(state: PipelineState, step: int, *, step_durations: list[float]
                     for k in killed:
                         lines.append(f"- [{k.finding_id}] [{k.challenge}] {k.finding_title} - {k.reasoning[:80]}")
                     lines.append("")
+                _append_quote_grounding(state.quote_grounding_challenge)
 
         elif i == 15:
             if state.compounds is not None:
