@@ -20,6 +20,7 @@ import sys
 from pathlib import Path
 
 from paperstore.testing import store  # noqa: F401  (pytest fixture)
+from tomd.lib.check_content import _JSON_SCHEMA_VERSION
 
 
 _BODY = (
@@ -54,7 +55,9 @@ def test_check_content_writes_json(store, tmp_path: Path):
     assert result.returncode == 0, (result.stdout, result.stderr)
     assert json_path.exists()
     payload = json.loads(json_path.read_text())
-    assert payload["schema_version"] == 2
+    # Track the library constant rather than a literal, so a schema bump
+    # does not need an edit here to stay honest.
+    assert payload["schema_version"] == _JSON_SCHEMA_VERSION
     assert "constants" in payload
     assert payload["constants"]["shingle_width"] == 5
     assert len(payload["papers"]) == 1

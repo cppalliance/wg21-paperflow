@@ -95,6 +95,16 @@ _COVERAGE_NEEDS_REVIEW: float | None = None
 # detection, looser than tomd's vertical-band rule.
 _REPEAT_RATIO = 0.5
 
+# A repeated line is chrome (running header/footer/document number) only when
+# it also occurs at most this many times on every page it appears on: such
+# chrome shows up roughly once per page (a running title top, a doc number
+# bottom). A content token extracted as its own line and repeated many times
+# per page (e.g. a green ``constexpr`` insertion prefixing every declaration
+# in a <cmath>/<cstdlib> synopsis, which PyMuPDF emits as a standalone line)
+# far exceeds this and must be kept, or a source-faithful ideal is wrongly
+# scored as drift.
+_MAX_CHROME_LINE_REPEATS_PER_PAGE = 2
+
 # Sample text length surfaced for each MisalignedRegion in stdout / JSON.
 _REGION_SAMPLE_CHARS = 60
 
@@ -110,7 +120,9 @@ _WORKER_POLL_INTERVAL = 0.5
 # constants block, or top-level keys change.
 # v2: added per-paper unigram_coverage / unigram_drift. Schema-1 files stay
 # readable (_result_from_dict defaults the absent fields to 0.0).
-_JSON_SCHEMA_VERSION = 2
+# v3: added the max_chrome_line_repeats_per_page constant to the constants
+# block. Per-paper fields are unchanged, so schema-1/2 files stay readable.
+_JSON_SCHEMA_VERSION = 3
 
 
 # -- Data ---------------------------------------------------------------------
@@ -273,24 +285,36 @@ def _strip_repeating_lines(pages: list[str]) -> list[str]:
     vertical-band rule but works on the flat ``get_text()`` output and
     catches the dominant repeat artefacts (running titles, running
     document numbers, "Page N of M").
+
+    A line counts as chrome only when it also appears at most
+    ``_MAX_CHROME_LINE_REPEATS_PER_PAGE`` times on every page it occurs on.
+    Chrome repeats roughly once per page; a content token repeated many
+    times per page (e.g. a ``constexpr`` qualifier extracted as its own
+    line before each declaration in a library synopsis) is body content,
+    not chrome, and is kept so a faithful ideal is not scored as drift.
     """
     if not pages:
         return pages
-    counts: dict[str, int] = {}
+    page_counts: dict[str, int] = {}   # pages the line occurs on
+    max_per_page: dict[str, int] = {}  # most occurrences on any one page
     for page in pages:
-        seen_on_page: set[str] = set()
+        per_page: dict[str, int] = {}
         for raw in page.splitlines():
             stripped = raw.strip()
             if not stripped:
                 continue
-            if stripped in seen_on_page:
-                continue
-            seen_on_page.add(stripped)
-            counts[stripped] = counts.get(stripped, 0) + 1
+            per_page[stripped] = per_page.get(stripped, 0) + 1
+        for line, n in per_page.items():
+            page_counts[line] = page_counts.get(line, 0) + 1
+            if n > max_per_page.get(line, 0):
+                max_per_page[line] = n
 
     page_count = len(pages)
     threshold = max(2, int(page_count * _REPEAT_RATIO))
-    repeats = {line for line, n in counts.items() if n >= threshold}
+    repeats = {
+        line for line, n in page_counts.items()
+        if n >= threshold and max_per_page[line] <= _MAX_CHROME_LINE_REPEATS_PER_PAGE
+    }
     if not repeats:
         return pages
 
@@ -986,6 +1010,7 @@ def write_content_check_json_atomic(
             "coverage_buckets": list(_COVERAGE_BUCKETS),
             "coverage_needs_review": _COVERAGE_NEEDS_REVIEW,
             "repeat_ratio": _REPEAT_RATIO,
+            "max_chrome_line_repeats_per_page": _MAX_CHROME_LINE_REPEATS_PER_PAGE,
         },
         "papers": [_result_to_dict(r) for r in results],
     }
