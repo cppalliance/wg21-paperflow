@@ -532,8 +532,10 @@ def load_assay_state(pid: str, backend) -> PipelineState:
                 challenge=f.challenge, reasoning=f.reasoning,
             ))
 
-    asks = [AskOutput(target=a.target, quote=a.quote, type=a.type, line=0)
-            for a in ask_rows]
+    asks = [
+        AskOutput(target=a.target, quote=a.quote, type=a.type, line=a.line)
+        for a in ask_rows
+    ]
 
     from assay.references import RefEntry, UrlEntry
     ref_pids = [

@@ -289,6 +289,7 @@ CREATE TABLE IF NOT EXISTS assay_asks (
     target   TEXT NOT NULL,
     quote    TEXT NOT NULL,
     type     TEXT NOT NULL,
+    line     INTEGER DEFAULT 0,
     PRIMARY KEY (paper_id, uid)
 );
 CREATE TABLE IF NOT EXISTS assay_pids (
@@ -501,6 +502,14 @@ def _migrate(conn: sqlite3.Connection) -> None:
     }:
         conn.execute(
             "ALTER TABLE papers ADD COLUMN citations_extracted_at TEXT DEFAULT ''"
+        )
+
+    ask_cols = {r[1] for r in conn.execute(
+        "PRAGMA table_info(assay_asks)"
+    ).fetchall()}
+    if ask_cols and "line" not in ask_cols:
+        conn.execute(
+            "ALTER TABLE assay_asks ADD COLUMN line INTEGER DEFAULT 0"
         )
 
     conn.executescript(_SCHEMA)
@@ -1684,14 +1693,14 @@ class SqliteBackend(StorageBackend):
         with self._conn:
             self._conn.execute("DELETE FROM assay_asks WHERE paper_id = ?", (paper_id,))
             self._conn.executemany(
-                "INSERT INTO assay_asks (paper_id, uid, target, quote, type) VALUES (?, ?, ?, ?, ?)",
-                [(paper_id, i, a.get("target", ""), a.get("quote", ""), a.get("type", "")) for i, a in enumerate(asks, 1)],
+                "INSERT INTO assay_asks (paper_id, uid, target, quote, type, line) VALUES (?, ?, ?, ?, ?, ?)",
+                [(paper_id, i, a.get("target", ""), a.get("quote", ""), a.get("type", ""), a.get("line", 0)) for i, a in enumerate(asks, 1)],
             )
 
     def get_assay_asks(self, paper_id: str) -> list:
         from paperstore.extract_rows import AssayAskRow
         rows = self._conn.execute(
-            "SELECT paper_id, uid, target, quote, type FROM assay_asks WHERE paper_id = ?",
+            "SELECT paper_id, uid, target, quote, type, line FROM assay_asks WHERE paper_id = ?",
             (paper_id,),
         ).fetchall()
         return [AssayAskRow(*r) for r in rows]

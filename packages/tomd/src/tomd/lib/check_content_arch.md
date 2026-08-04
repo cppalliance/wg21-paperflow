@@ -126,13 +126,28 @@ per-window, not per-paper.
 **T3. Page-line repeat scrubber**
 - `_strip_repeating_lines`
 - Header / footer / page-number mitigation without positional data.
-  Splits each page into lines, counts unique line-text occurrences
-  across the document, drops any line text appearing on at least
-  `_REPEAT_RATIO` (default 0.5) of pages.
+  Splits each page into lines and, for each distinct line text, records
+  both how many pages it occurs on and the most occurrences it reaches
+  on any single page. A line is chrome only when **both** conditions
+  hold: it appears on at least `_REPEAT_RATIO` (default 0.5) of pages,
+  **and** it occurs at most `_MAX_CHROME_LINE_REPEATS_PER_PAGE`
+  (default 2) times on every page it appears on.
+- The per-page cap is what separates chrome from repeated content.
+  Chrome recurs roughly once per page (a running title at the top, a
+  document number at the bottom). A content token that the flat
+  extraction emits as its own line can recur far more often per page:
+  a `constexpr` qualifier prefixing every declaration in a
+  `<cmath>`/`<cstdlib>` synopsis hits 20+ occurrences on a single
+  page. Without the cap that token is scrubbed from the source stream,
+  and a source-faithful ideal that carries it is wrongly scored as
+  drift.
 - Crudely position-free: works on the flat `get_text()` output
   without escalating to `get_text("dict")`. Cruder than tomd's
   vertical-band rule, but catches running titles, running document
   numbers, and "Page N of M" patterns.
+- Known residual: content repeating only once or twice per page hits
+  the same failure mode the cap does not cover. See the note under
+  "Edge cases".
 
 ### Layer 2: Markdown extraction (2 techniques)
 
@@ -237,11 +252,12 @@ edit.
 | `_MIN_REGION_TOKENS` | 8 | Smallest gap surfaced as a `MisalignedRegion`. Below this, the noise floor exceeds the signal. |
 | `_COVERAGE_BUCKETS` | (0.95, 0.85, 0.70) | Histogram bucket edges for the stdout summary. |
 | `_COVERAGE_NEEDS_REVIEW` | `None` | Review-gate threshold. `None` today (distribution-only output); a calibration pass will commit a value per source format from real data. |
-| `_REPEAT_RATIO` | 0.5 | Page-line repeat threshold for header/footer scrubbing. |
+| `_REPEAT_RATIO` | 0.5 | Page-line repeat threshold for header/footer scrubbing: the fraction of pages a line must appear on to be a chrome candidate. |
+| `_MAX_CHROME_LINE_REPEATS_PER_PAGE` | 2 | Second chrome condition: a candidate must occur at most this many times on every page it appears on. Above it, the line is repeated body content, not chrome. |
 | `_REGION_SAMPLE_CHARS` | 60 | Character cap on the surfaced sample text. |
 | `_WORST_FILES_DISPLAY_LIMIT` | 30 | Cap for the stdout "worst N" list. |
 | `_CHECK_BATCH_TIMEOUT_SEC` | 120 | Per-paper straggler timeout in batch mode. |
-| `_JSON_SCHEMA_VERSION` | 1 | Bumped when the JSON shape changes incompatibly. |
+| `_JSON_SCHEMA_VERSION` | 3 | Bumped when the per-paper fields, the constants block, or the top-level keys change. |
 
 The JSON output echoes the constants block so calibration analyses
 remain reproducible across runs.
@@ -251,6 +267,17 @@ remain reproducible across runs.
 - **Headers, footers, page numbers** — tomd strips them; flat
   extraction keeps them. *Mitigation:* T3 (page-line repeat
   scrubbing).
+- **Body content the scrubber mistakes for chrome** — a content line
+  that recurs on most pages is a chrome candidate.
+  `_MAX_CHROME_LINE_REPEATS_PER_PAGE` rescues the many-per-page case
+  (a keyword prefixing every declaration in a synopsis), but content
+  that recurs only once or twice per page is still scrubbed: repeated
+  table headers such as `Field` or `Value`, or a section label
+  repeated per page, are removed from the source stream. *Effect:*
+  coverage and drift are both computed against a source that is
+  missing those tokens, so a faithful ideal can be penalised. Not
+  mitigated today; positional data (`get_text("dict")`) or a
+  body-vs-margin y-band test is the real fix.
 - **Table of contents** — tomd strips them; flat extraction keeps
   them. *Acceptable false-OK:* the TOC duplicates headings that
   appear later, so a token-bag alignment treats it as matched

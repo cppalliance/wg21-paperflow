@@ -737,6 +737,17 @@ def _count(store: SqliteBackend, table: str, pid: str) -> int:
     ).fetchone()[0]
 
 
+def test_store_assay_asks_round_trip_line(store: SqliteBackend):
+    store.store_assay_asks("P1", [
+        {"target": "LEWG", "quote": "adopt this", "type": "adopt", "line": 99},
+        {"target": "committee", "quote": "review", "type": "review"},
+    ])
+    rows = store.get_assay_asks("P1")
+    assert len(rows) == 2
+    assert rows[0].line == 99
+    assert rows[1].line == 0
+
+
 def test_store_assay_synthesis_skip_metadata_roundtrip(store: SqliteBackend):
     """skip_reason and paper_stats survive store/get for --rerender."""
     store.upsert_year("2026", [{"paper_id": "P1"}])

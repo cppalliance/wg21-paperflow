@@ -194,6 +194,51 @@ class TestStripRepeatingLines:
     def test_short_doc_no_op(self):
         assert _strip_repeating_lines([]) == []
 
+    def test_keeps_content_token_repeated_many_times_per_page(self):
+        # A code keyword extracted as its own line (e.g. a green ``constexpr``
+        # insertion prefixing every declaration in a <cmath> synopsis) repeats
+        # on most pages, but many times per page: it is content, not chrome,
+        # and must be kept so a source-faithful ideal is not scored as drift.
+        pages = [
+            "constexpr\nfloat acos(float x);\nconstexpr\nfloat asin(float x);"
+            "\nconstexpr\nfloat cos(float x);",
+            "constexpr\nfloat exp(float x);\nconstexpr\nfloat log(float x);"
+            "\nconstexpr\nfloat sin(float x);",
+            "constexpr\nfloat tan(float x);\nconstexpr\nfloat sqrt(float x);"
+            "\nconstexpr\nfloat cbrt(float x);",
+        ]
+        # Nothing in this fixture is chrome, so the scrubber is a no-op.
+        # Exact equality, not a substring probe: the bug this guards against
+        # deleted 180 of 231 occurrences, which any() would have passed.
+        assert _strip_repeating_lines(pages) == pages
+
+    def test_still_drops_once_per_page_header_amid_repeated_content(self):
+        # A once-per-page running header is still chrome even when the page
+        # also has a many-times-per-page content token.
+        pages = [
+            "Running Title\nconstexpr\nint a();\nconstexpr\nint b();\nconstexpr\nint c();",
+            "Running Title\nconstexpr\nint d();\nconstexpr\nint e();\nconstexpr\nint f();",
+            "Running Title\nconstexpr\nint g();\nconstexpr\nint h();\nconstexpr\nint i();",
+        ]
+        cleaned = _strip_repeating_lines(pages)
+        # The header goes and every other line stays, counts included.
+        assert cleaned == [
+            page.replace("Running Title\n", "", 1) for page in pages
+        ]
+        assert all(page.count("constexpr") == 3 for page in cleaned)
+
+    def test_drops_chrome_appearing_twice_per_page(self):
+        # Pins _MAX_CHROME_LINE_REPEATS_PER_PAGE from below: a document number
+        # printed in both the header and the footer band occurs twice per page
+        # and is still chrome. Lowering the constant to 1 fails this test.
+        pages = [
+            "P0533R9\nbody one\nP0533R9",
+            "P0533R9\nbody two\nP0533R9",
+            "P0533R9\nbody three\nP0533R9",
+        ]
+        cleaned = _strip_repeating_lines(pages)
+        assert cleaned == ["body one", "body two", "body three"]
+
 
 class TestMarkdownStream:
     def test_strips_front_matter(self):
