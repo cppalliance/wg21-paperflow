@@ -120,7 +120,9 @@ _WORKER_POLL_INTERVAL = 0.5
 # constants block, or top-level keys change.
 # v2: added per-paper unigram_coverage / unigram_drift. Schema-1 files stay
 # readable (_result_from_dict defaults the absent fields to 0.0).
-_JSON_SCHEMA_VERSION = 2
+# v3: added the max_chrome_line_repeats_per_page constant to the constants
+# block. Per-paper fields are unchanged, so schema-1/2 files stay readable.
+_JSON_SCHEMA_VERSION = 3
 
 
 # -- Data ---------------------------------------------------------------------
@@ -1008,6 +1010,7 @@ def write_content_check_json_atomic(
             "coverage_buckets": list(_COVERAGE_BUCKETS),
             "coverage_needs_review": _COVERAGE_NEEDS_REVIEW,
             "repeat_ratio": _REPEAT_RATIO,
+            "max_chrome_line_repeats_per_page": _MAX_CHROME_LINE_REPEATS_PER_PAGE,
         },
         "papers": [_result_to_dict(r) for r in results],
     }
