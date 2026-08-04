@@ -38,6 +38,7 @@ from assay.harness import (
     collect,
     cross_examine,
     dedupe_findings,
+    ground_quotes,
     synthesize,
     upgrade_gaps,
 )
@@ -63,6 +64,7 @@ from assay.models import (
     FindingOutput,
     PipelineState,
     ProbeResult,
+    QuoteGroundingReport,
     RationaleOutput,
     ResearchLensOutput,
     ScanOutput,
@@ -966,7 +968,10 @@ async def _custom_classify(state: PipelineState, ctx: StepContext, spec) -> None
 
 
 async def _custom_collect(state: PipelineState, ctx: StepContext, spec) -> None:
-    """Step 7: aggregate and dedup (pure Python)."""
+    """Step 7: aggregate and dedup (pure Python).
+
+    Runs deterministic quote-grounding on collected items/asks (warn-only).
+    """
     items, gaps_by_lens, asks, active, inactive, next_id = collect(
         state.raw_extractions or [],
         state.raw_scans or [],
@@ -978,6 +983,90 @@ async def _custom_collect(state: PipelineState, ctx: StepContext, spec) -> None:
     state.asks = asks
     state.active_lenses = active
     state.inactive_lenses = inactive
+    _apply_collect_quote_grounding(state)
+
+
+def _collect_quote_grounding_entries(
+    items: CollectedItems,
+    asks: list,
+) -> list[tuple[str, int, str, int | None]]:
+    """Build quote-grounding entries for collected items (skip companion evidence)."""
+    entries: list[tuple[str, int, str, int | None]] = []
+    for kind, bucket in (
+        ("claim", items.claims),
+        ("evidence", items.evidence),
+        ("concession", items.concessions),
+        ("question", items.questions),
+        ("dependency", items.dependencies),
+        ("scope", items.scope),
+    ):
+        for item in bucket:
+            if isinstance(item, CollectedItem) and item.source_pid:
+                continue
+            ref_id = item.id if isinstance(item, CollectedItem) else None
+            entries.append((item.quote, item.line, kind, ref_id))
+    for ask in asks:
+        entries.append((ask.quote, ask.line, "ask", ask.id))
+    return entries
+
+
+def _challenge_quote_grounding_entries(
+    findings: list[FindingOutput],
+    strengths: list[StrengthOutput],
+) -> list[tuple[str, int, str, int | None]]:
+    entries: list[tuple[str, int, str, int | None]] = []
+    for finding in findings:
+        entries.append((finding.quote, finding.line, "finding", finding.id))
+    for strength in strengths:
+        entries.append((strength.quote, strength.line, "strength", strength.id))
+    return entries
+
+
+_QUOTE_GROUNDING_LOG_SAMPLES_LEN = 200
+
+
+def _log_quote_grounding(report: QuoteGroundingReport, *, step: str) -> None:
+    if report.ungrounded == 0:
+        return
+    samples = ", ".join(
+        f"{f.kind or 'quote'}:{f.ref_id or '?'} {_truncate_quote(f.quote)}"
+        for f in report.failures
+    )[:_QUOTE_GROUNDING_LOG_SAMPLES_LEN]
+    logger.warning(
+        "%s quote grounding: %d ungrounded / %d checked (%s)",
+        step,
+        report.ungrounded,
+        report.checked,
+        samples,
+    )
+
+
+def _truncate_quote(text: str, limit: int = 60) -> str:
+    text = text.replace("\n", " ").strip()
+    if len(text) <= limit:
+        return text
+    return text[: limit - 3] + "..."
+
+
+def _apply_collect_quote_grounding(state: PipelineState) -> None:
+    if not state.paper_md or state.items is None:
+        return
+    entries = _collect_quote_grounding_entries(state.items, state.asks or [])
+    report = ground_quotes(entries, state.paper_md)
+    state.quote_grounding_collect = report
+    _log_quote_grounding(report, step="Collect")
+
+
+def _apply_challenge_quote_grounding(state: PipelineState) -> None:
+    if not state.paper_md:
+        return
+    entries = _challenge_quote_grounding_entries(
+        state.surviving or [],
+        state.strengths or [],
+    )
+    report = ground_quotes(entries, state.paper_md)
+    state.quote_grounding_challenge = report
+    _log_quote_grounding(report, step="Challenge")
 
 
 async def _custom_derive(state: PipelineState, ctx: StepContext, spec) -> None:
@@ -1387,7 +1476,10 @@ async def _custom_rationale(state: PipelineState, ctx: StepContext, spec) -> Non
 
 
 async def _custom_challenge(state: PipelineState, ctx: StepContext, spec) -> None:
-    """Step 14: LLM cross-examination of findings."""
+    """Step 14: LLM cross-examination of findings.
+
+    Runs quote-grounding on surviving findings and strengths (warn-only).
+    """
     agent = ctx.agents[spec.step.model]
     max_output = spec.step.max_output_tokens or agent.max_tokens
     thinking = spec.step.thinking_budget
@@ -1397,6 +1489,7 @@ async def _custom_challenge(state: PipelineState, ctx: StepContext, spec) -> Non
     if not findings:
         state.surviving = []
         state.killed = []
+        _apply_challenge_quote_grounding(state)
         return
 
     by_lens: dict[str, list[FindingOutput]] = {}
@@ -1451,6 +1544,7 @@ async def _custom_challenge(state: PipelineState, ctx: StepContext, spec) -> Non
     surviving, killed = cross_examine(findings, all_verdicts)
     state.surviving = surviving
     state.killed = killed
+    _apply_challenge_quote_grounding(state)
 
 
 async def _custom_couple(state: PipelineState, ctx: StepContext, spec) -> None:
