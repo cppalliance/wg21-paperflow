@@ -212,6 +212,7 @@ class AssayAskRow:
     target: str
     quote: str
     type: str
+    line: int = 0
 
 
 @dataclass(frozen=True)
