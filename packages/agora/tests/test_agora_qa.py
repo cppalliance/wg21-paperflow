@@ -1,3 +1,10 @@
+#
+# Copyright (c) 2026 Glenn Siegman (glenn@cppalliance.org)
+#
+# Distributed under the Boost Software License, Version 1.0. (See accompanying
+# file LICENSE_1_0.txt or copy at http://www.boost.org/LICENSE_1_0.txt)
+#
+
 """Tests for the generation QA report (:mod:`agora.qa`).
 
 The report is advisory — the emit step logs findings and records them

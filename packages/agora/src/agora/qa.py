@@ -1,3 +1,10 @@
+#
+# Copyright (c) 2026 Glenn Siegman (glenn@cppalliance.org)
+#
+# Distributed under the Boost Software License, Version 1.0. (See accompanying
+# file LICENSE_1_0.txt or copy at http://www.boost.org/LICENSE_1_0.txt)
+#
+
 """Generation QA: a lightweight content report over a finished thread.
 
 The emit step runs this after generation and before the artifact
