@@ -1,3 +1,10 @@
+#
+# Copyright (c) 2026 Glenn Siegman (glenn@cppalliance.org)
+#
+# Distributed under the Boost Software License, Version 1.0. (See accompanying
+# file LICENSE_1_0.txt or copy at http://www.boost.org/LICENSE_1_0.txt)
+#
+
 """Step 10 - Reactor: per-persona votes on the generated thread.
 
 The reactor pass decides **who voted how** — never when: reveal
