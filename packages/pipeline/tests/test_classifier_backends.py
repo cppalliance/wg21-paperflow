@@ -241,7 +241,15 @@ class _StubCrossEncoder:
         for _premise, hypothesis in pairs:
             entail, contra = self.scores_by_hypothesis.get(hypothesis, (0.0, 0.0))
             # Index 0 = contradiction, 1 = entailment, 2 = neutral.
-            out.append([contra, entail, 0.0])
+            row = [contra, entail, 0.0]
+            if apply_softmax:
+                import math
+
+                m = max(row)
+                exps = [math.exp(v - m) for v in row]
+                z = sum(exps)
+                row = [v / z for v in exps]
+            out.append(row)
         return out
 
 
@@ -298,15 +306,16 @@ def test_nli_cross_encoder_single_label_softmax(monkeypatch):
     stub = _StubCrossEncoder("fake")
     stub.scores_by_hypothesis = {
         "This text is target": (3.0, -1.0),
-        "This text is skip": (-2.0, 2.0),
+        "This text is skip": (1.0, 0.0),
     }
     _install_stub_st(monkeypatch, stub)
     backend = NliCrossEncoderBackend(model="fake/nli")
     result = backend.classify(["foo"], ["target", "skip"], multi_label=False)
-    # Softmaxed across labels -> sum to 1.0.
+    # Cross-label softmax, not independent per-label sigmoids.
+    assert result[0]["target"] == pytest.approx(0.5624, abs=1e-3)
+    assert result[0]["skip"] == pytest.approx(0.4376, abs=1e-3)
     total = sum(result[0].values())
     assert total == pytest.approx(1.0, abs=1e-6)
-    # Target dominates.
     assert result[0]["target"] > result[0]["skip"]
 
 
@@ -316,8 +325,6 @@ def test_nli_cross_encoder_empty_input(monkeypatch):
     backend = NliCrossEncoderBackend(model="fake/nli")
     assert backend.classify([], ["target", "skip"]) == []
     assert stub.calls == []
-
-
 
 
 def test_multilabel_seqcls_projects_scores(monkeypatch):

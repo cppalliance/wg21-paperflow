@@ -45,6 +45,7 @@
 #    [transformer_provider_defaults] maps slot names to provider names.
 #    Override precedence at runtime: caller ``provider_override`` kwarg
 #    (no CLI wiring yet) > PAPERFLOW_TRANSFORMER_PROVIDER env var >
+#    per-classifier ``provider = "<name>"`` entry pin >
 #    [transformer_provider_defaults] > the hardcoded "auto" fallback
 #    (so a fresh clone with no provider section still works).
 #

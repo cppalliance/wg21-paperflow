@@ -9,8 +9,10 @@
 
 Three categories, each with a different response:
 
-- **User-fixable**: edit the prompt file. ``PromptFileError`` and its
+- **User-fixable**: edit the prompt file. Most :class:`PromptFileError`
   subclasses carry the step name and expected format.
+  :class:`DuplicateBulletKeyError` is also a :class:`PromptFileError`
+  but is not step-scoped.
 - **Transient**: retry. ``TransientStepError`` wraps API timeouts,
   rate limits, and network errors.
 - **Hard runtime**: pipeline bug. ``ValidationStepError`` wraps LLM

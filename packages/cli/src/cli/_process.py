@@ -142,7 +142,7 @@ def run_process_command(
             except pydantic_ai.exceptions.UsageLimitExceeded as exc:
                 print(f"{paper.paper_id}: LLM usage limit ({exc})", file=sys.stderr)
                 failed += 1
-            except Exception as exc:
+            except Exception as exc:  # batch worker firewall: report and continue
                 msg = f"{paper.paper_id}: {type(exc).__name__}: {exc}"
                 cause = exc.__cause__
                 while cause:

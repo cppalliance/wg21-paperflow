@@ -24,9 +24,12 @@ Usage:
 from __future__ import annotations
 
 import json
+import math
 import sys
 import time
 from pathlib import Path
+
+import pysbd
 
 from pipeline.tokens import est_tokens
 
@@ -63,11 +66,7 @@ HYPO_SHORT = [
 ]
 
 
-import pysbd
-
 _SEGMENTER = pysbd.Segmenter(language="en", clean=False)
-
-
 
 
 def _split_sentences(text: str, max_tokens: int) -> list[str]:
@@ -95,9 +94,9 @@ def _split_sentences(text: str, max_tokens: int) -> list[str]:
                 buf = []
                 buf_wc = 0
             words = sent.split()
-            k = (sw + max_tokens - 1) // max_tokens
-            ps = (sw + k - 1) // k
-            for i in range(0, sw, ps):
+            k = max(1, (sw + max_tokens - 1) // max_tokens)
+            ps = max(1, math.ceil(len(words) / k))
+            for i in range(0, len(words), ps):
                 chunks.append(" ".join(words[i : i + ps]))
         else:
             buf.append(sent)

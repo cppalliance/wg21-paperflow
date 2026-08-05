@@ -160,7 +160,7 @@ Two layers separate infrastructure from pipeline intent:
 ```
 SERVICES.toml -> load_services() -> dict[str, ModelBackend]
                                          |
-                 resolve_slots() -> dict[str, ModelBackend]
+                 resolve_pipeline_models() -> dict[str, ModelBackend]
                                          |
                  AgentBackend(slot, max_tokens=..., thinking_budget=...) -> per-pipeline agents
 ```

@@ -19,6 +19,7 @@ cited papers without committing them to the full pipeline.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from pathlib import Path
 from datetime import datetime, timezone
@@ -229,8 +230,10 @@ async def _run_stage(
             whiteout_text=whiteout_text,
         )
     elif stage == STAGES["agora"]:
-        await _stage_agora(pid, backend, debug=debug, trace=trace,
-                           on_progress=on_progress)
+        await _stage_agora(
+            pid, backend, debug=debug, trace=trace,
+            stop_after=stop_after, on_progress=on_progress,
+        )
     elif stage == STAGES["herald"]:
         pass
     else:
@@ -395,9 +398,6 @@ async def _stage_convert(
     valid. When the markdown does change AND ``keep_downstream`` is
     False, the .agora.json files and the extract rows are wiped.
     """
-    import asyncio
-    from pathlib import Path
-
     from tomd.api import convert_paper_full
 
     paper = backend.get_meta(pid)
@@ -506,6 +506,7 @@ async def _stage_convert(
 
 async def _stage_agora(
     pid: str, backend: StorageBackend, *, debug: bool = False, trace: bool = False,
+    stop_after: int | None = None,
     on_progress: object = None,
 ) -> None:
     """Run agora pipeline on the paper.
@@ -518,5 +519,6 @@ async def _stage_agora(
 
     await agora_paper(
         pid, backend, debug=debug, trace=trace,
+        stop_after=stop_after,
         on_progress=on_progress,
     )

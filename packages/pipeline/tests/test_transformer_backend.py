@@ -36,7 +36,7 @@ import pytest
 
 from conftest import SeqClsStubModel, install_seqcls_transformers_stub
 from pipeline import transformer_backend as tb
-from pipeline.errors import TransformerConfigError
+from pipeline.errors import ServiceConfigError, TransformerConfigError
 from pipeline.transformer_backend import (
     CrossEncoderBackend,
     HFZeroShotBackend,
@@ -285,7 +285,7 @@ def test_resolver_unknown_name_raises(tmp_path):
     )
     p = _write_services_toml(tmp_path, "")
     providers, defaults = load_transformer_providers(p)
-    with pytest.raises(KeyError, match="nope"):
+    with pytest.raises(ServiceConfigError, match="nope"):
         resolve_transformer_provider(providers, defaults, override="nope")
 
 

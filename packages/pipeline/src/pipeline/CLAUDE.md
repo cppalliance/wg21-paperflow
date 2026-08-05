@@ -8,7 +8,7 @@ Shared framework for the LLM analytical pipelines (`agora`). It depends only on 
 - `classifier_backends.py` - `ClassifierBackend` ABC and concrete backends (`ZeroShotV2Backend`, `NliCrossEncoderBackend`, `MultiLabelClassifierBackend`), `CLASSIFIER_BACKEND_REGISTRY`. Local text classifiers wrapping HF Transformers / sentence_transformers. Parallel namespace to `model_backends.py`; no interaction.
 - `transformer_backend.py` - `TransformerBackend` family (`HFZeroShotBackend`, `CrossEncoderBackend`, `SeqClassificationBackend`, `EmbeddingBackend`), `TransformerProvider` device/dtype/batch resolution.
 - `agents.py` - `AgentBackend`: wraps a `ModelBackend` with pipeline-level config (`thinking_budget`) and the slot/service identity (`slot_name`, `service_name`, `backend_class_name`) used by capability-mismatch error messages. The call-time `tools_capable` check remains as defense-in-depth for tools passed via `run_task` outside `meta.tools`.
-- `services.py` - `load_services()` and `resolve_pipeline_models()` for LLM `[services.NAME]` slots; `resolve_classifiers(binding)` for local `[classifiers.NAME]` inventory. When `binding` is `None`, `[classifier_defaults]` supplies the framework fallback; an explicit binding (including `{}`) is authoritative and does not merge defaults underneath. Returns `dict[str, ClassifierBackend]` keyed by the caller's slot names; two slots bound to the same entry share one instance. Resolver naming: `resolve_slots` (LLM, global defaults), `resolve_pipeline_models` (LLM, caller binding), `resolve_classifiers` (classifier, caller binding).
+- `services.py` - `load_services()` and `resolve_pipeline_models()` for LLM `[services.NAME]` slots; `resolve_classifiers(binding)` for local `[classifiers.NAME]` inventory. When `binding` is `None`, `[classifier_defaults]` supplies the framework fallback; an explicit binding (including `{}`) is authoritative and does not merge defaults underneath. Returns `dict[str, ClassifierBackend]` keyed by the caller's slot names; two slots bound to the same entry share one instance. Resolver naming: `resolve_pipeline_models` (LLM, caller binding from pipeline markdown), `resolve_classifiers` (classifier, caller binding).
 - `errors.py` - exception hierarchy rooted at `PipelineError`. Includes `CapabilityMismatchError` for pipeline-construction-time slot/capability mismatches.
 - `prompt.py` - `StepHooks`, `StepMeta`, `StepSpec`, `build_pipeline`, `parse_step_meta`. Owns prompt-to-hook conformance only; capability validation lives in `validate.py`. Step-meta field-name convention: single-word fields are TitleCase (`**Model:**`, `**Execution:**`, `**Tools:**`, `**Condition:**`); new multi-word fields are kebab-case (`**max-output:**`). Pre-existing `**System prompt:**` (TitleCase + space) is grandfathered. Lookup is case-insensitive (the parser lowercases keys). `_META_RE` allows `[\w \-]+` so hyphens in field names parse correctly; adding a new punctuation character requires updating that regex.
 - `validate.py` - `validate_capabilities(specs, *, stop_after=None)`. Primary gate for capability mismatches; called by each pipeline's entry function right after `build_pipeline`.
@@ -30,7 +30,7 @@ from pipeline import (
     ClassifierBackend, ZeroShotV2Backend, NliCrossEncoderBackend,
     MultiLabelClassifierBackend, SeqClassificationBackend,
     CLASSIFIER_BACKEND_REGISTRY,
-    load_services, resolve_slots, ServiceRegistry,
+    load_services, resolve_pipeline_models, ServiceRegistry,
     resolve_classifiers,
     PipelineError, StepError, HookMismatchError, MissingMetadataError,
     CapabilityMismatchError,
@@ -109,7 +109,7 @@ Determinism contract: offline-first weight loading, per-instance pipeline single
 - Backends are long-lived. `BraveBackend` holds a persistent connection pool and rate limiter. Create once, share across `WebResearcher` instances for parallel runs.
 - Researcher borrows or owns. Pass a backend to share it. Omit to auto-create one. `_owns_backend` tracks who closes it.
 - Fail loud. Missing `BRAVE_API_KEY` raises `ValueError` at construction time, not at first search call.
-- Fail loud. `resolve_slots` raises `ValueError` when a bound service's declared `api_key_env` env var is missing, empty, or whitespace-only. The check fires at slot-binding time, not at config load, so unbound entries in `SERVICES.toml` stay inert.
+- Fail loud. `resolve_pipeline_models` raises :class:`ServiceConfigError` when a bound service's declared `api_key_env` env var is missing, empty, or whitespace-only. The check fires at slot-binding time, not at config load, so unbound entries in `SERVICES.toml` stay inert.
 - Backend env-var contracts are declared on the class. A `ModelBackend` subclass that reads its env var directly from the environment (rather than receiving it as a kwarg) sets `required_api_key_env: ClassVar[str]`. `load_services` rejects `[services.NAME]` entries whose `api_key_env` does not match this value, so the loader and the SDK cannot drift apart on which variable the user must export.
 - No global state. The researcher is an explicit object. Create it, pass it around, close it.
 - Errors are typed. All pipeline errors inherit `PipelineError`. Downstream packages re-raise domain errors that also inherit `PipelineError`.

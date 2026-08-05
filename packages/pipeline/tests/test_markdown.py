@@ -49,6 +49,13 @@ def test_sections_basic():
     assert result["B"] == "Body B"
 
 
+def test_sections_preamble_key():
+    md = "Intro text\n\n## A\n\nBody A"
+    result = sections(md)
+    assert result["_preamble"] == "Intro text"
+    assert result["A"] == "Body A"
+
+
 def test_sections_fence_preserves_h2():
     md = (
         "## Step\n\n"

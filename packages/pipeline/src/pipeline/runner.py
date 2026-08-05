@@ -166,7 +166,14 @@ class StepContext:
             )
             return result
 
-        results = await asyncio.gather(*[_bounded(c) for c in coros])
+        tasks = [asyncio.create_task(_bounded(c)) for c in coros]
+        try:
+            results = await asyncio.gather(*tasks)
+        except Exception:
+            for task in tasks:
+                if not task.done():
+                    task.cancel()
+            raise
         return sorted(results, key=lambda x: x[0])
 
     def sub_progress(self, chunk: int, n_chunks: int, name: str) -> None:

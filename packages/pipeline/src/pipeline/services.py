@@ -5,17 +5,28 @@
 # file LICENSE_1_0.txt or copy at http://www.boost.org/LICENSE_1_0.txt)
 #
 
-"""Service loader: SERVICES.toml -> :class:`ServiceRegistry`.
+"""Service loader: SERVICES.toml -> backends and resolvers.
 
-``SERVICES.toml`` at the repo root is a pure infrastructure inventory.
-Each ``[services.NAME]`` section declares an endpoint with its
-capabilities. API keys come from environment variables only (the
-``api_key_env`` field names the env var; the key itself is never in
-the file). There are no slot defaults; each pipeline's markdown file
-declares its own logical-name -> service-name map under
-``## Services``.
+``SERVICES.toml`` at the repo root is a pure infrastructure inventory
+with parallel namespaces:
 
-Validation happens in two layers:
+- ``[services.NAME]``: remote LLM endpoints (:class:`ModelBackend`).
+  Each pipeline's markdown ``## Services`` block binds logical names
+  to inventory entries via :func:`resolve_pipeline_models`.
+- ``[classifiers.NAME]``: local text classifiers
+  (:class:`ClassifierBackend`). Callers bind slots via
+  :func:`resolve_classifiers`; ``[classifier_defaults]`` applies only
+  when ``binding`` is ``None``.
+- ``[embedders.NAME]``: embedding models, loaded eagerly by
+  :func:`load_embedders`.
+- ``[transformer_providers.NAME]``: device/dtype/batch settings for
+  transformer inference, resolved by :func:`load_transformer_providers`
+  and :func:`resolve_transformer_provider`.
+
+API keys come from environment variables only (the ``api_key_env``
+field names the env var; the key itself is never in the file).
+
+Validation happens in two layers for LLM services:
 
 - :func:`load_services` does eager config-shape checks: unknown
   ``backend`` keys and ``required_api_key_env`` mismatches both raise
@@ -92,6 +103,21 @@ def _find_services_toml() -> Path | None:
     return None
 
 
+def _load_config(path: Path | None) -> tuple[Path, dict[str, Any]]:
+    """Resolve SERVICES.toml path and parse it."""
+    if path is None:
+        path = _find_services_toml()
+    if path is None or not path.is_file():
+        raise FileNotFoundError(
+            f"{_SERVICES_FILENAME} not found. Create it at the repo root "
+            f"with at least one [services.NAME] section."
+        )
+
+    with open(path, "rb") as f:
+        config = tomllib.load(f)
+    return path, config
+
+
 def load_services(path: Path | None = None) -> ServiceRegistry:
     """Parse SERVICES.toml, build ModelBackend instances, return registry.
 
@@ -122,16 +148,7 @@ def load_services(path: Path | None = None) -> ServiceRegistry:
     Raises :class:`ServiceConfigError` for unknown backend types and for
     ``required_api_key_env`` mismatches.
     """
-    if path is None:
-        path = _find_services_toml()
-    if path is None or not path.is_file():
-        raise FileNotFoundError(
-            f"{_SERVICES_FILENAME} not found. Create it at the repo root "
-            f"with at least one [services.NAME] section."
-        )
-
-    with open(path, "rb") as f:
-        config = tomllib.load(f)
+    _, config = _load_config(path)
 
     services_config = config.get("services", {})
 
@@ -320,16 +337,7 @@ def resolve_classifiers(
     Raises :class:`ServiceConfigError` for unknown backends, unknown
     inventory entries, or unknown per-entry provider names.
     """
-    if path is None:
-        path = _find_services_toml()
-    if path is None or not path.is_file():
-        raise FileNotFoundError(
-            f"{_SERVICES_FILENAME} not found. Create it at the repo root "
-            f"with at least one [services.NAME] section."
-        )
-
-    with open(path, "rb") as f:
-        config = tomllib.load(f)
+    path, config = _load_config(path)
 
     classifiers_config = config.get("classifiers", {})
     # [classifier_defaults] applies only when binding is None (caller
@@ -364,12 +372,6 @@ def resolve_classifiers(
             )
             backend = _instantiate_classifier(entry_name, cfg, provider)
             entry_instances[entry_name] = backend
-            logger.info(
-                "Classifier entry %r model=%s provider=%s",
-                entry_name,
-                backend.model_id,
-                backend.provider.name,
-            )
         out[slot_name] = entry_instances[entry_name]
 
     return out
@@ -382,10 +384,11 @@ def load_embedders(
 ) -> tuple[dict[str, EmbeddingBackend], dict[str, str]]:
     """Parse SERVICES.toml ``[embedders.*]``, build EmbeddingBackend instances.
 
-    Parallel to :func:`resolve_classifiers`. Returns ``(embedders, defaults)``
-    where ``embedders`` maps names to
-    :class:`pipeline.transformer_backend.EmbeddingBackend` instances and
-    ``defaults`` maps slot names to embedder names from
+    Eager whole-inventory load (tuple of embedders + defaults), unlike
+    :func:`resolve_classifiers` which lazily instantiates only bound
+    entries. Returns ``(embedders, defaults)`` where ``embedders`` maps
+    names to :class:`pipeline.transformer_backend.EmbeddingBackend`
+    instances and ``defaults`` maps slot names to embedder names from
     ``[embedder_defaults]``.
 
     Missing ``[embedders.*]`` and ``[embedder_defaults]`` sections are not
@@ -393,16 +396,7 @@ def load_embedders(
     """
     from pipeline.transformer_backend import EmbeddingBackend
 
-    if path is None:
-        path = _find_services_toml()
-    if path is None or not path.is_file():
-        raise FileNotFoundError(
-            f"{_SERVICES_FILENAME} not found. Create it at the repo root "
-            f"with at least one [services.NAME] section."
-        )
-
-    with open(path, "rb") as f:
-        config = tomllib.load(f)
+    _, config = _load_config(path)
 
     embedders_config = config.get("embedders", {})
     defaults = config.get("embedder_defaults", {})
@@ -448,16 +442,7 @@ def load_transformer_providers(
     Raises :class:`pipeline.errors.TransformerConfigError` for malformed
     entries (missing required keys under ``mode = "explicit"``).
     """
-    if path is None:
-        path = _find_services_toml()
-    if path is None or not path.is_file():
-        raise FileNotFoundError(
-            f"{_SERVICES_FILENAME} not found. Create it at the repo root "
-            f"with at least one [services.NAME] section."
-        )
-
-    with open(path, "rb") as f:
-        config = tomllib.load(f)
+    _, config = _load_config(path)
 
     raw_providers = config.get("transformer_providers", {})
     defaults = config.get("transformer_provider_defaults", {})
@@ -493,9 +478,9 @@ def resolve_transformer_provider(
     4. The hardcoded ``"auto"`` entry injected by
        :func:`load_transformer_providers`.
 
-    Raises ``KeyError`` if the resolved name is not in ``providers``.
-    Mirrors the slot-resolution pattern used by :func:`resolve_slots`
-    and :func:`resolve_classifiers`.
+    Raises :class:`ServiceConfigError` if the resolved name is not in
+    ``providers``. Mirrors the slot-resolution pattern used by
+    :func:`resolve_pipeline_models` and :func:`resolve_classifiers`.
     """
     name = (
         override
@@ -504,7 +489,7 @@ def resolve_transformer_provider(
         or "auto"
     )
     if name not in providers:
-        raise KeyError(
+        raise ServiceConfigError(
             f"Transformer provider '{name}' is not defined in "
             f"SERVICES.toml. Available: {sorted(providers)}"
         )
@@ -529,7 +514,7 @@ def resolve_pipeline_models(
       ``registry.services``.
     - Every referenced service's ``api_key_env`` env var is set to a
       non-whitespace value (services that declared no env var are
-      skipped, mirroring :func:`resolve_slots`).
+      skipped).
 
     Raises :class:`ServiceConfigError` on any failure. The error
     message identifies the failing logical name and either the missing

@@ -303,6 +303,9 @@ def parse_pipeline_services(body: str, *, source: str = "") -> dict[str, str]:
     Accepts lines like ``- **default:** anthropic-opus`` and returns
     ``{"default": "anthropic-opus"}``. Keys are lowercased; empty
     values are skipped.
+
+    Raises :class:`DuplicateBulletKeyError` when the same key appears
+    twice with a non-empty value.
     """
     return bullet_map(body, source=source)
 
@@ -312,6 +315,9 @@ def parse_pipeline_config(body: str, *, source: str = "") -> dict[str, str]:
 
     Same ``- **key:** value`` format as Services. Returns
     ``{"concurrency": "2", ...}``. Keys are lowercased.
+
+    Raises :class:`DuplicateBulletKeyError` when the same key appears
+    twice with a non-empty value.
     """
     return bullet_map(body, source=source)
 
