@@ -22,7 +22,8 @@ from unittest.mock import patch
 import pytest
 
 from paperstore import SqliteBackend
-from pipeline import ProcessResult
+
+from cli.postconditions import ProcessResult
 
 
 @pytest.fixture
