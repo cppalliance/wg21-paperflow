@@ -27,25 +27,25 @@
     "code": 0.67,
     "frontmatter": 1.0,
     "heading": 0.39,
-    "list": 0.18,
+    "list": 0.84,
     "table": 1.0,
-    "text": 0.53
+    "text": 0.55
   },
   "p1122r3": {
     "code": 0.58,
     "frontmatter": 0.75,
     "heading": 0.86,
-    "list": 0.3,
+    "list": 0.84,
     "table": 0.0,
     "text": 0.84
   },
   "p2040r0": {
-    "code": 0.44,
+    "code": 0.72,
     "frontmatter": 1.0,
-    "heading": 0.66,
-    "list": 0.0,
+    "heading": 0.86,
+    "list": 1.0,
     "table": 1.0,
-    "text": 0.7
+    "text": 0.78
   },
   "p3411r5": {
     "code": 1.0,
@@ -58,8 +58,8 @@
   "p3556r0": {
     "code": 0.75,
     "frontmatter": 1.0,
-    "heading": 0.59,
-    "list": 0.0,
+    "heading": 0.67,
+    "list": 1.0,
     "table": 1.0,
     "text": 0.64
   },
