@@ -262,7 +262,7 @@ def test_resolve_pipeline_models_skips_unreferenced_services(monkeypatch):
 
 
 def _classifier_toml(tmp_path, extra: str = "") -> Path:
-    body = f"""
+    body = """
 [classifiers.nli-small]
 backend = "nli_cross_encoder"
 model = "cross-encoder/nli-deberta-v3-small"
