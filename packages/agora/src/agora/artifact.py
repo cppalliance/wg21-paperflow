@@ -1,3 +1,10 @@
+#
+# Copyright (c) 2026 Glenn Siegman (glenn@cppalliance.org)
+#
+# Distributed under the Boost Software License, Version 1.0. (See accompanying
+# file LICENSE_1_0.txt or copy at http://www.boost.org/LICENSE_1_0.txt)
+#
+
 """The ``.agora.json`` artifact: serialization and producer validation.
 
 The artifact is the interface between this package (producer) and the
@@ -132,6 +139,11 @@ def _blueprint_view(dump: dict[str, Any]) -> dict[str, Any]:
     This is what the planner produced before any content was written —
     every slot with its brief, the calibration, anchors, tensions, and
     encounter plans. Embedded verbatim for audit and regeneration.
+
+    The blueprint is audit data, not part of the consumer contract:
+    consumers must treat it as opaque. The only pinned guarantee is
+    that generation fields are omitted. Hand-authored test fixtures
+    embed a condensed stub here rather than this full shape.
     """
     blueprint = {
         key: value for key, value in dump.items()

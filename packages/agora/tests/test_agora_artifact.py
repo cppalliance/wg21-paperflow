@@ -1,3 +1,10 @@
+#
+# Copyright (c) 2026 Glenn Siegman (glenn@cppalliance.org)
+#
+# Distributed under the Boost Software License, Version 1.0. (See accompanying
+# file LICENSE_1_0.txt or copy at http://www.boost.org/LICENSE_1_0.txt)
+#
+
 """Tests for .agora.json serialization and producer validation."""
 
 from __future__ import annotations
@@ -11,6 +18,8 @@ import pytest
 
 from agora.artifact import (
     SCHEMA_VERSION,
+    _REPLY_GENERATION_FIELDS,
+    _THREAD_GENERATION_FIELDS,
     ArtifactError,
     thread_to_artifact,
     validate_artifact,
@@ -34,13 +43,21 @@ def _load_fixture(name: str) -> dict:
 
 @pytest.fixture()
 def rich_artifact() -> dict:
-    """The hand-authored rich Case-A fixture (hot, 15 comments)."""
+    """The hand-authored rich Case-A fixture (hot, 15 comments).
+
+    A synthetic double, not producer output: its blueprint is a
+    condensed stub and its anchors use fictional string ids. The
+    producer-shape guarantees live in the serialization tests below.
+    """
     return _load_fixture("P2987R0.agora.json")
 
 
 @pytest.fixture()
 def revision_artifact() -> dict:
-    """The hand-authored compact Case-C revision fixture."""
+    """The hand-authored compact Case-C revision fixture.
+
+    A synthetic double like ``rich_artifact``.
+    """
     return _load_fixture("P2611R3.agora.json")
 
 
@@ -316,6 +333,28 @@ def test_blueprint_carries_plan_but_no_generation_fields():
         assert "content" not in slot
         assert "character_username" not in slot
         assert "votes" not in slot
+
+
+def test_producer_blueprint_omits_every_generation_field():
+    # The only pinned producer-blueprint guarantee: generation fields
+    # are stripped. Everything else is opaque audit data, and fixture
+    # blueprints are condensed stubs that need not match this shape.
+    thread = _generated_thread()
+    blueprint = thread_to_artifact(thread)["blueprint"]
+    dump = thread.model_dump(mode="json")
+    assert not _THREAD_GENERATION_FIELDS & set(blueprint)
+    assert set(blueprint) == set(dump) - _THREAD_GENERATION_FIELDS
+    for slot in blueprint["replies"]:
+        assert not _REPLY_GENERATION_FIELDS & set(slot)
+
+
+def test_producer_anchor_claim_uid_is_int():
+    # Fixture anchors use fictional string ids; the producer path
+    # emits the paperstore integer key. Pin the producer shape.
+    artifact = thread_to_artifact(_generated_thread())
+    anchor = artifact["technical_anchors"][0]
+    assert isinstance(anchor["claim_uid"], int)
+    assert anchor["claim_loc"] is None
 
 
 def test_generated_at_serialized_as_iso(rich_artifact: dict):

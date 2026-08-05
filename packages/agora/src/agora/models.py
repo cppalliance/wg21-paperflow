@@ -11,7 +11,7 @@ One schema, fields filled progressively. The analysis-phase steps in
 this package populate every structural and analytical field of
 ``Thread`` / ``Reply`` / ``EncounterPlan``. Generation-phase fields
 (``content``, ``character_username``, ``score``, furniture flags,
-vote counts) stay ``None`` until a future generation phase fills
+``votes``) stay ``None`` until a future generation phase fills
 them in.
 
 ``SourceLoc`` is imported from ``paperstore`` (the canonical home for

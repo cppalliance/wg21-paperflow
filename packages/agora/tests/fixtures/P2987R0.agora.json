@@ -10,7 +10,7 @@
     "A. Proposer",
     "B. Coauthor"
   ],
-  "audience": "SG1, LEWG",
+  "audience": "LEWG, SG1",
   "subreddit": "r/wg21",
   "committee": "lewg",
   "paper_type": "proposal",
