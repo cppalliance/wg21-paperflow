@@ -15,6 +15,14 @@
     "table": 0.0,
     "text": 0.58
   },
+  "p0957r8": {
+    "code": 0.8,
+    "frontmatter": 1.0,
+    "heading": 0.94,
+    "list": 1.0,
+    "table": 0.25,
+    "text": 0.8
+  },
   "p1068r11": {
     "code": 0.67,
     "frontmatter": 1.0,
