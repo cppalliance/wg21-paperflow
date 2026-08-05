@@ -242,13 +242,6 @@ class _StubCrossEncoder:
             entail, contra = self.scores_by_hypothesis.get(hypothesis, (0.0, 0.0))
             # Index 0 = contradiction, 1 = entailment, 2 = neutral.
             row = [contra, entail, 0.0]
-            if apply_softmax:
-                import math
-
-                m = max(row)
-                exps = [math.exp(v - m) for v in row]
-                z = sum(exps)
-                row = [v / z for v in exps]
             out.append(row)
         return out
 
@@ -311,7 +304,8 @@ def test_nli_cross_encoder_single_label_softmax(monkeypatch):
     _install_stub_st(monkeypatch, stub)
     backend = NliCrossEncoderBackend(model="fake/nli")
     result = backend.classify(["foo"], ["target", "skip"], multi_label=False)
-    # Cross-label softmax, not independent per-label sigmoids.
+    # Per-label binary softmax on (entail, contra), then cross-label softmax
+    # over those scores; asymmetric logits so independent sigmoids would not sum to 1.
     assert result[0]["target"] == pytest.approx(0.5624, abs=1e-3)
     assert result[0]["skip"] == pytest.approx(0.4376, abs=1e-3)
     total = sum(result[0].values())

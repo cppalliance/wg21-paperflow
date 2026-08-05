@@ -6,6 +6,8 @@
 
 """Tests for _build_hooks / assay.md sync."""
 
+import re
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
@@ -26,6 +28,26 @@ from assay.pipeline import (
 )
 from paperstore.testing import store  # noqa: F401
 from pipeline import PipelinePrompt, build_pipeline
+
+_REPO_ROOT = Path(__file__).resolve().parents[3]
+_STUDY_DEFAULT_SERVICE_SCRIPTS = (
+    _REPO_ROOT / "study/red-team/analyze.py",
+    _REPO_ROOT / "study/agora/generate.py",
+    _REPO_ROOT / "study/advocatus/synthesize.py",
+)
+_DEFAULT_SERVICE_RE = re.compile(r'^DEFAULT_SERVICE = "([^"]+)"', re.MULTILINE)
+
+
+def test_study_scripts_default_service_matches_assay_md():
+    prompt = PipelinePrompt.load("assay", "assay.md")
+    assay_default = prompt.services["default"]
+    for path in _STUDY_DEFAULT_SERVICE_SCRIPTS:
+        match = _DEFAULT_SERVICE_RE.search(path.read_text(encoding="utf-8"))
+        assert match is not None, f"missing DEFAULT_SERVICE in {path}"
+        assert match.group(1) == assay_default, (
+            f"{path.name} DEFAULT_SERVICE must match assay.md **default:** "
+            f"({assay_default!r})"
+        )
 
 
 def test_hooks_match_assay_md():

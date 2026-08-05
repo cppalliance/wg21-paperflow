@@ -220,10 +220,8 @@ def _validate_targets(verb: str, targets: list[str]) -> None:
             print(f"paperflow {verb}: {exc}", file=sys.stderr)
             sys.exit(1)
 
-    for process_verb in ("agora", "assay"):
-        if verb != process_verb:
-            continue
-        if process_verb == "agora" and "year" in kinds:
+    if verb in ("agora", "assay"):
+        if verb == "agora" and "year" in kinds:
             print(
                 f"paperflow {verb}: accepts a paper ID or year-month, not bare years.",
                 file=sys.stderr,

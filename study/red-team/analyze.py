@@ -23,7 +23,7 @@ and token estimates) and paper markdown from paperstore. Writes
 
 Usage:
     python study/red-team/analyze.py P2300R10
-    python study/red-team/analyze.py P2300R10 --slot fast
+    python study/red-team/analyze.py P2300R10 --slot NAME
 """
 
 from __future__ import annotations
@@ -43,9 +43,24 @@ DATA_DIR = Path("c:/Users/Vinnie/wg21-data-dir/paperstore")
 CHUNKS_DATA = Path(__file__).parent.parent / "section-chunks" / "data"
 OUT_DIR = Path(__file__).parent / "data"
 
+# Canonical source: packages/assay/src/assay/assay.md ``## Services`` **default:**.
+DEFAULT_SERVICE = "h200x8-deepseek-v4-pro"
+
 MAX_OUTPUT_TOKENS = 16384
 
 SeverityKind = Literal["critical", "significant", "minor"]
+
+
+def _resolve_service(registry, name: str):
+    if name not in registry.services:
+        known = ", ".join(sorted(registry.services))
+        print(
+            f"Unknown service {name!r}. Known entries: {known}",
+            file=sys.stderr,
+        )
+        sys.exit(2)
+    return registry.services[name]
+
 
 SignalType = Literal[
     "claim",
@@ -274,7 +289,7 @@ def _build_reduce_user_message(
 
 
 async def main() -> None:
-    slot_name = "default"
+    slot_name = DEFAULT_SERVICE
 
     args = sys.argv[1:]
     if not args or args[0].startswith("-"):
@@ -307,16 +322,11 @@ async def main() -> None:
         candidates = cand_data.get("candidates", [])
 
     # Resolve service
-    from pipeline.services import load_services, resolve_slots
+    from pipeline.services import load_services
     from pipeline.agents import AgentBackend
 
     registry = load_services()
-    slots = resolve_slots(registry)
-
-    if slot_name in registry.services:
-        backend = registry.services[slot_name]
-    else:
-        svc_name, backend = slots[slot_name]
+    backend = _resolve_service(registry, slot_name)
 
     agent = AgentBackend(backend, max_tokens=MAX_OUTPUT_TOKENS, thinking_budget=4096)
 

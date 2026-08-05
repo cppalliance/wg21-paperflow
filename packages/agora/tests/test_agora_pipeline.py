@@ -30,7 +30,7 @@ from agora.pipeline import (
 @pytest.fixture(autouse=True)
 def _placeholder_api_keys(monkeypatch):
     # Tests in this module invoke ``agora_paper`` to exercise error
-    # paths unrelated to authentication. ``pipeline.resolve_slots``
+    # paths unrelated to authentication. ``pipeline.resolve_pipeline_models``
     # now validates env vars at slot-binding; placeholder values let
     # the validation pass so the test reaches the path it actually
     # cares about. The fail-fast contract itself is covered in

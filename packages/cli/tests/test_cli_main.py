@@ -67,12 +67,21 @@ def test_no_verb_fallback_routes_to_full():
         (["mailing", "P1234R5"], "not paper IDs"),
         (["mailing", "2026-01"], "not paper IDs"),
         (["full", "2026-01"], "not year-month"),
+        (["agora", "P0000R0", "P0001R0"], "accepts exactly one target"),
+        (["assay", "P0000R0", "P0001R0"], "accepts exactly one target"),
+        (["agora", "2026"], "not bare years"),
     ],
 )
 def test_invalid_targets_rejected(argv: list[str], msg: str):
     result = _run(*argv)
     assert result.returncode != 0
     assert msg in result.stderr
+
+
+def test_assay_accepts_bare_year():
+    from cli.__main__ import _validate_targets
+
+    _validate_targets("assay", ["2026"])
 
 
 @pytest.mark.parametrize(

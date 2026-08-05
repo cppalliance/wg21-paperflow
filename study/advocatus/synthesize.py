@@ -31,6 +31,21 @@ RED_TEAM_DATA = Path(__file__).parent.parent / "red-team" / "data"
 CHUNKS_DATA = Path(__file__).parent.parent / "section-chunks" / "data"
 OUT_DIR = Path(__file__).parent / "data"
 
+# Canonical source: packages/assay/src/assay/assay.md ``## Services`` **default:**.
+DEFAULT_SERVICE = "h200x8-deepseek-v4-pro"
+
+
+def _resolve_service(registry, name: str):
+    if name not in registry.services:
+        known = ", ".join(sorted(registry.services))
+        print(
+            f"Unknown service {name!r}. Known entries: {known}",
+            file=sys.stderr,
+        )
+        sys.exit(2)
+    return registry.services[name]
+
+
 SealKind = Literal["nihil_obstat", "cum_objectionibus", "sine_causa"]
 ChallengeVerdict = Literal["killed", "relegated", "survived"]
 
@@ -159,7 +174,7 @@ def _build_user_message(pid: str, findings: list, candidates: dict, intro: str) 
 
 
 async def main() -> None:
-    slot_name = "default"
+    slot_name = DEFAULT_SERVICE
 
     args = sys.argv[1:]
     if not args or args[0].startswith("-"):
@@ -189,16 +204,11 @@ async def main() -> None:
     print(f"Findings: {len(findings)}", file=sys.stderr)
     print(f"Slot: {slot_name}", file=sys.stderr)
 
-    from pipeline.services import load_services, resolve_slots
+    from pipeline.services import load_services
     from pipeline.agents import AgentBackend
 
     registry = load_services()
-    slots = resolve_slots(registry)
-
-    if slot_name in registry.services:
-        backend = registry.services[slot_name]
-    else:
-        svc_name, backend = slots[slot_name]
+    backend = _resolve_service(registry, slot_name)
     agent = AgentBackend(backend, max_tokens=16384, thinking_budget=4096)
 
     user_msg = _build_user_message(pid, findings, candidates, intro)
