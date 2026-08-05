@@ -14,7 +14,7 @@ from .. import (
 )
 from .. import tables as _tables
 from ..shared import _find_front_matter_end
-from .cleanup import normalize_whitespace
+from .cleanup import escape_leading_atx, normalize_whitespace
 from .code_format import is_diagram_block, maybe_normalize_code_line
 from .code_grid import CodeGrid
 from .wording_emit import _render_wording_section
@@ -126,7 +126,8 @@ def _render_paragraph_spans(sec: Section) -> str:
     em-dash or en-dash bullet marker.
     """
     if not sec.lines:
-        return " ".join(ln.strip() for ln in sec.text.split("\n") if ln.strip())
+        return escape_leading_atx(
+            " ".join(ln.strip() for ln in sec.text.split("\n") if ln.strip()))
     rendered_lines = []
     for line in sec.lines:
         rendered_lines.append(_render_line_spans(line))
@@ -140,7 +141,8 @@ def _render_paragraph_spans(sec: Section) -> str:
             prefix + _EMDASH_BULLET_RE.sub("- ", ln, count=1)
             for ln in non_empty
         )
-    return " ".join(ln.strip() for ln in lines if ln.strip())
+    return escape_leading_atx(
+        " ".join(ln.strip() for ln in lines if ln.strip()))
 
 def _render_heading_spans(sec: Section) -> str:
     """Render a heading, joining the lines that share its visual baseline.

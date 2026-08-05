@@ -1,7 +1,8 @@
 """Tests for lib.pdf.cleanup."""
 
 from conftest import make_span, make_line, make_block
-from tomd.lib.pdf.cleanup import normalize_whitespace, cleanup_text
+from tomd.lib.pdf.cleanup import (escape_leading_atx, normalize_whitespace,
+                                  cleanup_text)
 from tomd.lib import strip_format_chars
 from tomd.lib.pdf.types import is_readable, Line, Block
 
@@ -167,3 +168,35 @@ def test_cleanup_text_dehyphenates():
     result = cleanup_text([block])
     full_text = result[0].text
     assert "implementation" in full_text
+
+
+class TestEscapeLeadingAtx:
+    """A body block opening on "#" must not be parsed as a heading (#302)."""
+
+    def test_preprocessor_directive_is_escaped(self):
+        text = "# include \" q-char-sequence \" new-line causes the replacement"
+        assert escape_leading_atx(text) == "\\" + text
+
+    def test_all_six_atx_levels_are_escaped(self):
+        for n in range(1, 7):
+            body = "#" * n + " text"
+            assert escape_leading_atx(body) == "\\" + body
+
+    def test_seven_hashes_is_not_atx(self):
+        body = "####### text"
+        assert escape_leading_atx(body) == body
+
+    def test_hash_without_following_space_is_left_alone(self):
+        assert escape_leading_atx("#define FOO 1") == "#define FOO 1"
+
+    def test_bare_hash_is_escaped(self):
+        assert escape_leading_atx("#") == "\\#"
+
+    def test_interior_hash_is_left_alone(self):
+        assert escape_leading_atx("see # include below") == "see # include below"
+
+    def test_already_escaped_text_is_not_double_escaped(self):
+        assert escape_leading_atx("\\# include") == "\\# include"
+
+    def test_ordinary_prose_is_unchanged(self):
+        assert escape_leading_atx("ordinary prose") == "ordinary prose"
