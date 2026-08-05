@@ -1,3 +1,10 @@
+#
+# Copyright (c) 2026 Glenn Siegman (glenn@cppalliance.org)
+#
+# Distributed under the Boost Software License, Version 1.0. (See accompanying
+# file LICENSE_1_0.txt or copy at http://www.boost.org/LICENSE_1_0.txt)
+#
+
 """Tests for the generation phase: Step 8 (Cast) and Step 9 (Voice).
 
 The LLM is mocked: a fake ``run_task`` returns canned structured
