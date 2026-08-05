@@ -382,6 +382,26 @@ def normalize_whitespace(text: str) -> str:
     return "\n".join(lines)
 
 
+# An ATX heading opener at column 0: one to six "#" then whitespace or nothing.
+# A body block that starts this way is read by every Markdown parser as a
+# heading, so a preprocessor directive quoted in prose (P3556R0 quotes the
+# [cpp.include] grammar as `# include ... new-line causes the replacement of
+# that directive by ...`) silently becomes an H1 (#302).
+_LEADING_ATX_RE = re.compile(r"^(#{1,6})(\s|$)")
+
+
+def escape_leading_atx(text: str) -> str:
+    """Backslash-escape a "#" that would turn a body block into a heading.
+
+    The text is unchanged for readers; only Markdown's block parser is
+    affected. Text already backslash-escaped upstream (the sub-caption path in
+    ``emit._escape_italic_text``) does not match and is left alone. Shared by
+    the paragraph and wording-prose renderers, the two emit paths that flatten
+    PDF lines into a single body block.
+    """
+    return _LEADING_ATX_RE.sub(r"\\\1\2", text)
+
+
 def find_hidden_regions(page, body_fonts: set[str] | None = None,
                         ) -> set[tuple[float, float, float, float]]:
     """Find regions of hidden text on a page.
