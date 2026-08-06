@@ -1061,6 +1061,18 @@ class TestListMarkerNormalization:
         md = emit_markdown({}, [sec])
         assert "2. The override keyword shall be added" in md
 
+    def test_leading_emphasis_is_not_a_list_marker(self):
+        """The "\\s+" in _ASTERISK_MARKER_RE is what keeps "*word*" intact.
+
+        Loosening it to "\\s*" would eat the opening emphasis delimiter and
+        leave the closing one behind, silently corrupting the text. Pinned
+        because nothing else in the suite would go red for it.
+        """
+        sec = make_section("*emphasized* lead-in", kind=SectionKind.LIST)
+        md = emit_markdown({}, [sec])
+        assert "*emphasized* lead-in" in md
+        assert "- emphasized" not in md
+
 
 class TestEmdashBulletItems:
     """Em-dash enumerations must not collapse into one paragraph (#303)."""
@@ -1105,6 +1117,21 @@ class TestEmdashBulletItems:
     def test_end_note_dash_is_not_a_marker(self):
         """"—end note]" has no whitespace after the dash, so it is content."""
         assert _emdash_bullet_items(["—end note]"]) is None
+
+    def test_lone_marker_with_no_text_is_not_a_list(self):
+        assert _emdash_bullet_items(["—"]) is None
+
+    def test_trailing_bare_marker_emits_no_empty_bullet(self):
+        """A text-less marker is not an item, so it never emits "- "."""
+        assert _emdash_bullet_items(["— a", "—"]) == ["- a"]
+
+    def test_trailing_bare_marker_does_not_pad_prose_to_the_minimum(self):
+        """The empty item must not count toward _EMDASH_LIST_MIN_ITEMS."""
+        assert _emdash_bullet_items([
+            "— a dash-led sentence that then",
+            "wraps onto a second line",
+            "—",
+        ]) is None
 
     def test_wrapped_enumeration_renders_as_a_list_through_emit(self):
         lines = [make_line(["—"]), make_line(["(5.1)"]),

@@ -148,6 +148,10 @@ def _emdash_bullet_items(non_empty: list[str]) -> list[str] | None:
 
     The all-marked case keeps its old behaviour, including for a single line;
     otherwise ``_EMDASH_LIST_MIN_ITEMS`` items are needed to commit.
+
+    A marker with no text after it is not an item. Dropping it before the
+    minimum-items test keeps a bare trailing dash from both emitting an empty
+    ``"- "`` bullet and padding a prose block up to the commit threshold.
     """
     if not non_empty or not _EMDASH_BULLET_RE.match(non_empty[0]):
         return None
@@ -157,8 +161,9 @@ def _emdash_bullet_items(non_empty: list[str]) -> list[str] | None:
             items.append([_EMDASH_BULLET_RE.sub("", ln, count=1).strip()])
         else:
             items[-1].append(ln)
-    if not (len(items) == len(non_empty)
-            or len(items) >= _EMDASH_LIST_MIN_ITEMS):
+    all_marked = len(items) == len(non_empty)
+    items = [parts for parts in items if any(parts)]
+    if not items or not (all_marked or len(items) >= _EMDASH_LIST_MIN_ITEMS):
         return None
     return [f"{LIST_BULLET} " + " ".join(p for p in parts if p)
             for parts in items]
