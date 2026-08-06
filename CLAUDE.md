@@ -91,7 +91,7 @@ D2 and D3 name pipeline-internal symbols and live in `packages/pipeline/src/pipe
 
 ## Services and agents
 
-Infrastructure is declared in `SERVICES.toml` at the repo root. Each `[services.NAME]` section declares an endpoint (backend type, URL, API key env var, model name, `max_context_window`, capabilities). The `[defaults]` section maps slot names (`fast`, `default`, `tool`) to service names. `SERVICES.toml` describes service capacity, not pipeline usage: `max_context_window` is the total context window, not how much any pipeline will use.
+Infrastructure is declared in `SERVICES.toml` at the repo root. Each `[services.NAME]` section declares an endpoint (backend type, URL, API key env var, model name, `max_context_window`, capabilities). There are no service slot defaults in `SERVICES.toml`. `SERVICES.toml` describes service capacity, not pipeline usage: `max_context_window` is the total context window, not how much any pipeline will use.
 
 `AgentBackend` wraps a `ModelBackend` with pipeline-level config (`max_tokens`, `thinking_budget`). `ModelBackend` (one class per model family) encapsulates all mechanical concerns: structured output strategy, BPE cleanup, thinking-block stripping, tool-calling workarounds. See `MODELS.md` for the workaround inventory and retire-when conditions.
 

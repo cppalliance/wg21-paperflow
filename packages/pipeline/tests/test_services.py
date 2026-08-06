@@ -474,6 +474,42 @@ executor_workers = 1
     assert seen == ["auto"]
 
 
+def test_resolve_classifiers_env_beats_entry_pin(tmp_path, monkeypatch):
+    p = _write_services_toml(
+        tmp_path,
+        """
+[classifiers.pinned]
+backend = "nli_cross_encoder"
+model = "cross-encoder/nli-deberta-v3-small"
+provider = "cpu-fp32"
+
+[transformer_providers.auto]
+mode = "auto"
+max_batch_size = 16
+max_length = 128
+executor_workers = 1
+
+[transformer_providers.cpu-fp32]
+mode = "explicit"
+device = "cpu"
+dtype = "fp32"
+batch_size = 8
+max_length = 128
+executor_workers = 1
+""",
+    )
+    seen: list[str] = []
+
+    def fake_inst(name, cfg, provider):
+        seen.append(provider.name)
+        return _ClfFake(cfg.get("model", name), provider)
+
+    monkeypatch.setattr("pipeline.services._instantiate_classifier", fake_inst)
+    monkeypatch.setenv("PAPERFLOW_TRANSFORMER_PROVIDER", "auto")
+    resolve_classifiers({"s": "pinned"}, path=p)
+    assert seen == ["auto"]
+
+
 def test_resolve_classifiers_entry_pin_beats_table_default(tmp_path, monkeypatch):
     p = _write_services_toml(
         tmp_path,

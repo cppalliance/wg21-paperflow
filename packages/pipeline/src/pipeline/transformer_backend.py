@@ -884,7 +884,7 @@ def run_mps_correctness_selftest(backend: CrossEncoderBackend) -> None:
 
     No-op unless the backend's device is ``mps``. Runs at most once
     per process. Emits ``logger.warning`` on divergence citing
-    pytorch#170837 and recommending ``--provider cpu-fp32``.
+    pytorch#170837 and recommending ``PAPERFLOW_TRANSFORMER_PROVIDER=cpu-fp32``.
 
     Cost: one extra forward pass per MPS process startup. Catches a
     real correctness regression silently shipping on Apple Silicon.
@@ -915,7 +915,7 @@ def run_mps_correctness_selftest(backend: CrossEncoderBackend) -> None:
                 logger.warning(
                     "MPS correctness self-test: batched vs single logits "
                     "for '%s' diverge by %.4f > tol (pytorch#170837). "
-                    "Consider running with --provider cpu-fp32 until "
+                    "Consider PAPERFLOW_TRANSFORMER_PROVIDER=cpu-fp32 until "
                     "upstream fix lands.",
                     key, abs(s - b),
                 )

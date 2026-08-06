@@ -169,7 +169,9 @@ SERVICES.toml -> load_services() -> dict[str, ModelBackend]
 
 **AgentBackend** wraps a `ModelBackend` with pipeline-level config (`max_tokens`, `thinking_budget`). Validates `tools_capable` at call time.
 
-**SERVICES.toml** is pure infrastructure inventory describing service capacity. Each `[services.NAME]` section declares an endpoint with its capabilities and `max_context_window`. API keys come from environment variables only. The `[defaults]` section maps slot names (`fast`, `default`, `tool`) to service names. Output token limits (`max_tokens`) are pipeline-level constants, not service config.
+**SERVICES.toml** is pure infrastructure inventory describing service capacity. Each `[services.NAME]` section declares an endpoint with its capabilities and `max_context_window`. API keys come from environment variables only. There are no service slot defaults in this file. Output token limits (`max_tokens`) are pipeline-level constants, not service config.
+
+Pipelines bind logical model names in each package's markdown ``## Services`` block (for example `fast`, `default`, `tool` to inventory entry names). `resolve_pipeline_models(prompt.services, registry)` validates those bindings and returns the slot map. There is no CLI `--service` override.
 
 Pipelines create agents by intent, each defining its own `MAX_OUTPUT_TOKENS`:
 
@@ -179,4 +181,3 @@ synthesis_agent = AgentBackend(slots["default"], max_tokens=MAX_OUTPUT_TOKENS, t
 research_agent = AgentBackend(slots["tool"], max_tokens=MAX_OUTPUT_TOKENS)
 ```
 
-CLI `--service` overrides beat `[defaults]`. Resolution order: `--service` > `[defaults]` > error.
