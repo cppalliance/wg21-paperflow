@@ -1,0 +1,946 @@
+{
+  "_fixture_note": "HAND-AUTHORED v1 fixture for the .agora.json artifact contract. Fictional placeholder paper P2987R0 and authors; persona usernames are the real roster. Not generated output; refresh from real generated artifacts once generation lands. Ingest ignores unknown fields, including this one.",
+  "schema_version": 1,
+  "document": "P2987R0",
+  "paper": "P2987",
+  "revision": 0,
+  "mailing_id": "2026-05",
+  "title": "Structured Concurrency Primitives for the Standard Library",
+  "authors": [
+    "A. Proposer",
+    "B. Coauthor"
+  ],
+  "audience": "LEWG, SG1",
+  "subreddit": "r/wg21",
+  "committee": "lewg",
+  "paper_type": "proposal",
+  "heat": "hot",
+  "interest": "magnetic",
+  "revision_case": "A",
+  "prior_revision": null,
+  "submission_title": "P2987R0 wants structured concurrency in the standard library — scope-bound task<T>, no detached tasks",
+  "submission_body": "New in the 2026-05 mailing. The paper proposes a `task<T>` whose lifetime is bound to a lexical scope, plus a `nursery`/`scope` type that joins all child tasks before it exits. Explicit non-goal: no detached/fire-and-forget tasks. Motivation leans on the coroutines-TS experience and cancellation correctness. Targets SG1, forwarded to LEWG.",
+  "submission_link": "/p2987r0",
+  "submission_tag": "Proposal",
+  "submission_poster_id": "abi_archivist",
+  "submission_votes": [
+    {
+      "persona": "monomorphic_dan",
+      "direction": 1
+    },
+    {
+      "persona": "async_skeptic",
+      "direction": 1
+    },
+    {
+      "persona": "the_constexpr_oracle",
+      "direction": 1
+    },
+    {
+      "persona": "ranges_andy",
+      "direction": 1
+    },
+    {
+      "persona": "nanosecond_nancy",
+      "direction": 1
+    },
+    {
+      "persona": "lifetimes_lucy",
+      "direction": 1
+    },
+    {
+      "persona": "not_a_real_cpp_dev",
+      "direction": 1
+    },
+    {
+      "persona": "just_use_rust_lol",
+      "direction": -1
+    },
+    {
+      "persona": "committee_gonna_committee",
+      "direction": -1
+    }
+  ],
+  "technical_anchors": [
+    {
+      "id": "a1",
+      "kind": "load_bearing",
+      "summary": "task<T> lifetime is bound to a lexical scope; the scope joins all children before exit.",
+      "claim_uid": "P2987R0:c1",
+      "claim_loc": "§3.1"
+    },
+    {
+      "id": "a2",
+      "kind": "conflicted",
+      "summary": "Cancellation propagation across nested scopes is the load-bearing safety claim and is underspecified for the timeout case.",
+      "claim_uid": "P2987R0:c2",
+      "claim_loc": "§4.3"
+    },
+    {
+      "id": "a3",
+      "kind": "critical_gap",
+      "summary": "No latency/overhead analysis for the scheduler under high task churn.",
+      "claim_uid": "P2987R0:c3",
+      "claim_loc": "§6"
+    }
+  ],
+  "design_tensions": [
+    {
+      "id": "t1",
+      "summary": "Scope-bound lifetime (safety) vs. detached tasks (some real workloads need fire-and-forget).",
+      "position_a": "Structured-only: detached tasks are a footgun; everything must join.",
+      "position_b": "Detached tasks are required for long-lived background work; structured-only is too restrictive."
+    }
+  ],
+  "blueprint": {
+    "_note": "Condensed representative Phase-1 output for the fixture; the real blueprint is the verbatim serialized planner state.",
+    "calibration": {
+      "paper_type": "proposal",
+      "heat": "hot",
+      "interest": "magnetic",
+      "target_comments": 15
+    },
+    "technical_anchor_ids": [
+      "a1",
+      "a2",
+      "a3"
+    ],
+    "design_tension_ids": [
+      "t1"
+    ],
+    "encounters": [
+      {
+        "encounter_id": "e1",
+        "design_tension_id": "t1",
+        "resolution": "narrowing",
+        "slot_ids": [
+          "r2",
+          "r3",
+          "r4",
+          "r5"
+        ]
+      }
+    ],
+    "slots": [
+      {
+        "slot_id": "r1",
+        "parent_slot_id": null,
+        "depth": 0,
+        "role": "teaser",
+        "anchor_id": "a1",
+        "encounter_id": null,
+        "domain_lens": 9,
+        "brief": "Teaser hook: praise the motivation, flag design déjà vu with the coroutines TS."
+      },
+      {
+        "slot_id": "r2",
+        "parent_slot_id": null,
+        "depth": 0,
+        "role": "signal",
+        "anchor_id": "a2",
+        "encounter_id": "e1",
+        "domain_lens": 8,
+        "brief": "Top signal: cancellation propagation across nested scopes is underspecified."
+      },
+      {
+        "slot_id": "r3",
+        "parent_slot_id": "r2",
+        "depth": 1,
+        "role": "encounter",
+        "anchor_id": "a2",
+        "encounter_id": "e1",
+        "domain_lens": 9,
+        "brief": "Encounter turn: detached tasks are needed for real workloads."
+      },
+      {
+        "slot_id": "r4",
+        "parent_slot_id": "r3",
+        "depth": 2,
+        "role": "encounter",
+        "anchor_id": "a2",
+        "encounter_id": "e1",
+        "domain_lens": 8,
+        "brief": "Encounter rebuttal: detached is a footgun; structured pattern covers it."
+      },
+      {
+        "slot_id": "r5",
+        "parent_slot_id": "r4",
+        "depth": 3,
+        "role": "encounter",
+        "anchor_id": "a2",
+        "encounter_id": "e1",
+        "domain_lens": 9,
+        "brief": "Encounter concession: narrow objection to the timeout case."
+      },
+      {
+        "slot_id": "r6",
+        "parent_slot_id": null,
+        "depth": 0,
+        "role": "signal",
+        "anchor_id": "a3",
+        "encounter_id": null,
+        "domain_lens": 4,
+        "brief": "Latency data; returns later with numbers."
+      },
+      {
+        "slot_id": "r7",
+        "parent_slot_id": null,
+        "depth": 0,
+        "role": "noise",
+        "anchor_id": null,
+        "encounter_id": null,
+        "domain_lens": null,
+        "brief": "Rust snark."
+      },
+      {
+        "slot_id": "r8",
+        "parent_slot_id": "r7",
+        "depth": 1,
+        "role": "noise",
+        "anchor_id": null,
+        "encounter_id": null,
+        "domain_lens": null,
+        "brief": "Meme reply."
+      },
+      {
+        "slot_id": "r9",
+        "parent_slot_id": null,
+        "depth": 0,
+        "role": "tangent",
+        "anchor_id": null,
+        "encounter_id": null,
+        "domain_lens": 6,
+        "brief": "Misconception trap: conflates std::async/futures with structured concurrency."
+      },
+      {
+        "slot_id": "r10",
+        "parent_slot_id": "r9",
+        "depth": 1,
+        "role": "signal",
+        "anchor_id": "a1",
+        "encounter_id": null,
+        "domain_lens": 10,
+        "brief": "Teaching reply correcting the async misconception."
+      },
+      {
+        "slot_id": "r11",
+        "parent_slot_id": null,
+        "depth": 0,
+        "role": "mod",
+        "anchor_id": null,
+        "encounter_id": null,
+        "domain_lens": null,
+        "brief": "Mod notice: on-topic reminder."
+      },
+      {
+        "slot_id": "r12",
+        "parent_slot_id": null,
+        "depth": 0,
+        "role": "signal",
+        "anchor_id": "a2",
+        "encounter_id": null,
+        "domain_lens": 11,
+        "brief": "Safety/UB angle; later removed by a mod for heat."
+      },
+      {
+        "slot_id": "r13",
+        "parent_slot_id": "r2",
+        "depth": 1,
+        "role": "noise",
+        "anchor_id": null,
+        "encounter_id": null,
+        "domain_lens": null,
+        "brief": "Deadpan process cynicism; controversial."
+      },
+      {
+        "slot_id": "r14",
+        "parent_slot_id": "r6",
+        "depth": 1,
+        "role": "noise",
+        "anchor_id": null,
+        "encounter_id": null,
+        "domain_lens": 6,
+        "brief": "Filler; later user-deleted."
+      },
+      {
+        "slot_id": "r15",
+        "parent_slot_id": "r2",
+        "depth": 1,
+        "role": "signal",
+        "anchor_id": "a2",
+        "encounter_id": null,
+        "domain_lens": 13,
+        "brief": "OP replies, points to §4.3."
+      }
+    ]
+  },
+  "generated_at": "2026-05-18T09:00:00Z",
+  "comments": [
+    {
+      "slot_id": "r1",
+      "parent_slot_id": null,
+      "depth": 0,
+      "role": "teaser",
+      "persona": "async_skeptic",
+      "body": "The motivation section is genuinely the best I've read this mailing. The actual `task<T>` design, though? We've been here before — go reread the coroutines-TS lifetime postmortem before we relitigate it.",
+      "tag": null,
+      "is_op": false,
+      "is_mod": false,
+      "controversial": false,
+      "edited": false,
+      "deleted": false,
+      "removed": false,
+      "collapsed": false,
+      "anchor_id": "a1",
+      "encounter_id": null,
+      "domain_lens": 9,
+      "brief": "Teaser hook: praise the motivation, flag design déjà vu with the coroutines TS.",
+      "votes": [
+        {
+          "persona": "monomorphic_dan",
+          "direction": 1
+        },
+        {
+          "persona": "nanosecond_nancy",
+          "direction": 1
+        },
+        {
+          "persona": "ranges_andy",
+          "direction": 1
+        },
+        {
+          "persona": "the_constexpr_oracle",
+          "direction": 1
+        },
+        {
+          "persona": "not_a_real_cpp_dev",
+          "direction": 1
+        },
+        {
+          "persona": "just_use_rust_lol",
+          "direction": 1
+        },
+        {
+          "persona": "segfault_enjoyer_69",
+          "direction": 1
+        },
+        {
+          "persona": "lifetimes_lucy",
+          "direction": -1
+        }
+      ]
+    },
+    {
+      "slot_id": "r2",
+      "parent_slot_id": null,
+      "depth": 0,
+      "role": "signal",
+      "persona": "monomorphic_dan",
+      "body": "The load-bearing claim is cancellation correctness, and §4.3 doesn't actually define propagation across *nested* scopes. If an inner scope is cancelled, does the outer scope observe a partial result, an exception, or nothing? The paper needs a single axiom here and then everything else should derive from it. Right now it's three half-axioms.",
+      "tag": null,
+      "is_op": false,
+      "is_mod": false,
+      "controversial": false,
+      "edited": false,
+      "deleted": false,
+      "removed": false,
+      "collapsed": false,
+      "anchor_id": "a2",
+      "encounter_id": "e1",
+      "domain_lens": 8,
+      "brief": "Top signal: cancellation propagation across nested scopes is underspecified.",
+      "votes": [
+        {
+          "persona": "the_constexpr_oracle",
+          "direction": 1
+        },
+        {
+          "persona": "lifetimes_lucy",
+          "direction": 1
+        },
+        {
+          "persona": "embedded_for_20_years",
+          "direction": 1
+        },
+        {
+          "persona": "not_a_real_cpp_dev",
+          "direction": 1
+        },
+        {
+          "persona": "nanosecond_nancy",
+          "direction": -1
+        },
+        {
+          "persona": "just_use_rust_lol",
+          "direction": -1
+        },
+        {
+          "persona": "segfault_enjoyer_69",
+          "direction": -1
+        },
+        {
+          "persona": "committee_gonna_committee",
+          "direction": -1
+        }
+      ]
+    },
+    {
+      "slot_id": "r3",
+      "parent_slot_id": "r2",
+      "depth": 1,
+      "role": "encounter",
+      "persona": "async_skeptic",
+      "body": "Define it however you like — structured-only is still the wrong default. Half my workloads are long-lived background pumps that outlive any lexical scope. A standard concurrency model that can't express a detached task isn't a concurrency model, it's a coroutine demo.",
+      "tag": null,
+      "is_op": false,
+      "is_mod": false,
+      "controversial": false,
+      "edited": false,
+      "deleted": false,
+      "removed": false,
+      "collapsed": false,
+      "anchor_id": "a2",
+      "encounter_id": "e1",
+      "domain_lens": 9,
+      "brief": "Encounter turn: detached tasks are needed for real workloads.",
+      "votes": [
+        {
+          "persona": "nanosecond_nancy",
+          "direction": 1
+        },
+        {
+          "persona": "ranges_andy",
+          "direction": 1
+        },
+        {
+          "persona": "segfault_enjoyer_69",
+          "direction": 1
+        },
+        {
+          "persona": "monomorphic_dan",
+          "direction": -1
+        },
+        {
+          "persona": "the_constexpr_oracle",
+          "direction": -1
+        }
+      ]
+    },
+    {
+      "slot_id": "r4",
+      "parent_slot_id": "r3",
+      "depth": 2,
+      "role": "encounter",
+      "persona": "monomorphic_dan",
+      "body": "\"Detached background pump\" is exactly the case that leaks and races on shutdown — it's the footgun, not the feature. You model it as a scope that lives at `main`'s lifetime and is explicitly cancelled at shutdown. Same expressiveness, but now the lifetime is *visible* instead of implicit.",
+      "tag": null,
+      "is_op": false,
+      "is_mod": false,
+      "controversial": false,
+      "edited": false,
+      "deleted": false,
+      "removed": false,
+      "collapsed": false,
+      "anchor_id": "a2",
+      "encounter_id": "e1",
+      "domain_lens": 8,
+      "brief": "Encounter rebuttal: detached is a footgun; structured pattern covers it.",
+      "votes": [
+        {
+          "persona": "the_constexpr_oracle",
+          "direction": 1
+        },
+        {
+          "persona": "lifetimes_lucy",
+          "direction": 1
+        },
+        {
+          "persona": "embedded_for_20_years",
+          "direction": 1
+        },
+        {
+          "persona": "nanosecond_nancy",
+          "direction": 1
+        }
+      ]
+    },
+    {
+      "slot_id": "r5",
+      "parent_slot_id": "r4",
+      "depth": 3,
+      "role": "encounter",
+      "persona": "async_skeptic",
+      "body": "Fair. The app-lifetime scope covers the background-pump case and I'll drop that objection. I'm narrowing to one thing: the *timeout* case in §4.3, where the scope must cancel children but report which ones didn't finish. That's the part that's still hand-wavy.",
+      "tag": null,
+      "is_op": false,
+      "is_mod": false,
+      "controversial": false,
+      "edited": false,
+      "deleted": false,
+      "removed": false,
+      "collapsed": false,
+      "anchor_id": "a2",
+      "encounter_id": "e1",
+      "domain_lens": 9,
+      "brief": "Encounter concession: narrow objection to the timeout case.",
+      "votes": [
+        {
+          "persona": "monomorphic_dan",
+          "direction": 1
+        },
+        {
+          "persona": "the_constexpr_oracle",
+          "direction": 1
+        },
+        {
+          "persona": "ranges_andy",
+          "direction": 1
+        },
+        {
+          "persona": "nanosecond_nancy",
+          "direction": 1
+        },
+        {
+          "persona": "lifetimes_lucy",
+          "direction": 1
+        }
+      ]
+    },
+    {
+      "slot_id": "r6",
+      "parent_slot_id": null,
+      "depth": 0,
+      "role": "signal",
+      "persona": "nanosecond_nancy",
+      "body": "Ran the reference scheduler against our HFT harness under high task churn (~2M tasks/s spawn). Median is fine; the p99 is not — scope teardown serializes the join and we see tail spikes. Numbers in the gist.\n\n**Edit:** added the p99 column, it's worse than I first eyeballed. This is the §6 gap the paper waves off.",
+      "tag": null,
+      "is_op": false,
+      "is_mod": false,
+      "controversial": false,
+      "edited": true,
+      "deleted": false,
+      "removed": false,
+      "collapsed": false,
+      "anchor_id": "a3",
+      "encounter_id": null,
+      "domain_lens": 4,
+      "brief": "Latency data; returns later with numbers.",
+      "votes": [
+        {
+          "persona": "monomorphic_dan",
+          "direction": 1
+        },
+        {
+          "persona": "async_skeptic",
+          "direction": 1
+        },
+        {
+          "persona": "embedded_for_20_years",
+          "direction": 1
+        },
+        {
+          "persona": "ranges_andy",
+          "direction": 1
+        },
+        {
+          "persona": "the_constexpr_oracle",
+          "direction": 1
+        },
+        {
+          "persona": "not_a_real_cpp_dev",
+          "direction": 1
+        }
+      ]
+    },
+    {
+      "slot_id": "r7",
+      "parent_slot_id": null,
+      "depth": 0,
+      "role": "noise",
+      "persona": "just_use_rust_lol",
+      "body": "tokio shipped structured concurrency in 2020 and it just works lmao. anyway good luck with the next 12 years of meetings",
+      "tag": null,
+      "is_op": false,
+      "is_mod": false,
+      "controversial": false,
+      "edited": false,
+      "deleted": false,
+      "removed": false,
+      "collapsed": false,
+      "anchor_id": null,
+      "encounter_id": null,
+      "domain_lens": null,
+      "brief": "Rust snark.",
+      "votes": [
+        {
+          "persona": "segfault_enjoyer_69",
+          "direction": 1
+        },
+        {
+          "persona": "committee_gonna_committee",
+          "direction": 1
+        },
+        {
+          "persona": "bootcamp_grad_2025",
+          "direction": 1
+        },
+        {
+          "persona": "not_a_real_cpp_dev",
+          "direction": 1
+        },
+        {
+          "persona": "ranges_andy",
+          "direction": 1
+        },
+        {
+          "persona": "nanosecond_nancy",
+          "direction": 1
+        },
+        {
+          "persona": "the_constexpr_oracle",
+          "direction": 1
+        },
+        {
+          "persona": "monomorphic_dan",
+          "direction": -1
+        },
+        {
+          "persona": "lifetimes_lucy",
+          "direction": -1
+        },
+        {
+          "persona": "embedded_for_20_years",
+          "direction": -1
+        }
+      ]
+    },
+    {
+      "slot_id": "r8",
+      "parent_slot_id": "r7",
+      "depth": 1,
+      "role": "noise",
+      "persona": "segfault_enjoyer_69",
+      "body": "🦀 has entered the chat",
+      "tag": null,
+      "is_op": false,
+      "is_mod": false,
+      "controversial": false,
+      "edited": false,
+      "deleted": false,
+      "removed": false,
+      "collapsed": false,
+      "anchor_id": null,
+      "encounter_id": null,
+      "domain_lens": null,
+      "brief": "Meme reply.",
+      "votes": [
+        {
+          "persona": "just_use_rust_lol",
+          "direction": 1
+        },
+        {
+          "persona": "committee_gonna_committee",
+          "direction": 1
+        },
+        {
+          "persona": "bootcamp_grad_2025",
+          "direction": 1
+        },
+        {
+          "persona": "not_a_real_cpp_dev",
+          "direction": -1
+        }
+      ]
+    },
+    {
+      "slot_id": "r9",
+      "parent_slot_id": null,
+      "depth": 0,
+      "role": "tangent",
+      "persona": "not_a_real_cpp_dev",
+      "body": "Beginner question, sorry if this is obvious: doesn't `std::async` already give us this? I just launch a few with `std::launch::async` and call `.get()` later. What does \"structured concurrency\" actually add over that?",
+      "tag": null,
+      "is_op": false,
+      "is_mod": false,
+      "controversial": false,
+      "edited": false,
+      "deleted": false,
+      "removed": false,
+      "collapsed": false,
+      "anchor_id": null,
+      "encounter_id": null,
+      "domain_lens": 6,
+      "brief": "Misconception trap: conflates std::async/futures with structured concurrency.",
+      "votes": [
+        {
+          "persona": "bootcamp_grad_2025",
+          "direction": 1
+        },
+        {
+          "persona": "the_constexpr_oracle",
+          "direction": 1
+        },
+        {
+          "persona": "compiles_first_try",
+          "direction": 1
+        },
+        {
+          "persona": "ranges_andy",
+          "direction": 1
+        },
+        {
+          "persona": "segfault_enjoyer_69",
+          "direction": -1
+        }
+      ]
+    },
+    {
+      "slot_id": "r10",
+      "parent_slot_id": "r9",
+      "depth": 1,
+      "role": "signal",
+      "persona": "the_constexpr_oracle",
+      "body": "Good question, and a common one. `std::async` hands you a `future`, but *nothing owns the concurrency*: the future's destructor either blocks (sometimes) or detaches, and cancellation is whatever you bolt on by hand. Structured concurrency ties each task's lifetime to a lexical scope — when the scope exits, every child has either completed or been cancelled, guaranteed, before the next line runs. The proposal's `task<T>` is that scope-bound owner. So it's less \"a faster async\" and more \"async with the lifetimes made explicit and enforced.\"",
+      "tag": null,
+      "is_op": false,
+      "is_mod": false,
+      "controversial": false,
+      "edited": false,
+      "deleted": false,
+      "removed": false,
+      "collapsed": false,
+      "anchor_id": "a1",
+      "encounter_id": null,
+      "domain_lens": 10,
+      "brief": "Teaching reply correcting the async misconception.",
+      "votes": [
+        {
+          "persona": "monomorphic_dan",
+          "direction": 1
+        },
+        {
+          "persona": "lifetimes_lucy",
+          "direction": 1
+        },
+        {
+          "persona": "ranges_andy",
+          "direction": 1
+        },
+        {
+          "persona": "compiles_first_try",
+          "direction": 1
+        },
+        {
+          "persona": "not_a_real_cpp_dev",
+          "direction": 1
+        },
+        {
+          "persona": "bootcamp_grad_2025",
+          "direction": 1
+        },
+        {
+          "persona": "nanosecond_nancy",
+          "direction": 1
+        },
+        {
+          "persona": "embedded_for_20_years",
+          "direction": 1
+        }
+      ]
+    },
+    {
+      "slot_id": "r11",
+      "parent_slot_id": null,
+      "depth": 0,
+      "role": "mod",
+      "persona": "AutoModerator",
+      "body": "This thread is tagged **SG1**. Reminder: critique the paper's design, not its authors, and no \"just use $OTHER_LANGUAGE\" derails past the first one. See the community rules.",
+      "tag": null,
+      "is_op": false,
+      "is_mod": true,
+      "controversial": false,
+      "edited": false,
+      "deleted": false,
+      "removed": false,
+      "collapsed": false,
+      "anchor_id": null,
+      "encounter_id": null,
+      "domain_lens": null,
+      "brief": "Mod notice: on-topic reminder.",
+      "votes": [
+        {
+          "persona": "standards_shepherd",
+          "direction": 1
+        },
+        {
+          "persona": "paper_trail_2019",
+          "direction": 1
+        },
+        {
+          "persona": "monomorphic_dan",
+          "direction": 1
+        },
+        {
+          "persona": "not_a_real_cpp_dev",
+          "direction": 1
+        }
+      ]
+    },
+    {
+      "slot_id": "r12",
+      "parent_slot_id": null,
+      "depth": 0,
+      "role": "signal",
+      "persona": "lifetimes_lucy",
+      "body": "If we ship this without nailing down what happens when a scope exits via exception while a child is mid-flight, we are encoding UB into the one feature whose entire pitch is safety, and frankly the authors should know better than to—",
+      "tag": null,
+      "is_op": false,
+      "is_mod": false,
+      "controversial": false,
+      "edited": false,
+      "deleted": false,
+      "removed": true,
+      "collapsed": false,
+      "anchor_id": "a2",
+      "encounter_id": null,
+      "domain_lens": 11,
+      "brief": "Safety/UB angle; removed by a mod for getting personal.",
+      "votes": [
+        {
+          "persona": "monomorphic_dan",
+          "direction": 1
+        },
+        {
+          "persona": "async_skeptic",
+          "direction": 1
+        }
+      ]
+    },
+    {
+      "slot_id": "r13",
+      "parent_slot_id": "r2",
+      "depth": 1,
+      "role": "noise",
+      "persona": "committee_gonna_committee",
+      "body": "calling it now: three more revisions, a new study group spun off at the next meeting, and this ships in C++32 as a defect report against a paper that doesn't exist yet",
+      "tag": null,
+      "is_op": false,
+      "is_mod": false,
+      "controversial": true,
+      "edited": false,
+      "deleted": false,
+      "removed": false,
+      "collapsed": false,
+      "anchor_id": null,
+      "encounter_id": null,
+      "domain_lens": null,
+      "brief": "Deadpan process cynicism; controversial.",
+      "votes": [
+        {
+          "persona": "just_use_rust_lol",
+          "direction": 1
+        },
+        {
+          "persona": "segfault_enjoyer_69",
+          "direction": 1
+        },
+        {
+          "persona": "bootcamp_grad_2025",
+          "direction": 1
+        },
+        {
+          "persona": "ranges_andy",
+          "direction": 1
+        },
+        {
+          "persona": "monomorphic_dan",
+          "direction": -1
+        },
+        {
+          "persona": "the_constexpr_oracle",
+          "direction": -1
+        },
+        {
+          "persona": "lifetimes_lucy",
+          "direction": -1
+        },
+        {
+          "persona": "embedded_for_20_years",
+          "direction": -1
+        },
+        {
+          "persona": "nanosecond_nancy",
+          "direction": -1
+        }
+      ]
+    },
+    {
+      "slot_id": "r14",
+      "parent_slot_id": "r6",
+      "depth": 1,
+      "role": "noise",
+      "persona": "bootcamp_grad_2025",
+      "body": "[deleted]",
+      "tag": null,
+      "is_op": false,
+      "is_mod": false,
+      "controversial": false,
+      "edited": false,
+      "deleted": true,
+      "removed": false,
+      "collapsed": false,
+      "anchor_id": null,
+      "encounter_id": null,
+      "domain_lens": 6,
+      "brief": "Filler; later user-deleted.",
+      "votes": [
+        {
+          "persona": "segfault_enjoyer_69",
+          "direction": 1
+        }
+      ]
+    },
+    {
+      "slot_id": "r15",
+      "parent_slot_id": "r2",
+      "depth": 1,
+      "role": "signal",
+      "persona": "abi_archivist",
+      "body": "OP here. Nested-scope propagation *is* addressed — §4.3 says an inner cancellation surfaces to the enclosing scope as a `cancellation_error` carrying the set of unfinished children, and the outer scope decides. Happy to expand if that's not landing, because a few of you are reading it as \"unspecified\" and it's merely under-explained.",
+      "tag": null,
+      "is_op": true,
+      "is_mod": false,
+      "controversial": false,
+      "edited": false,
+      "deleted": false,
+      "removed": false,
+      "collapsed": false,
+      "anchor_id": "a2",
+      "encounter_id": null,
+      "domain_lens": 13,
+      "brief": "OP replies, points to §4.3.",
+      "votes": [
+        {
+          "persona": "monomorphic_dan",
+          "direction": 1
+        },
+        {
+          "persona": "async_skeptic",
+          "direction": 1
+        },
+        {
+          "persona": "the_constexpr_oracle",
+          "direction": 1
+        },
+        {
+          "persona": "embedded_for_20_years",
+          "direction": 1
+        },
+        {
+          "persona": "not_a_real_cpp_dev",
+          "direction": 1
+        }
+      ]
+    }
+  ]
+}

@@ -22,6 +22,7 @@ from tomd.lib.pdf.structure import (
     _classify_code_line, _is_narrative_continuation, _trim_narrative_from_code,
     _absorb_trailing_label_into_code, _is_tail_prose,
     _peel_trailing_prose_from_code,
+    _weak_heading_qualifies,
 )
 
 
@@ -2868,3 +2869,108 @@ class TestPeelTrailingProseFromCode:
         para = make_section("just prose here", kind=SectionKind.PARAGRAPH)
         out = _peel_trailing_prose_from_code([para])
         assert out == [para]
+
+
+class TestWeakHeadingQualifies:
+    """A LOW-confidence heading candidate must also *look* like a heading (#302).
+
+    ``heading_confidence`` returns LOW when exactly one weak signal fired, so
+    the text has to carry the claim by itself. These cases pin the three tells.
+    """
+
+    def test_short_label_qualifies(self):
+        assert _weak_heading_qualifies("Rounding Mode", "", 1, False, False)
+
+    def test_dotted_number_only_qualifies(self):
+        """P4182R0's real subsection headings are number-only at body weight."""
+        assert _weak_heading_qualifies(
+            "3.1 Platform schema", "3.1", None, False, False)
+
+    def test_question_heading_qualifies(self):
+        """A trailing "?" is heading style in WG21 papers, not prose."""
+        assert _weak_heading_qualifies(
+            "Why not represent a proposed API as a C++20 range?", "",
+            1, False, False)
+
+    def test_trailing_dot_number_is_stripped_before_the_prose_test(self):
+        """"2. History" must not read as an interior sentence boundary."""
+        assert _weak_heading_qualifies(
+            "2. History/Changes from Previous Release", "", 1, False, False)
+
+    def test_bare_number_line_is_exempt(self):
+        """A number alone has no text to judge; the orphan merge pairs it."""
+        assert _weak_heading_qualifies("I.", "", 1, False, False)
+        assert _weak_heading_qualifies("3.35", "", 1, False, False)
+
+    def test_dotless_number_without_typography_is_paragraph_numbering(self):
+        """P3556R0 quotes standardese whose paragraph numbers are bare."""
+        assert not _weak_heading_qualifies(
+            "3 A preprocessing directive of the form", "3",
+            None, False, False)
+
+    def test_dotless_number_with_font_support_still_qualifies(self):
+        """The tell needs the *absence* of every typographic signal."""
+        assert _weak_heading_qualifies(
+            "3 Introduction", "3", 1, False, False)
+
+    def test_sentence_opening_on_a_roman_numeral_is_rejected(self):
+        """P2040R0: "I think ..." matches SECTION_NUM_RE as roman numeral I."""
+        assert not _weak_heading_qualifies(
+            "I think this general approach to the syntax at call site is best",
+            "I", None, False, False)
+
+    def test_terminal_period_is_prose(self):
+        assert not _weak_heading_qualifies(
+            "Your costs and results may vary.", "", 1, False, False)
+
+    def test_interior_sentence_boundary_is_prose(self):
+        assert not _weak_heading_qualifies(
+            "Performance varies by use and other factors. Learn more on the",
+            "", 1, False, False)
+
+    def test_length_alone_is_not_a_tell(self):
+        """The call site's _HEADING_MAX_WORDS cap owns length; this gate does not."""
+        assert _weak_heading_qualifies(
+            "Performance results are based on testing as of dates shown in "
+            "configurations and", "", 1, False, False)
+
+
+class TestFontOnlyFooterProseNotAHeading:
+    """An Intel-style legal footer one point above body size is not a heading.
+
+    Canonical case: P1068R11's "Notices & Disclaimers" page sets its
+    disclaimer at 12pt against an 11pt body, so the font-size signal alone
+    ranks every line as a heading and the outline gains a run of H3s (#302).
+    """
+
+    _FOOTER = [
+        "Performance varies by use, configuration and other factors. "
+        "Learn more on the",
+        "No product or component can be absolutely secure.",
+        "Your costs and results may vary.",
+        "Intel technologies may require enabled hardware, software or "
+        "service activation.",
+    ]
+
+    def test_footer_lines_stay_paragraphs(self):
+        body_fill = [_mk_section("ordinary body " + ("x" * 80), font_size=11.0)
+                     for _ in range(10)]
+        footer = [_mk_section(t, font_size=12.0) for t in self._FOOTER]
+        _, result, _ = structure_sections(body_fill + footer, has_title=True)
+        promoted = [s.text for s in result
+                    if s.kind == SectionKind.HEADING
+                    and any(t in s.text for t in self._FOOTER)]
+        assert not promoted, (
+            f"footer prose promoted to headings on the font signal alone: "
+            f"{promoted}"
+        )
+
+    def test_footer_text_survives(self):
+        """Rejecting the heading must not drop the text."""
+        body_fill = [_mk_section("ordinary body " + ("x" * 80), font_size=11.0)
+                     for _ in range(10)]
+        footer = [_mk_section(t, font_size=12.0) for t in self._FOOTER]
+        _, result, _ = structure_sections(body_fill + footer, has_title=True)
+        joined = "\n".join(s.text for s in result)
+        for t in self._FOOTER:
+            assert t in joined

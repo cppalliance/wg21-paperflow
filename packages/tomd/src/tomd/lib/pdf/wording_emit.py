@@ -25,7 +25,7 @@ from __future__ import annotations
 from .. import DEFAULT_FENCE_LANG
 from ..wording_markup import WORDING_FENCE_CLOSE, wording_fence_open
 from ..wording_policy import UNIFORM_ROLE_THRESHOLD, implicit_role_for
-from .cleanup import normalize_whitespace
+from .cleanup import escape_leading_atx, normalize_whitespace
 from .code_format import normalize_code_line
 from .code_grid import CodeGrid
 from .types import Line, Span, Section, SectionKind
@@ -336,5 +336,6 @@ def _render_wording_section(sec: Section) -> str:
 
     rendered_lines = [_render_wording_line(line) for line in sec.lines]
     text = normalize_whitespace("\n".join(rendered_lines))
-    inner = " ".join(ln.strip() for ln in text.split("\n") if ln.strip())
+    inner = escape_leading_atx(
+        " ".join(ln.strip() for ln in text.split("\n") if ln.strip()))
     return f"{wording_fence_open(div_class)}\n\n{inner}\n\n{WORDING_FENCE_CLOSE}"

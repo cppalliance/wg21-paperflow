@@ -75,6 +75,12 @@ _GOLDEN_STEMS = (
     # Code-block extraction regression guards (issue #128).
     "p4012r0-codeblock",
     "p4012r0-page-10",
+    # Also the collateral-loss guard for the false-heading fix (#302). This
+    # single-page extract promoted its standardese footnote "3 explicit
+    # conversion to `basic_vec` allows ..." to an H2, which made
+    # _strip_pre_heading_fragments treat the whole page above it as pre-heading
+    # chrome and delete 7 of the 9 sections. The golden held that 85% content
+    # loss; it now holds the full page (source-word coverage 0.15 -> 1.00).
     "p4012r0-page-6",
     "p0876r22-page-14",
     # Anti-narrative-trim guard: P3181R1's "Stronger semantics" / "Why this

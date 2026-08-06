@@ -43,7 +43,8 @@ def test_render_trace_step_0_only_renders_load_section():
     state = PipelineState(
         paper_id="P1000R0",
         paper_title="Schedule",
-        subreddit="r/lewg",
+        subreddit="r/wg21",
+        committee="lewg",
         paper_audience="LEWG",
         paper_revision=0,
         dissect_caput_causae="Foo bar baz.",
@@ -53,13 +54,15 @@ def test_render_trace_step_0_only_renders_load_section():
     assert "## 0. Load" in out
     assert "## 1. Smell Test" not in out
     assert "Foo bar baz" in out
-    assert "r/lewg" in out
+    assert "r/wg21" in out
+    assert "lewg" in out
 
 
 def test_render_trace_includes_anchors_and_tensions():
     state = PipelineState(
         paper_id="P2000R1", paper_title="Anchors",
-        subreddit="r/ewg",
+        subreddit="r/wg21",
+        committee="ewg",
         paper_type="proposal",
         technical_anchors=[_anchor("a01", 5), _anchor("a02", 9)],
         design_tensions=[DesignTension(id="t01", description="A vs B")],
@@ -82,7 +85,8 @@ def test_render_trace_includes_research_when_step_2_reached():
     )
     state = PipelineState(
         paper_id="P3000R0", paper_title="Research",
-        subreddit="r/lwg",
+        subreddit="r/wg21",
+        committee="lwg",
         research_summary=rs,
     )
     out = render_trace(state, stop_step=2)
@@ -94,7 +98,8 @@ def test_render_trace_includes_research_when_step_2_reached():
 def test_render_trace_calibration_section():
     state = PipelineState(
         paper_id="P4000R0", paper_title="Hot",
-        subreddit="r/ewg",
+        subreddit="r/wg21",
+        committee="ewg",
         heat="thermonuclear", interest="gravitational",
         target_comment_count=200,
         encounter_count=3, signal_count=80, noise_count=120,
@@ -115,7 +120,8 @@ def test_render_trace_skeleton_lists_replies():
     ]
     state = PipelineState(
         paper_id="P5000R0", paper_title="Skeleton",
-        subreddit="r/ewg",
+        subreddit="r/wg21",
+        committee="ewg",
         replies=replies,
         encounter_slot_groups=[],
     )
@@ -130,7 +136,8 @@ def test_render_trace_skeleton_lists_replies():
 def test_render_trace_encounters_section_handles_empty():
     state = PipelineState(
         paper_id="P6000R0", paper_title="No encounters",
-        subreddit="r/ewg",
+        subreddit="r/wg21",
+        committee="ewg",
         encounter_count=0,
         encounters=[],
     )
@@ -151,7 +158,8 @@ def test_render_trace_encounters_section_renders_plans():
     )
     state = PipelineState(
         paper_id="P7000R0", paper_title="Encs",
-        subreddit="r/ewg",
+        subreddit="r/wg21",
+        committee="ewg",
         encounter_count=1,
         encounters=[enc],
     )

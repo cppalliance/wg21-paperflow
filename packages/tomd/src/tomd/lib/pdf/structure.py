@@ -1003,6 +1003,74 @@ def _heading_is_numbered(sec: Section) -> bool:
     return bool(SECTION_NUM_RE.match(sec.text.split("\n")[0].strip()))
 
 
+# Sentence-terminating punctuation. "?" is absent on purpose: question-form
+# headings are common in WG21 papers ("Why not represent a proposed API as a
+# C++20 range?"), so a trailing "?" is not prose evidence.
+_PROSE_TERMINATORS = (".", "!", "…")
+
+# An interior sentence boundary: a terminator, an optional closing quote or
+# bracket, whitespace, then the opening of a new sentence. Two sentences on
+# one line means prose ("... and other factors. Learn more on the").
+_INTERIOR_SENTENCE_RE = re.compile(r"""[.!?…]["')\]]?\s+["“(A-Z]""")
+
+
+def _reads_as_prose(text: str) -> bool:
+    """True when *text* reads as a sentence rather than a heading label."""
+    stripped = text.strip()
+    if not stripped:
+        return False
+    if stripped.endswith(_PROSE_TERMINATORS):
+        return True
+    return bool(_INTERIOR_SENTENCE_RE.search(stripped))
+
+
+def _weak_heading_qualifies(first_line: str, section_num: str,
+                            font_level: int | None, is_bold: bool,
+                            is_known: bool) -> bool:
+    """Whether a LOW-confidence heading candidate still reads as a heading.
+
+    At LOW confidence exactly one weak signal fired, so the text has to carry
+    the heading claim by itself. Two tells reject it (#302):
+
+    - **Paragraph numbering.** A dotless section number with no typographic
+      support is standardese paragraph numbering ("3 A preprocessing directive
+      of the form") or a sentence opening on a numeral ("I think this general
+      approach ..."), not a section number. Dotted numbers ("3.1 Platform
+      schema") are unambiguous and keep their number-only promotion.
+    - **Sentence punctuation.** See ``_reads_as_prose``. Applied only when the
+      line is NOT bold. Bold is an author-applied signal, so a bold sentence is
+      a deliberate sub-heading even when it ends in a full stop (P4094R0 sets
+      its objection Q&A entries that way: "Q: This is hindsight bias."). The
+      tells this gate exists for have no author intent behind them: an
+      incidental font-size rank, or an ambiguous leading number.
+
+    Sentence *length* is deliberately not a third tell: the pre-existing
+    ``_HEADING_MAX_WORDS`` cap at the call site already rejects long lines at
+    LOW confidence, and tightening it further would reject a real question-form
+    heading ("Why not represent a proposed API as a C++20 range?", 10 words).
+
+    A line that is *only* a section number ("I.", "8", "3.1") is exempt: it
+    carries no text to judge, and `_merge_orphan_heading_numbers` downstream
+    is what pairs it with the title block the PDF put in a different font.
+
+    The number is stripped with ``SECTION_NUM_PREFIX_RE``, not
+    ``SECTION_NUM_RE``: the prefix form also consumes a *trailing dot*
+    ("2. History/Changes from Previous Release"), whose dot-space-capital shape
+    would otherwise read as an interior sentence boundary.
+    """
+    if _BARE_SECTION_NUM_RE.match(first_line):
+        return True
+    tail = SECTION_NUM_PREFIX_RE.sub("", first_line.strip(), count=1).strip()
+    if not tail:
+        return False
+    if (section_num and "." not in section_num
+            and font_level is None and not is_bold and not is_known):
+        return False
+    if is_bold:
+        return True
+    return not _reads_as_prose(tail)
+
+
 def _is_known_section(first_line: str) -> bool:
     """Check if *first_line* names a KNOWN_SECTIONS entry.
 
@@ -1442,6 +1510,14 @@ def _structure_body_impl(metadata: dict,
 
             is_prose_length = len(first_line.split()) > _HEADING_MAX_WORDS
             prose_on_weak_signal = is_prose_length and conf == Confidence.LOW
+            # Multi-signal gate (#302): one weak signal is not enough on its
+            # own, so a LOW-confidence candidate must also *look* like a
+            # heading. Without this a footer disclaimer set one point above
+            # body size, or a standardese paragraph number, becomes a heading
+            # and pollutes the outline every downstream chunker reads.
+            if conf == Confidence.LOW and not _weak_heading_qualifies(
+                    first_line, section_num, font_level, is_bold, is_known):
+                prose_on_weak_signal = True
             if level > 0 and not prose_on_weak_signal:
                 head_sec, body_sec = _split_heading_body(sec, body_size)
                 head_sec.kind = SectionKind.HEADING
