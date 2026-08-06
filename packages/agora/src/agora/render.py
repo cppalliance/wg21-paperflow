@@ -96,6 +96,7 @@ def render_trace(state: PipelineState, stop_step: int) -> str:
     if stop_step >= 0:
         lines.append("## 0. Load\n")
         lines.append(f"- subreddit: {state.subreddit or '-'}")
+        lines.append(f"- committee: {state.committee or '-'}")
         lines.append(
             f"- audience: {state.paper_audience or '-'}; "
             f"revision: R{state.paper_revision} (case {state.revision_case})"

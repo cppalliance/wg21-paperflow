@@ -16,7 +16,7 @@ One-shot, fully batch. No human-in-the-loop.
 
 The pipeline runs Steps 0-7 (analysis phase). It plans the thread and
 writes ``{pid}.agora.json`` to paperstore. It does **not** generate
-reply text, characters, vote counts, or Reddit furniture; those
+reply text, characters, votes, or Reddit furniture; those
 remain ``None`` on the emitted ``Thread`` and are filled later by a
 future generation phase.
 """
@@ -56,6 +56,7 @@ from agora import mod_reference
 from agora.errors import PaperNotConvertedError, PaperNotFoundError
 from agora.models import (
     CalibrationOutput,
+    Committee,
     EncountersOutput,
     PipelineState,
     ResearchAgentReport,
@@ -63,7 +64,6 @@ from agora.models import (
     SkeletonOutput,
     SmellTestOutput,
     SubmissionOutput,
-    Subreddit,
     Thread,
 )
 from agora.render import render_trace
@@ -83,34 +83,41 @@ _STEP_6_ENCOUNTERS = "Step 6 - Encounters"
 _STEP_7_SERIALIZE = "Step 7 - Serialize"
 
 
-# -- Subreddit routing -------------------------------------------------------
+# -- Committee routing -------------------------------------------------------
+#
+# Every thread lands in the single r/wg21 community; the first target
+# group only derives the committee code the website renders as an
+# audience badge.
 
-_SUBREDDIT_BY_AUDIENCE: dict[str, Subreddit] = {
-    "EWG": "r/ewg",
-    "EWGI": "r/ewg",
-    "SG": "r/ewg",
-    "PLENARY": "r/ewg",
-    "LEWG": "r/lewg",
-    "LEWGI": "r/lewg",
-    "CWG": "r/cwg",
-    "LWG": "r/lwg",
+_COMMITTEE_BY_AUDIENCE: dict[str, Committee] = {
+    "EWG": "ewg",
+    "EWGI": "ewg",
+    "SG": "ewg",
+    "PLENARY": "ewg",
+    "LEWG": "lewg",
+    "LEWGI": "lewg",
+    "CWG": "cwg",
+    "LWG": "lwg",
 }
 
 _PAPER_ID_RE = re.compile(r"^(P\d+)R(\d+)$", re.IGNORECASE)
 
 
-def _route_subreddit(audience: str) -> Subreddit:
-    """Pick a subreddit by first target-group token. Defaults to ``r/ewg``."""
+def _route_committee(audience: str) -> Committee:
+    """Derive a committee code from the first target-group token.
+
+    Defaults to ``ewg`` for empty or unrecognized audiences.
+    """
     if not audience:
-        return "r/ewg"
+        return "ewg"
     for token in re.split(r"[\s,;/]+", audience.strip()):
         key = token.strip().upper()
         if not key:
             continue
-        for prefix, sub in _SUBREDDIT_BY_AUDIENCE.items():
+        for prefix, committee in _COMMITTEE_BY_AUDIENCE.items():
             if key.startswith(prefix):
-                return sub
-    return "r/ewg"
+                return committee
+    return "ewg"
 
 
 def _split_paper_id(pid: str) -> tuple[str, int]:
@@ -160,10 +167,12 @@ async def _pure_load(state: PipelineState, ctx: StepContext, spec: StepSpec) -> 
     state.paper_audience = meta.target_group or ""
     state.paper_date = meta.document_date or ""
     state.paper_url = meta.url or ""
+    state.mailing_id = meta.mailing_date or ""
     paper_number, revision = _split_paper_id(pid)
     state.paper_number = paper_number
     state.paper_revision = revision
-    state.subreddit = _route_subreddit(state.paper_audience)
+    state.subreddit = "r/wg21"
+    state.committee = _route_committee(state.paper_audience)
 
     # Load every extract artifact as raw row dicts; downstream steps
     # pick the fields they need without rebuilding typed models here.
@@ -185,8 +194,8 @@ async def _pure_load(state: PipelineState, ctx: StepContext, spec: StepSpec) -> 
         ctx.backend, paper_number, revision, pid,
     )
     logger.info(
-        "Step 0: %s (R%d) routed to %s; case=%s; prior=%s",
-        pid, revision, state.subreddit,
+        "Step 0: %s (R%d) committee=%s; case=%s; prior=%s",
+        pid, revision, state.committee,
         state.revision_case, state.prior_revision or "-",
     )
 
@@ -466,6 +475,7 @@ def _prepare_submission(state: PipelineState, ctx: StepContext) -> str:
         f"- date: {state.paper_date}\n"
         f"- paperstore url: {state.paper_url or '(none)'}\n"
         f"- subreddit: {state.subreddit}\n"
+        f"- committee: {state.committee}\n"
         f"- revision case: {state.revision_case}"
         f" (prior: {state.prior_revision or '-'})\n\n"
         f"## Heat / Interest\n\n"
@@ -513,7 +523,8 @@ def _prepare_skeleton(state: PipelineState, ctx: StepContext) -> str:
         f"- signal_count: {state.signal_count}\n"
         f"- noise_count: {state.noise_count}\n"
         f"- encounter_count: {state.encounter_count}\n"
-        f"- subreddit: {state.subreddit}\n\n"
+        f"- subreddit: {state.subreddit}\n"
+        f"- committee: {state.committee}\n\n"
         f"## Technical Anchors (every anchor must be addressed by >=1 slot)\n\n"
         f"{_json([a.model_dump(mode='json') for a in (state.technical_anchors or [])])}\n\n"
         f"## Hot Takes\n\n{_json(state.hot_takes)}\n\n"
@@ -581,11 +592,13 @@ async def _pure_serialize(state: PipelineState, ctx: StepContext, spec: StepSpec
         document=state.paper_id or "",
         paper=state.paper_number or "",
         revision=state.paper_revision,
+        mailing_id=state.mailing_id,
         title=state.paper_title,
-        authors=", ".join(state.paper_authors),
+        authors=list(state.paper_authors),
         audience=state.paper_audience,
         date=state.paper_date,
         subreddit=state.subreddit,
+        committee=state.committee or "ewg",
         prior_revision=state.prior_revision,
         revision_case=state.revision_case,  # type: ignore[arg-type]
         paper_type=state.paper_type,

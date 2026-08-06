@@ -1,0 +1,321 @@
+{
+  "_fixture_note": "HAND-AUTHORED v1 fixture for the .agora.json artifact contract. Fictional placeholder paper P2611R3/R2 and authors; persona usernames are the real roster. Revision-case-C example (exercises the supersede/lineage path). Not generated output. Ingest ignores unknown fields, including this one.",
+  "schema_version": 1,
+  "document": "P2611R3",
+  "paper": "P2611",
+  "revision": 3,
+  "mailing_id": "2026-05",
+  "title": "Disallow Implicit Narrowing in Aggregate Initialization",
+  "authors": [
+    "C. Author"
+  ],
+  "audience": "EWG, CWG",
+  "subreddit": "r/wg21",
+  "committee": "ewg",
+  "paper_type": "wording",
+  "heat": "warm",
+  "interest": "relevant",
+  "revision_case": "C",
+  "prior_revision": "P2611R2",
+  "submission_title": "P2611R3 — narrowing-in-aggregates fix, now reconciled with designated initializers (the R2 blocker)",
+  "submission_body": "R3 of the narrowing proposal. The big R2 objection was the interaction with designated initializers; R3 adds wording carving that out and a migration note. Otherwise unchanged from R2. Back to EWG, with CWG wording review.",
+  "submission_link": "/p2611r3",
+  "submission_tag": "Wording",
+  "submission_poster_id": "paper_trail_2019",
+  "submission_votes": [
+    {
+      "persona": "ranges_andy",
+      "direction": 1
+    },
+    {
+      "persona": "embedded_for_20_years",
+      "direction": 1
+    },
+    {
+      "persona": "compiles_first_try",
+      "direction": 1
+    },
+    {
+      "persona": "monomorphic_dan",
+      "direction": 1
+    },
+    {
+      "persona": "committee_gonna_committee",
+      "direction": -1
+    }
+  ],
+  "technical_anchors": [
+    {
+      "id": "a1",
+      "kind": "load_bearing",
+      "summary": "R3 adds wording so the narrowing ban does not break existing designated-initializer code — the R2 blocker.",
+      "claim_uid": "P2611R3:c1",
+      "claim_loc": "§2"
+    }
+  ],
+  "design_tensions": [],
+  "blueprint": {
+    "_note": "Condensed representative Phase-1 output for the fixture.",
+    "calibration": {
+      "paper_type": "wording",
+      "heat": "warm",
+      "interest": "relevant",
+      "target_comments": 5
+    },
+    "technical_anchor_ids": [
+      "a1"
+    ],
+    "design_tension_ids": [],
+    "encounters": [],
+    "revision": {
+      "case": "C",
+      "prior_revision": "P2611R2",
+      "note": "Supersedes R2; R2 thread to be badged superseded by the consumer."
+    },
+    "slots": [
+      {
+        "slot_id": "r1",
+        "parent_slot_id": null,
+        "depth": 0,
+        "role": "teaser",
+        "anchor_id": "a1",
+        "encounter_id": null,
+        "domain_lens": 10,
+        "brief": "Teaser: R3 actually fixes the R2 designated-init blocker; credit where due."
+      },
+      {
+        "slot_id": "r2",
+        "parent_slot_id": null,
+        "depth": 0,
+        "role": "signal",
+        "anchor_id": "a1",
+        "encounter_id": null,
+        "domain_lens": 2,
+        "brief": "Implementer note: migration cost on real codebases."
+      },
+      {
+        "slot_id": "r3",
+        "parent_slot_id": null,
+        "depth": 0,
+        "role": "tangent",
+        "anchor_id": null,
+        "encounter_id": null,
+        "domain_lens": 6,
+        "brief": "Novice question: what counts as narrowing here?"
+      },
+      {
+        "slot_id": "r4",
+        "parent_slot_id": "r3",
+        "depth": 1,
+        "role": "signal",
+        "anchor_id": "a1",
+        "encounter_id": null,
+        "domain_lens": 12,
+        "brief": "Teaching reply with a concrete example."
+      },
+      {
+        "slot_id": "r5",
+        "parent_slot_id": null,
+        "depth": 0,
+        "role": "noise",
+        "anchor_id": null,
+        "encounter_id": null,
+        "domain_lens": null,
+        "brief": "Process snark."
+      }
+    ]
+  },
+  "generated_at": "2026-05-18T09:05:00Z",
+  "comments": [
+    {
+      "slot_id": "r1",
+      "parent_slot_id": null,
+      "depth": 0,
+      "role": "teaser",
+      "persona": "ranges_andy",
+      "body": "Credit where it's due: R2 died on the designated-initializer interaction and R3 actually fixes it instead of hand-waving. §2's carve-out is the right shape. This is mergeable now in a way R2 wasn't.",
+      "tag": null,
+      "is_op": false,
+      "is_mod": false,
+      "controversial": false,
+      "edited": false,
+      "deleted": false,
+      "removed": false,
+      "collapsed": false,
+      "anchor_id": "a1",
+      "encounter_id": null,
+      "domain_lens": 10,
+      "brief": "Teaser: R3 fixes the R2 blocker; credit where due.",
+      "votes": [
+        {
+          "persona": "embedded_for_20_years",
+          "direction": 1
+        },
+        {
+          "persona": "compiles_first_try",
+          "direction": 1
+        },
+        {
+          "persona": "monomorphic_dan",
+          "direction": 1
+        },
+        {
+          "persona": "paper_trail_2019",
+          "direction": 1
+        }
+      ]
+    },
+    {
+      "slot_id": "r2",
+      "parent_slot_id": null,
+      "depth": 0,
+      "role": "signal",
+      "persona": "embedded_for_20_years",
+      "body": "On real firmware trees this will flag a few hundred sites that were quietly narrowing `int`→`uint8_t` in brace-init. That's the point of the paper, so I'm for it — but the migration note should say plainly that `-Wno-` is not a fix and the cast has to be made explicit. Otherwise people will paper over it. Posting once; won't relitigate in the replies.",
+      "tag": null,
+      "is_op": false,
+      "is_mod": false,
+      "controversial": false,
+      "edited": false,
+      "deleted": false,
+      "removed": false,
+      "collapsed": false,
+      "anchor_id": "a1",
+      "encounter_id": null,
+      "domain_lens": 2,
+      "brief": "Implementer note: migration cost; make the cast explicit.",
+      "votes": [
+        {
+          "persona": "ranges_andy",
+          "direction": 1
+        },
+        {
+          "persona": "monomorphic_dan",
+          "direction": 1
+        },
+        {
+          "persona": "compiles_first_try",
+          "direction": 1
+        },
+        {
+          "persona": "nanosecond_nancy",
+          "direction": 1
+        }
+      ]
+    },
+    {
+      "slot_id": "r3",
+      "parent_slot_id": null,
+      "depth": 0,
+      "role": "tangent",
+      "persona": "not_a_real_cpp_dev",
+      "body": "Trying to follow along: is `int x{2.0}` already an error today, or is that the thing this paper is changing? I genuinely can't keep track of which narrowing cases are already banned.",
+      "tag": null,
+      "is_op": false,
+      "is_mod": false,
+      "controversial": false,
+      "edited": false,
+      "deleted": false,
+      "removed": false,
+      "collapsed": false,
+      "anchor_id": null,
+      "encounter_id": null,
+      "domain_lens": 6,
+      "brief": "Novice question: what counts as narrowing here?",
+      "votes": [
+        {
+          "persona": "bootcamp_grad_2025",
+          "direction": 1
+        },
+        {
+          "persona": "compiles_first_try",
+          "direction": 1
+        }
+      ]
+    },
+    {
+      "slot_id": "r4",
+      "parent_slot_id": "r3",
+      "depth": 1,
+      "role": "signal",
+      "persona": "compiles_first_try",
+      "body": "Not a dumb question at all — the rules are genuinely scattered. `int x{2.0}` is *already* ill-formed (float→int in a braced-init is existing narrowing). What R2/R3 adds is catching the *integer* cases that today slip through in aggregates, e.g. `struct S { uint8_t b; }; S s{300};` — that compiles now and silently wraps. R3 makes that one an error too, while leaving designated-init spellings like `S s{.b = 7}` alone. So: float cases old, the silent integer-aggregate cases new.",
+      "tag": null,
+      "is_op": false,
+      "is_mod": false,
+      "controversial": false,
+      "edited": false,
+      "deleted": false,
+      "removed": false,
+      "collapsed": false,
+      "anchor_id": "a1",
+      "encounter_id": null,
+      "domain_lens": 12,
+      "brief": "Teaching reply with a concrete example.",
+      "votes": [
+        {
+          "persona": "not_a_real_cpp_dev",
+          "direction": 1
+        },
+        {
+          "persona": "bootcamp_grad_2025",
+          "direction": 1
+        },
+        {
+          "persona": "ranges_andy",
+          "direction": 1
+        },
+        {
+          "persona": "embedded_for_20_years",
+          "direction": 1
+        },
+        {
+          "persona": "monomorphic_dan",
+          "direction": 1
+        }
+      ]
+    },
+    {
+      "slot_id": "r5",
+      "parent_slot_id": null,
+      "depth": 0,
+      "role": "noise",
+      "persona": "committee_gonna_committee",
+      "body": "three revisions to ban writing 300 into a byte. we are so back",
+      "tag": null,
+      "is_op": false,
+      "is_mod": false,
+      "controversial": true,
+      "edited": false,
+      "deleted": false,
+      "removed": false,
+      "collapsed": false,
+      "anchor_id": null,
+      "encounter_id": null,
+      "domain_lens": null,
+      "brief": "Process snark.",
+      "votes": [
+        {
+          "persona": "segfault_enjoyer_69",
+          "direction": 1
+        },
+        {
+          "persona": "just_use_rust_lol",
+          "direction": 1
+        },
+        {
+          "persona": "bootcamp_grad_2025",
+          "direction": 1
+        },
+        {
+          "persona": "embedded_for_20_years",
+          "direction": -1
+        },
+        {
+          "persona": "compiles_first_try",
+          "direction": -1
+        }
+      ]
+    }
+  ]
+}

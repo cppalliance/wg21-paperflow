@@ -10,7 +10,7 @@ LLM-driven thread planning pipeline (the Mod). Project-wide rules live in the ro
 
 Plans a thread for a WG21 paper. Researches the paper's public reception, calibrates discussion heat and intellectual interest, and lays out every reply slot with a brief describing what that reply must accomplish.
 
-It does not generate reply text, characters, votes, or furniture. Those belong to a future generation phase in this same pipeline. The pipeline reads extract-table data from paperstore and produces a `Thread` whose generation-phase fields (content, character_username, score, time_label, awards, etc.) are left as `None`. The brief on each `Reply` is a permanent audit trail: "this reply addresses anchor X from the Y domain lens."
+It does not generate reply text, characters, votes, or furniture. Those belong to a future generation phase in this same pipeline. The pipeline reads extract-table data from paperstore and produces a `Thread` whose generation-phase fields (content, character_username, score, time_label, votes, etc.) are left as `None`. The brief on each `Reply` is a permanent audit trail: "this reply addresses anchor X from the Y domain lens."
 
 `the-mod.md` is the creative reference: heat/interest tiers, Tables A-D, the noise palette, encounter rules, content rules, ad palette, mod roster. It ships as package data and is injected as context into the LLM calls that need it.
 
@@ -22,6 +22,7 @@ One-shot, fully batch. No `AskQuestion`, no human-in-the-loop, no resumable runs
 - `the-mod.md` - canonical creative reference, shipped as package data. `mod_reference.py` slices it into per-step excerpts injected into LLM call user messages.
 - `mod_reference.py` - loads the-mod.md and exposes the scoped excerpt each step's prepare hook injects (heat check for calibration, Table C + noise palette for the skeleton, etc.). Fails loudly if a cited heading disappears.
 - `pipeline.py` - async orchestration: hook registry (`_build_hooks`), step prepare/extract functions, blueprint validation, public `agora_paper()` and `agora_since()` entry points. Step parsing (`StepSpec`, `PipelinePrompt`) and the dispatch loop live in the `pipeline` package. Sub-agent dispatch goes through `pipeline.tasks.run_task`, which serializes via the shared `_task_semaphore`.
+- `artifact.py` - the `.agora.json` interface: `thread_to_artifact` maps a fully generated `Thread` to the artifact dict (model names -> artifact vocabulary: `content`->`body`, `character_username`->`persona`, `flair`->`tag`, `submission_flair`->`submission_tag`; embeds the analysis-phase blueprint for audit), `validate_artifact` enforces the producer-side invariants (structure, vote uniqueness/direction, anchor coverage, roster membership when a roster is supplied). Canonical hand-authored fixtures live in `tests/fixtures/`.
 - `render.py` - debug transcript and per-step trace renderers. No HTML.
 - `models.py` - Pydantic models. One schema (`Thread`, `Reply`, `EncounterPlan` and friends) matches the eventual database; analysis-phase fields are required, generation-phase fields are `Optional`. Per-step LLM output classes and `PipelineState` live here too. `SourceLoc` imported from `paperstore`.
 - `errors.py` - paper-domain errors (`PaperNotFoundError`, `PaperNotConvertedError`) inheriting `pipeline.PipelineError`.
