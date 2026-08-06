@@ -111,7 +111,62 @@ def _render_line_spans(line: Line, in_code_section: bool = False,
     return "".join(parts)
 
 
-_EMDASH_BULLET_RE = re.compile(r"^[\u2013\u2014]\s")
+# The single Markdown unordered-list marker this converter emits, at every
+# nesting depth. "-" over "*" because the HTML renderer already emits "-", the
+# blessed ideals standardize on it, and it cannot be read as emphasis if a
+# stray bullet glyph survives mid-text (#303).
+LIST_BULLET = "-"
+
+
+# A line that opens an em/en-dash bulleted item. The dash is followed by
+# whitespace, or by nothing at all: standardese enumerations lay the marker out
+# as its own column, so extraction hands us the dash alone on its own ``Line``
+# ("\u2014", then "(5.1)", then the item text). Only the dash is consumed; the
+# grouping below strips what follows.
+_EMDASH_BULLET_RE = re.compile(r"^[\u2013\u2014](?=\s|$)")
+
+# Minimum items for an em-dash block whose lines do NOT all carry a marker to
+# read as a list. One marked line followed by unmarked lines is far more likely
+# to be a paragraph that happens to open on an em-dash than a one-item list, so
+# the wrapped-continuation path needs a second marked line to commit.
+_EMDASH_LIST_MIN_ITEMS = 2
+
+
+def _emdash_bullet_items(non_empty: list[str]) -> list[str] | None:
+    """Group em-dash-bulleted lines into items, or None if this is not a list.
+
+    A marker line opens an item; every unmarked line folds into the item above
+    it. That is how both shapes of a real enumeration reach us:
+
+    - a *wrapped* item, whose tail line carries no dash;
+    - a *column-laid-out* item, where the dash, the paragraph number and the
+      text are three separate ``Line`` objects on one visual row.
+
+    Requiring *every* line to carry a marker (the previous rule) failed on both
+    and collapsed the whole list into one run-together paragraph (#303, P3556R0's
+    [module.import] and [cpp.pre] enumerations).
+
+    The all-marked case keeps its old behaviour, including for a single line;
+    otherwise ``_EMDASH_LIST_MIN_ITEMS`` items are needed to commit.
+
+    A marker with no text after it is not an item. Dropping it before the
+    minimum-items test keeps a bare trailing dash from both emitting an empty
+    ``"- "`` bullet and padding a prose block up to the commit threshold.
+    """
+    if not non_empty or not _EMDASH_BULLET_RE.match(non_empty[0]):
+        return None
+    items: list[list[str]] = []
+    for ln in non_empty:
+        if _EMDASH_BULLET_RE.match(ln):
+            items.append([_EMDASH_BULLET_RE.sub("", ln, count=1).strip()])
+        else:
+            items[-1].append(ln)
+    all_marked = len(items) == len(non_empty)
+    items = [parts for parts in items if any(parts)]
+    if not items or not (all_marked or len(items) >= _EMDASH_LIST_MIN_ITEMS):
+        return None
+    return [f"{LIST_BULLET} " + " ".join(p for p in parts if p)
+            for parts in items]
 
 
 def _render_paragraph_spans(sec: Section) -> str:
@@ -122,8 +177,8 @@ def _render_paragraph_spans(sec: Section) -> str:
     with ``*...*`` wrappers) is not double-processed. PDF line breaks in
     the text are still flattened to spaces.
 
-    Preserves line breaks when every non-empty line starts with an
-    em-dash or en-dash bullet marker.
+    A block whose first line opens with an em-dash or en-dash bullet marker
+    renders as a list instead; see :func:`_emdash_bullet_items`.
     """
     if not sec.lines:
         return escape_leading_atx(
@@ -135,12 +190,10 @@ def _render_paragraph_spans(sec: Section) -> str:
     text = normalize_whitespace(text)
     lines = text.split("\n")
     non_empty = [ln.strip() for ln in lines if ln.strip()]
-    if non_empty and all(_EMDASH_BULLET_RE.match(ln) for ln in non_empty):
+    items = _emdash_bullet_items(non_empty)
+    if items is not None:
         prefix = "  " * sec.indent_level
-        return "\n".join(
-            prefix + _EMDASH_BULLET_RE.sub("- ", ln, count=1)
-            for ln in non_empty
-        )
+        return "\n".join(prefix + item for item in items)
     return escape_leading_atx(
         " ".join(ln.strip() for ln in lines if ln.strip()))
 
@@ -230,14 +283,14 @@ def _render_heading_spans(sec: Section) -> str:
 
 
 def _normalize_bullet(char: str) -> str:
-    """Replace Unicode bullet characters with *."""
+    """Replace a Unicode bullet character with ``LIST_BULLET``."""
     if char in BULLET_CHARS:
-        return "*"
+        return LIST_BULLET
     return char
 
 
 def _normalize_bullets(text: str) -> str:
-    """Replace Unicode bullet characters with * throughout text."""
+    """Replace Unicode bullet characters with ``LIST_BULLET`` throughout text."""
     return "".join(_normalize_bullet(ch) for ch in text)
 
 
@@ -282,19 +335,30 @@ def _is_list_item_start(text: str, current_item: str) -> bool:
     return False
 
 
+# A literal "*" list marker carried over from the source (some PDFs typeset
+# their bullets as plain asterisks, so no BULLET_CHARS glyph is present).
+_ASTERISK_MARKER_RE = re.compile(r"^\*\s+")
+
+
 def _format_list_item(text: str, depth: int) -> str:
     """Format one list item at the given nesting depth.
 
-    A Unicode bullet glyph becomes ``*`` at depth 0 and ``-`` when nested
-    (indented two spaces per level). Anything already carrying its own
-    marker (numbered ``1.``, literal ``-``/``*``) keeps it and is only
-    indented.
+    An unordered item gets ``LIST_BULLET`` at every depth (indented two spaces
+    per level), whether its source marker was a Unicode bullet glyph or a
+    literal ``*``. Depth used to switch the marker to ``*`` at the top level,
+    which made every unordered list in a PDF-sourced paper differ from the same
+    list in an HTML-sourced one and from the blessed ideals (#303); nesting is
+    carried by the indent, never by the marker glyph. Rewriting a literal ``*``
+    marker also removes the one shape where an item's own text could be read as
+    emphasis. An ordinal marker (``1.``, ``b)``) is meaningful and is kept.
     """
     text = text.strip()
     indent = _LIST_INDENT_UNIT * max(depth, 0)
     if text[:1] in BULLET_CHARS:
-        marker = "-" if depth > 0 else "*"
-        return f"{indent}{marker} {_normalize_bullets(text[1:].lstrip())}"
+        return f"{indent}{LIST_BULLET} {_normalize_bullets(text[1:].lstrip())}"
+    if _ASTERISK_MARKER_RE.match(text):
+        body = _ASTERISK_MARKER_RE.sub("", text, count=1)
+        return f"{indent}{LIST_BULLET} {_normalize_bullets(body)}"
     return f"{indent}{_normalize_bullets(text)}"
 
 

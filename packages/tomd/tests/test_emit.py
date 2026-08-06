@@ -3,6 +3,7 @@
 from conftest import make_section, make_line, make_span
 from tomd.lib.pdf.types import SectionKind, Confidence, Section, Span, Line
 from tomd.lib.pdf.emit import (
+    _emdash_bullet_items,
     emit_markdown,
     emit_prompts,
     _render_code_block,
@@ -255,11 +256,13 @@ def test_emit_list():
     assert "- item one" in md
 
 
-def test_emit_list_top_level_bullet_uses_star():
+def test_emit_list_top_level_bullet_uses_dash():
+    """Every depth uses the same "-" marker; nesting is carried by the indent."""
     sec = make_section("● item", kind=SectionKind.LIST)
     md = emit_markdown({}, [sec])
-    assert "* item" in md
+    assert "- item" in md
     assert "●" not in md
+    assert "* item" not in md
 
 
 def test_emit_list_nested_bullet_indented_dash():
@@ -299,8 +302,8 @@ def test_emit_list_multiple_clean_items_one_per_line():
     sec = make_section("● first\n● second",
                        kind=SectionKind.LIST, lines=[line1, line2])
     md = emit_markdown({}, [sec])
-    assert "* first" in md
-    assert "* second" in md
+    assert "- first" in md
+    assert "- second" in md
 
 
 def test_emit_list_numbered_item_keeps_own_marker():
@@ -338,7 +341,7 @@ def test_emit_list_year_continuation_stays_joined():
     sec = make_section("● Approved at the meeting in\n2017. The decision still stands.",
                        kind=SectionKind.LIST, lines=[line1, line2])
     md = emit_markdown({}, [sec])
-    assert "* Approved at the meeting in 2017. The decision still stands." in md
+    assert "- Approved at the meeting in 2017. The decision still stands." in md
 
 
 def test_emit_list_ordinal_after_finished_bullet_stays_separate():
@@ -356,7 +359,7 @@ def test_emit_list_ordinal_after_finished_bullet_stays_separate():
         kind=SectionKind.LIST, lines=[line1, line2],
     )
     md = emit_markdown({}, [sec])
-    assert "* It may be considered a controversial feature." in md
+    assert "- It may be considered a controversial feature." in md
     assert "d) Constraining iterators and ranges" in md
     assert "feature. d)" not in md
 
@@ -1028,3 +1031,117 @@ class TestCodeGutter:
         # measured column to 0 and the buf-overflow fallback nudged
         # past the number).
         assert body[3] == "4 [anchor]"
+
+
+class TestListMarkerNormalization:
+    """One marker, "-", at every depth and from every source shape (#303)."""
+
+    def test_literal_asterisk_marker_becomes_dash(self):
+        """Some PDFs typeset bullets as plain "*", so no BULLET_CHARS glyph exists."""
+        sec = make_section("* Intel oneAPI Math Kernel Library",
+                           kind=SectionKind.LIST)
+        md = emit_markdown({}, [sec])
+        assert "- Intel oneAPI Math Kernel Library" in md
+        assert "* Intel" not in md
+
+    def test_trademark_asterisk_inside_item_text_survives(self):
+        """Only the leading marker is rewritten; "Java*" is content."""
+        sec = make_section("* Java* java.util.Random", kind=SectionKind.LIST)
+        md = emit_markdown({}, [sec])
+        assert "- Java* java.util.Random" in md
+
+    def test_nested_bullet_keeps_dash_and_indent(self):
+        sec = make_section("○ nested", kind=SectionKind.LIST, indent_level=1)
+        md = emit_markdown({}, [sec])
+        assert "  - nested" in md
+
+    def test_ordinal_marker_is_not_rewritten(self):
+        sec = make_section("2. The override keyword shall be added",
+                           kind=SectionKind.LIST)
+        md = emit_markdown({}, [sec])
+        assert "2. The override keyword shall be added" in md
+
+    def test_leading_emphasis_is_not_a_list_marker(self):
+        """The "\\s+" in _ASTERISK_MARKER_RE is what keeps "*word*" intact.
+
+        Loosening it to "\\s*" would eat the opening emphasis delimiter and
+        leave the closing one behind, silently corrupting the text. Pinned
+        because nothing else in the suite would go red for it.
+        """
+        sec = make_section("*emphasized* lead-in", kind=SectionKind.LIST)
+        md = emit_markdown({}, [sec])
+        assert "*emphasized* lead-in" in md
+        assert "- emphasized" not in md
+
+
+class TestEmdashBulletItems:
+    """Em-dash enumerations must not collapse into one paragraph (#303)."""
+
+    def test_wrapped_item_folds_into_its_marker(self):
+        items = _emdash_bullet_items([
+            "— (5.1) if their header-names identify different headers or",
+            "source files, they import distinct header units;",
+            "— (5.2) otherwise, they import the same header unit;",
+        ])
+        assert items == [
+            "- (5.1) if their header-names identify different headers or "
+            "source files, they import distinct header units;",
+            "- (5.2) otherwise, they import the same header unit;",
+        ]
+
+    def test_marker_alone_on_its_own_line(self):
+        """Standardese lays the dash, the number and the text out as columns."""
+        items = _emdash_bullet_items([
+            "—", "(1.1)", "a `#` preprocessing token, or",
+            "—", "(1.2)", "an `import` preprocessing token, or",
+        ])
+        assert items == [
+            "- (1.1) a `#` preprocessing token, or",
+            "- (1.2) an `import` preprocessing token, or",
+        ]
+
+    def test_all_marked_single_line_still_becomes_an_item(self):
+        """Pre-existing behaviour: an all-marked block commits at one item."""
+        assert _emdash_bullet_items(["— only item"]) == ["- only item"]
+
+    def test_one_marker_then_unmarked_lines_stays_prose(self):
+        """Below _EMDASH_LIST_MIN_ITEMS this is a paragraph opening on a dash."""
+        assert _emdash_bullet_items([
+            "— a dash-led sentence that then",
+            "wraps onto a second line",
+        ]) is None
+
+    def test_block_not_opening_on_a_marker_is_not_a_list(self):
+        assert _emdash_bullet_items(["lead-in text", "— an item"]) is None
+
+    def test_end_note_dash_is_not_a_marker(self):
+        """"—end note]" has no whitespace after the dash, so it is content."""
+        assert _emdash_bullet_items(["—end note]"]) is None
+
+    def test_lone_marker_with_no_text_is_not_a_list(self):
+        assert _emdash_bullet_items(["—"]) is None
+
+    def test_trailing_bare_marker_emits_no_empty_bullet(self):
+        """A text-less marker is not an item, so it never emits "- "."""
+        assert _emdash_bullet_items(["— a", "—"]) == ["- a"]
+
+    def test_trailing_bare_marker_does_not_pad_prose_to_the_minimum(self):
+        """The empty item must not count toward _EMDASH_LIST_MIN_ITEMS."""
+        assert _emdash_bullet_items([
+            "— a dash-led sentence that then",
+            "wraps onto a second line",
+            "—",
+        ]) is None
+
+    def test_wrapped_enumeration_renders_as_a_list_through_emit(self):
+        lines = [make_line(["—"]), make_line(["(5.1)"]),
+                 make_line(["if their header-names differ,"]),
+                 make_line(["they import distinct header units;"]),
+                 make_line(["—"]), make_line(["(5.2)"]),
+                 make_line(["otherwise, the same header unit."])]
+        sec = make_section("\n".join(ln.text for ln in lines),
+                           kind=SectionKind.PARAGRAPH, lines=lines)
+        md = emit_markdown({}, [sec])
+        assert "- (5.1) if their header-names differ, they import distinct " \
+               "header units;" in md
+        assert "- (5.2) otherwise, the same header unit." in md

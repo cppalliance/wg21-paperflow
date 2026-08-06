@@ -138,7 +138,11 @@ The output Markdown must be clean and readable:
 - Paragraphs are single unwrapped lines (no hard wraps from PDF line breaks)
 - One blank line between all block elements (paragraphs, headings, lists, code blocks)
 - Headings use ATX style (`##` not underlines)
-- Lists use the marker from the source when detectable (`-`, `*`, `1.`)
+- Unordered lists always use `-`, at every nesting depth, whatever the source
+  marker was (a `BULLET_CHARS` glyph, a literal `*`, an em/en-dash). The single
+  marker is `emit.LIST_BULLET`; nesting is carried by two-space indentation per
+  level, never by switching the marker glyph. This matches the HTML renderer and
+  the blessed ideals. Ordinal markers (`1.`, `b)`) are meaningful and are kept.
 - No trailing whitespace on lines
 - No redundant blank lines (max one between blocks)
 - Dehyphenate broken words across lines (`imple-` + `mentation` -> `implementation`)
