@@ -16,7 +16,7 @@ One-shot, fully batch. No human-in-the-loop.
 
 The pipeline runs Steps 0-7 (analysis phase). It plans the thread and
 writes ``{pid}.agora.json`` to paperstore. It does **not** generate
-reply text, characters, vote counts, or Reddit furniture; those
+reply text, characters, votes, or Reddit furniture; those
 remain ``None`` on the emitted ``Thread`` and are filled later by a
 future generation phase.
 """
