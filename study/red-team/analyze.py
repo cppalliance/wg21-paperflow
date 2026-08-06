@@ -43,24 +43,9 @@ DATA_DIR = Path("c:/Users/Vinnie/wg21-data-dir/paperstore")
 CHUNKS_DATA = Path(__file__).parent.parent / "section-chunks" / "data"
 OUT_DIR = Path(__file__).parent / "data"
 
-# Canonical source: packages/assay/src/assay/assay.md ``## Services`` **default:**.
-DEFAULT_SERVICE = "h200x8-deepseek-v4-pro"
-
 MAX_OUTPUT_TOKENS = 16384
 
 SeverityKind = Literal["critical", "significant", "minor"]
-
-
-def _resolve_service(registry, name: str):
-    if name not in registry.services:
-        known = ", ".join(sorted(registry.services))
-        print(
-            f"Unknown service {name!r}. Known entries: {known}",
-            file=sys.stderr,
-        )
-        sys.exit(2)
-    return registry.services[name]
-
 
 SignalType = Literal[
     "claim",
@@ -289,7 +274,7 @@ def _build_reduce_user_message(
 
 
 async def main() -> None:
-    slot_name = DEFAULT_SERVICE
+    slot_override: str | None = None
 
     args = sys.argv[1:]
     if not args or args[0].startswith("-"):
@@ -302,7 +287,7 @@ async def main() -> None:
     pid = args[0].upper()
     for i, a in enumerate(args):
         if a == "--slot" and i + 1 < len(args):
-            slot_name = args[i + 1]
+            slot_override = args[i + 1]
 
     # Load score matrix (section boundaries + token estimates)
     matrix_path = CHUNKS_DATA / f"{pid.lower()}_score_matrix.json"
@@ -322,11 +307,17 @@ async def main() -> None:
         candidates = cand_data.get("candidates", [])
 
     # Resolve service
-    from pipeline.services import load_services
+    from pipeline import PipelinePrompt
+    from pipeline.services import load_services, resolve_pipeline_models
     from pipeline.agents import AgentBackend
 
     registry = load_services()
-    backend = _resolve_service(registry, slot_name)
+    prompt = PipelinePrompt.load("assay", "assay.md")
+    services_map = (
+        prompt.services if slot_override is None else {"default": slot_override}
+    )
+    backend = resolve_pipeline_models(services_map, registry)["default"]
+    slot_label = slot_override if slot_override is not None else services_map["default"]
 
     agent = AgentBackend(backend, max_tokens=MAX_OUTPUT_TOKENS, thinking_budget=4096)
 
@@ -337,7 +328,7 @@ async def main() -> None:
 
     print(f"Context window: {context_window}", file=sys.stderr)
     print(f"Available for sections: {available} tokens", file=sys.stderr)
-    print(f"Slot: {slot_name}", file=sys.stderr)
+    print(f"Slot: {slot_label}", file=sys.stderr)
 
     # -----------------------------------------------------------------------
     # Phase 1: Map (lens-agnostic signal extraction)

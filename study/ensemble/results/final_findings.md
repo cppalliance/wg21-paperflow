@@ -1,9 +1,9 @@
 # Final findings — cascade vs single, closing the loop
 
 **Reproducibility:** section-chunk scores cited from
-`study/section-chunks/section_classifier.py` used the **word-unit**
-oversized-sentence fallback (post PR #334). Re-running the harness with
-the prior token-index chunker will not reproduce the same chunk
+`study/section-chunks/section_classifier.py` used the **prior
+token-index** oversized-sentence fallback. Re-running the harness with
+the word-unit chunker (post PR #334) will not reproduce the same chunk
 boundaries or downstream ensemble numbers.
 
 This is the apples-to-apples ablation we couldn't run before. Every

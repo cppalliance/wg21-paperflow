@@ -35,23 +35,9 @@ DATA_DIR = Path("c:/Users/Vinnie/wg21-data-dir/paperstore")
 OUT_DIR = STUDY_DIR / "data"
 RESULTS_DIR = STUDY_DIR / "results"
 
-# Canonical source: packages/assay/src/assay/assay.md ``## Services`` **default:**.
-DEFAULT_SERVICE = "h200x8-deepseek-v4-pro"
-
 HeatTier = Literal["cold", "warm", "hot", "thermonuclear"]
 InterestTier = Literal["niche", "relevant", "magnetic", "gravitational"]
 PaperType = Literal["wording", "proposal", "directional"]
-
-
-def _resolve_service(registry, name: str):
-    if name not in registry.services:
-        known = ", ".join(sorted(registry.services))
-        print(
-            f"Unknown service {name!r}. Known entries: {known}",
-            file=sys.stderr,
-        )
-        sys.exit(2)
-    return registry.services[name]
 
 
 class TechnicalAnchor(BaseModel, frozen=True):
@@ -142,8 +128,8 @@ def _build_thread_gen_msg(pid: str, smell: SmellTestOutput) -> str:
 
 
 async def main() -> None:
-    smell_slot = DEFAULT_SERVICE
-    thread_slot = DEFAULT_SERVICE
+    smell_slot_override: str | None = None
+    thread_slot_override: str | None = None
 
     args = sys.argv[1:]
     if not args or args[0].startswith("-"):
@@ -153,11 +139,11 @@ async def main() -> None:
     pid = args[0].upper()
     for i, a in enumerate(args):
         if a == "--slot" and i + 1 < len(args):
-            smell_slot = thread_slot = args[i + 1]
+            smell_slot_override = thread_slot_override = args[i + 1]
         elif a == "--smell-slot" and i + 1 < len(args):
-            smell_slot = args[i + 1]
+            smell_slot_override = args[i + 1]
         elif a == "--thread-slot" and i + 1 < len(args):
-            thread_slot = args[i + 1]
+            thread_slot_override = args[i + 1]
 
     findings_path = RED_TEAM_DATA / f"{pid.lower()}_findings.json"
     candidates_path = RED_TEAM_DATA / f"{pid.lower()}_candidates.json"
@@ -174,28 +160,51 @@ async def main() -> None:
 
     print(f"Paper: {pid}", file=sys.stderr)
     print(f"Findings: {len(findings)}", file=sys.stderr)
-    print(f"Smell slot: {smell_slot}, Thread slot: {thread_slot}", file=sys.stderr)
+
+    from pipeline import PipelinePrompt
+    from pipeline.services import load_services, resolve_pipeline_models
+    from pipeline.agents import AgentBackend
+
+    registry = load_services()
+    prompt = PipelinePrompt.load("assay", "assay.md")
+    default_service = prompt.services["default"]
+    smell_label = smell_slot_override if smell_slot_override is not None else default_service
+    thread_label = (
+        thread_slot_override if thread_slot_override is not None else default_service
+    )
+    print(
+        f"Smell slot: {smell_label}, Thread slot: {thread_label}",
+        file=sys.stderr,
+    )
+
+    def _resolve_backend(override: str | None):
+        services_map = (
+            prompt.services if override is None else {"default": override}
+        )
+        return resolve_pipeline_models(services_map, registry)["default"]
+
+    if smell_slot_override is None and thread_slot_override is None:
+        shared = _resolve_backend(None)
+        smell_backend = thread_backend = shared
+    else:
+        smell_backend = _resolve_backend(smell_slot_override)
+        thread_backend = _resolve_backend(thread_slot_override)
+
+    smell_agent = AgentBackend(
+        smell_backend,
+        max_tokens=16384,
+        thinking_budget=4096,
+    )
+    thread_agent = AgentBackend(
+        thread_backend,
+        max_tokens=16384,
+        thinking_budget=4096,
+    )
 
     prompt_sections = _load_prompt_sections()
     system_prompt = prompt_sections.get("System Prompt", "")
     smell_instructions = prompt_sections.get("1. Smell Test", "")
     thread_instructions = prompt_sections.get("2. Generate Thread", "")
-
-    from pipeline.services import load_services
-    from pipeline.agents import AgentBackend
-
-    registry = load_services()
-
-    smell_agent = AgentBackend(
-        _resolve_service(registry, smell_slot),
-        max_tokens=16384,
-        thinking_budget=4096,
-    )
-    thread_agent = AgentBackend(
-        _resolve_service(registry, thread_slot),
-        max_tokens=16384,
-        thinking_budget=4096,
-    )
 
     # Step 1: Smell test
     smell_msg = _build_smell_test_msg(pid, findings, candidates, "")

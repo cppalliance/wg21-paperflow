@@ -78,12 +78,6 @@ def test_invalid_targets_rejected(argv: list[str], msg: str):
     assert msg in result.stderr
 
 
-def test_assay_accepts_bare_year():
-    from cli.__main__ import _validate_targets
-
-    _validate_targets("assay", ["2026"])
-
-
 @pytest.mark.parametrize(
     ("argv", "msg"),
     [

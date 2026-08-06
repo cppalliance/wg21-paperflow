@@ -86,7 +86,7 @@ _VERB_TARGETS_HELP = {
     "convert":   "Year (2026), paper id(s) (P3642R4 ...), or year-month (2026-01).",
     "full":      "Year (2026), paper id(s) (P3642R4 ...), or `all`.",
     "agora":     "Paper ID (P4003R2) or year-month (2026-01) for batch planning.",
-    "assay":     "Paper ID (P4003R2) or year-month (2026-01) for batch analysis.",
+    "assay":     "One target: paper ID (P4003R2), year (2026), or year-month (2026-01).",
     "status":    "Paper ID, year, year-month, or omit for all incomplete papers.",
 }
 
