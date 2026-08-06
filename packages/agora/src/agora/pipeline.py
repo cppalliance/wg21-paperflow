@@ -52,6 +52,7 @@ from pipeline.errors import (
     StepError,
     ValidationStepError,
 )
+from agora import mod_reference
 from agora.errors import PaperNotConvertedError, PaperNotFoundError
 from agora.models import (
     CalibrationOutput,
@@ -265,6 +266,8 @@ def _prepare_smell_test(state: PipelineState, ctx: StepContext) -> str:
         f"## Markers\n\n"
         f"{_json(state.dissect_markers)}\n\n"
         f"## Paper Source\n\n{state.paper_source or ''}\n\n"
+        f"## The Mod Reference (the-mod.md)\n\n"
+        f"{mod_reference.smell_test_excerpts()}\n\n"
         f"## Instructions\n\n{body}"
     )
 
@@ -371,21 +374,42 @@ async def _pure_research(state: PipelineState, ctx: StepContext, spec: StepSpec)
     )
 
 
-def _fallback_report(agent: str) -> ResearchAgentReport:
+async def _pure_research_disabled(
+    state: PipelineState, ctx: StepContext, spec: StepSpec,
+) -> None:
+    """Step 2 with research turned off for the run.
+
+    Records an empty research summary so Step 3 calibrates from paper
+    signals alone; no web search or MCP traffic is generated.
+    """
+    logger.info("Step 2 skipped: research disabled for this run")
+    state.research_summary = _empty_research_summary(
+        "(research disabled for this run; no findings)"
+    )
+
+
+_FALLBACK_FINDINGS = "(research sub-agent failed; no findings)"
+
+
+def _fallback_report(
+    agent: str, findings: str = _FALLBACK_FINDINGS,
+) -> ResearchAgentReport:
     return ResearchAgentReport(
         agent=agent,  # type: ignore[arg-type]
-        findings="(research sub-agent failed; no findings)",
+        findings=findings,
         sources=[],
         heat_signal="warm",
         interest_signal="relevant",
     )
 
 
-def _empty_research_summary() -> ResearchSummary:
+def _empty_research_summary(
+    findings: str = _FALLBACK_FINDINGS,
+) -> ResearchSummary:
     return ResearchSummary(
-        public_reception=_fallback_report("public_reception"),
-        committee_history=_fallback_report("committee_history"),
-        author_ecosystem=_fallback_report("author_ecosystem"),
+        public_reception=_fallback_report("public_reception", findings),
+        committee_history=_fallback_report("committee_history", findings),
+        author_ecosystem=_fallback_report("author_ecosystem", findings),
     )
 
 
@@ -411,6 +435,8 @@ def _prepare_calibrate(state: PipelineState, ctx: StepContext) -> str:
         f"## Design Tensions\n\n"
         f"{_json([t.model_dump(mode='json') for t in (state.design_tensions or [])])}\n\n"
         f"## Research Summary\n\n{research}\n\n"
+        f"## The Mod Reference (the-mod.md)\n\n"
+        f"{mod_reference.calibrate_excerpts()}\n\n"
         f"## Instructions\n\n{body}"
     )
 
@@ -451,6 +477,8 @@ def _prepare_submission(state: PipelineState, ctx: StepContext) -> str:
         f"## Hot Takes\n\n{_json(state.hot_takes)}\n\n"
         f"## Research Summary\n\n{research}\n\n"
         f"## Paper Source\n\n{state.paper_source or ''}\n\n"
+        f"## The Mod Reference (the-mod.md)\n\n"
+        f"{mod_reference.submission_excerpts()}\n\n"
         f"## Instructions\n\n{body}"
     )
 
@@ -493,6 +521,8 @@ def _prepare_skeleton(state: PipelineState, ctx: StepContext) -> str:
         f"## Misconception Traps\n\n{_json(state.misconception_traps)}\n\n"
         f"## Design Tensions\n\n"
         f"{_json([t.model_dump(mode='json') for t in (state.design_tensions or [])])}\n\n"
+        f"## The Mod Reference (the-mod.md)\n\n"
+        f"{mod_reference.skeleton_excerpts()}\n\n"
         f"## Instructions\n\n{body}"
     )
 
@@ -520,6 +550,8 @@ def _prepare_encounters(state: PipelineState, ctx: StepContext) -> str:
         f"## Pre-allocated Encounter Slot Groups\n\n{_json(groups)}\n\n"
         f"## Planned Replies\n\n"
         f"{_json([r.model_dump(mode='json') for r in (state.replies or [])])}\n\n"
+        f"## The Mod Reference (the-mod.md)\n\n"
+        f"{mod_reference.encounters_excerpts()}\n\n"
         f"## Instructions\n\n{body}"
     )
 
@@ -609,30 +641,41 @@ def _validate_blueprint(state: PipelineState, replies: list, encounters: list) -
         if r.role in ("signal", "encounter", "teaser") and r.domain_lens is not None:
             lens_used.add(r.domain_lens)
 
-    missing_anchors = anchor_ids - addressed
-    if missing_anchors and anchor_ids:
-        logger.warning(
-            "Step 7: %d technical anchors have no addressing reply: %s",
-            len(missing_anchors), sorted(missing_anchors),
+    missing_anchors = sorted(anchor_ids - addressed)
+    if missing_anchors:
+        raise ValidationStepError(
+            7, _STEP_7_SERIALIZE,
+            ValueError(
+                f"{len(missing_anchors)} technical anchor(s) have no addressing "
+                f"reply slot with role signal/encounter/teaser: {missing_anchors}. "
+                f"Every anchor must be addressed by at least one slot."
+            ),
         )
 
     encounter_slot_ids = {sid for e in encounters for sid in e.slot_ids}
     skel_encounter_ids = {
         r.slot_id for r in replies if r.role == "encounter"
     }
-    orphan_encounter = skel_encounter_ids - encounter_slot_ids
-    if orphan_encounter and encounters:
-        logger.warning(
-            "Step 7: %d encounter slots are not linked to any EncounterPlan: %s",
-            len(orphan_encounter), sorted(orphan_encounter),
+    orphan_encounter = sorted(skel_encounter_ids - encounter_slot_ids)
+    if orphan_encounter:
+        raise ValidationStepError(
+            7, _STEP_7_SERIALIZE,
+            ValueError(
+                f"{len(orphan_encounter)} encounter slot(s) are not claimed by "
+                f"any EncounterPlan: {orphan_encounter}. Step 6 must emit one "
+                f"plan per encounter chain covering every encounter-role slot."
+            ),
         )
 
     floor = _INTEREST_LENS_FLOOR.get(state.interest or "niche", 0)
     if floor and len(lens_used) < floor:
-        logger.warning(
-            "Step 7: interest=%s requires >=%d distinct domain lenses; "
-            "skeleton used %d.",
-            state.interest, floor, len(lens_used),
+        raise ValidationStepError(
+            7, _STEP_7_SERIALIZE,
+            ValueError(
+                f"interest={state.interest} requires >={floor} distinct Table C "
+                f"domain lenses; the skeleton used {len(lens_used)} "
+                f"({sorted(lens_used)})."
+            ),
         )
 
     if state.revision_case == "C" and not state.prior_revision:
@@ -652,12 +695,15 @@ def _json(obj: Any) -> str:
 
 # -- Hook registry -----------------------------------------------------------
 
-def _build_hooks() -> dict[str, StepHooks]:
+def _build_hooks(*, research: bool = True) -> dict[str, StepHooks]:
     """Build the step hooks dict.
 
     No agents are attached here; the runner resolves the agent for
     each step via ``ctx.agents[spec.step.model]`` so ``agora.md``'s
     ``**Model:**`` declarations are the single source of truth.
+
+    ``research=False`` swaps Step 2 for a stub that records an empty
+    research summary instead of dispatching the web sub-agents.
     """
     return {
         _STEP_0_LOAD: StepHooks(custom=_pure_load),
@@ -667,7 +713,7 @@ def _build_hooks() -> dict[str, StepHooks]:
             extract=_extract_smell_test,
         ),
         _STEP_2_RESEARCH: StepHooks(
-            custom=_pure_research,
+            custom=_pure_research if research else _pure_research_disabled,
         ),
         _STEP_3_CALIBRATE: StepHooks(
             output_type=CalibrationOutput,
@@ -705,6 +751,7 @@ async def agora_paper(
     stop_after: int | None = None,
     debug: bool = False,
     trace: bool = False,
+    research: bool = True,
 ) -> Thread | str:
     """Plan a Reddit thread for a dissected WG21 paper.
 
@@ -713,6 +760,10 @@ async def agora_paper(
     writes ``{pid}.agora.json`` via ``backend.write_agora_json``, and
     returns the planned :class:`Thread`. Generation-phase fields stay
     ``None``.
+
+    ``research=False`` turns Step 2 off for this run: no web search
+    or MCP traffic; the thread calibrates from paper signals alone
+    against an empty research summary.
 
     Raises :class:`PromptFileError` if ``agora.md`` has structural
     problems. Raises :class:`PaperNotFoundError` or
@@ -743,7 +794,7 @@ async def agora_paper(
             "'System Prompt' section not found in agora.md."
         )
 
-    hooks = _build_hooks()
+    hooks = _build_hooks(research=research)
     pipeline = build_pipeline(prompt, hooks)
 
     try:
@@ -820,12 +871,14 @@ async def agora_since(
     stop_after: int | None = None,
     debug: bool = False,
     trace: bool = False,
+    research: bool = True,
 ) -> list[dict[str, str | None]]:
     """Plan threads for all papers with ``mailing_date >= month``.
 
-    Iterates sequentially, calling :func:`agora_paper` for each. The
-    JSON is written inside :func:`agora_paper` via
-    ``backend.write_agora_json``; this function only collects status.
+    Iterates sequentially, calling :func:`agora_paper` for each
+    (``research`` is passed through). The JSON is written inside
+    :func:`agora_paper` via ``backend.write_agora_json``; this
+    function only collects status.
 
     Per-paper errors are caught and logged; the loop continues.
 
@@ -844,6 +897,7 @@ async def agora_since(
                 stop_after=stop_after,
                 debug=debug,
                 trace=trace,
+                research=research,
             )
             logger.info("Planned thread for %s", pid)
             results.append({"paper_id": pid, "status": "ok", "error": None})
