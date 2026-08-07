@@ -105,7 +105,7 @@ synthesis_agent = AgentBackend(slots["default"], max_tokens=MAX_OUTPUT_TOKENS, t
 research_agent = AgentBackend(slots["tool"], max_tokens=MAX_OUTPUT_TOKENS)
 ```
 
-Model slot binding comes from each pipeline's markdown ``## Services`` block. Edit that file to change which service backs a logical model name. Classifier slot binding uses the same ``- **slot:** entry`` bullet format under a ``## Classifiers`` block; the orchestrator passes the parsed map to `resolve_classifiers`.
+Model slot binding comes from each pipeline's markdown ``## Services`` block. Edit that file to change which service backs a logical model name. Classifier slot binding uses the same ``- **slot:** entry`` bullet format under a ``## Classifiers`` block.
 
 ## Invariants
 

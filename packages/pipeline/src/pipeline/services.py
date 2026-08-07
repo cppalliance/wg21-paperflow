@@ -326,9 +326,9 @@ def resolve_classifiers(
     Returns a slot-name -> backend dict keyed by the caller's binding.
     Two slots bound to the same inventory entry share one backend
     instance. Slots are processed in sorted slot-name order (D7).
-    Callers that want an ensemble pass ``set(result.values())`` or
-    ``dict.fromkeys(result.values())`` into a scorer that accepts a
-    sequence.
+    Callers that want an ensemble pass ``dict.fromkeys(result.values())``
+    (preserves sorted slot insertion order) or ``set(result.values())`` if
+    order does not matter into a scorer that accepts a sequence.
 
     Provider selection for each entry follows
     :func:`_provider_for_classifier_entry`.

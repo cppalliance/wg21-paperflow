@@ -167,28 +167,35 @@ async def main() -> None:
 
     registry = load_services()
     prompt = PipelinePrompt.load("assay", "assay.md")
-    default_service = prompt.services["default"]
-    smell_label = smell_slot_override if smell_slot_override is not None else default_service
-    thread_label = (
-        thread_slot_override if thread_slot_override is not None else default_service
-    )
-    print(
-        f"Smell slot: {smell_label}, Thread slot: {thread_label}",
-        file=sys.stderr,
-    )
 
     def _resolve_backend(override: str | None):
         services_map = (
             prompt.services if override is None else {"default": override}
         )
-        return resolve_pipeline_models(services_map, registry)["default"]
+        return resolve_pipeline_models(services_map, registry)["default"], services_map
 
     if smell_slot_override is None and thread_slot_override is None:
-        shared = _resolve_backend(None)
-        smell_backend = thread_backend = shared
+        smell_backend, services_map = _resolve_backend(None)
+        thread_backend = smell_backend
+        smell_label = thread_label = services_map["default"]
     else:
-        smell_backend = _resolve_backend(smell_slot_override)
-        thread_backend = _resolve_backend(thread_slot_override)
+        smell_backend, smell_map = _resolve_backend(smell_slot_override)
+        thread_backend, thread_map = _resolve_backend(thread_slot_override)
+        smell_label = (
+            smell_slot_override
+            if smell_slot_override is not None
+            else smell_map["default"]
+        )
+        thread_label = (
+            thread_slot_override
+            if thread_slot_override is not None
+            else thread_map["default"]
+        )
+
+    print(
+        f"Smell slot: {smell_label}, Thread slot: {thread_label}",
+        file=sys.stderr,
+    )
 
     smell_agent = AgentBackend(
         smell_backend,

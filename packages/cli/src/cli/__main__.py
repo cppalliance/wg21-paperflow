@@ -86,7 +86,7 @@ _VERB_TARGETS_HELP = {
     "convert":   "Year (2026), paper id(s) (P3642R4 ...), or year-month (2026-01).",
     "full":      "Year (2026), paper id(s) (P3642R4 ...), or `all`.",
     "agora":     "Paper ID (P4003R2) or year-month (2026-01) for batch planning.",
-    "assay":     "One target: paper ID (P4003R2), year (2026), or year-month (2026-01).",
+    "assay":     "One target: paper ID (P4003R2).",
     "status":    "Paper ID, year, year-month, or omit for all incomplete papers.",
 }
 
@@ -220,8 +220,22 @@ def _validate_targets(verb: str, targets: list[str]) -> None:
             print(f"paperflow {verb}: {exc}", file=sys.stderr)
             sys.exit(1)
 
-    if verb in ("agora", "assay"):
-        if verb == "agora" and "year" in kinds:
+    if verb == "assay":
+        if len(targets) != 1:
+            print(
+                f"paperflow {verb}: accepts exactly one target, got {len(targets)}.",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+        if kinds != {"paper"}:
+            print(
+                f"paperflow {verb}: accepts a paper ID, not years or year-months.",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+
+    if verb == "agora":
+        if "year" in kinds:
             print(
                 f"paperflow {verb}: accepts a paper ID or year-month, not bare years.",
                 file=sys.stderr,

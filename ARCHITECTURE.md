@@ -158,7 +158,7 @@ won = cur.rowcount == 1
 Two layers separate infrastructure from pipeline intent:
 
 ```
-SERVICES.toml -> load_services() -> dict[str, ModelBackend]
+SERVICES.toml -> load_services() -> ServiceRegistry
                                          |
                  resolve_pipeline_models() -> dict[str, ModelBackend]
                                          |
