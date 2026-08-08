@@ -22,6 +22,7 @@ from tomd.lib.shared import (  # noqa: F401
     strip_format_chars,
     strip_leading_h1,
     strip_freeform_metadata_lines,
+    strip_heading_section_number,
     strip_orphan_toc_list,
     strip_redundant_body_meta,
 )
@@ -55,6 +56,7 @@ __all__ = [
     "strip_format_chars",
     "strip_leading_h1",
     "strip_freeform_metadata_lines",
+    "strip_heading_section_number",
     "strip_orphan_toc_list",
     "strip_redundant_body_meta",
     "FRONT_MATTER_ORDER",

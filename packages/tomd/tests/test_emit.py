@@ -31,7 +31,7 @@ def test_emit_heading_joins_all_lines():
         lines=[make_line(["1"]), make_line(["Scope"]), make_line(["[scope]"])],
     )
     md = emit_markdown({}, [sec])
-    assert "## 1 Scope [scope]" in md
+    assert "## Scope [scope]" in md
 
 
 def test_emit_heading_dedupes_overprinted_lines():
@@ -65,7 +65,7 @@ def test_emit_heading_excludes_lower_baseline_body_line():
         ],
     )
     md = emit_markdown({}, [sec])
-    assert "## 1 Scope" in md
+    assert "## Scope" in md
     assert "Body prose here" not in md.split("\n")[0]
     assert "Body prose here" in md
 
@@ -85,7 +85,7 @@ def test_emit_heading_joins_mixed_font_row_by_baseline():
         ],
     )
     md = emit_markdown({}, [sec])
-    assert "## 19 SCOPE" in md
+    assert "## SCOPE" in md
 
 
 def test_emit_heading_joins_split_row_when_font_size_zero():
@@ -103,7 +103,31 @@ def test_emit_heading_joins_split_row_when_font_size_zero():
         ],
     )
     md = emit_markdown({}, [sec])
-    assert "## 1 Scope" in md
+    assert "## Scope" in md
+
+
+def test_emit_heading_strips_redundant_section_number():
+    """Issue #301: the number already sets the heading level; it must not
+    also survive into the rendered text (`## 2 Revision History` -> `##
+    Revision History`)."""
+    sec = make_section("2 Revision History", kind=SectionKind.HEADING,
+                       heading_level=2)
+    md = emit_markdown({}, [sec])
+    assert "## Revision History" in md
+    assert "## 2 Revision History" not in md
+
+
+def test_emit_heading_keeps_wording_clause_reference():
+    """A number immediately followed by a bracketed stable name (`5.1
+    [lex.separate]`) is a WG21 standard clause reference, not the paper's
+    own outline number, and must survive - it is the only record of which
+    clause is being modified."""
+    sec = make_section(
+        "5.1 [lex.separate] Separate translation",
+        kind=SectionKind.HEADING, heading_level=3,
+    )
+    md = emit_markdown({}, [sec])
+    assert "### 5.1 [lex.separate] Separate translation" in md
 
 
 def test_emit_paragraph_unwrapped():

@@ -1059,3 +1059,27 @@ DOC_NUM_RE = re.compile(rf"\b({DOC_NUM_PATTERN})\b", re.IGNORECASE)
 # Leading section-number prefix used by the HTML renderer to strip a number
 # (e.g. "2.1.3 " or "1. ") from heading text.
 SECTION_NUM_PREFIX_RE = re.compile(rf"^{SECTION_NUM_PATTERN}\.?\s+")
+
+
+def strip_heading_section_number(text: str) -> str:
+    """Strip a leading outline-number prefix from rendered heading text.
+
+    The number is consumed upstream as the *level* signal (dotted-decimal
+    depth or the HTML source tag digit); leaving it in the text too
+    duplicates it, so ``## 2 Revision History`` should read ``## Revision
+    History``.
+
+    Exception: a number immediately followed by ``[`` (e.g. ``5.1
+    [lex.separate]``, ``15.6.5 [[cpp.rescan]](url)`` once link-rendered) is a
+    WG21 *standard clause reference* inside a Wording/Proposed Wording
+    section, not the paper's own outline numbering - it does not correspond
+    to this heading's nesting depth (a "15.6.5" clause reference can sit at
+    the same level as a "5.1" one) and is the only record of which clause of
+    the standard is being modified, so it must survive into the text.
+    """
+    m = SECTION_NUM_PREFIX_RE.match(text)
+    if not m:
+        return text
+    if text[m.end():].startswith("["):
+        return text
+    return text[m.end():]

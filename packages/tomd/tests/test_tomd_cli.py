@@ -134,7 +134,7 @@ def test_cli_rebless_force_lowers(tmp_path):
     manifest.write_text(json.dumps({"p4228r0": {"heading": 1.0}}) + "\n", encoding="utf-8")
     rc = main(["--golden-dir", str(tmp_path), "rebless", "p4228r0", "--force"])
     assert rc == 0
-    assert json.loads(manifest.read_text())["p4228r0"]["heading"] == pytest.approx(round(2 / 3, 2))
+    assert json.loads(manifest.read_text())["p4228r0"]["heading"] == pytest.approx(0.92)
 
 
 def test_cli_add_stages_source(tmp_path):

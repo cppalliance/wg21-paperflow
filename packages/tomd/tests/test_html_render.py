@@ -21,16 +21,24 @@ class TestHeading:
         md = render_body(soup, "mpark")
         assert "## Introduction" in md
 
-    def test_keeps_section_number_span(self):
+    def test_strips_section_number_span(self):
         soup = parse_html(
             '<h1><span class="header-section-number">1</span> Abstract</h1>')
         md = render_body(soup, "mpark")
-        assert "# 1 Abstract" in md
+        assert "# Abstract" in md
 
-    def test_preserves_leading_dotted_number(self):
+    def test_strips_leading_dotted_number(self):
         soup = parse_html("<h3>2.1.3 Details</h3>")
         md = render_body(soup, "mpark")
-        assert "### 2.1.3 Details" in md
+        assert "### Details" in md
+
+    def test_keeps_wording_clause_reference(self):
+        # Issue #301: a number immediately followed by a bracketed stable
+        # name is a WG21 standard clause reference, not the paper's own
+        # outline number, and must survive stripping.
+        soup = parse_html("<h3>5.1 [lex.separate] Separate translation</h3>")
+        md = render_body(soup, "mpark")
+        assert "### 5.1 [lex.separate] Separate translation" in md
 
     def test_bold_suppressed(self):
         soup = parse_html("<h2><strong>Bold Heading</strong></h2>")
@@ -342,13 +350,13 @@ class TestHeadingEdgeCases:
         md = render_body(soup, "mpark")
         assert "## The `foo_bar` section" in md
 
-    def test_inline_code_preserved_with_kept_number_span(self):
+    def test_inline_code_preserved_after_number_span_stripped(self):
         soup = parse_html(
             '<h2><span class="header-section-number">3</span> '
             "<code>foo</code> bar</h2>"
         )
         md = render_body(soup, "mpark")
-        assert "## 3 `foo` bar" in md
+        assert "## `foo` bar" in md
 
     def test_link_preserved_in_heading(self):
         soup = parse_html(
@@ -1950,8 +1958,8 @@ class TestEelisWording:
             "<div class='texpara'><div class='sentence'>Body</div></div>"
             "</div>"
         )
-        assert "### 20 Memory management library [mem]" in md
-        assert "#### 20.1 General [mem.general]" in md
+        assert "### Memory management library [mem]" in md
+        assert "#### General [mem.general]" in md
         assert "###### Deep heading" in md
         assert "####### " not in md
 

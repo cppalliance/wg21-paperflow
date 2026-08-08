@@ -8,7 +8,7 @@ from collections import deque
 
 from bs4 import BeautifulSoup, CData, Comment, Tag, NavigableString
 
-from .. import CODE_LANG_LABELS, strip_format_chars, ALLOWED_LINK_SCHEMES
+from .. import CODE_LANG_LABELS, strip_format_chars, ALLOWED_LINK_SCHEMES, strip_heading_section_number
 from ..wording_markup import WORDING_FENCE_CLOSE, wording_fence_open, wording_tag_open
 from .. import tables as _tables
 from ..pdf.code_format import is_diagram_block
@@ -666,6 +666,10 @@ def _render_heading(el: Tag) -> str | None:
     text = text.replace("\n", " ")
     text = re.sub(r"  +", " ", text)
     text = _BOLD_WRAP_RE.sub(r"\1", text)
+    # The number is only a level signal (the source tag digit already carries
+    # it here); it must not also survive into the rendered text, or headings
+    # read "## 2 Revision History" instead of the clean "## Revision History".
+    text = strip_heading_section_number(text)
     return f"{'#' * level} {text}"
 
 

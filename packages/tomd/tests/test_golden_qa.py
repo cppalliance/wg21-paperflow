@@ -74,12 +74,14 @@ def test_tomd_markdown_html_nonempty():
 @requires_source
 def test_score_stem_matches_committed_baseline():
     # p4228r0 has a blessed ideal; its score must reproduce the manifest.
-    # heading is 2/3 under the graded axis: text and nesting are correct, only
-    # the absolute level is uniformly wrong (the #155 signature).
+    # heading is 0.92: level and nesting are now correct (issue #301 stripped
+    # the redundant leading section number from heading text), text is not
+    # perfect because a handful of headings still diverge from the ideal for
+    # unrelated reasons.
     scores = score_stem("p4228r0", _GOLDEN)
-    assert scores["heading"] == pytest.approx(round(2 / 3, 2))  # 2/3 rounds to 0.67
+    assert scores["heading"] == pytest.approx(0.92)
     assert scores["frontmatter"] == 1.0
-    assert scores["text"] == pytest.approx(0.85)
+    assert scores["text"] == pytest.approx(0.95)
 
 
 @requires_source
@@ -121,9 +123,9 @@ def test_bless_stem_writes_exact_baseline(tmp_path):
     manifest = _stage(tmp_path)
     manifest.write_text("{}\n", encoding="utf-8")
     row = bless_stem("p4228r0", tmp_path, manifest)
-    assert row["heading"] == pytest.approx(round(2 / 3, 2))  # 2/3 rounds to 0.67
+    assert row["heading"] == pytest.approx(0.92)
     written = json.loads(manifest.read_text(encoding="utf-8"))
-    assert written["p4228r0"]["heading"] == pytest.approx(round(2 / 3, 2))
+    assert written["p4228r0"]["heading"] == pytest.approx(0.92)
 
 
 @requires_source
@@ -152,7 +154,7 @@ def test_rebless_force_lowers_baseline(tmp_path):
     manifest.write_text(json.dumps({"p4228r0": {"heading": 1.0}}) + "\n", encoding="utf-8")
     rebless_stems(["p4228r0"], tmp_path, manifest, force=True)
     written = json.loads(manifest.read_text(encoding="utf-8"))
-    assert written["p4228r0"]["heading"] == pytest.approx(round(2 / 3, 2))
+    assert written["p4228r0"]["heading"] == pytest.approx(0.92)
 
 
 @requires_source
@@ -161,7 +163,7 @@ def test_rebless_raises_baseline_up(tmp_path):
     manifest.write_text(json.dumps({"p4228r0": {"heading": 0.0}}) + "\n", encoding="utf-8")
     outcomes = rebless_stems(["p4228r0"], tmp_path, manifest, force=False)
     written = json.loads(manifest.read_text(encoding="utf-8"))
-    assert written["p4228r0"]["heading"] == pytest.approx(round(2 / 3, 2))
+    assert written["p4228r0"]["heading"] == pytest.approx(0.92)
     assert outcomes[0].stem == "p4228r0"
 
 

@@ -9,6 +9,7 @@ from .. import (
     apply_strip_leading_h1,
     dedup_paragraphs,
     format_front_matter,
+    strip_heading_section_number,
     strip_redundant_body_meta,
     strip_orphan_toc_list,
 )
@@ -244,7 +245,7 @@ def _render_heading_spans(sec: Section) -> str:
             for ln in sec.lines]
     rows = [r for r in rows if r[2]]
     if not rows:
-        clean_text = sec.text.split("\n")[0].strip()
+        clean_text = strip_heading_section_number(sec.text.split("\n")[0].strip())
         return f"{prefix} {clean_text}" if clean_text else ""
 
     anchor_y, anchor_fs, _, _ = rows[0]
@@ -265,7 +266,7 @@ def _render_heading_spans(sec: Section) -> str:
             if body_line:
                 remainder_lines.append(body_line)
 
-    clean_text = " ".join(parts).strip()
+    clean_text = strip_heading_section_number(" ".join(parts).strip())
     if not clean_text:
         return ""
     heading = f"{prefix} {clean_text}"

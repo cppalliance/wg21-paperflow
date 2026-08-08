@@ -17,6 +17,7 @@ from tomd.lib.shared import (
     _strip_metadata_table,
     apply_strip_leading_h1,
     override_revision_from_filename,
+    strip_heading_section_number,
     strip_leading_h1,
     strip_redundant_body_meta,
 )
@@ -170,3 +171,45 @@ class TestStripLeadingH1:
     def test_max_level_2_leaves_deeper_heading(self):
         out = strip_leading_h1("### My Paper\n\nBody.", "My Paper", max_level=2)
         assert out.lstrip().startswith("### My Paper")
+
+
+class TestStripHeadingSectionNumber:
+    """Issue #301: the number is a level signal, not part of the title."""
+
+    def test_strips_plain_arabic_number(self):
+        assert strip_heading_section_number("2 Revision History") == "Revision History"
+
+    def test_strips_dotted_decimal_number(self):
+        assert strip_heading_section_number("2.1.3 Details") == "Details"
+
+    def test_strips_number_with_trailing_dot(self):
+        assert strip_heading_section_number("1. Disclosure") == "Disclosure"
+
+    def test_strips_roman_numeral(self):
+        assert strip_heading_section_number("IV Scope") == "Scope"
+
+    def test_no_number_is_noop(self):
+        assert strip_heading_section_number("Abstract") == "Abstract"
+
+    def test_bare_number_with_no_title_is_left_alone(self):
+        # No trailing content to distinguish "the number" from "the title",
+        # so there is nothing safe to strip.
+        assert strip_heading_section_number("3.2") == "3.2"
+
+    def test_keeps_standard_clause_reference(self):
+        # A number immediately followed by "[" is a WG21 standard clause
+        # reference (which clause is being modified), not the paper's own
+        # redundant outline number, and must survive into the heading text.
+        text = "5.1 [lex.separate] Separate translation"
+        assert strip_heading_section_number(text) == text
+
+    def test_keeps_multi_part_clause_reference(self):
+        text = "15.6.5 [[cpp.rescan]](https://wg21.link/cpp.rescan) Rescanning"
+        assert strip_heading_section_number(text) == text
+
+    def test_strips_number_when_bracket_is_not_adjacent(self):
+        # The bracket exception only fires when the bracket directly follows
+        # the number; a bracket later in the title is an ordinary heading.
+        text = "10.3 modify [simd.expos.defn]"
+        assert (strip_heading_section_number(text)
+                == "modify [simd.expos.defn]")

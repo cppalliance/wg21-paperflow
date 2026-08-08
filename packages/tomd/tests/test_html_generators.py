@@ -251,7 +251,7 @@ def test_hatemplate_heading_levels_not_offset_by_title_h1():
     soup = parse_html(_load("hatemplate_sample.html"))
     strip_boilerplate(soup, "hatemplate")
     md = render_body(soup, "hatemplate")
-    assert "### 1.1 Header synopsis [test.syn]" in md
+    assert "### Header synopsis [test.syn]" in md
     assert "##### " not in md
 
 
