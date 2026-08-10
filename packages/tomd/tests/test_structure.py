@@ -1574,6 +1574,38 @@ class TestWordingSectionCodeGuard:
 
         assert sec.kind == SectionKind.WORDING_REMOVE
 
+    def test_bare_numeral_ins_stays_code(self):
+        # Issue #305: a PDF that colors numeric literals for its own
+        # syntax-highlighting reasons (no foreign chromatic companion, so
+        # the color guard above does not fire) must not have an ordinary
+        # code example ("gen(777)") wrapped in a fake ":::wording-add" with
+        # "<ins>777</ins>" inside the fence.
+        literal = Span(text="777", color=self._GREEN_INS,
+                       monospace=True, wording_role="ins")
+        black = Span(text="std::mt19937 gen();", color=self._BLACK,
+                    monospace=True)
+        sec = self._code_section([black, literal])
+
+        _classify_wording_sections([sec])
+
+        assert sec.kind == SectionKind.CODE
+
+    def test_numeral_and_identifier_ins_mix_still_reclassified(self):
+        # Control: the bare-numeral guard only fires when EVERY ins span is
+        # a bare numeral. A section that also inserts a real identifier
+        # (e.g. a genuine "constexpr" edit alongside a renumbered literal)
+        # is still promoted, so the guard stays targeted.
+        literal = Span(text="777", color=self._GREEN_INS,
+                       monospace=True, wording_role="ins")
+        keyword = Span(text="constexpr", color=self._GREEN_INS,
+                       monospace=True, wording_role="ins")
+        black = Span(text="void f();", color=self._BLACK, monospace=True)
+        sec = self._code_section([keyword, literal, black])
+
+        _classify_wording_sections([sec])
+
+        assert sec.kind == SectionKind.WORDING_ADD
+
 
 class TestBlockFontSize:
     def test_line_count_voting(self):
