@@ -23,9 +23,13 @@
 #      multilabel_seqcls   fine-tuned AutoModelForSequenceClassification
 #    No api_key_env: classifiers are local-model wrappers. First run
 #    downloads weights into the local HF cache; subsequent runs are
-#    fully offline. [classifier_defaults] maps classifier slot names to
-#    classifier names. The orchestrator overrides via --classifier CLI
-#    flags (e.g. `--classifier selector=zeroshot-base`).
+#    fully offline. This file is a pure inventory of entries; it does
+#    not bind slot names to entries. Each consuming package declares
+#    its own slot -> entry binding under a ## Classifiers block in its
+#    pipeline markdown (e.g. assay.md), resolved via
+#    pipeline.resolve_classifiers(). See the [classifiers] section
+#    below for [classifier_defaults]'s narrow role as a framework
+#    fallback.
 #
 # 3. [transformer_providers.NAME] declares the device / dtype / batch
 #    settings used for transformer inference. Classifiers do NOT declare
@@ -39,10 +43,11 @@
 #                            used verbatim. Missing required keys raise
 #                            at load. Use in cloud / provisioned hosts.
 #    [transformer_provider_defaults] maps slot names to provider names.
-#    Override precedence at runtime: --provider CLI flag (top) >
-#    PAPERFLOW_TRANSFORMER_PROVIDER env var > [transformer_provider_defaults]
-#    > the hardcoded "auto" fallback (so a fresh clone with no provider
-#    section still works).
+#    Override precedence at runtime: caller ``provider_override`` kwarg
+#    (no CLI wiring yet) > PAPERFLOW_TRANSFORMER_PROVIDER env var >
+#    per-classifier ``provider = "<name>"`` entry pin >
+#    [transformer_provider_defaults] > the hardcoded "auto" fallback
+#    (so a fresh clone with no provider section still works).
 #
 # The three namespaces do not mix: slot resolution is independent.
 
@@ -149,8 +154,20 @@ thinking_capable = true
 tools_capable = true
 
 # ---------------------------------------------------------------------------
-# Local zero-shot classifiers (dissect Step 1 Tag Sentences)
+# Local text classifiers (HF / CrossEncoder / fine-tuned seqcls)
 # ---------------------------------------------------------------------------
+#
+# Each entry is one model plus runtime parameters for a specific use.
+# Name an entry <package>-<use>-<family> when its model or provider
+# settings diverge from a shared inventory entry. Binding (which slot
+# maps to which entry) is owned by each consuming package, typically
+# via a ``## Classifiers`` block in that package's pipeline markdown.
+#
+# [classifier_defaults] is the framework fallback layer: resolve_classifiers()
+# loads it only when the caller passes binding=None (no binding declared).
+# An explicit binding, including {}, is authoritative and does not merge
+# defaults underneath. No in-repo pipeline calls resolve_classifiers yet;
+# it is guarded by tests.
 
 # Default: small NLI cross-encoder. ~150MB, ~15-25ms/sentence on CPU.
 # With the cross-validated TARGET hypothesis label and structural
@@ -167,28 +184,27 @@ model = "cross-encoder/nli-deberta-v3-small"
 # classification on 5 NLI + 28 non-NLI datasets. ~1.7GB FP32, ~1.5s
 # per sentence on CPU. Sharper raw scores than nli-small but the
 # final-decision quality is equivalent once the alt TARGET hypothesis
-# is in place. Use via `--classifier selector=zeroshot-large` when
-# you want the model's confidence numbers themselves (e.g. for the
-# Tier 3 cascade oracle slot described in study/ensemble/).
+# is in place. Bind via the consuming package's ``## Classifiers``
+# block when sharper raw scores are needed (e.g. the Tier 3 cascade
+# oracle slot described in study/ensemble/).
 [classifiers.zeroshot-large]
 backend = "zeroshot_v2"
 model = "MoritzLaurer/deberta-v3-large-zeroshot-v2.0"
 
 # Mid-tier: DeBERTa-v3-base, same fine-tune family as zeroshot-large.
-# ~700MB FP32, sub-second per chunk on CPU. Use via `--classifier
-# selector=zeroshot-base` when you need a faster iteration loop than
-# zeroshot-large but want sharper scores than nli-small.
+# ~700MB FP32, sub-second per chunk on CPU.
 [classifiers.zeroshot-base]
 backend = "zeroshot_v2"
 model = "MoritzLaurer/deberta-v3-base-zeroshot-v2.0"
 
 # Fine-tuned multi-label sequence classifier (multilabel_seqcls backend).
 # Uncomment once a checkpoint exists (train via
-# packages/pipeline/scripts/finetune_seqcls.py). Use via
-# `--classifier selector=routing-tagger`.
-# [classifiers.routing-tagger]
+# packages/pipeline/scripts/finetune_seqcls.py). Assay binds via
+# ``assay.md`` ``## Classifiers`` (e.g. selector: assay-routing-tagger).
+# [classifiers.assay-routing-tagger]
 # backend = "multilabel_seqcls"
 # model = "/path/to/routing-tagger-v1"
+# provider = "cpu-fp32"
 
 # Example future addition: specialized claim detector. Demonstrates
 # that the abstraction makes adding a new classifier a config change,

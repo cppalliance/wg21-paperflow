@@ -5,17 +5,28 @@
 # file LICENSE_1_0.txt or copy at http://www.boost.org/LICENSE_1_0.txt)
 #
 
-"""Service loader: SERVICES.toml -> :class:`ServiceRegistry`.
+"""Service loader: SERVICES.toml -> backends and resolvers.
 
-``SERVICES.toml`` at the repo root is a pure infrastructure inventory.
-Each ``[services.NAME]`` section declares an endpoint with its
-capabilities. API keys come from environment variables only (the
-``api_key_env`` field names the env var; the key itself is never in
-the file). There are no slot defaults; each pipeline's markdown file
-declares its own logical-name -> service-name map under
-``## Services``.
+``SERVICES.toml`` at the repo root is a pure infrastructure inventory
+with parallel namespaces:
 
-Validation happens in two layers:
+- ``[services.NAME]``: remote LLM endpoints (:class:`ModelBackend`).
+  Each pipeline's markdown ``## Services`` block binds logical names
+  to inventory entries via :func:`resolve_pipeline_models`.
+- ``[classifiers.NAME]``: local text classifiers
+  (:class:`ClassifierBackend`). Callers bind slots via
+  :func:`resolve_classifiers`; ``[classifier_defaults]`` applies only
+  when ``binding`` is ``None``.
+- ``[embedders.NAME]``: embedding models, loaded eagerly by
+  :func:`load_embedders`.
+- ``[transformer_providers.NAME]``: device/dtype/batch settings for
+  transformer inference, resolved by :func:`load_transformer_providers`
+  and :func:`resolve_transformer_provider`.
+
+API keys come from environment variables only (the ``api_key_env``
+field names the env var; the key itself is never in the file).
+
+Validation happens in two layers for LLM services:
 
 - :func:`load_services` does eager config-shape checks: unknown
   ``backend`` keys and ``required_api_key_env`` mismatches both raise
@@ -76,9 +87,7 @@ class ServiceRegistry:
         # bleeding through the proxy. ``frozen=True`` blocks direct
         # attribute assignment in __post_init__, so go through
         # ``object.__setattr__``.
-        object.__setattr__(
-            self, "services", MappingProxyType(dict(self.services))
-        )
+        object.__setattr__(self, "services", MappingProxyType(dict(self.services)))
         object.__setattr__(
             self, "api_key_envs", MappingProxyType(dict(self.api_key_envs))
         )
@@ -92,6 +101,21 @@ def _find_services_toml() -> Path | None:
         if candidate.is_file():
             return candidate
     return None
+
+
+def _load_config(path: Path | None) -> tuple[Path, dict[str, Any]]:
+    """Resolve SERVICES.toml path and parse it."""
+    if path is None:
+        path = _find_services_toml()
+    if path is None or not path.is_file():
+        raise FileNotFoundError(
+            f"{_SERVICES_FILENAME} not found. Create it at the repo root "
+            f"with at least one [services.NAME] section."
+        )
+
+    with open(path, "rb") as f:
+        config = tomllib.load(f)
+    return path, config
 
 
 def load_services(path: Path | None = None) -> ServiceRegistry:
@@ -124,16 +148,7 @@ def load_services(path: Path | None = None) -> ServiceRegistry:
     Raises :class:`ServiceConfigError` for unknown backend types and for
     ``required_api_key_env`` mismatches.
     """
-    if path is None:
-        path = _find_services_toml()
-    if path is None or not path.is_file():
-        raise FileNotFoundError(
-            f"{_SERVICES_FILENAME} not found. Create it at the repo root "
-            f"with at least one [services.NAME] section."
-        )
-
-    with open(path, "rb") as f:
-        config = tomllib.load(f)
+    _, config = _load_config(path)
 
     services_config = config.get("services", {})
 
@@ -204,7 +219,10 @@ def load_services(path: Path | None = None) -> ServiceRegistry:
 
         logger.info(
             "Service '%s': %s  model=%s  endpoint=%s",
-            name, backend_key, init_kwargs["model"], init_kwargs["base_url"],
+            name,
+            backend_key,
+            init_kwargs["model"],
+            init_kwargs["base_url"],
         )
 
     return ServiceRegistry(
@@ -213,81 +231,151 @@ def load_services(path: Path | None = None) -> ServiceRegistry:
     )
 
 
-def load_classifiers(
+def _instantiate_classifier(
+    name: str,
+    cfg: dict[str, Any],
+    provider: TransformerProvider,
+) -> ClassifierBackend:
+    backend_key = cfg.get("backend")
+    if backend_key not in CLASSIFIER_BACKEND_REGISTRY:
+        raise ServiceConfigError(
+            f"Classifier '{name}' declares backend '{backend_key}' "
+            f"which is not in the registry. "
+            f"Available: {sorted(CLASSIFIER_BACKEND_REGISTRY)}",
+        )
+
+    init_kwargs: dict[str, Any] = {
+        k: v for k, v in cfg.items() if k not in ("backend", "device", "provider")
+    }
+    init_kwargs["provider"] = provider
+
+    backend_cls = CLASSIFIER_BACKEND_REGISTRY[backend_key]
+    backend = backend_cls(**init_kwargs)
+    logger.info(
+        "Classifier '%s': %s  model=%s  provider=%s (device=%s dtype=%s batch=%d)",
+        name,
+        backend_key,
+        cfg.get("model", ""),
+        provider.name,
+        provider.device,
+        provider.dtype,
+        provider.batch_size,
+    )
+    return backend
+
+
+def _provider_for_classifier_entry(
+    entry_name: str,
+    entry_cfg: Mapping[str, Any],
+    providers: dict[str, TransformerProvider],
+    provider_defaults: Mapping[str, str],
+    *,
+    provider_override: str | None,
+) -> TransformerProvider:
+    """Resolve transformer provider for one classifier inventory entry.
+
+    Precedence, top wins:
+
+    1. ``provider_override`` (``resolve_classifiers(provider_override=...)``).
+    2. ``PAPERFLOW_TRANSFORMER_PROVIDER`` env var.
+    3. The entry's ``provider = "<name>"`` in SERVICES.toml.
+    4. ``[transformer_provider_defaults].default``.
+    5. The hardcoded ``"auto"`` entry.
+    """
+    entry_pin = entry_cfg.get("provider")
+    if isinstance(entry_pin, str):
+        entry_pin = entry_pin.strip() or None
+    else:
+        entry_pin = None
+
+    provider_name = (
+        provider_override
+        or os.environ.get(_TRANSFORMER_PROVIDER_ENV)
+        or entry_pin
+        or provider_defaults.get("default")
+        or "auto"
+    )
+    if provider_name not in providers:
+        raise ServiceConfigError(
+            f"Classifier entry {entry_name!r} declares transformer provider "
+            f"{provider_name!r} which is not defined in SERVICES.toml. "
+            f"Available: {sorted(providers)}"
+        )
+    return providers[provider_name]
+
+
+def resolve_classifiers(
+    binding: Mapping[str, str] | None = None,
     path: Path | None = None,
     *,
-    provider: TransformerProvider | None = None,
-) -> tuple[dict[str, ClassifierBackend], dict[str, str]]:
-    """Parse SERVICES.toml, build ClassifierBackend instances.
+    provider_override: str | None = None,
+) -> dict[str, ClassifierBackend]:
+    """Resolve classifier inventory entries to :class:`ClassifierBackend` instances.
 
-    Parallel to :func:`load_services`. Returns ``(classifiers,
-    defaults)`` where ``classifiers`` maps names to
-    :class:`pipeline.classifier_backends.ClassifierBackend` instances
-    and ``defaults`` maps slot names (e.g. ``selector``) to classifier
-    names from ``[classifier_defaults]``.
+    ``binding`` is an opaque slot-name -> inventory-entry-name map from
+    the caller (e.g. a pipeline's ``## Classifiers`` block). The framework
+    does not parse pipeline markdown or know slot semantics; it only
+    instantiates the entries the caller names.
 
-    No API keys: classifier backends are local-model wrappers. Per-
-    entry fields (``model`` plus any optional fields the specific
-    backend reads) are forwarded as kwargs to the backend constructor.
+    ``binding`` is authoritative when provided: ``{}`` resolves to an
+    empty dict (no silent fallback). ``None`` is the only path that
+    loads ``[classifier_defaults]`` (framework fallback for callers
+    that declare no binding). A non-empty dict is used as-is; defaults
+    are not merged in underneath partial bindings.
 
-    The runtime device / dtype / batch settings come from a
-    :class:`TransformerProvider`. Resolve one with
-    :func:`load_transformer_providers` + :func:`resolve_transformer_provider`
-    and pass it via the ``provider`` kwarg; when omitted, the
-    process-wide host-auto provider is used. The legacy per-classifier
-    ``device`` field is silently dropped: configure it via the provider
-    instead.
+    Returns a slot-name -> backend dict keyed by the caller's binding.
+    Two slots bound to the same inventory entry share one backend
+    instance. Slots are processed in sorted slot-name order (D7).
+    Callers that want an ensemble should pass ``dict.fromkeys(result.values())``
+    (preserves sorted slot insertion order) or ``set(result.values())`` if
+    order does not matter. If the scorer expects a sequence, use
+    ``list(dict.fromkeys(result.values()))``.
 
-    Missing ``[classifiers.*]`` and ``[classifier_defaults]`` are not
-    an error -- this lets pre-Step-1 callers ignore the new sections
-    entirely. The returned dicts are empty in that case.
+    Provider selection for each entry follows
+    :func:`_provider_for_classifier_entry`.
 
-    Raises ``FileNotFoundError`` if the config file is not found.
-    Raises :class:`ServiceConfigError` for unknown backend types.
+    Raises ``FileNotFoundError`` if SERVICES.toml is missing.
+    Raises :class:`ServiceConfigError` for unknown backends, unknown
+    inventory entries, or unknown per-entry provider names.
     """
-    if path is None:
-        path = _find_services_toml()
-    if path is None or not path.is_file():
-        raise FileNotFoundError(
-            f"{_SERVICES_FILENAME} not found. Create it at the repo root "
-            f"with at least one [services.NAME] section."
-        )
-
-    with open(path, "rb") as f:
-        config = tomllib.load(f)
+    path, config = _load_config(path)
 
     classifiers_config = config.get("classifiers", {})
-    defaults = config.get("classifier_defaults", {})
+    # [classifier_defaults] applies only when binding is None (caller
+    # declared nothing). An explicit binding -- even {} -- is authoritative
+    # and does not pull in default slots silently.
+    if binding is None:
+        binding = dict(config.get("classifier_defaults", {}))
 
-    if provider is None:
-        provider = default_auto_provider()
+    if not binding:
+        return {}
 
-    classifiers: dict[str, ClassifierBackend] = {}
-    for name, cfg in classifiers_config.items():
-        backend_key = cfg.get("backend")
-        if backend_key not in CLASSIFIER_BACKEND_REGISTRY:
+    providers, provider_defaults = load_transformer_providers(path)
+
+    entry_instances: dict[str, ClassifierBackend] = {}
+    out: dict[str, ClassifierBackend] = {}
+
+    for slot_name, entry_name in sorted(binding.items()):
+        if entry_name not in classifiers_config:
             raise ServiceConfigError(
-                f"Classifier '{name}' declares backend '{backend_key}' "
-                f"which is not in the registry. "
-                f"Available: {sorted(CLASSIFIER_BACKEND_REGISTRY)}"
+                f"Classifier slot {slot_name!r} references entry "
+                f"{entry_name!r} which is not defined in SERVICES.toml. "
+                f"Available: {sorted(classifiers_config)}"
             )
+        if entry_name not in entry_instances:
+            cfg = classifiers_config[entry_name]
+            provider = _provider_for_classifier_entry(
+                entry_name,
+                cfg,
+                providers,
+                provider_defaults,
+                provider_override=provider_override,
+            )
+            backend = _instantiate_classifier(entry_name, cfg, provider)
+            entry_instances[entry_name] = backend
+        out[slot_name] = entry_instances[entry_name]
 
-        # Drop `backend` (used above) and the legacy `device` field
-        # (now owned by the provider). Forward the rest as kwargs.
-        init_kwargs: dict[str, Any] = {
-            k: v for k, v in cfg.items() if k not in ("backend", "device")
-        }
-        init_kwargs["provider"] = provider
-
-        backend_cls = CLASSIFIER_BACKEND_REGISTRY[backend_key]
-        classifiers[name] = backend_cls(**init_kwargs)
-        logger.info(
-            "Classifier '%s': %s  model=%s  provider=%s (device=%s dtype=%s batch=%d)",
-            name, backend_key, cfg.get("model", ""),
-            provider.name, provider.device, provider.dtype, provider.batch_size,
-        )
-
-    return classifiers, defaults
+    return out
 
 
 def load_embedders(
@@ -297,10 +385,11 @@ def load_embedders(
 ) -> tuple[dict[str, EmbeddingBackend], dict[str, str]]:
     """Parse SERVICES.toml ``[embedders.*]``, build EmbeddingBackend instances.
 
-    Parallel to :func:`load_classifiers`. Returns ``(embedders, defaults)``
-    where ``embedders`` maps names to
-    :class:`pipeline.transformer_backend.EmbeddingBackend` instances and
-    ``defaults`` maps slot names to embedder names from
+    Eager whole-inventory load (tuple of embedders + defaults), unlike
+    :func:`resolve_classifiers` which lazily instantiates only bound
+    entries. Returns ``(embedders, defaults)`` where ``embedders`` maps
+    names to :class:`pipeline.transformer_backend.EmbeddingBackend`
+    instances and ``defaults`` maps slot names to embedder names from
     ``[embedder_defaults]``.
 
     Missing ``[embedders.*]`` and ``[embedder_defaults]`` sections are not
@@ -308,16 +397,7 @@ def load_embedders(
     """
     from pipeline.transformer_backend import EmbeddingBackend
 
-    if path is None:
-        path = _find_services_toml()
-    if path is None or not path.is_file():
-        raise FileNotFoundError(
-            f"{_SERVICES_FILENAME} not found. Create it at the repo root "
-            f"with at least one [services.NAME] section."
-        )
-
-    with open(path, "rb") as f:
-        config = tomllib.load(f)
+    _, config = _load_config(path)
 
     embedders_config = config.get("embedders", {})
     defaults = config.get("embedder_defaults", {})
@@ -335,8 +415,12 @@ def load_embedders(
         embedders[name] = EmbeddingBackend(model_id, provider)
         logger.info(
             "Embedder '%s': model=%s  provider=%s (device=%s dtype=%s batch=%d)",
-            name, model_id,
-            provider.name, provider.device, provider.dtype, provider.batch_size,
+            name,
+            model_id,
+            provider.name,
+            provider.device,
+            provider.dtype,
+            provider.batch_size,
         )
 
     return embedders, defaults
@@ -359,16 +443,7 @@ def load_transformer_providers(
     Raises :class:`pipeline.errors.TransformerConfigError` for malformed
     entries (missing required keys under ``mode = "explicit"``).
     """
-    if path is None:
-        path = _find_services_toml()
-    if path is None or not path.is_file():
-        raise FileNotFoundError(
-            f"{_SERVICES_FILENAME} not found. Create it at the repo root "
-            f"with at least one [services.NAME] section."
-        )
-
-    with open(path, "rb") as f:
-        config = tomllib.load(f)
+    _, config = _load_config(path)
 
     raw_providers = config.get("transformer_providers", {})
     defaults = config.get("transformer_provider_defaults", {})
@@ -398,15 +473,15 @@ def resolve_transformer_provider(
 
     Order, top wins:
 
-    1. ``override`` (from the ``--provider`` CLI flag).
+    1. ``override`` (caller-supplied ``provider_override`` kwarg).
     2. ``PAPERFLOW_TRANSFORMER_PROVIDER`` env var.
     3. ``[transformer_provider_defaults].default`` from SERVICES.toml.
     4. The hardcoded ``"auto"`` entry injected by
        :func:`load_transformer_providers`.
 
-    Raises ``KeyError`` if the resolved name is not in ``providers``.
-    Mirrors the slot-resolution pattern used by :func:`resolve_slots`
-    and :func:`resolve_classifier_slots`.
+    Raises :class:`ServiceConfigError` if the resolved name is not in
+    ``providers``. Mirrors the slot-resolution pattern used by
+    :func:`resolve_pipeline_models` and :func:`resolve_classifiers`.
     """
     name = (
         override
@@ -415,46 +490,11 @@ def resolve_transformer_provider(
         or "auto"
     )
     if name not in providers:
-        raise KeyError(
+        raise ServiceConfigError(
             f"Transformer provider '{name}' is not defined in "
             f"SERVICES.toml. Available: {sorted(providers)}"
         )
     return providers[name]
-
-
-def resolve_classifier_slots(
-    classifiers: dict[str, ClassifierBackend],
-    defaults: dict[str, str],
-    overrides: dict[str, str] | None = None,
-) -> dict[str, ClassifierBackend]:
-    """Map classifier slot names to ClassifierBackend instances.
-
-    Parallel to :func:`resolve_slots`. ``overrides`` (from
-    ``--classifier`` CLI flags) beat ``defaults`` (from
-    ``[classifier_defaults]`` in SERVICES.toml).
-
-    When a single override has no ``=`` (e.g., ``--classifier
-    zeroshot-base``), it applies to all slots in ``defaults``.
-
-    Raises ``KeyError`` if a slot references a classifier name that
-    doesn't exist.
-    """
-    merged = dict(defaults)
-    if overrides:
-        merged.update(overrides)
-
-    slots: dict[str, ClassifierBackend] = {}
-    for slot_name, classifier_name in merged.items():
-        if classifier_name not in classifiers:
-            raise KeyError(
-                f"Slot '{slot_name}' references classifier "
-                f"'{classifier_name}' which is not defined in "
-                f"SERVICES.toml. "
-                f"Available classifiers: {sorted(classifiers)}"
-            )
-        slots[slot_name] = classifiers[classifier_name]
-
-    return slots
 
 
 def resolve_pipeline_models(
@@ -475,7 +515,7 @@ def resolve_pipeline_models(
       ``registry.services``.
     - Every referenced service's ``api_key_env`` env var is set to a
       non-whitespace value (services that declared no env var are
-      skipped, mirroring :func:`resolve_slots`).
+      skipped).
 
     Raises :class:`ServiceConfigError` on any failure. The error
     message identifies the failing logical name and either the missing
@@ -515,5 +555,3 @@ def resolve_pipeline_models(
         out[logical_name] = registry.services[service_name]
 
     return out
-
-

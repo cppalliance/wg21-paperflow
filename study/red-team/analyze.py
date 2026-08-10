@@ -23,7 +23,7 @@ and token estimates) and paper markdown from paperstore. Writes
 
 Usage:
     python study/red-team/analyze.py P2300R10
-    python study/red-team/analyze.py P2300R10 --slot fast
+    python study/red-team/analyze.py P2300R10 --slot NAME
 """
 
 from __future__ import annotations
@@ -274,7 +274,7 @@ def _build_reduce_user_message(
 
 
 async def main() -> None:
-    slot_name = "default"
+    slot_override: str | None = None
 
     args = sys.argv[1:]
     if not args or args[0].startswith("-"):
@@ -287,7 +287,7 @@ async def main() -> None:
     pid = args[0].upper()
     for i, a in enumerate(args):
         if a == "--slot" and i + 1 < len(args):
-            slot_name = args[i + 1]
+            slot_override = args[i + 1]
 
     # Load score matrix (section boundaries + token estimates)
     matrix_path = CHUNKS_DATA / f"{pid.lower()}_score_matrix.json"
@@ -307,16 +307,17 @@ async def main() -> None:
         candidates = cand_data.get("candidates", [])
 
     # Resolve service
-    from pipeline.services import load_services, resolve_slots
+    from pipeline import PipelinePrompt
+    from pipeline.services import load_services, resolve_pipeline_models
     from pipeline.agents import AgentBackend
 
     registry = load_services()
-    slots = resolve_slots(registry)
-
-    if slot_name in registry.services:
-        backend = registry.services[slot_name]
-    else:
-        svc_name, backend = slots[slot_name]
+    prompt = PipelinePrompt.load("assay", "assay.md")
+    services_map = (
+        prompt.services if slot_override is None else {"default": slot_override}
+    )
+    backend = resolve_pipeline_models(services_map, registry)["default"]
+    slot_label = slot_override if slot_override is not None else services_map["default"]
 
     agent = AgentBackend(backend, max_tokens=MAX_OUTPUT_TOKENS, thinking_budget=4096)
 
@@ -327,7 +328,7 @@ async def main() -> None:
 
     print(f"Context window: {context_window}", file=sys.stderr)
     print(f"Available for sections: {available} tokens", file=sys.stderr)
-    print(f"Slot: {slot_name}", file=sys.stderr)
+    print(f"Slot: {slot_label}", file=sys.stderr)
 
     # -----------------------------------------------------------------------
     # Phase 1: Map (lens-agnostic signal extraction)

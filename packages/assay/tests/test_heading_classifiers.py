@@ -1,12 +1,12 @@
 #
-# Copyright (c) 2026 Vinnie Falco (vinnie.falco@gmail.com)
+# Copyright (c) 2026 Henry Wang (henryw910816@outlook.com)
 #
 # Distributed under the Boost Software License, Version 1.0.
 #
 
 from __future__ import annotations
 
-from pipeline.heading_classifiers import (
+from assay.heading_classifiers import (
     HeadingKind,
     is_acknowledgment_heading,
     is_appendix_heading_line,
@@ -49,6 +49,6 @@ def test_is_appendix_heading_line_motivation_false():
 
 def test_is_revision_heading_override():
     assert (
-        is_revision_heading("## Old revision history notes", {"old revision history"})
+        is_revision_heading("## Revision log", {"revision log"})
         is HeadingKind.YES
     )

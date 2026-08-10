@@ -8,16 +8,14 @@ Shared framework for the LLM analytical pipelines (`agora`). It depends only on 
 - `classifier_backends.py` - `ClassifierBackend` ABC and concrete backends (`ZeroShotV2Backend`, `NliCrossEncoderBackend`, `MultiLabelClassifierBackend`), `CLASSIFIER_BACKEND_REGISTRY`. Local text classifiers wrapping HF Transformers / sentence_transformers. Parallel namespace to `model_backends.py`; no interaction.
 - `transformer_backend.py` - `TransformerBackend` family (`HFZeroShotBackend`, `CrossEncoderBackend`, `SeqClassificationBackend`, `EmbeddingBackend`), `TransformerProvider` device/dtype/batch resolution.
 - `agents.py` - `AgentBackend`: wraps a `ModelBackend` with pipeline-level config (`thinking_budget`) and the slot/service identity (`slot_name`, `service_name`, `backend_class_name`) used by capability-mismatch error messages. The call-time `tools_capable` check remains as defense-in-depth for tools passed via `run_task` outside `meta.tools`.
-- `services.py` - `load_services()` / `resolve_slots()` for LLM `[services.NAME]` slots, and `load_classifiers()` / `resolve_classifier_slots()` for local `[classifiers.NAME]` slots. Both parse SERVICES.toml; the two namespaces are independent. `resolve_slots` returns `dict[str, tuple[str, ModelBackend]]` so callers can thread the resolved service name into each `AgentBackend`.
+- `services.py` - `load_services()` and `resolve_pipeline_models()` for LLM `[services.NAME]` slots; `resolve_classifiers(binding)` for local `[classifiers.NAME]` inventory. When `binding` is `None`, `[classifier_defaults]` supplies the framework fallback; an explicit binding (including `{}`) is authoritative and does not merge defaults underneath. Returns `dict[str, ClassifierBackend]` keyed by the caller's slot names; two slots bound to the same entry share one instance. Resolver naming: `resolve_pipeline_models` (LLM, caller binding from pipeline markdown), `resolve_classifiers` (classifier, caller binding).
 - `errors.py` - exception hierarchy rooted at `PipelineError`. Includes `CapabilityMismatchError` for pipeline-construction-time slot/capability mismatches.
 - `prompt.py` - `StepHooks`, `StepMeta`, `StepSpec`, `build_pipeline`, `parse_step_meta`. Owns prompt-to-hook conformance only; capability validation lives in `validate.py`. Step-meta field-name convention: single-word fields are TitleCase (`**Model:**`, `**Execution:**`, `**Tools:**`, `**Condition:**`); new multi-word fields are kebab-case (`**max-output:**`). Pre-existing `**System prompt:**` (TitleCase + space) is grandfathered. Lookup is case-insensitive (the parser lowercases keys). `_META_RE` allows `[\w \-]+` so hyphens in field names parse correctly; adding a new punctuation character requires updating that regex.
 - `validate.py` - `validate_capabilities(specs, *, stop_after=None)`. Primary gate for capability mismatches; called by each pipeline's entry function right after `build_pipeline`.
 - `runner.py` - `dispatch`, `load_sections`, `run_agent`, `StepContext`, `write_debug_file`.
 - `progress.py` - `ProgressEvent`, `ProgressCallback`: the framework-owned progress-reporting contract. Domain-free; carries no paper concepts.
 - `tasks.py` - `run_task`, `render_debug_md`, `_task_semaphore`.
-- `markdown.py` - `sections` (H2 splitter), `sanitize_md`, `front_matter_end_index`, `YAML_FENCE_RE`.
-- `markdown_patterns.py` - shared `HEADING_RE`, `BOLD_SUBSECTION_RE`.
-- `heading_classifiers.py` - blanking tri-state classifiers (`is_revision_heading`, `is_reference_heading`, `is_acknowledgment_heading`), survey `SURVEY_WORDING_HEADING_RE`, standalone `is_appendix_heading_line`.
+- `markdown.py` - `sections` (H2 splitter), `bullet_map` (`- **key:** value` bullets), `sanitize_md`, `front_matter_end_index`, `YAML_FENCE_RE`, `HEADING_RE` (generic ATX heading pattern).
 - `nli_batch.py` - `score_entailment_pairs` for sentence-level NLI batch scoring (Tag Sentences family API).
 - `session.py` - `WebResearcher`, `SearchResult`, `SearchResponse`, `FetchResponse`, `SearchBackend` ABC.
 - `backends/` - `BraveBackend` (Brave Search API), `get_default_backend`.
@@ -32,8 +30,8 @@ from pipeline import (
     ClassifierBackend, ZeroShotV2Backend, NliCrossEncoderBackend,
     MultiLabelClassifierBackend, SeqClassificationBackend,
     CLASSIFIER_BACKEND_REGISTRY,
-    load_services, resolve_slots, ServiceRegistry,
-    load_classifiers, resolve_classifier_slots,
+    load_services, resolve_pipeline_models, ServiceRegistry,
+    resolve_classifiers,
     PipelineError, StepError, HookMismatchError, MissingMetadataError,
     CapabilityMismatchError,
     StepHooks, StepMeta, StepSpec, build_pipeline,
@@ -99,7 +97,7 @@ Determinism contract: offline-first weight loading, per-instance pipeline single
 ## Invariants
 
 - Paper-agnostic, no internal dependencies. `pipeline` is a domain-free framework and MUST NOT import from any internal/workspace package (`paperstore`, `cli`, `agora`, `assay`, `tomd`, `mailing`, `preview`). It depends only on third-party libraries. Paper-domain orchestration (`process_paper`, stage postconditions, the `read_paper` tool) lives in `cli`, not here. If a framework module needs a shared type that currently lives in a paper package, define it here instead of importing it.
-- `ClassifierBackend` and `ModelBackend` are parallel namespaces. `[services.NAME]` / `[classifiers.NAME]` and `[defaults]` / `[classifier_defaults]` do not mix; slot resolution is independent. Override flags map to different `StepContext` dicts: `--service` populates `ctx.agents` (via `AgentBackend(slots[slot_name][1], slot_name=slot_name, service_name=slots[slot_name][0])`), `--classifier` populates `ctx.classifiers`.
+- `ClassifierBackend` and `ModelBackend` are parallel namespaces. `[services.NAME]` / `[classifiers.NAME]` do not mix; classifier framework fallback is `[classifier_defaults]` only when `binding is None`. Each consuming package owns its classifier slot binding (pipeline never parses another package's markdown for classifiers). `resolve_classifiers` only instantiates inventory entries referenced by the caller's binding. `provider_override` is a resolver kwarg with no CLI wiring yet.
 - Capability validation runs once at pipeline-construction time. `validate_capabilities()` rejects any step whose declared `meta.tools` or assigned `thinking_budget` would land on a backend whose class attributes do not support it. The runtime `NotImplementedError` in `AgentBackend.run` is secondary defense, retained for custom hooks that pass ad-hoc tools via `run_task` outside `meta.tools`.
 - `dispatch()` and `validate_capabilities()` must use identical `stop_after` scoping logic. Today both filter by `enumerate` index against the step list; if you switch one site to `spec.meta.number`, switch both in the same commit.
 - Three-layer system prompts. Every LLM step receives the framework floor, plus the pipeline `## System Prompt`, plus an optional per-step `### System Prompt`. Per-step mode is `append` by default, or `replace` for floor + step only. The floor always applies.
@@ -111,7 +109,7 @@ Determinism contract: offline-first weight loading, per-instance pipeline single
 - Backends are long-lived. `BraveBackend` holds a persistent connection pool and rate limiter. Create once, share across `WebResearcher` instances for parallel runs.
 - Researcher borrows or owns. Pass a backend to share it. Omit to auto-create one. `_owns_backend` tracks who closes it.
 - Fail loud. Missing `BRAVE_API_KEY` raises `ValueError` at construction time, not at first search call.
-- Fail loud. `resolve_slots` raises `ValueError` when a bound service's declared `api_key_env` env var is missing, empty, or whitespace-only. The check fires at slot-binding time, not at config load, so unbound entries in `SERVICES.toml` stay inert.
+- Fail loud. `resolve_pipeline_models` raises `ServiceConfigError` when a bound service's declared `api_key_env` env var is missing, empty, or whitespace-only. The check fires at slot-binding time, not at config load, so unbound entries in `SERVICES.toml` stay inert.
 - Backend env-var contracts are declared on the class. A `ModelBackend` subclass that reads its env var directly from the environment (rather than receiving it as a kwarg) sets `required_api_key_env: ClassVar[str]`. `load_services` rejects `[services.NAME]` entries whose `api_key_env` does not match this value, so the loader and the SDK cannot drift apart on which variable the user must export.
 - No global state. The researcher is an explicit object. Create it, pass it around, close it.
 - Errors are typed. All pipeline errors inherit `PipelineError`. Downstream packages re-raise domain errors that also inherit `PipelineError`.

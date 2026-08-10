@@ -128,8 +128,8 @@ def _build_thread_gen_msg(pid: str, smell: SmellTestOutput) -> str:
 
 
 async def main() -> None:
-    smell_slot = "default"
-    thread_slot = "default"
+    smell_slot_override: str | None = None
+    thread_slot_override: str | None = None
 
     args = sys.argv[1:]
     if not args or args[0].startswith("-"):
@@ -139,11 +139,11 @@ async def main() -> None:
     pid = args[0].upper()
     for i, a in enumerate(args):
         if a == "--slot" and i + 1 < len(args):
-            smell_slot = thread_slot = args[i + 1]
+            smell_slot_override = thread_slot_override = args[i + 1]
         elif a == "--smell-slot" and i + 1 < len(args):
-            smell_slot = args[i + 1]
+            smell_slot_override = args[i + 1]
         elif a == "--thread-slot" and i + 1 < len(args):
-            thread_slot = args[i + 1]
+            thread_slot_override = args[i + 1]
 
     findings_path = RED_TEAM_DATA / f"{pid.lower()}_findings.json"
     candidates_path = RED_TEAM_DATA / f"{pid.lower()}_candidates.json"
@@ -160,27 +160,50 @@ async def main() -> None:
 
     print(f"Paper: {pid}", file=sys.stderr)
     print(f"Findings: {len(findings)}", file=sys.stderr)
-    print(f"Smell slot: {smell_slot}, Thread slot: {thread_slot}", file=sys.stderr)
+
+    from pipeline import PipelinePrompt
+    from pipeline.services import load_services, resolve_pipeline_models
+    from pipeline.agents import AgentBackend
+
+    registry = load_services()
+    prompt = PipelinePrompt.load("assay", "assay.md")
+
+    def _resolve_backend(override: str | None):
+        services_map = (
+            prompt.services if override is None else {"default": override}
+        )
+        return resolve_pipeline_models(services_map, registry)["default"], services_map
+
+    if smell_slot_override is None and thread_slot_override is None:
+        smell_backend, services_map = _resolve_backend(None)
+        thread_backend = smell_backend
+        smell_label = thread_label = services_map["default"]
+    else:
+        smell_backend, smell_map = _resolve_backend(smell_slot_override)
+        thread_backend, thread_map = _resolve_backend(thread_slot_override)
+        smell_label = smell_map["default"]
+        thread_label = thread_map["default"]
+
+    print(
+        f"Smell slot: {smell_label}, Thread slot: {thread_label}",
+        file=sys.stderr,
+    )
+
+    smell_agent = AgentBackend(
+        smell_backend,
+        max_tokens=16384,
+        thinking_budget=4096,
+    )
+    thread_agent = AgentBackend(
+        thread_backend,
+        max_tokens=16384,
+        thinking_budget=4096,
+    )
 
     prompt_sections = _load_prompt_sections()
     system_prompt = prompt_sections.get("System Prompt", "")
     smell_instructions = prompt_sections.get("1. Smell Test", "")
     thread_instructions = prompt_sections.get("2. Generate Thread", "")
-
-    from pipeline.services import load_services, resolve_slots
-    from pipeline.agents import AgentBackend
-
-    registry = load_services()
-    slots = resolve_slots(registry)
-
-    def _resolve(name: str):
-        if name in registry.services:
-            return registry.services[name]
-        _svc, backend = slots[name]
-        return backend
-
-    smell_agent = AgentBackend(_resolve(smell_slot), max_tokens=16384, thinking_budget=4096)
-    thread_agent = AgentBackend(_resolve(thread_slot), max_tokens=16384, thinking_budget=4096)
 
     # Step 1: Smell test
     smell_msg = _build_smell_test_msg(pid, findings, candidates, "")

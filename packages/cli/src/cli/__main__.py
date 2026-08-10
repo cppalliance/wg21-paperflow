@@ -86,7 +86,7 @@ _VERB_TARGETS_HELP = {
     "convert":   "Year (2026), paper id(s) (P3642R4 ...), or year-month (2026-01).",
     "full":      "Year (2026), paper id(s) (P3642R4 ...), or `all`.",
     "agora":     "Paper ID (P4003R2) or year-month (2026-01) for batch planning.",
-    "assay":     "Paper ID (P4003R2) or year-month (2026-01) for batch analysis.",
+    "assay":     "One target: paper ID (P4003R2).",
     "status":    "Paper ID, year, year-month, or omit for all incomplete papers.",
 }
 
@@ -105,7 +105,7 @@ _VERB_FLAGS: dict[str, set[str]] = {
     "download":  {"force", "concurrency"},
     "convert":   {"force", "concurrency", "check_content", "check_content_json", "keep_downstream", "yes", "extract_vector_images", "vector_whiteout_text"},
     "full":      {"force", "verify", "concurrency", "extract_vector_images", "vector_whiteout_text"},
-    "agora":     {"debug", "trace", "step", "provider", "force"},
+    "agora":     {"debug", "trace", "step", "force"},
     "assay":     {"debug", "trace", "step", "force", "rerender"},
     "status":    set(),
 }
@@ -137,11 +137,6 @@ _FLAG_DEFS: list[dict] = [
     dict(name="chunk", flags=["--chunk"], type=int,
          default=None, metavar="C",
          help="Run only chunk C in parallel steps."),
-    dict(name="classifier", flags=["--classifier"], action="append",
-         default=None, metavar="NAME",
-         help="Override classifier slot binding. Use NAME to override all slots, or SLOT=NAME (e.g. selector=zeroshot-base) for one slot. Repeatable."),
-    dict(name="provider", flags=["--provider"], default=None, metavar="NAME",
-         help="Override the active transformer provider (device/dtype/batch). Defaults to PAPERFLOW_TRANSFORMER_PROVIDER, then [transformer_provider_defaults].default in SERVICES.toml, then 'auto' (host-detected)."),
     dict(name="keep_downstream", flags=["--keep-downstream"], action="store_true",
          default=False,
          help="On convert: don't clear agora artifacts even "
@@ -225,9 +220,21 @@ def _validate_targets(verb: str, targets: list[str]) -> None:
             print(f"paperflow {verb}: {exc}", file=sys.stderr)
             sys.exit(1)
 
-    for process_verb in ("agora",):
-        if verb != process_verb:
-            continue
+    if verb == "assay":
+        if len(targets) != 1:
+            print(
+                f"paperflow {verb}: accepts exactly one target, got {len(targets)}.",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+        if kinds != {"paper"}:
+            print(
+                f"paperflow {verb}: accepts a single paper ID.",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+
+    if verb == "agora":
         if "year" in kinds:
             print(
                 f"paperflow {verb}: accepts a paper ID or year-month, not bare years.",

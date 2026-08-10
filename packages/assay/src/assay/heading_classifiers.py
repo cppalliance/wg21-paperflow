@@ -1,18 +1,18 @@
 #
-# Copyright (c) 2026 Vinnie Falco (vinnie.falco@gmail.com)
+# Copyright (c) 2026 Henry Wang (henryw910816@outlook.com)
 #
 # Distributed under the Boost Software License, Version 1.0. (See accompanying
 # file LICENSE_1_0.txt or copy at http://www.boost.org/LICENSE_1_0.txt)
 #
 
-"""Shared heading classifiers for blanking and survey signals."""
+"""WG21 heading classifiers for blanking and survey signals."""
 
 from __future__ import annotations
 
 import re
 from enum import Enum, auto
 
-from pipeline.markdown_patterns import HEADING_RE
+from pipeline.markdown import HEADING_RE
 
 # ---------------------------------------------------------------------------
 # Blanking tri-state
@@ -87,7 +87,10 @@ _ACKNOWLEDGMENT_HEADING_RE = re.compile(
     re.IGNORECASE,
 )
 
-# Survey wording signal (assay Step 3).
+# Survey wording signal (assay Step 3). Kept separate from routing's
+# wording heading regex in ``paper_routing.headings``: survey matches
+# proposed resolution; routing matches standardese and
+# modifications-to-the-standard.
 SURVEY_WORDING_HEADING_RE = re.compile(
     r"(?i)\bwording\b|\bproposed\s+changes\b|\bproposed\s+resolution\b",
 )
@@ -149,7 +152,13 @@ def is_appendix_heading_line(
     *,
     overrides: set[str] | frozenset[str] = frozenset(),
 ) -> bool:
-    """True when *line* opens a non-prose appendix block."""
+    """True when *line* opens a non-prose appendix block.
+
+    For standalone ``route_paper`` on unblanked markdown. In assay,
+    ``blank_paper`` blanks revision history, references, and
+    acknowledgments before routing, so only ``appendix`` / ``examples``
+    headings typically reach the in-pipeline classifier.
+    """
     if is_revision_heading(line, overrides) is HeadingKind.YES:
         return True
     if is_reference_heading(line) is HeadingKind.YES:

@@ -19,6 +19,7 @@ cited papers without committing them to the full pipeline.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from pathlib import Path
 from datetime import datetime, timezone
@@ -52,8 +53,6 @@ async def process_paper(
     trace: bool = False,
     stop_after: int | None = None,
     chunk_index: int | None = None,
-    classifier_overrides: dict[str, str] | None = None,
-    provider_override: str | None = None,
     force: bool = False,
     keep_downstream: bool = False,
     extract_vector: bool = False,
@@ -136,8 +135,6 @@ async def process_paper(
             stage_result = await _run_stage(
                 pid, status, backend, debug=debug, trace=trace,
                 stop_after=stop_after, chunk_index=chunk_index,
-                classifier_overrides=classifier_overrides,
-                provider_override=provider_override,
                 keep_downstream=keep_downstream,
                 extract_vector=extract_vector,
                 whiteout_text=whiteout_text,
@@ -217,8 +214,6 @@ async def _run_stage(
     trace: bool = False,
     stop_after: int | None = None,
     chunk_index: int | None = None,
-    classifier_overrides: dict[str, str] | None = None,
-    provider_override: str | None = None,
     keep_downstream: bool = False,
     extract_vector: bool = False,
     whiteout_text: bool = False,
@@ -235,9 +230,10 @@ async def _run_stage(
             whiteout_text=whiteout_text,
         )
     elif stage == STAGES["agora"]:
-        await _stage_agora(pid, backend, debug=debug, trace=trace,
-                           provider_override=provider_override,
-                           on_progress=on_progress)
+        await _stage_agora(
+            pid, backend, debug=debug, trace=trace,
+            stop_after=stop_after, on_progress=on_progress,
+        )
     elif stage == STAGES["herald"]:
         pass
     else:
@@ -402,9 +398,6 @@ async def _stage_convert(
     valid. When the markdown does change AND ``keep_downstream`` is
     False, the .agora.json files and the extract rows are wiped.
     """
-    import asyncio
-    from pathlib import Path
-
     from tomd.api import convert_paper_full
 
     paper = backend.get_meta(pid)
@@ -513,7 +506,7 @@ async def _stage_convert(
 
 async def _stage_agora(
     pid: str, backend: StorageBackend, *, debug: bool = False, trace: bool = False,
-    provider_override: str | None = None,
+    stop_after: int | None = None,
     on_progress: object = None,
 ) -> None:
     """Run agora pipeline on the paper.
@@ -526,6 +519,6 @@ async def _stage_agora(
 
     await agora_paper(
         pid, backend, debug=debug, trace=trace,
+        stop_after=stop_after,
         on_progress=on_progress,
     )
-    _ = provider_override

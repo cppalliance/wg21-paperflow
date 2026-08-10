@@ -159,7 +159,7 @@ def _build_user_message(pid: str, findings: list, candidates: dict, intro: str) 
 
 
 async def main() -> None:
-    slot_name = "default"
+    slot_override: str | None = None
 
     args = sys.argv[1:]
     if not args or args[0].startswith("-"):
@@ -169,7 +169,7 @@ async def main() -> None:
     pid = args[0].upper()
     for i, a in enumerate(args):
         if a == "--slot" and i + 1 < len(args):
-            slot_name = args[i + 1]
+            slot_override = args[i + 1]
 
     findings_path = RED_TEAM_DATA / f"{pid.lower()}_findings.json"
     if not findings_path.is_file():
@@ -187,18 +187,19 @@ async def main() -> None:
 
     print(f"Paper: {pid}", file=sys.stderr)
     print(f"Findings: {len(findings)}", file=sys.stderr)
-    print(f"Slot: {slot_name}", file=sys.stderr)
 
-    from pipeline.services import load_services, resolve_slots
+    from pipeline import PipelinePrompt
+    from pipeline.services import load_services, resolve_pipeline_models
     from pipeline.agents import AgentBackend
 
     registry = load_services()
-    slots = resolve_slots(registry)
-
-    if slot_name in registry.services:
-        backend = registry.services[slot_name]
-    else:
-        svc_name, backend = slots[slot_name]
+    prompt = PipelinePrompt.load("assay", "assay.md")
+    services_map = (
+        prompt.services if slot_override is None else {"default": slot_override}
+    )
+    backend = resolve_pipeline_models(services_map, registry)["default"]
+    slot_label = slot_override if slot_override is not None else services_map["default"]
+    print(f"Slot: {slot_label}", file=sys.stderr)
     agent = AgentBackend(backend, max_tokens=16384, thinking_budget=4096)
 
     user_msg = _build_user_message(pid, findings, candidates, intro)

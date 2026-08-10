@@ -25,24 +25,6 @@ from paperstore.progress import ProgressEvent
 from paperstore.stages import STAGE_NAMES
 
 
-def _parse_classifier_overrides(raw: list[str] | None) -> dict[str, str] | None:
-    """Parse ``--classifier`` flag values into a slot -> classifier-name dict.
-
-    A bare ``NAME`` (no ``=``) applies to the default ``selector`` slot.
-    ``SLOT=NAME`` overrides one slot. Mirrors :func:`_parse_service_overrides`.
-    """
-    if not raw:
-        return None
-    overrides: dict[str, str] = {}
-    for item in raw:
-        if "=" in item:
-            slot, name = item.split("=", 1)
-            overrides[slot.strip()] = name.strip()
-        else:
-            overrides["selector"] = item
-    return overrides
-
-
 def run_process_command(
     args: argparse.Namespace,
     backend: StorageBackend,
@@ -63,8 +45,6 @@ def run_process_command(
     skip_prompt = getattr(args, "yes", False)
     extract_vector = getattr(args, "extract_vector_images", False)
     whiteout_text = getattr(args, "vector_whiteout_text", False)
-    classifier_overrides = _parse_classifier_overrides(getattr(args, "classifier", None))
-    provider_override = getattr(args, "provider", None)
 
     verb = STAGE_NAMES.get(through - 1, "process")
 
@@ -147,8 +127,6 @@ def run_process_command(
                         trace=trace,
                         stop_after=stop_after,
                         chunk_index=chunk_index,
-                        classifier_overrides=classifier_overrides,
-                        provider_override=provider_override,
                         force=force,
                         keep_downstream=keep_downstream,
                         extract_vector=extract_vector,
@@ -164,7 +142,7 @@ def run_process_command(
             except pydantic_ai.exceptions.UsageLimitExceeded as exc:
                 print(f"{paper.paper_id}: LLM usage limit ({exc})", file=sys.stderr)
                 failed += 1
-            except Exception as exc:
+            except Exception as exc:  # batch worker firewall: report and continue
                 msg = f"{paper.paper_id}: {type(exc).__name__}: {exc}"
                 cause = exc.__cause__
                 while cause:

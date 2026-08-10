@@ -96,7 +96,7 @@ Eagle3 (`Draft Token Count > 0`, `Draft Model: ...-eagle3-...`) is acceptable fo
 
 ## Service configuration
 
-Infrastructure is declared in `SERVICES.toml` at the repo root. Each `[services.NAME]` section maps to a `ModelBackend` instance via the `backend` field. API keys come from environment variables (the `api_key_env` field names the env var). The `[defaults]` section maps slot names to service names. CLI `--service` overrides beat defaults.
+Infrastructure is declared in `SERVICES.toml` at the repo root. Each `[services.NAME]` section maps to a `ModelBackend` instance via the `backend` field. API keys come from environment variables (the `api_key_env` field names the env var). There are no service slot defaults in `SERVICES.toml`. Each pipeline's markdown ``## Services`` block binds logical names to inventory entries; `resolve_pipeline_models()` validates those bindings at runtime.
 
 ## Token-to-character ratios
 

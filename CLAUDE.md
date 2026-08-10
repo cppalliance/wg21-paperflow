@@ -91,7 +91,11 @@ D2 and D3 name pipeline-internal symbols and live in `packages/pipeline/src/pipe
 
 ## Services and agents
 
-Infrastructure is declared in `SERVICES.toml` at the repo root. Each `[services.NAME]` section declares an endpoint (backend type, URL, API key env var, model name, `max_context_window`, capabilities). The `[defaults]` section maps slot names (`fast`, `default`, `tool`) to service names. `SERVICES.toml` describes service capacity, not pipeline usage: `max_context_window` is the total context window, not how much any pipeline will use.
+Infrastructure is declared in `SERVICES.toml` at the repo root. Each `[services.NAME]` section declares an endpoint (backend type, URL, API key env var, model name, `max_context_window`, capabilities). There are no service slot defaults in `SERVICES.toml`. `SERVICES.toml` describes service capacity, not pipeline usage: `max_context_window` is the total context window, not how much any pipeline will use.
+
+`AgentBackend` wraps a `ModelBackend` with pipeline-level config (`max_tokens`, `thinking_budget`). `ModelBackend` (one class per model family) encapsulates all mechanical concerns: structured output strategy, BPE cleanup, thinking-block stripping, tool-calling workarounds. See `MODELS.md` for the workaround inventory and retire-when conditions.
+
+Local classifier inventory lives in `SERVICES.toml` under `[classifiers.NAME]`. Each consuming package owns which entry backs each slot via a ``## Classifiers`` block in that package's pipeline markdown. `SERVICES.toml` declares capacity only. `resolve_classifiers(binding)` returns a slot-name -> backend dict; when `binding` is `None`, `[classifier_defaults]` supplies the framework fallback (guarded by tests). An explicit binding, including `{}`, is authoritative and does not merge defaults underneath. No in-repo pipeline calls `resolve_classifiers` yet.
 
 Pipelines create agents by intent, not by model name. Each pipeline defines its own `MAX_OUTPUT_TOKENS` constant and passes it to `AgentBackend`:
 
@@ -101,9 +105,7 @@ synthesis_agent = AgentBackend(slots["default"], max_tokens=MAX_OUTPUT_TOKENS, t
 research_agent = AgentBackend(slots["tool"], max_tokens=MAX_OUTPUT_TOKENS)
 ```
 
-`AgentBackend` wraps a `ModelBackend` with pipeline-level config (`max_tokens`, `thinking_budget`). `ModelBackend` (one class per model family) encapsulates all mechanical concerns: structured output strategy, BPE cleanup, thinking-block stripping, tool-calling workarounds. See `MODELS.md` for the workaround inventory and retire-when conditions.
-
-Override slots at the CLI with `--service NAME` (all slots) or `--service SLOT=NAME` (one slot).
+Model slot binding comes from each pipeline's markdown ``## Services`` block. Edit that file to change which service backs a logical model name. Classifier slot binding uses the same ``- **slot:** entry`` bullet format under a ``## Classifiers`` block.
 
 ## Invariants
 

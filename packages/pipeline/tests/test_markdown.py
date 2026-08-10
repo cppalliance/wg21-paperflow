@@ -6,7 +6,40 @@
 
 from __future__ import annotations
 
-from pipeline.markdown import extract_code_blocks, sections
+import pytest
+
+from pipeline.errors import DuplicateBulletKeyError
+from pipeline.markdown import bullet_map, extract_code_blocks, sections
+
+
+def test_bullet_map_parses_bold_items():
+    body = "- **Selector:** nli-small\n- **Other:** zeroshot-base\n"
+    assert bullet_map(body) == {
+        "selector": "nli-small",
+        "other": "zeroshot-base",
+    }
+
+
+def test_bullet_map_empty_body():
+    assert bullet_map("") == {}
+
+
+def test_bullet_map_raises_on_duplicate_key():
+    body = "- **selector:** nli-small\n- **selector:** assay-routing-tagger\n"
+    with pytest.raises(DuplicateBulletKeyError, match="duplicate bullet key 'selector'"):
+        bullet_map(body)
+
+
+def test_bullet_map_duplicate_key_case_insensitive():
+    body = "- **Selector:** nli-small\n- **selector:** assay-routing-tagger\n"
+    with pytest.raises(DuplicateBulletKeyError, match="duplicate bullet key"):
+        bullet_map(body)
+
+
+def test_bullet_map_duplicate_key_includes_source():
+    body = "- **selector:** nli-small\n- **selector:** zeroshot-base\n"
+    with pytest.raises(DuplicateBulletKeyError, match="assay.md ## Services"):
+        bullet_map(body, source="assay.md ## Services")
 
 
 def test_sections_basic():
@@ -14,6 +47,13 @@ def test_sections_basic():
     result = sections(md)
     assert result["A"] == "Body A"
     assert result["B"] == "Body B"
+
+
+def test_sections_preamble_key():
+    md = "Intro text\n\n## A\n\nBody A"
+    result = sections(md)
+    assert result["_preamble"] == "Intro text"
+    assert result["A"] == "Body A"
 
 
 def test_sections_fence_preserves_h2():

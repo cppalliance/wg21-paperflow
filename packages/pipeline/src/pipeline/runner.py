@@ -44,7 +44,12 @@ from pipeline.model_backends import DEFAULT_REQUEST_LIMIT
 from pipeline.markdown import sections
 from pipeline.prompt import PipelinePrompt, StepSpec
 from pipeline.tasks import render_debug_prompt
-from pipeline.tools import _random_tag, guard_instruction as _guard_instruction, inject_untrusted as _inject_untrusted
+from pipeline.tools import (
+    _random_tag,
+    guard_instruction as _guard_instruction,
+    inject_untrusted as _inject_untrusted,
+)
+from pipeline.classifier_backends import ClassifierBackend
 
 logger = logging.getLogger(__name__)
 
@@ -89,11 +94,12 @@ class StepContext:
 
     prompt: PipelinePrompt = field(default_factory=_empty_prompt)
     agents: dict[str, AgentBackend] = field(default_factory=dict)
-    # Local classifier slots. Parallel to ``agents``; populated by the
-    # orchestrator from ``resolve_classifier_slots``. Read by custom
-    # steps that need a deterministic, non-LLM classifier
-    # (e.g. ``ctx.classifiers["selector"]``).
-    classifiers: dict[str, Any] = field(default_factory=dict)
+    # Resolved classifier backends, populated by the orchestrator via
+    # :func:`pipeline.services.resolve_classifiers`. Keyed by the
+    # caller's slot names (e.g. ``selector``, ``routing_tagger``).
+    # Two slots bound to the same inventory entry share one instance.
+    # Consumers wanting an ensemble use ``set(ctx.classifiers.values())``.
+    classifiers: dict[str, ClassifierBackend] = field(default_factory=dict)
     researcher: Any = None
     backend: Any = None
     debug: bool = False
@@ -124,6 +130,7 @@ class StepContext:
     def guard_instruction(self) -> str:
         """System-prompt instruction for the guard delimiters."""
         return _guard_instruction(self._guard_tag)
+
     _current_spec: StepSpec | None = None
 
     def __post_init__(self) -> None:
@@ -153,12 +160,20 @@ class StepContext:
                 result = await coro
             completed += 1
             self.sub_progress(
-                completed - 1, n,
+                completed - 1,
+                n,
                 f"{label} {completed}/{n}" if label else f"{completed}/{n}",
             )
             return result
 
-        results = await asyncio.gather(*[_bounded(c) for c in coros])
+        tasks = [asyncio.create_task(_bounded(c)) for c in coros]
+        try:
+            results = await asyncio.gather(*tasks)
+        except Exception:
+            for task in tasks:
+                if not task.done():
+                    task.cancel()
+            raise
         return sorted(results, key=lambda x: x[0])
 
     def sub_progress(self, chunk: int, n_chunks: int, name: str) -> None:
@@ -167,12 +182,14 @@ class StepContext:
             return
         frac = (chunk + 1) / n_chunks
         pct = (self._progress_step + frac) / max(self._progress_total, 1)
-        self.on_progress(ProgressEvent(
-            step=self._progress_step,
-            total=self._progress_total,
-            name=name,
-            pct=pct,
-        ))
+        self.on_progress(
+            ProgressEvent(
+                step=self._progress_step,
+                total=self._progress_total,
+                name=name,
+                pct=pct,
+            )
+        )
 
     @property
     def sections(self) -> Mapping[str, str]:
@@ -195,9 +212,7 @@ def load_sections(package: str, filename: str) -> dict[str, str]:
         resource = importlib.resources.files(package).joinpath(filename)
         return sections(resource.read_text(encoding="utf-8"))
     except (FileNotFoundError, OSError) as exc:
-        raise PromptFileError(
-            f"Failed to read {filename}: {exc}"
-        ) from exc
+        raise PromptFileError(f"Failed to read {filename}: {exc}") from exc
 
 
 def _compose_system_prompt(spec: StepSpec, ctx: StepContext) -> str:
@@ -264,7 +279,9 @@ async def run_agent(
 
     try:
         result = await agent.run(
-            system, user_msg, output_type,
+            system,
+            user_msg,
+            output_type,
             tools=tools,
             label=spec.step.name,
             debug_log=ctx.debug_log if ctx.debug else None,
@@ -318,7 +335,8 @@ async def dispatch(
             label = tool_name.title() if tool_name else "Trace"
             header = f"# {label} {ctx.pid} {ts}\n\n"
             trace_path.write_text(
-                header + content, encoding="utf-8",
+                header + content,
+                encoding="utf-8",
             )
         if debug_path and ctx.debug_log:
             write_debug_file(debug_path, ctx.debug_log, timestamp=ts)
@@ -330,9 +348,14 @@ async def dispatch(
 
             ctx._progress_step = i
             if on_progress is not None:
-                on_progress(ProgressEvent(
-                    step=i, total=total, name=spec.step.name, pct=i / total,
-                ))
+                on_progress(
+                    ProgressEvent(
+                        step=i,
+                        total=total,
+                        name=spec.step.name,
+                        pct=i / total,
+                    )
+                )
 
             if spec.hooks.guard and not spec.hooks.guard(state):
                 logger.info("Step %d: %s (skipped by guard)", i, spec.step.name)
@@ -367,17 +390,23 @@ async def dispatch(
 
                     results: list[Any] = []
                     for msg in user_msgs:
-                        results.append(await run_agent(
-                            ctx, spec, msg,
-                            request_limit=effective_request_limit,
-                        ))
+                        results.append(
+                            await run_agent(
+                                ctx,
+                                spec,
+                                msg,
+                                request_limit=effective_request_limit,
+                            )
+                        )
                     if spec.hooks.extract:
                         spec.hooks.extract(state, results)
                 else:
                     assert spec.hooks.prepare is not None
                     user_msg = spec.hooks.prepare(state, ctx)
                     result = await run_agent(
-                        ctx, spec, user_msg,
+                        ctx,
+                        spec,
+                        user_msg,
                         request_limit=effective_request_limit,
                     )
                     if spec.hooks.extract:
@@ -386,7 +415,11 @@ async def dispatch(
                 raise
             except Exception as exc:
                 logger.error(
-                    "Step %d (%s) failed: %s", i, spec.step.name, exc, exc_info=True,
+                    "Step %d (%s) failed: %s",
+                    i,
+                    spec.step.name,
+                    exc,
+                    exc_info=True,
                 )
                 raise StepError(i, spec.step.name, exc) from exc
 
@@ -403,9 +436,14 @@ async def dispatch(
         _flush_trace_and_debug()
 
     if on_progress is not None:
-        on_progress(ProgressEvent(
-            step=total, total=total, name="done", pct=1.0,
-        ))
+        on_progress(
+            ProgressEvent(
+                step=total,
+                total=total,
+                name="done",
+                pct=1.0,
+            )
+        )
 
 
 def write_debug_file(path: Path, debug_log: list[str], *, timestamp: str = "") -> None:
