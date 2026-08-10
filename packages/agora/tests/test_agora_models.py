@@ -96,6 +96,17 @@ def test_reply_depth_bounds():
         Reply(slot_id="s01", depth=-1, role="signal", brief="b")
 
 
+def test_reply_noise_stance_vocabulary_is_closed():
+    """A stance typo must fail loudly, not demote a trap to noise."""
+    Reply(slot_id="s01", depth=0, role="noise", brief="b",
+          noise_stance="misconception")
+    Reply(slot_id="s01", depth=0, role="noise", brief="b",
+          noise_stance="process-cynic")
+    with pytest.raises(ValidationError):
+        Reply(slot_id="s01", depth=0, role="noise", brief="b",
+              noise_stance="misconceptions")
+
+
 def test_reply_lens_bounds():
     Reply(slot_id="s01", depth=0, role="signal", brief="b", domain_lens=13)
     with pytest.raises(ValidationError):

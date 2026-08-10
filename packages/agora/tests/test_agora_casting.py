@@ -102,7 +102,7 @@ def test_every_table_c_domain_resolves_to_a_signal_persona():
 
 
 def test_noise_slot_gets_jokester():
-    persona = _select(_reply("s01", role="noise", noise_stance="didnt-read"))
+    persona = _select(_reply("s01", role="noise", noise_stance="didn't-read"))
     assert persona.tier == "noise"
     assert persona.archetype == "jokester"
 
@@ -203,10 +203,10 @@ def _big_thread() -> Thread:
         _reply("s04", role="signal", domain_lens=13),
         _reply("s05", role="signal", domain_lens=10,
                parent_slot_id="s03", depth=1),
-        _reply("s06", role="noise", noise_stance="rust"),
+        _reply("s06", role="noise", noise_stance="Rust-evangelist"),
         _reply("s07", role="noise", noise_stance="doomsayer"),
         _reply("s08", role="noise", noise_stance="process-cynic"),
-        _reply("s09", role="noise", noise_stance="didnt-read"),
+        _reply("s09", role="noise", noise_stance="didn't-read"),
         _reply("s10", role="tangent"),
         _reply("s11", role="tangent", parent_slot_id="s10", depth=1),
         _reply("s12", role="mod"),

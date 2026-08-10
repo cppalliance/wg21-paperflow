@@ -22,10 +22,16 @@ Two steps appended after the planner's Serialize step:
   order (teaser first, then encounter chains in turn order, then
   signal, then the noise fill) and asks the LLM to write each comment
   body. Every call runs through :func:`pipeline.tasks.run_task` with
-  the assigned persona's ``system_prompt`` as the system message, so
-  the voice comes from the roster, not from the pipeline's planner
-  prompt. ``deleted``-role slots never reach the LLM: their body is
-  the literal ``[deleted]`` and the flag is set here.
+  the pipeline guard floor prepended to the assigned persona's
+  ``system_prompt``, and every paper-derived or previously generated
+  block in the user message rides inside ``ctx.inject_untrusted``
+  markers — the same prompt-injection boundary the dispatch path
+  enforces. Each written body is then checked (required verbatim
+  blockquote present; every URL drawn from the verified link
+  inventory) and rejected bodies are rewritten with the violations
+  appended, twice, before the step fails. ``deleted``-role slots
+  never reach the LLM: their body is the literal ``[deleted]`` and
+  the flag is set here.
 
 Votes, scores, orderings, and time labels stay ``None``/empty: the
 reactor pass owns votes and everything display-side derives from
@@ -35,6 +41,8 @@ them.
 from __future__ import annotations
 
 import logging
+import re
+from collections.abc import Callable
 
 from pipeline import StepContext, StepSpec, run_task
 from pipeline.agents import AgentBackend
@@ -64,6 +72,17 @@ _EDITED_PARITY_MOD = 2
 """An edited comment appears in roughly half of all threads: the
 document hash's parity decides, so the same paper always gets the
 same answer."""
+
+_VOICE_MAX_ATTEMPTS = 3
+"""Tries per slot: the write plus up to two corrective rewrites
+before Step 9 fails the run (no partial artifact is ever persisted)."""
+
+_URL_RE = re.compile(r"https?://[^\s<>()\[\]{}\"'`]+", re.IGNORECASE)
+
+_PAPER_REF_RE = re.compile(r"\b([PN]\d{4})(R\d+)?\b")
+"""WG21 paper ids as they appear in paper text (``P2900``,
+``P2900R14``, ``N4950``). Feeds the wg21.link allowance: a paper the
+source document cites certainly exists, so linking it is safe."""
 
 
 # -- Step 8 - Cast -------------------------------------------------------------
@@ -135,6 +154,7 @@ async def _pure_voice(state: PipelineState, ctx: StepContext, spec: StepSpec) ->
     assert thread is not None, "Step 9 requires the Thread from Step 7."
 
     instructions = ctx.prompt.step_section(spec.step.name)
+    link_section, allowed_urls = _verified_links(state, thread)
     ordered = generation_order(thread)
     total = len(ordered)
 
@@ -155,16 +175,38 @@ async def _pure_voice(state: PipelineState, ctx: StepContext, spec: StepSpec) ->
                 ),
             )
 
-        user_msg = _voice_message(thread, reply, instructions)
-        output = await run_task(
-            _agent_for(reply, ctx, spec),
-            persona.system_prompt,
-            user_msg,
-            CommentOutput,
-            label=f"{spec.step.name} ({reply.slot_id})",
-            debug_log=ctx.debug_log if ctx.debug else None,
+        base_msg = _voice_message(
+            thread, reply, instructions, ctx.inject_untrusted, link_section,
         )
-        reply.content = output.content.strip()
+        user_msg = base_msg
+        for attempt in range(1, _VOICE_MAX_ATTEMPTS + 1):
+            output = await run_task(
+                _agent_for(reply, ctx, spec),
+                f"{ctx.guard_instruction}\n\n{persona.system_prompt}",
+                user_msg,
+                CommentOutput,
+                label=f"{spec.step.name} ({reply.slot_id})",
+                debug_log=ctx.debug_log if ctx.debug else None,
+            )
+            content = output.content.strip()
+            problems = _content_violations(reply, content, thread, allowed_urls)
+            if not problems:
+                break
+            if attempt == _VOICE_MAX_ATTEMPTS:
+                raise ValidationStepError(
+                    _STEP_9_NUMBER, spec.step.name,
+                    ValueError(
+                        f"Slot {reply.slot_id!r} failed content validation"
+                        f" after {_VOICE_MAX_ATTEMPTS} attempts:"
+                        f" {'; '.join(problems)}"
+                    ),
+                )
+            logger.info(
+                "Step 9: rewriting %s (attempt %d rejected: %s)",
+                reply.slot_id, attempt, "; ".join(problems),
+            )
+            user_msg = _corrected_message(base_msg, problems)
+        reply.content = content
         ctx.sub_progress(index, total, f"{spec.step.name} {reply.slot_id}")
 
     missing = [r.slot_id for r in thread.replies if not r.content]
@@ -226,24 +268,37 @@ def generation_order(thread: Thread) -> list[Reply]:
 # -- Voice prompt assembly -----------------------------------------------------
 
 
-def _voice_message(thread: Thread, reply: Reply, instructions: str) -> str:
-    """Assemble the per-slot user message for the voice call."""
+def _voice_message(
+    thread: Thread,
+    reply: Reply,
+    instructions: str,
+    inject: Callable[[str], str],
+    link_section: str,
+) -> str:
+    """Assemble the per-slot user message for the voice call.
+
+    ``inject`` is ``ctx.inject_untrusted``: every paper-derived or
+    previously generated block (submission body, anchor claim text,
+    ancestor comments, the trap correction) crosses into the prompt
+    inside guard markers, matching the dispatch-path boundary.
+    """
     parts = [
-        _thread_context(thread),
-        _assignment(thread, reply),
+        _thread_context(thread, inject),
+        _assignment(thread, reply, inject),
     ]
-    ancestry = _ancestry(thread, reply)
+    ancestry = _ancestry(thread, reply, inject)
     if ancestry:
         parts.append(ancestry)
     encounter = _encounter_context(thread, reply)
     if encounter:
         parts.append(encounter)
-    trap = _trap_context(thread, reply)
+    trap = _trap_context(thread, reply, inject)
     if trap:
         parts.append(trap)
     constraints = _constraints(reply)
     if constraints:
         parts.append(constraints)
+    parts.append(link_section)
     parts.append(
         f"## The Mod Reference (the-mod.md)\n\n{_mod_excerpts_for(reply)}"
     )
@@ -251,7 +306,7 @@ def _voice_message(thread: Thread, reply: Reply, instructions: str) -> str:
     return "\n\n".join(parts)
 
 
-def _thread_context(thread: Thread) -> str:
+def _thread_context(thread: Thread, inject: Callable[[str], str]) -> str:
     return (
         f"## Thread\n\n"
         f"- paper: {thread.document} — {thread.title}\n"
@@ -261,11 +316,13 @@ def _thread_context(thread: Thread) -> str:
         f"- submission by u/{thread.submission_poster_id}:"
         f" **{thread.submission_title}**\n"
         f"- link: {thread.submission_link}\n\n"
-        f"### Submission body\n\n{thread.submission_body}"
+        f"### Submission body\n\n{inject(thread.submission_body)}"
     )
 
 
-def _assignment(thread: Thread, reply: Reply) -> str:
+def _assignment(
+    thread: Thread, reply: Reply, inject: Callable[[str], str],
+) -> str:
     lines = [
         "## Your Comment",
         "",
@@ -290,22 +347,31 @@ def _assignment(thread: Thread, reply: Reply) -> str:
             f"### Anchor {anchor.id} ({anchor.kind})",
             "",
             f"- summary: {anchor.summary}",
-            f'- the paper says (verbatim): "{anchor.claim_text}"',
+            "- the paper says (verbatim):",
+            "",
+            inject(anchor.claim_text),
         ]
     return "\n".join(lines)
 
 
-def _ancestry(thread: Thread, reply: Reply) -> str:
+def _ancestry(
+    thread: Thread, reply: Reply, inject: Callable[[str], str],
+) -> str:
     """The chain above this comment, oldest first.
 
     Ancestors written earlier in the generation order contribute their
     text; ancestors not yet written contribute their brief, so every
-    prompt stays deterministic within the fixed walk.
+    prompt stays deterministic within the fixed walk. The walk keeps a
+    visited set: blueprint validation rejects cyclic parent graphs,
+    but a cycle that slipped through must degrade to a truncated
+    chain, not an infinite loop.
     """
     by_slot = {r.slot_id: r for r in thread.replies}
     chain: list[Reply] = []
+    visited: set[str] = set()
     parent_id = reply.parent_slot_id
-    while parent_id is not None:
+    while parent_id is not None and parent_id not in visited:
+        visited.add(parent_id)
         parent = by_slot.get(parent_id)
         if parent is None:
             break
@@ -318,7 +384,7 @@ def _ancestry(thread: Thread, reply: Reply) -> str:
         if ancestor.content:
             lines.append(
                 f"- u/{ancestor.character_username} wrote:\n\n"
-                f"{_indent(ancestor.content)}"
+                f"{inject(ancestor.content)}"
             )
         else:
             lines.append(
@@ -328,10 +394,6 @@ def _ancestry(thread: Thread, reply: Reply) -> str:
     lines.append("")
     lines.append("You are replying to the last comment in this chain.")
     return "\n".join(lines)
-
-
-def _indent(text: str) -> str:
-    return "\n".join(f"  > {line}" for line in text.splitlines())
 
 
 def _encounter_context(thread: Thread, reply: Reply) -> str:
@@ -355,7 +417,9 @@ def _encounter_context(thread: Thread, reply: Reply) -> str:
     )
 
 
-def _trap_context(thread: Thread, reply: Reply) -> str:
+def _trap_context(
+    thread: Thread, reply: Reply, inject: Callable[[str], str],
+) -> str:
     """For a misconception-trap question: fit the question to its answer.
 
     The teaching correction (a signal child) is written before the
@@ -378,7 +442,7 @@ def _trap_context(thread: Thread, reply: Reply) -> str:
     return (
         f"## The Answer You Will Receive\n\n"
         f"u/{teaching.character_username} replies to your question with:\n\n"
-        f"{_indent(teaching.content)}\n\n"
+        f"{inject(teaching.content)}\n\n"
         f"Write the confused or leading question that this reply"
         f" answers. Ask it in your own voice; do not know the answer."
     )
@@ -400,8 +464,8 @@ def _constraints(reply: Reply) -> str:
         )
     if reply.carries_link:
         items.append(
-            "Include one plausible URL (the paper link, a wg21.link"
-            " reference, or a godbolt-style link)."
+            "Include one URL copied verbatim from the Verified Links"
+            " list in this message. Never invent or alter a URL."
         )
     if reply.edited:
         items.append(
@@ -427,3 +491,158 @@ def _mod_excerpts_for(reply: Reply) -> str:
     if reply.role in ("signal", "teaser"):
         return mod_reference.voice_signal_excerpts()
     return mod_reference.voice_noise_excerpts()
+
+
+# -- Content validation ----------------------------------------------------------
+
+
+def _verified_links(
+    state: PipelineState, thread: Thread,
+) -> tuple[str, frozenset[str]]:
+    """The verified link inventory for this thread.
+
+    Returns ``(prompt_section, allowed_urls)``: the ``## Verified
+    Links`` section every voice prompt carries, and the normalized
+    set the URL check accepts. Everything in it is verified by
+    construction — the submission's resolved paper link, the
+    paperstore url, URLs the Step 2 research agents actually visited,
+    URLs from the paper's own external citations, and
+    ``wg21.link/<id>`` for paper ids the paper's text cites (a paper
+    the source document references certainly exists). Nothing else
+    may appear in a comment.
+    """
+    urls: list[str] = []
+    seen: set[str] = set()
+
+    def _add(candidate: object) -> None:
+        if not isinstance(candidate, str):
+            return
+        url = candidate.strip()
+        if not url.lower().startswith(("http://", "https://")):
+            return
+        normalized = _normalize_url(url)
+        if normalized not in seen:
+            seen.add(normalized)
+            urls.append(url)
+
+    _add(thread.submission_link)
+    _add(state.paper_url)
+    _add(f"https://wg21.link/{thread.document.lower()}")
+    rs = thread.research_summary
+    for report in (rs.public_reception, rs.committee_history,
+                   rs.author_ecosystem):
+        for source in report.sources:
+            _add(source)
+    for row in state.dissect_external_citations or []:
+        for value in row.values():
+            _add(value)
+
+    cited: set[str] = {thread.paper.upper()}
+    for match in _PAPER_REF_RE.finditer(state.paper_source or ""):
+        cited.add(match.group(1).upper())
+        if match.group(2):
+            cited.add((match.group(1) + match.group(2)).upper())
+
+    allowed = set(seen)
+    for pid in cited:
+        allowed.add(_normalize_url(f"https://wg21.link/{pid.lower()}"))
+
+    lines = [
+        "## Verified Links",
+        "",
+        "If your comment includes any URL, copy it verbatim from this"
+        " list. Never invent, guess, or alter a URL — prefer no link"
+        " over a made-up one.",
+        "",
+    ]
+    lines += [f"- {url}" for url in urls]
+    lines.append(
+        "- https://wg21.link/<paper-id> for a paper this paper cites: "
+        + ", ".join(sorted(cited))
+    )
+    return "\n".join(lines), frozenset(allowed)
+
+
+def _normalize_url(url: str) -> str:
+    return url.strip().rstrip("/").lower()
+
+
+def _extract_urls(content: str) -> list[str]:
+    return [m.group(0).rstrip(".,;:!?*") for m in _URL_RE.finditer(content)]
+
+
+def _content_violations(
+    reply: Reply,
+    content: str,
+    thread: Thread,
+    allowed_urls: frozenset[str],
+) -> list[str]:
+    """Check one written body against the enforceable slot constraints."""
+    problems: list[str] = []
+    if reply.carries_quote:
+        quote_problem = _quote_violation(content, thread)
+        if quote_problem:
+            problems.append(quote_problem)
+    for url in _extract_urls(content):
+        if _normalize_url(url) not in allowed_urls:
+            problems.append(
+                f"The URL {url} is not in the Verified Links list;"
+                f" use a listed URL verbatim or drop the link."
+            )
+    return problems
+
+
+def _quote_violation(content: str, thread: Thread) -> str | None:
+    """Require a ``>`` blockquote whose text is verbatim paper text.
+
+    A blockquote satisfies the slot when its whitespace-squashed text
+    is a contiguous fragment of an anchor's claim text or of the
+    submission body — the two sources the constraint offers.
+    """
+    blocks = _blockquote_blocks(content)
+    if not blocks:
+        return (
+            "The comment must quote the paper in a `>` blockquote"
+            " and none was found."
+        )
+    sources = [_squash_ws(a.claim_text) for a in thread.technical_anchors]
+    sources.append(_squash_ws(thread.submission_body))
+    for block in blocks:
+        text = _squash_ws(block)
+        if text and any(text in source for source in sources):
+            return None
+    return (
+        "No `>` blockquote matches the paper verbatim: quote the"
+        " anchor's exact claim text (or an exact fragment of the"
+        " submission body) without paraphrasing."
+    )
+
+
+def _blockquote_blocks(content: str) -> list[str]:
+    """Contiguous ``>``-prefixed line runs, each squashed to one string."""
+    blocks: list[str] = []
+    current: list[str] = []
+    for line in content.splitlines():
+        stripped = line.lstrip()
+        if stripped.startswith(">"):
+            current.append(stripped.lstrip("> ").strip())
+        elif current:
+            blocks.append(" ".join(current))
+            current = []
+    if current:
+        blocks.append(" ".join(current))
+    return blocks
+
+
+def _squash_ws(text: str) -> str:
+    return " ".join(text.split())
+
+
+def _corrected_message(base_msg: str, problems: list[str]) -> str:
+    bullets = "\n".join(f"- {p}" for p in problems)
+    return (
+        f"{base_msg}\n\n## Corrections\n\n"
+        f"Your previous attempt was rejected for the reasons below."
+        f" Rewrite the comment — same brief, same voice — fixing"
+        f" every one:\n\n{bullets}"
+    )

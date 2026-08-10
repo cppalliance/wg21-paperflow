@@ -468,8 +468,12 @@ their body is the literal ``[deleted]``.
 Each call carries the persona's system prompt (the voice), the slot's
 brief, the submission, the anchor quote when the slot addresses one,
 the comment chain above the slot, the encounter position and turn
-when applicable, and the constraints below. The comment is the brief,
-executed — in the persona's voice, at the persona's typical length.
+when applicable, the verified link inventory, and the constraints
+below. The comment is the brief, executed — in the persona's voice,
+at the persona's typical length. Each written body is checked — the
+required verbatim blockquote must be present, and every URL must
+come from the verified link inventory; a rejected body is rewritten
+with the violations appended (two rewrites, then the step fails).
 
 Rules for every comment:
 
@@ -481,6 +485,12 @@ Rules for every comment:
 - **Quotes are verbatim.** When the slot carries a quote, use the
   anchor's exact claim text (or an exact fragment of the submission
   body) in a ``>`` blockquote. Never paraphrase inside a blockquote.
+- **Links are verified.** Every URL in a comment is copied verbatim
+  from the call's Verified Links list: the resolved paper link, URLs
+  the research agents actually visited, the paper's own citations,
+  and ``wg21.link/<id>`` for papers the paper's text cites. Never
+  invent a URL — no fabricated godbolt short-links, video ids, or
+  discussion-thread ids. Prefer no link over a made-up one.
 - **The technical floor holds.** Even the laziest noise comment
   sounds like a C++ programmer wrote it (the-mod.md section 6).
 - **Reddit markdown.** Plain paragraphs, ``>`` blockquotes, fenced

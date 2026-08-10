@@ -232,6 +232,49 @@ def test_validate_blueprint_no_anchors_passes_vacuously():
     _validate_blueprint(state, [_reply("s01", role="noise")], [])
 
 
+def test_validate_blueprint_cyclic_parent_chain_raises():
+    state = PipelineState(interest="niche")
+    replies = [
+        _reply("s01", role="noise", parent_slot_id="s02", depth=1),
+        _reply("s02", role="noise", parent_slot_id="s01", depth=2),
+    ]
+    with pytest.raises(ValidationStepError, match="cyclic"):
+        _validate_blueprint(state, replies, [])
+
+
+def test_validate_blueprint_self_parent_raises():
+    state = PipelineState(interest="niche")
+    replies = [_reply("s01", role="noise", parent_slot_id="s01", depth=1)]
+    with pytest.raises(ValidationStepError, match="cyclic"):
+        _validate_blueprint(state, replies, [])
+
+
+def test_validate_blueprint_trap_without_correction_child_raises():
+    state = PipelineState(interest="niche")
+    replies = [
+        _reply("s01", role="noise", noise_stance="misconception"),
+        _reply("s02", role="noise", parent_slot_id="s01", depth=1),
+    ]
+    with pytest.raises(ValidationStepError, match="misconception-trap"):
+        _validate_blueprint(state, replies, [])
+
+
+def test_validate_blueprint_trap_with_signal_child_passes():
+    state = PipelineState(interest="niche")
+    replies = [
+        _reply("s01", role="noise", noise_stance="misconception"),
+        _reply("s02", role="signal", parent_slot_id="s01", depth=1),
+    ]
+    _validate_blueprint(state, replies, [])
+
+
+def test_validate_blueprint_misconception_on_non_noise_role_raises():
+    state = PipelineState(interest="niche")
+    replies = [_reply("s01", role="signal", noise_stance="misconception")]
+    with pytest.raises(ValidationStepError, match="role 'noise'"):
+        _validate_blueprint(state, replies, [])
+
+
 # -- the-mod.md prompt injection -------------------------------------------
 
 
@@ -286,7 +329,7 @@ def test_extract_skeleton_widens_slots_to_replies():
             SkeletonReply(slot_id="s01", depth=0, role="teaser", brief="hook"),
             SkeletonReply(
                 slot_id="s02", parent_slot_id="s01", depth=1, role="noise",
-                brief="react", noise_tone="snark", noise_stance="con",
+                brief="react", noise_tone="snark", noise_stance="process-cynic",
             ),
         ],
         encounter_slot_groups=[["s03", "s04"]],

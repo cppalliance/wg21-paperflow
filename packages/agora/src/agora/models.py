@@ -53,6 +53,24 @@ ReplyRole = Literal[
     "deleted",
 ]
 EncounterResolution = Literal["concession", "narrowing", "stalemate"]
+NoiseStance = Literal[
+    "didn't-read",
+    "skimmed-abstract",
+    "Rust-evangelist",
+    "C-purist",
+    "it's-fine-actually",
+    "doomsayer",
+    "recruiter-brain",
+    "process-cynic",
+    "old-guard",
+    "student",
+    "misconception",
+]
+"""the-mod.md section 6 stance palette plus the ``misconception``
+marker agora.md Step 5 puts on a misconception-trap question slot.
+Closed vocabulary: casting keys trap handling on the exact
+``misconception`` string, so a free-form stance would let a typo
+silently demote a trap to ordinary noise."""
 RevisionCase = Literal["A", "B", "C"]
 """``A``: new paper, no prior thread. ``B``: re-run of an existing
 revision (regenerate same thread). ``C``: new revision; the prior
@@ -214,9 +232,10 @@ class Reply(BaseModel):
         default=None,
         description="Tone label for noise slots (e.g. ``snark``, ``earnest``).",
     )
-    noise_stance: Optional[str] = Field(
+    noise_stance: Optional[NoiseStance] = Field(
         default=None,
-        description="Stance label for noise slots (e.g. ``pro``, ``con``, ``baffled``).",
+        description="Stance label for noise slots, drawn from the-mod.md"
+        " section 6 palette; ``misconception`` marks a trap question slot.",
     )
 
     carries_quote: bool = False
@@ -418,9 +437,10 @@ class SkeletonReply(BaseModel, frozen=True):
         default=None,
         description="Tone label for noise slots (e.g. ``snark``, ``earnest``).",
     )
-    noise_stance: Optional[str] = Field(
+    noise_stance: Optional[NoiseStance] = Field(
         default=None,
-        description="Stance label for noise slots (e.g. ``pro``, ``con``, ``baffled``).",
+        description="Stance label for noise slots, drawn from the-mod.md"
+        " section 6 palette; ``misconception`` marks a trap question slot.",
     )
 
     carries_quote: bool = False

@@ -56,6 +56,7 @@ from pipeline.errors import (
     ValidationStepError,
 )
 from agora import mod_reference
+from agora.casting import MISCONCEPTION_STANCE
 from agora.errors import PaperNotConvertedError, PaperNotFoundError
 from agora.generate import _pure_cast, _pure_voice
 from agora.models import (
@@ -647,6 +648,52 @@ _INTEREST_LENS_FLOOR: dict[str, int] = {
 
 def _validate_blueprint(state: PipelineState, replies: list, encounters: list) -> None:
     """Sanity-check the Thread structure before serialisation."""
+    by_slot = {r.slot_id: r for r in replies}
+    for r in replies:
+        chain = {r.slot_id}
+        cursor = r.parent_slot_id
+        while cursor is not None:
+            if cursor in chain:
+                raise ValidationStepError(
+                    7, _STEP_7_SERIALIZE,
+                    ValueError(
+                        f"Reply '{r.slot_id}' sits on a cyclic parent chain"
+                        f" (revisits '{cursor}'). Parent links must form a tree."
+                    ),
+                )
+            chain.add(cursor)
+            parent = by_slot.get(cursor)
+            cursor = parent.parent_slot_id if parent is not None else None
+
+    trap_slots = [r for r in replies if r.noise_stance == MISCONCEPTION_STANCE]
+    wrong_role = sorted(r.slot_id for r in trap_slots if r.role != "noise")
+    if wrong_role:
+        raise ValidationStepError(
+            7, _STEP_7_SERIALIZE,
+            ValueError(
+                f"misconception stance requires role 'noise' (the confused"
+                f" question); offending slot(s): {wrong_role}."
+            ),
+        )
+    unanswered_traps = sorted(
+        r.slot_id for r in trap_slots
+        if not any(
+            child.parent_slot_id == r.slot_id
+            and child.role in ("signal", "teaser")
+            for child in replies
+        )
+    )
+    if unanswered_traps:
+        raise ValidationStepError(
+            7, _STEP_7_SERIALIZE,
+            ValueError(
+                f"{len(unanswered_traps)} misconception-trap slot(s) have no"
+                f" signal/teaser child delivering the correction:"
+                f" {unanswered_traps}. Step 5 allocates a two-slot pair per"
+                f" trap (the confused question and its answer)."
+            ),
+        )
+
     anchor_ids = {a.id for a in (state.technical_anchors or [])}
     addressed: set[str] = set()
     lens_used: set[int] = set()
