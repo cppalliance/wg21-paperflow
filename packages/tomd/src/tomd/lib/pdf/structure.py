@@ -2190,6 +2190,19 @@ def _section_has_foreign_chromatic(sec: Section) -> bool:
     )
 
 
+def _ins_spans_are_bare_numerals(spans: list[Span]) -> bool:
+    """True if every ``ins``-tagged span's stripped text is digits only.
+
+    A PDF syntax-highlighting theme that colors numeric literals (e.g. a
+    "777" argument in an illustrative code example) can collide with
+    WG21's own ins-green hue band. A genuine WG21 insertion marks an
+    identifier, keyword, or punctuation token; it is never a bare number
+    on its own, so a section whose only "ins" signal is one or more lone
+    numeral runs is syntax highlighting, not a real edit.
+    """
+    return bool(spans) and all(s.text.strip().isdigit() for s in spans)
+
+
 def _classify_wording_sections(sections: list[Section]) -> list[Section]:
     """Reclassify sections containing wording-marked spans."""
     for sec in sections:
@@ -2211,7 +2224,13 @@ def _classify_wording_sections(sections: list[Section]) -> list[Section]:
         # collapsing into a single wording line. Sections with a red /
         # strikethrough deletion ("del") are genuine WG21 wording even when
         # the surrounding code is syntax-highlighted, so they are exempt.
-        if non_context == {"ins"} and _section_has_foreign_chromatic(sec):
+        # A lone highlighted numeral (no foreign color companion) is the
+        # same false positive under a monochrome numeric-literal theme;
+        # see _ins_spans_are_bare_numerals.
+        if non_context == {"ins"} and (
+                _section_has_foreign_chromatic(sec)
+                or _ins_spans_are_bare_numerals(
+                    [s for s in wording_spans if s.wording_role == "ins"])):
             continue
         if non_context == {"ins"}:
             sec.kind = SectionKind.WORDING_ADD
