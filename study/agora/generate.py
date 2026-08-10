@@ -181,16 +181,8 @@ async def main() -> None:
     else:
         smell_backend, smell_map = _resolve_backend(smell_slot_override)
         thread_backend, thread_map = _resolve_backend(thread_slot_override)
-        smell_label = (
-            smell_slot_override
-            if smell_slot_override is not None
-            else smell_map["default"]
-        )
-        thread_label = (
-            thread_slot_override
-            if thread_slot_override is not None
-            else thread_map["default"]
-        )
+        smell_label = smell_map["default"]
+        thread_label = thread_map["default"]
 
     print(
         f"Smell slot: {smell_label}, Thread slot: {thread_label}",

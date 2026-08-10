@@ -9,28 +9,8 @@
 
 from __future__ import annotations
 
-import pytest
-
 from cli.__main__ import _validate_targets
 
 
 def test_assay_accepts_paper_id():
     _validate_targets("assay", ["P4003R2"])
-
-
-def test_assay_rejects_bare_year():
-    with pytest.raises(SystemExit) as exc_info:
-        _validate_targets("assay", ["2026"])
-    assert exc_info.value.code == 1
-
-
-def test_assay_rejects_year_month():
-    with pytest.raises(SystemExit) as exc_info:
-        _validate_targets("assay", ["2026-01"])
-    assert exc_info.value.code == 1
-
-
-def test_agora_rejects_bare_year():
-    with pytest.raises(SystemExit) as exc_info:
-        _validate_targets("agora", ["2026"])
-    assert exc_info.value.code == 1

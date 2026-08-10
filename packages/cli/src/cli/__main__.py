@@ -229,7 +229,7 @@ def _validate_targets(verb: str, targets: list[str]) -> None:
             sys.exit(1)
         if kinds != {"paper"}:
             print(
-                f"paperflow {verb}: accepts a paper ID, not years or year-months.",
+                f"paperflow {verb}: accepts a single paper ID.",
                 file=sys.stderr,
             )
             sys.exit(1)

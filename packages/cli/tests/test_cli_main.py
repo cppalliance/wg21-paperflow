@@ -69,8 +69,9 @@ def test_no_verb_fallback_routes_to_full():
         (["full", "2026-01"], "not year-month"),
         (["agora", "P0000R0", "P0001R0"], "accepts exactly one target"),
         (["assay", "P0000R0", "P0001R0"], "accepts exactly one target"),
-        (["assay", "2026"], "not years or year-months"),
-        (["assay", "2026-01"], "not years or year-months"),
+        (["assay", "2026"], "single paper ID"),
+        (["assay", "2026-01"], "single paper ID"),
+        (["assay", "all"], "single paper ID"),
         (["agora", "2026"], "not bare years"),
     ],
 )
