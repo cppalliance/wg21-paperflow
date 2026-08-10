@@ -1061,25 +1061,62 @@ DOC_NUM_RE = re.compile(rf"\b({DOC_NUM_PATTERN})\b", re.IGNORECASE)
 SECTION_NUM_PREFIX_RE = re.compile(rf"^{SECTION_NUM_PATTERN}\.?\s+")
 
 
+# Outline labels recognised in rendered heading text. Deliberately stricter
+# than SECTION_NUM_PREFIX_RE above: that pattern normalizes *both* sides of a
+# TOC comparison, so an over-eager match there is harmless, whereas a match
+# here edits user-visible output. Hence a non-decimal label must carry its
+# dot - without it, ordinary words built from Roman-numeral letters get eaten
+# ("C compatibility", "LLVM codegen impact", "I Have a Dream").
+_HEADING_DECIMAL_LABEL_RE = re.compile(r"^\d+(?:\.\d+)*\.?\s+")
+_HEADING_LETTER_LABEL_RE = re.compile(r"^(?:[IVXLCDM]{2,}|[A-Z])\.\s+")
+
+# A WG21 stable name directly after the label: bracketed, lowercase and
+# space-free ("[mem]", "[lex.separate]", "[c.math.abs]"), optionally the outer
+# bracket of a rendered link ("[[cpp.rescan]](url)"). Narrower than the
+# anchored whole-line `_STABLE_NAME_RE` in lib/pdf/table.py. The lowercase,
+# space-free shape is what separates a clause reference from an ordinary
+# markdown link label ("2 [Some Title](url)"), whose text carries capitals
+# and/or spaces. Carries no `^`: it is applied as `.match(text, pos)`, which
+# anchors at `pos`, whereas `^` would only ever match the real string start.
+_ADJACENT_STABLE_NAME_RE = re.compile(r"\[\[?[a-z][a-z0-9.+_-]*\]")
+
+
 def strip_heading_section_number(text: str) -> str:
-    """Strip a leading outline-number prefix from rendered heading text.
+    """Strip a leading outline label from rendered heading text.
 
-    The number is consumed upstream as the *level* signal (dotted-decimal
-    depth or the HTML source tag digit); leaving it in the text too
-    duplicates it, so ``## 2 Revision History`` should read ``## Revision
-    History``.
+    The house convention, set by the blessed golden ideals, is that a
+    heading's text is its title alone: the outline label belongs to the
+    document's structure, which markdown carries in the heading depth. So
+    ``## 2 Revision History`` reads ``## Revision History``, and the same
+    applies to Roman (``VIII. Proposed Wording``) and alphabetic
+    (``C. Arguments with External Visibility``) labels, which the ideals
+    strip uniformly - see ``ideals/p0533r9.md``, whose source mixes a Roman
+    outline with an alphabetic sub-series and whose ideal carries neither.
 
-    Exception: a number immediately followed by ``[`` (e.g. ``5.1
-    [lex.separate]``, ``15.6.5 [[cpp.rescan]](url)`` once link-rendered) is a
-    WG21 *standard clause reference* inside a Wording/Proposed Wording
-    section, not the paper's own outline numbering - it does not correspond
-    to this heading's nesting depth (a "15.6.5" clause reference can sit at
-    the same level as a "5.1" one) and is the only record of which clause of
-    the standard is being modified, so it must survive into the text.
+    Exception: a *decimal* label immediately followed by a WG21 stable name
+    (``5.1 [lex.separate] Separate translation``, ``15.6.5
+    [[cpp.rescan]](url) ...`` once link-rendered) is a **standard clause
+    reference** quoted inside a Wording / Proposed Wording section, not the
+    paper's own outline number. It does not correspond to this heading's
+    nesting depth (a "15.6.5" clause reference can sit at the same level as a
+    "5.1" one) and is the only record of which clause of the standard is being
+    modified, so it survives. The exception is decimal-only because clause
+    numbers are always decimal: a letter label sitting next to a stable name
+    is the paper's own sub-series (``C. Modification to "The C standard
+    library" [library.c]``) and is still stripped.
+
+    The exception deliberately requires *adjacency*. A stable name later in
+    the heading does not decide the question, because both readings occur in
+    the corpus with identical text shape: ``23.3.8 Header <hive> synopsis
+    [hive.syn]`` (p3933r0) quotes a clause, while ``4.1 Canonical tree shape
+    [canonical.reduce.tree]`` (p4016r0) and ``10.3 modify
+    [simd.expos.defn]`` (p4012r0) number the paper's own sections. Telling
+    them apart needs document-level series context, not a wider text rule.
     """
-    m = SECTION_NUM_PREFIX_RE.match(text)
-    if not m:
-        return text
-    if text[m.end():].startswith("["):
-        return text
-    return text[m.end():]
+    m = _HEADING_DECIMAL_LABEL_RE.match(text)
+    if m:
+        if _ADJACENT_STABLE_NAME_RE.match(text, m.end()):
+            return text
+        return text[m.end():]
+    m = _HEADING_LETTER_LABEL_RE.match(text)
+    return text[m.end():] if m else text

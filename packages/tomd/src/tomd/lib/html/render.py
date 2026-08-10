@@ -666,9 +666,10 @@ def _render_heading(el: Tag) -> str | None:
     text = text.replace("\n", " ")
     text = re.sub(r"  +", " ", text)
     text = _BOLD_WRAP_RE.sub(r"\1", text)
-    # The number is only a level signal (the source tag digit already carries
-    # it here); it must not also survive into the rendered text, or headings
-    # read "## 2 Revision History" instead of the clean "## Revision History".
+    # Generators (bikeshed, mpark) bake the outline label into the heading
+    # text; the structure it encodes is already carried by the heading depth,
+    # so headings read "## 2 Revision History" instead of the clean
+    # "## Revision History" the ideals expect.
     text = strip_heading_section_number(text)
     return f"{'#' * level} {text}"
 

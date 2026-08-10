@@ -13,6 +13,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from tomd.lib.shared import (
     _strip_metadata_table,
     apply_strip_leading_h1,
@@ -174,7 +176,7 @@ class TestStripLeadingH1:
 
 
 class TestStripHeadingSectionNumber:
-    """Issue #301: the number is a level signal, not part of the title."""
+    """Issue #301: the outline label is document structure, not the title."""
 
     def test_strips_plain_arabic_number(self):
         assert strip_heading_section_number("2 Revision History") == "Revision History"
@@ -185,8 +187,8 @@ class TestStripHeadingSectionNumber:
     def test_strips_number_with_trailing_dot(self):
         assert strip_heading_section_number("1. Disclosure") == "Disclosure"
 
-    def test_strips_roman_numeral(self):
-        assert strip_heading_section_number("IV Scope") == "Scope"
+    def test_strips_dotted_roman_numeral(self):
+        assert strip_heading_section_number("IV. Scope") == "Scope"
 
     def test_no_number_is_noop(self):
         assert strip_heading_section_number("Abstract") == "Abstract"
@@ -196,10 +198,36 @@ class TestStripHeadingSectionNumber:
         # so there is nothing safe to strip.
         assert strip_heading_section_number("3.2") == "3.2"
 
+    @pytest.mark.parametrize("text", [
+        "C compatibility",
+        "LLVM codegen impact",
+        "I Have a Dream",
+        "D compatibility notes",
+    ])
+    def test_undotted_roman_letters_are_ordinary_words(self, text):
+        # An outline label is only recognised as Roman/alphabetic when it
+        # carries its dot. Without that, every heading whose first word is
+        # built from Roman-numeral letters loses it.
+        assert strip_heading_section_number(text) == text
+
+    @pytest.mark.parametrize("text,expected", [
+        ("A. Global Flags", "Global Flags"),
+        ("B. Rounding Mode", "Rounding Mode"),
+        ("C. Arguments with External Visibility",
+         "Arguments with External Visibility"),
+        ("D. Conditions for `constexpr`", "Conditions for `constexpr`"),
+    ])
+    def test_strips_whole_alphabetic_series(self, text, expected):
+        # An A/B/C/D sub-series is stripped uniformly, however Roman-numeral
+        # letters fall across it: `ideals/p0533r9.md` blesses exactly these
+        # four headings label-free. Stripping only the C/D half (which are
+        # Roman-numeral characters) would cut the series in two.
+        assert strip_heading_section_number(text) == expected
+
     def test_keeps_standard_clause_reference(self):
-        # A number immediately followed by "[" is a WG21 standard clause
-        # reference (which clause is being modified), not the paper's own
-        # redundant outline number, and must survive into the heading text.
+        # A number immediately followed by a stable name is a WG21 standard
+        # clause reference (which clause is being modified), not the paper's
+        # own redundant outline number, and must survive into the heading text.
         text = "5.1 [lex.separate] Separate translation"
         assert strip_heading_section_number(text) == text
 
@@ -207,9 +235,28 @@ class TestStripHeadingSectionNumber:
         text = "15.6.5 [[cpp.rescan]](https://wg21.link/cpp.rescan) Rescanning"
         assert strip_heading_section_number(text) == text
 
-    def test_strips_number_when_bracket_is_not_adjacent(self):
-        # The bracket exception only fires when the bracket directly follows
-        # the number; a bracket later in the title is an ordinary heading.
-        text = "10.3 modify [simd.expos.defn]"
-        assert (strip_heading_section_number(text)
+    def test_ordinary_markdown_link_does_not_shield_the_number(self):
+        # The clause-reference exception needs a *stable name* next to the
+        # number, not any bracket: a link label carries capitals and spaces.
+        assert (strip_heading_section_number("2 [Some Title](url)")
+                == "[Some Title](url)")
+
+    def test_strips_number_when_stable_name_is_not_adjacent(self):
+        # Adjacency is load-bearing. `10.3 modify [simd.expos.defn]` (p4012r0)
+        # and `4.1 Canonical tree shape [canonical.reduce.tree]` (p4016r0)
+        # number the paper's own sections, so a trailing stable name cannot
+        # decide the question on text alone.
+        assert (strip_heading_section_number("10.3 modify [simd.expos.defn]")
                 == "modify [simd.expos.defn]")
+
+    def test_letter_label_is_stripped_beside_a_stable_name(self):
+        # Clause numbers are always decimal, so the exception is decimal-only:
+        # this `C.` is p0533r9's own sub-series label, and its ideal drops it.
+        text = "C. Modification to “The C standard library” [library.c]"
+        assert (strip_heading_section_number(text)
+                == "Modification to “The C standard library” [library.c]")
+
+    def test_leading_date_is_not_an_outline_label(self):
+        # p1122r3's revision headings; the `2020` is not followed by a space.
+        text = "2020-08-28 [D1122R3] after virtual LWG meeting"
+        assert strip_heading_section_number(text) == text
