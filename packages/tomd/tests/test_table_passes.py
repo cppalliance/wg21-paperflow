@@ -6,11 +6,13 @@
 
 from types import SimpleNamespace
 
-from tomd.lib.pdf.types import Span, Line, Block
+from tomd.lib.pdf.types import Span, Line, Block, Section, SectionKind
 from tomd.lib.pdf.table import (
     _gap_asymmetry_reject,
     _block_horizontal_row_relaxed,
     _try_wrapped_partial_row,
+    _try_cross_page_continuation,
+    _filter_overlapping_mupdf_tables,
     _rot_midpoint,
     _detect_mupdf_native_tables,
     _detect_banded_rotated_tables,
@@ -692,3 +694,170 @@ class TestColumnAwareSortRotated:
         blocks = [b, a]
         _column_aware_sort(blocks, {0: 595.0})
         assert [blk.text for blk in blocks] == ["top", "bottom"]
+
+
+# ---------------------------------------------------------------------------
+# Cross-page table continuation (issue #304)
+# ---------------------------------------------------------------------------
+
+# Real geometry from P0957R8 "Table 3 - Sample compiler configurations", which
+# runs off the bottom of page 12 and resumes at the top of page 13.
+_P12_HEADER_XS = [63.0, 200.3, 343.7, 453.0]
+_P12_ROW1_XS = [75.4, 224.5, 347.4, 452.2]
+_P12_ROW2_XS = [94.4, 228.4, 351.2, 452.2]
+_P13_CONT_XS = [81.7, 224.5, 347.4, 452.2]
+
+
+def _row(page: int, y0: float, y1: float, xs: list[float]) -> Block:
+    """A columnar block: one line per cell, starting at each x in xs."""
+    lines = [
+        Line(spans=[Span(text=f"c{i}", font_size=10.0)],
+             bbox=(x, y0, x + 40.0, y1), page_num=page)
+        for i, x in enumerate(xs)
+    ]
+    return Block(lines=lines, bbox=(xs[0], y0, xs[-1] + 40.0, y1),
+                 page_num=page)
+
+
+def _spacer(page: int, y0: float, y1: float) -> Block:
+    """A whitespace-only block, as left behind by header/footer stripping."""
+    line = Line(spans=[Span(text=" ", font_size=10.0)],
+                bbox=(62.5, y0, 64.8, y1), page_num=page)
+    return Block(lines=[line], bbox=(62.5, y0, 64.8, y1), page_num=page)
+
+
+def _prose(page: int, y0: float, y1: float) -> Block:
+    """A single-line block carrying real text."""
+    line = Line(spans=[Span(text="Some prose.", font_size=10.0)],
+                bbox=(62.5, y0, 400.0, y1), page_num=page)
+    return Block(lines=[line], bbox=(62.5, y0, 400.0, y1), page_num=page)
+
+
+class TestTryCrossPageContinuation:
+    """Branch 6: a table runs off one page and resumes on the next."""
+
+    def _table_blocks(self) -> list[Block]:
+        return [
+            _row(12, 714.0, 727.8, _P12_HEADER_XS),
+            _row(12, 730.3, 743.7, _P12_ROW1_XS),
+            _row(12, 745.9, 759.3, _P12_ROW2_XS),
+        ]
+
+    def test_continuation_row_across_blank_spacer(self):
+        """The P0957R8 case: spacer on page 12, continuation on page 13."""
+        table_blocks = self._table_blocks()
+        blocks = [_spacer(12, 770.6, 793.1),
+                  _row(13, 73.5, 86.9, _P13_CONT_XS)]
+        result = _try_cross_page_continuation(
+            blocks, 0, _P12_ROW2_XS, table_blocks)
+        assert result is not None
+        assert result.advance_to == 2
+        assert result.new_ref_cols == _P13_CONT_XS
+
+    def test_continuation_row_with_nothing_between(self):
+        table_blocks = self._table_blocks()
+        blocks = [_row(13, 73.5, 86.9, _P13_CONT_XS)]
+        result = _try_cross_page_continuation(
+            blocks, 0, _P12_ROW2_XS, table_blocks)
+        assert result is not None
+        assert result.advance_to == 1
+
+    def test_real_block_between_ends_the_table(self):
+        """Only whitespace may intervene; prose means the table stopped."""
+        table_blocks = self._table_blocks()
+        blocks = [_prose(12, 770.6, 785.0),
+                  _row(13, 73.5, 86.9, _P13_CONT_XS)]
+        assert _try_cross_page_continuation(
+            blocks, 0, _P12_ROW2_XS, table_blocks) is None
+
+    def test_page_gap_larger_than_one_rejected(self):
+        table_blocks = self._table_blocks()
+        blocks = [_row(14, 73.5, 86.9, _P13_CONT_XS)]
+        assert _try_cross_page_continuation(
+            blocks, 0, _P12_ROW2_XS, table_blocks) is None
+
+    def test_candidate_below_top_band_rejected(self):
+        """A table further down the next page is a different table."""
+        table_blocks = self._table_blocks()
+        blocks = [_row(13, 300.0, 313.4, _P13_CONT_XS)]
+        assert _try_cross_page_continuation(
+            blocks, 0, _P12_ROW2_XS, table_blocks) is None
+
+    def test_table_not_at_page_bottom_rejected(self):
+        """A table ending mid-page did not run out of room."""
+        table_blocks = [
+            _row(12, 300.0, 313.4, _P12_HEADER_XS),
+            _row(12, 315.0, 328.4, _P12_ROW1_XS),
+            _row(12, 330.0, 343.4, _P12_ROW2_XS),
+        ]
+        blocks = [_row(13, 73.5, 86.9, _P13_CONT_XS)]
+        assert _try_cross_page_continuation(
+            blocks, 0, _P12_ROW2_XS, table_blocks) is None
+
+    def test_column_count_mismatch_rejected(self):
+        table_blocks = self._table_blocks()
+        blocks = [_row(13, 73.5, 86.9, [81.7, 224.5, 347.4])]
+        assert _try_cross_page_continuation(
+            blocks, 0, _P12_ROW2_XS, table_blocks) is None
+
+    def test_column_drift_beyond_tolerance_rejected(self):
+        """Same column count but a visibly different layout."""
+        table_blocks = self._table_blocks()
+        blocks = [_row(13, 73.5, 86.9, [200.0, 300.0, 400.0, 500.0])]
+        assert _try_cross_page_continuation(
+            blocks, 0, _P12_ROW2_XS, table_blocks) is None
+
+    def test_unestablished_table_rejected(self):
+        """A single row is not yet a table worth continuing."""
+        table_blocks = [_row(12, 745.9, 759.3, _P12_ROW2_XS)]
+        blocks = [_row(13, 73.5, 86.9, _P13_CONT_XS)]
+        assert _try_cross_page_continuation(
+            blocks, 0, _P12_ROW2_XS, table_blocks) is None
+
+    def test_non_columnar_candidate_rejected(self):
+        table_blocks = self._table_blocks()
+        blocks = [_prose(13, 73.5, 86.9)]
+        assert _try_cross_page_continuation(
+            blocks, 0, _P12_ROW2_XS, table_blocks) is None
+
+    def test_trailing_blanks_only_rejected(self):
+        """Running off the end of the document is not a continuation."""
+        table_blocks = self._table_blocks()
+        blocks = [_spacer(12, 770.6, 793.1)]
+        assert _try_cross_page_continuation(
+            blocks, 0, _P12_ROW2_XS, table_blocks) is None
+
+
+class TestFilterOverlappingMupdfTablesCrossPage:
+    """A cross-page section must claim a y-range per page, not one union."""
+
+    def _cross_page_section(self) -> Section:
+        """Section whose lines span the bottom of page 12 and top of page 13."""
+        return Section(
+            kind=SectionKind.TABLE,
+            text="",
+            lines=[
+                Line(spans=[Span(text="a")], bbox=(63.0, 714.0, 500.0, 727.8),
+                     page_num=12),
+                Line(spans=[Span(text="b")], bbox=(81.7, 73.5, 500.0, 86.9),
+                     page_num=13),
+            ],
+            page_num=12,
+        )
+
+    def test_unrelated_table_on_same_page_survives(self):
+        """A find_tables entry mid-page-12 does not overlap the bottom band."""
+        page_tables = {12: [{"bbox": (60.0, 448.0, 520.0, 560.0)}]}
+        kept = _filter_overlapping_mupdf_tables(
+            page_tables, [self._cross_page_section()])
+        assert kept == page_tables
+
+    def test_overlapping_entry_on_each_touched_page_dropped(self):
+        """Both the page-12 and the page-13 fragment suppress their own page."""
+        page_tables = {
+            12: [{"bbox": (60.0, 710.0, 520.0, 760.0)}],
+            13: [{"bbox": (60.0, 70.0, 520.0, 90.0)}],
+        }
+        kept = _filter_overlapping_mupdf_tables(
+            page_tables, [self._cross_page_section()])
+        assert kept == {}

@@ -3714,9 +3714,17 @@ def _filter_overlapping_mupdf_tables(
     for sec in existing_sections:
         if not sec.lines:
             continue
-        y_min = min(ln.bbox[1] for ln in sec.lines)
-        y_max = max(ln.bbox[3] for ln in sec.lines)
-        existing_ranges.append((sec.page_num, y_min, y_max))
+        # Group by the line's own page. A cross-page table's lines mix
+        # bottom-of-page-N and top-of-page-N+1 y-coordinates, so a single
+        # min/max would claim nearly the whole page and suppress unrelated
+        # find_tables entries on it.
+        per_page: dict[int, tuple[float, float]] = {}
+        for ln in sec.lines:
+            y0, y1 = per_page.get(ln.page_num, (ln.bbox[1], ln.bbox[3]))
+            per_page[ln.page_num] = (min(y0, ln.bbox[1]),
+                                     max(y1, ln.bbox[3]))
+        for pg, (y_min, y_max) in per_page.items():
+            existing_ranges.append((pg, y_min, y_max))
 
     result: dict[int, list[dict]] = {}
     for pg, tables in page_mupdf_tables.items():
@@ -4081,6 +4089,57 @@ def _try_partial_row(
     )
 
 
+# Per-column alignment tolerance for a cross-page continuation row. Wider
+# than _COLUMN_X_TOLERANCE because centered cells re-centre on the new page
+# against different text widths, but far tighter than the column pitch, so
+# an unrelated table with the same column count still fails to match.
+_CROSS_PAGE_COL_X_TOLERANCE = 30.0
+
+
+def _try_cross_page_continuation(
+    blocks: list[Block],
+    j: int,
+    ref_cols: list[float],
+    table_blocks: list[Block],
+) -> Optional[_MatchResult]:
+    """Branch 6: the table runs off one page and resumes on the next.
+
+    Fires only when the table is already established, its last row sits in
+    the bottom band of its page, and the candidate is a columnar block with
+    the same column count in the top band of the very next page. Only
+    whitespace-only spacer blocks (left behind by header/footer stripping)
+    may sit between the two; any real block ends the table as before.
+
+    Reuses the page-band constants of the MuPDF-native pass: "bottom of a
+    page" and "top of a page" mean the same thing in both.
+    """
+    if len(table_blocks) < _MIN_TABLE_ROWS:
+        return None
+    last = table_blocks[-1]
+    if last.bbox[3] < _CROSS_PAGE_BOTTOM_Y:
+        return None
+
+    k = j
+    while k < len(blocks) and not blocks[k].text.strip():
+        k += 1
+    if k >= len(blocks):
+        return None
+
+    cand = blocks[k]
+    if (cand.page_num != last.page_num + 1
+            or cand.bbox[1] > _CROSS_PAGE_TOP_Y):
+        return None
+
+    cand_cols = _block_column_positions(cand)
+    if cand_cols is None or len(cand_cols) != len(ref_cols):
+        return None
+    if any(abs(a - b) > _CROSS_PAGE_COL_X_TOLERANCE
+           for a, b in zip(ref_cols, cand_cols)):
+        return None
+
+    return _MatchResult(advance_to=k + 1, new_ref_cols=cand_cols)
+
+
 def _build_rows_ybanded(
     table_blocks: list[Block],
     ref_cols: list[float],
@@ -4394,6 +4453,19 @@ def detect_tables(
                 for k in range(j + 1, result.advance_to):
                     table_blocks.append(blocks[k])
                 partial_absorbed.update(result.absorbed_ids)
+                j = result.advance_to
+                continue
+
+            # Branch 6: the table resumes at the top of the next page.
+            # Tried last so it can only rescue a table the same-page
+            # branches have already given up on. Only the continuation
+            # row joins the table; the whitespace-only spacers it skipped
+            # carry no text.
+            result = _try_cross_page_continuation(
+                blocks, j, ref_cols, table_blocks)
+            if result is not None:
+                table_blocks.append(blocks[result.advance_to - 1])
+                ref_cols = result.new_ref_cols
                 j = result.advance_to
                 continue
 
