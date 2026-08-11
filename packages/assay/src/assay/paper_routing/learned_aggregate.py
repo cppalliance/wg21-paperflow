@@ -23,7 +23,6 @@ from pipeline.classifier_backends import (
 )
 
 from assay.paper_routing.features import (
-    build_feature_names,
     default_catalog_ids,
     extract_paper_features,
     vectorize_features,

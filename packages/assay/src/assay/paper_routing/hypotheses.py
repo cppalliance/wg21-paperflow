@@ -20,10 +20,7 @@ from pipeline.classifier_backends import (
 )
 from pipeline.nli_batch import score_entailment_pairs
 from assay.paper_routing.sections import line_section_map, section_for_sentence
-from assay.paper_routing.seqcls_thresholds import (
-    _ROUTING_SEQCLS_THRESHOLD_FALLBACK as _ROUTING_SEQCLS_THRESHOLD,
-    seqcls_threshold_for_label,
-)
+from assay.paper_routing.seqcls_thresholds import seqcls_threshold_for_label
 from assay.paper_routing.split import RawSentence, split_sentences
 from assay.paper_routing.types import HypothesisAxis, SectionType, Sentence
 

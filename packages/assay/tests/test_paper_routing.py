@@ -19,12 +19,14 @@ from assay.paper_routing.hypotheses import (
     Hypothesis,
     _CATALOG_IDS,
     _ROUTING_NLI_THRESHOLD,
-    _ROUTING_SEQCLS_THRESHOLD,
     _resolve_classifiers,
     get_hits_from_text,
     score_hypotheses,
 )
-from assay.paper_routing.seqcls_thresholds import load_seqcls_hypothesis_thresholds
+from assay.paper_routing.seqcls_thresholds import (
+    _ROUTING_SEQCLS_THRESHOLD_FALLBACK as _ROUTING_SEQCLS_THRESHOLD,
+    load_seqcls_hypothesis_thresholds,
+)
 from assay.paper_routing.split import split_sentences
 from assay.paper_routing.headings import classify_routing_section
 from assay.paper_routing.types import SectionType
@@ -565,8 +567,6 @@ def _make_sentences(count: int, *, hits: frozenset[str]) -> list:
 
 def test_admin_gate_fires_on_low_scores():
     """When all quadrant scores are at or below ADMIN_MAX_SCORE_GATE, emit nothing."""
-    from assay.paper_routing.types import Sentence
-
     sentences = _make_sentences(10, hits=frozenset())
     low_scores = {g: ADMIN_MAX_SCORE_GATE for g in RoutingGroup}
     groups, _ = apply_thresholds(low_scores, sentences)
@@ -616,8 +616,6 @@ def test_argmax_margin_emits_secondary_within_margin():
 
 def test_domain_arbitration_suppresses_weak_domain():
     """When one domain is much weaker, it should be zeroed by arbitration."""
-    from assay.paper_routing.types import Sentence
-
     sentences = _make_sentences(100, hits=frozenset({"D1", "M1"}))
     scores = aggregate_quadrant_scores(sentences)
     lib_best = max(scores[RoutingGroup.LEWG], scores[RoutingGroup.LWG])
