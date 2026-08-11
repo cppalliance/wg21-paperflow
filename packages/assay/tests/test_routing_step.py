@@ -88,8 +88,9 @@ def test_trace_includes_routing_fields():
 
     trace = render_trace(state, 3)
     assert "### Routing" in trace
-    assert "LEWG: score=" in trace
-    assert "LWG: score=" in trace
+    assert "- LEWG: score=" in trace
+    assert "- LWG: score=" in trace
+    assert "RoutingGroup." not in trace
     assert "is_administrative:" in trace
     assert "is_performance_focused:" in trace
 

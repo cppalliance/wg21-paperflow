@@ -10,9 +10,9 @@
 from __future__ import annotations
 
 import math
-import re
 from collections.abc import Sequence
 
+from assay.paper_routing.audience import audience_blob, audience_has_phrase
 from assay.paper_routing.axis_hist import (
     AXIS_HIT_FN,
     axis_density,
@@ -21,6 +21,7 @@ from assay.paper_routing.axis_hist import (
     library_hits,
     wording_hits,
 )
+from assay.paper_routing.hypotheses import CATALOG
 from assay.paper_routing.sustain import min_sustained_threshold, sustained_counts
 from assay.paper_routing.types import HypothesisAxis, RoutingGroup, SectionType, Sentence
 
@@ -47,18 +48,7 @@ _AUDIENCE_FLAG_NAMES: tuple[str, ...] = (
 
 
 def default_catalog_ids() -> tuple[str, ...]:
-    from assay.paper_routing.hypotheses import CATALOG
-
     return tuple(sorted(h.id for h in CATALOG))
-
-
-def _audience_blob(audience: list[str] | None) -> str:
-    return " ".join(audience or []).upper()
-
-
-def _audience_has_phrase(blob: str, phrase: str) -> bool:
-    pattern = r"\b" + r"\s+".join(re.escape(w) for w in phrase.split()) + r"\b"
-    return re.search(pattern, blob) is not None
 
 
 def build_feature_names(catalog_ids: Sequence[str]) -> tuple[str, ...]:
@@ -118,19 +108,19 @@ def extract_paper_features(
     features["min_sustained"] = float(min_sustained_threshold(total))
     features["sentence_count_log1p"] = math.log1p(total)
 
-    blob = _audience_blob(audience)
+    blob = audience_blob(audience)
     s1_fired = any("S1" in s.hypothesis_hits for s in sentences)
     features["s1_fired"] = 1.0 if s1_fired else 0.0
     features["audience_library_evolution"] = (
-        1.0 if _audience_has_phrase(blob, "LIBRARY EVOLUTION") else 0.0
+        1.0 if audience_has_phrase(blob, "LIBRARY EVOLUTION") else 0.0
     )
-    features["audience_lewg"] = 1.0 if _audience_has_phrase(blob, "LEWG") else 0.0
-    features["audience_library"] = 1.0 if _audience_has_phrase(blob, "LIBRARY") else 0.0
-    features["audience_lwg"] = 1.0 if _audience_has_phrase(blob, "LWG") else 0.0
-    features["audience_core"] = 1.0 if _audience_has_phrase(blob, "CORE") else 0.0
-    features["audience_cwg"] = 1.0 if _audience_has_phrase(blob, "CWG") else 0.0
-    features["audience_evolution"] = 1.0 if _audience_has_phrase(blob, "EVOLUTION") else 0.0
-    features["audience_ewg"] = 1.0 if _audience_has_phrase(blob, "EWG") else 0.0
+    features["audience_lewg"] = 1.0 if audience_has_phrase(blob, "LEWG") else 0.0
+    features["audience_library"] = 1.0 if audience_has_phrase(blob, "LIBRARY") else 0.0
+    features["audience_lwg"] = 1.0 if audience_has_phrase(blob, "LWG") else 0.0
+    features["audience_core"] = 1.0 if audience_has_phrase(blob, "CORE") else 0.0
+    features["audience_cwg"] = 1.0 if audience_has_phrase(blob, "CWG") else 0.0
+    features["audience_evolution"] = 1.0 if audience_has_phrase(blob, "EVOLUTION") else 0.0
+    features["audience_ewg"] = 1.0 if audience_has_phrase(blob, "EWG") else 0.0
 
     if total:
         all_hits = set().union(*(s.hypothesis_hits for s in sentences))

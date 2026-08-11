@@ -738,9 +738,9 @@ def render_trace(state: PipelineState, step: int, *, step_durations: list[float]
                 for label in RoutingGroup:
                     score = rt.quadrant_scores.get(label, 0.0)
                     sustained = rt.sustained_counts.get(label, 0)
-                    lines.append(f"- {label}: score={score:.4f}, sustained={sustained}")
+                    lines.append(f"- {label.value}: score={score:.4f}, sustained={sustained}")
                 if rt.groups:
-                    group_parts = [f"{k}={v:.4f}" for k, v in sorted(rt.groups.items())]
+                    group_parts = [f"{k.value}={v:.4f}" for k, v in sorted(rt.groups.items())]
                     lines.append(f"- groups: {', '.join(group_parts)}")
                 else:
                     lines.append("- groups: (none)")

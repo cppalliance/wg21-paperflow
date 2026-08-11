@@ -35,9 +35,10 @@ STANDARDESE_LABELS: tuple[str, ...] = (
 
 _LABEL_ALT = "|".join(re.escape(label) for label in STANDARDESE_LABELS)
 
-# Line-start matcher: optional markdown emphasis (*Effects:*), case-insensitive.
+# Line-start matcher: optional markdown emphasis (*Effects:* or **Effects**:),
+# case-insensitive.
 STANDARDESE_LINE_RE = re.compile(
-    rf"^\s*(?:\*)?({_LABEL_ALT})(?:\*)?\s*:",
+    rf"^\s*(?:\*{{1,2}})?({_LABEL_ALT})(?:\*{{1,2}})?\s*:",
     re.IGNORECASE,
 )
 
@@ -46,7 +47,7 @@ STANDARDESE_LINE_RE = re.compile(
 # inside "footnotes:") now that the label set has grown to include compound
 # phrases such as "Hardware constraints".
 STANDARDESE_LABEL_RE = re.compile(
-    rf"(?<![A-Za-z])(?:\*)?({_LABEL_ALT})(?:\*)?\s*:",
+    rf"(?<![A-Za-z])(?:\*{{1,2}})?({_LABEL_ALT})(?:\*{{1,2}})?\s*:",
     re.IGNORECASE,
 )
 

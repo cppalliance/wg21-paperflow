@@ -12,6 +12,7 @@ from __future__ import annotations
 import math
 
 from assay.paper_routing.axis_hist import AXIS_HIT_FN
+from assay.paper_routing.hypotheses import PERFORMANCE_ARGUMENT_ID
 from assay.paper_routing.types import RoutingGroup, Sentence
 
 MIN_SUSTAINED_FLOOR = 3
@@ -57,4 +58,4 @@ def sustained_counts(sentences: list[Sentence]) -> dict[RoutingGroup, int]:
 
 def performance_sustained_count(sentences: list[Sentence]) -> int:
     """Sentences where M13 (performance argument) fires."""
-    return sum(1 for s in sentences if "M13" in s.hypothesis_hits)
+    return sum(1 for s in sentences if PERFORMANCE_ARGUMENT_ID in s.hypothesis_hits)

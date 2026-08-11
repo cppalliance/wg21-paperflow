@@ -9,10 +9,7 @@ from __future__ import annotations
 import argparse
 import json
 import logging
-import re
 from pathlib import Path
-
-from pipeline.markdown import front_matter_end_index
 
 from assay.paper_routing.features import (
     build_feature_names,
@@ -25,18 +22,14 @@ from assay.paper_routing.types import RoutingGroup
 from eval_common import (
     assay_package_root,
     default_paperstore_dir,
+    expected_groups,
+    parse_audience_from_md,
     paper_golden_path,
     resolve_classifier,
 )
 
 _log = logging.getLogger(__name__)
 
-_CATEGORY_TO_GROUP: dict[str, RoutingGroup] = {
-    "library-design": RoutingGroup.LEWG,
-    "library-wording": RoutingGroup.LWG,
-    "language-evolution": RoutingGroup.EWG,
-    "language-wording": RoutingGroup.CWG,
-}
 _GROUP_ORDER: tuple[RoutingGroup, ...] = tuple(RoutingGroup)
 _TRAIN_SEED = 0
 _CV_FOLDS = 5
@@ -49,31 +42,6 @@ def _load_golden(path: Path) -> list[dict[str, object]]:
         if stripped:
             rows.append(json.loads(stripped))
     return rows
-
-
-def _expected_groups(categories: list[str]) -> set[RoutingGroup]:
-    groups: set[RoutingGroup] = set()
-    for cat in categories:
-        group = _CATEGORY_TO_GROUP.get(cat)
-        if group is not None:
-            groups.add(group)
-    return groups
-
-
-def _read_audience(md_path: Path) -> list[str]:
-    lines = md_path.read_text(encoding="utf-8").splitlines()
-    end = front_matter_end_index(lines)
-    if end == 0:
-        return []
-    audience_values: list[str] = []
-    for line in lines[1:end]:
-        match = re.match(r"^audience:\s*(.+)$", line.strip(), re.IGNORECASE)
-        if not match:
-            continue
-        value = match.group(1).strip().strip('"').strip("'")
-        if value:
-            audience_values.append(value)
-    return audience_values
 
 
 def _labels_vector(groups: set[RoutingGroup]) -> list[int]:
@@ -102,9 +70,15 @@ def _sweep_group_thresholds(
         best_t = 0.5
         best_f1 = -1.0
         for threshold in candidates:
-            tp = sum(1 for p, y in zip(probs, y_col, strict=True) if y and p >= threshold)
-            fp = sum(1 for p, y in zip(probs, y_col, strict=True) if not y and p >= threshold)
-            fn = sum(1 for p, y in zip(probs, y_col, strict=True) if y and p < threshold)
+            tp = sum(
+                1 for p, y in zip(probs, y_col, strict=True) if y and p >= threshold
+            )
+            fp = sum(
+                1 for p, y in zip(probs, y_col, strict=True) if not y and p >= threshold
+            )
+            fn = sum(
+                1 for p, y in zip(probs, y_col, strict=True) if y and p < threshold
+            )
             precision = tp / (tp + fp) if (tp + fp) else 0.0
             recall = tp / (tp + fn) if (tp + fn) else 0.0
             f1 = (
@@ -157,7 +131,7 @@ def build_training_rows(
         if not md_path.is_file():
             continue
         md = md_path.read_text(encoding="utf-8")
-        audience = _read_audience(md_path)
+        audience = parse_audience_from_md(md)
         sentences = score_hypotheses(
             md,
             audience=audience,
@@ -165,7 +139,7 @@ def build_training_rows(
             use_regex=False,
         )
         categories = list(row.get("categories") or [])
-        expected = _expected_groups([str(c) for c in categories])
+        expected = expected_groups([str(c) for c in categories])
         features = extract_paper_features(sentences, audience=audience)
         built.append(
             {
@@ -215,7 +189,9 @@ def train_and_freeze(
         fold_model.fit(x_train, y_train)
         fold_probs = fold_model.predict_proba([x_rows[i] for i in test_idx])
         for local_idx, global_idx in enumerate(test_idx):
-            oof_probs[global_idx] = [float(fold_probs[local_idx][j]) for j in range(len(_GROUP_ORDER))]
+            oof_probs[global_idx] = [
+                float(fold_probs[local_idx][j]) for j in range(len(_GROUP_ORDER))
+            ]
 
     thresholds = _sweep_group_thresholds(y_rows, oof_probs)
     oof_preds = _apply_thresholds(oof_probs, thresholds)
@@ -250,7 +226,8 @@ def train_and_freeze(
             {group.value: thresholds[group] for group in _GROUP_ORDER},
             indent=2,
             sort_keys=True,
-        ) + "\n",
+        )
+        + "\n",
         encoding="utf-8",
     )
     (output_dir / "train_report.json").write_text(
@@ -263,7 +240,8 @@ def train_and_freeze(
             },
             indent=2,
             sort_keys=True,
-        ) + "\n",
+        )
+        + "\n",
         encoding="utf-8",
     )
     return {

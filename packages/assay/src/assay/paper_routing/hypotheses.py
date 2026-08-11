@@ -489,6 +489,9 @@ LANGUAGE_DOMAIN = frozenset(h.id for h in CATALOG if h.axis is _LANG)
 DESIGN_MODE = frozenset(h.id for h in CATALOG if h.axis is _DES)
 WORDING_MODE = frozenset(h.id for h in CATALOG if h.axis is _WOR)
 
+# Shared with sustain.py's performance_sustained_count and features.py.
+PERFORMANCE_ARGUMENT_ID = "M13"
+
 _NLI_HYPOTHESES: tuple[Hypothesis, ...] = tuple(
     h for h in CATALOG if h.nli_text is not None
 )

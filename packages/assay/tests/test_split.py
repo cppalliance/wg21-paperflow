@@ -13,15 +13,18 @@ import pytest
 
 from assay.paper_routing.split import RawSentence, split_sentences
 
-_P1122R3_LINE = (
-    Path(__file__).resolve().parents[2]
-    / "tomd"
-    / "tests"
-    / "fixtures"
-    / "golden"
-    / "snapshots"
-    / "p1122r3.md"
-).read_text(encoding="utf-8").splitlines()[308].strip()
+
+def _p1122r3_line() -> str:
+    path = (
+        Path(__file__).resolve().parents[2]
+        / "tomd"
+        / "tests"
+        / "fixtures"
+        / "golden"
+        / "snapshots"
+        / "p1122r3.md"
+    )
+    return path.read_text(encoding="utf-8").splitlines()[308].strip()
 
 
 @pytest.mark.parametrize(
@@ -46,6 +49,14 @@ _P1122R3_LINE = (
             ["*Effects:* Equivalent to: return foo;"],
         ),
         (
+            "**Constraints**: T is trivially copyable.",
+            ["**Constraints**: T is trivially copyable."],
+        ),
+        (
+            "First clause applies. **Constraints**: T is trivially copyable.",
+            ["First clause applies.", "**Constraints**: T is trivially copyable."],
+        ),
+        (
             "In 20.10.2 [meta.type.synop], add: Effects: returns is_same_v.",
             [
                 "In 20.10.2 [meta.type.synop], add:",
@@ -60,7 +71,7 @@ def test_split_sentences_cases(markdown: str, expected_texts: list[str]) -> None
 
 
 def test_split_p1122r3_numbered_standardese() -> None:
-    units = split_sentences(_P1122R3_LINE)
+    units = split_sentences(_p1122r3_line())
     assert len(units) == 3
     assert units[0].text.startswith("1. Effects:")
     assert units[1].text.startswith("2. Synchronization:")
@@ -127,9 +138,9 @@ def test_split_edge_cases_no_junk_fragments(
     markdown: str, expected_texts: list[str]
 ) -> None:
     units = split_sentences(markdown)
+    junk = {"-", "(a)", "(b)", "1.2.3", "Release", "1.", "2.", "3."}
+    assert not any(u.text in junk for u in units)
     assert [u.text for u in units] == expected_texts
-    for text in expected_texts:
-        assert text not in {"-", "(a)", "(b)", "1.2.3", "Release", "1.", "2.", "3."}
 
 
 @pytest.mark.parametrize(

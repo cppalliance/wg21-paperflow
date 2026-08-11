@@ -9,8 +9,7 @@
 
 from __future__ import annotations
 
-import re
-
+from assay.paper_routing.audience import audience_blob, audience_has_phrase
 from assay.paper_routing.axis_hist import (
     axis_density,
     design_hits,
@@ -115,37 +114,28 @@ def _apply_domain_arbitration(scores: dict[RoutingGroup, float]) -> None:
             scores[RoutingGroup.LWG] *= 0.0
 
 
-def _audience_blob(audience: list[str] | None) -> str:
-    return " ".join(audience or []).upper()
-
-
-def _audience_has_phrase(blob: str, phrase: str) -> bool:
-    pattern = r"\b" + r"\s+".join(re.escape(w) for w in phrase.split()) + r"\b"
-    return re.search(pattern, blob) is not None
-
-
 def _apply_metadata_bonus(
     scores: dict[RoutingGroup, float],
     _sentences: list[Sentence],
     audience: list[str] | None,
 ) -> None:
-    blob = _audience_blob(audience)
+    blob = audience_blob(audience)
     if not blob:
         return
 
-    if _audience_has_phrase(blob, "LIBRARY EVOLUTION") or _audience_has_phrase(
+    if audience_has_phrase(blob, "LIBRARY EVOLUTION") or audience_has_phrase(
         blob, "LEWG"
     ):
         scores[RoutingGroup.LEWG] += _METADATA_BONUS_LIBRARY_EVOLUTION_LEWG
         scores[RoutingGroup.LWG] += _METADATA_BONUS_LIBRARY_LWG
-    elif _audience_has_phrase(blob, "LIBRARY") or _audience_has_phrase(blob, "LWG"):
+    elif audience_has_phrase(blob, "LIBRARY") or audience_has_phrase(blob, "LWG"):
         scores[RoutingGroup.LEWG] += _METADATA_BONUS_LIBRARY_LEWG
         scores[RoutingGroup.LWG] += _METADATA_BONUS_LIBRARY_LWG
 
-    if _audience_has_phrase(blob, "CORE") or _audience_has_phrase(blob, "CWG"):
+    if audience_has_phrase(blob, "CORE") or audience_has_phrase(blob, "CWG"):
         scores[RoutingGroup.CWG] += _METADATA_BONUS_CORE_CWG
         scores[RoutingGroup.EWG] += _METADATA_BONUS_CORE_EWG
     elif (
-        _audience_has_phrase(blob, "EVOLUTION") or _audience_has_phrase(blob, "EWG")
-    ) and not _audience_has_phrase(blob, "LIBRARY EVOLUTION"):
+        audience_has_phrase(blob, "EVOLUTION") or audience_has_phrase(blob, "EWG")
+    ) and not audience_has_phrase(blob, "LIBRARY EVOLUTION"):
         scores[RoutingGroup.EWG] += _METADATA_BONUS_EVOLUTION_EWG

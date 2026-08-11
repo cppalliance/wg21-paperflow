@@ -489,8 +489,8 @@ def test_threshold_requires_sustained_signal():
     ]
     scores = aggregate_quadrant_scores(sentences)
     groups, _ = apply_thresholds(scores, sentences)
-    if scores[RoutingGroup.LEWG] > THRESHOLD_LEWG:
-        assert RoutingGroup.LEWG in groups
+    assert scores[RoutingGroup.LEWG] > THRESHOLD_LEWG
+    assert RoutingGroup.LEWG in groups
 
 
 def test_routing_group_threshold_constants():
@@ -620,6 +620,6 @@ def test_domain_arbitration_suppresses_weak_domain():
     scores = aggregate_quadrant_scores(sentences)
     lib_best = max(scores[RoutingGroup.LEWG], scores[RoutingGroup.LWG])
     lang_best = max(scores[RoutingGroup.EWG], scores[RoutingGroup.CWG])
-    if lib_best > lang_best + DOMAIN_ARBITRATION_MARGIN:
-        assert scores[RoutingGroup.EWG] == 0.0
-        assert scores[RoutingGroup.CWG] == 0.0
+    assert lib_best > lang_best + DOMAIN_ARBITRATION_MARGIN
+    assert scores[RoutingGroup.EWG] == 0.0
+    assert scores[RoutingGroup.CWG] == 0.0

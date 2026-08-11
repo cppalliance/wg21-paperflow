@@ -40,7 +40,6 @@ from __future__ import annotations
 import argparse
 import json
 import logging
-import re
 import sys
 import time
 from collections.abc import Sequence
@@ -49,23 +48,17 @@ from pathlib import Path
 
 from assay.paper_routing import RoutingGroup, route_paper
 from pipeline.classifier_backends import ClassifierBackend
-from pipeline.markdown import front_matter_end_index
 
 from eval_common import (
     default_paperstore_dir,
+    expected_groups,
+    parse_audience_from_md,
     paper_golden_path,
     resolve_classifier,
 )
 from eval_metrics import MultilabelReport, prf_from_counts
 
 _log = logging.getLogger(__name__)
-
-_CATEGORY_TO_GROUP: dict[str, RoutingGroup] = {
-    "library-design": RoutingGroup.LEWG,
-    "library-wording": RoutingGroup.LWG,
-    "language-evolution": RoutingGroup.EWG,
-    "language-wording": RoutingGroup.CWG,
-}
 
 _ALL_GROUPS = frozenset(RoutingGroup)
 
@@ -160,36 +153,6 @@ def _load_golden(path: Path) -> list[PaperGolden]:
     return rows
 
 
-def _expected_groups(categories: tuple[str, ...]) -> set[RoutingGroup]:
-    if not categories or categories == ("informational",):
-        return set()
-    expected: set[RoutingGroup] = set()
-    for category in categories:
-        if category == "informational":
-            continue
-        group = _CATEGORY_TO_GROUP.get(category)
-        if group is None:
-            raise ValueError(f"Unknown category {category!r}")
-        expected.add(group)
-    return expected
-
-
-def _parse_audience_from_md(md: str) -> list[str]:
-    lines = md.splitlines()
-    end = front_matter_end_index(lines)
-    if end == 0:
-        return []
-    audience_values: list[str] = []
-    for line in lines[1:end]:
-        match = re.match(r"^audience:\s*(.+)$", line.strip(), re.IGNORECASE)
-        if not match:
-            continue
-        value = match.group(1).strip().strip('"').strip("'")
-        if value:
-            audience_values.append(value)
-    return audience_values
-
-
 def _paper_md_path(paperstore: Path, paper_id: str) -> Path:
     return paperstore / f"{paper_id.lower()}.md"
 
@@ -246,7 +209,7 @@ def _evaluate_paper(
             paper_id=golden.paper_id,
             title=golden.title,
             expected_groups=sorted(
-                g.value for g in _expected_groups(golden.categories)
+                g.value for g in expected_groups(golden.categories)
             ),
             predicted_groups=[],
             target_group=golden.target_group,
@@ -262,7 +225,7 @@ def _evaluate_paper(
         )
 
     md = md_path.read_text(encoding="utf-8")
-    audience = _parse_audience_from_md(md) if use_audience else None
+    audience = parse_audience_from_md(md) if use_audience else None
     result = route_paper(
         md,
         audience=audience,
@@ -271,7 +234,7 @@ def _evaluate_paper(
         use_learned_aggregator=config.use_learned_aggregator,
     )
     predicted = set(result.groups)
-    expected = _expected_groups(golden.categories)
+    expected = expected_groups(golden.categories)
     target_hit: bool | None
     if golden.target_group == "NONE":
         target_hit = None
