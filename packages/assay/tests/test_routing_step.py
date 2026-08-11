@@ -59,7 +59,7 @@ def _run_survey(state: PipelineState) -> None:
     asyncio.run(_custom_survey(state, _ctx(), _Spec()))
 
 
-def test_administrative_fixture_sets_skipped():
+def test_administrative_fixture_routes_but_does_not_skip():
     state = _state_from_fixture(
         "n5044_excerpt.md",
         paper_id="N5044R0",
@@ -68,13 +68,10 @@ def test_administrative_fixture_sets_skipped():
     )
     _run_survey(state)
 
-    assert state.skipped is True
+    assert state.skipped is False
     assert state.routing is not None
     assert state.routing.is_administrative is True
-    assert state.synthesis is not None
-    assert state.synthesis.verdict_label == "Skipped"
-    assert "Administrative" in (state.synthesis.skip_reason or "")
-    assert "routing labels" in (state.synthesis.skip_reason or "").lower()
+    assert state.synthesis is None
 
 
 def test_trace_includes_routing_fields():

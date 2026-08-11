@@ -596,7 +596,7 @@ async def _apply_survey_skip(
     paper_type: str,
     stats: dict,
 ) -> None:
-    """Mark pipeline skipped after triage or administrative routing."""
+    """Mark pipeline skipped after triage."""
     routing_groups = (
         {g.value: f"{s:.4f}" for g, s in state.routing.groups.items()}
         if state.routing is not None
