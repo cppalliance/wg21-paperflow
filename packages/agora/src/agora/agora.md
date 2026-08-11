@@ -243,24 +243,37 @@ slot budget.
 Apply the-mod.md sections 2.1-2.4 (included in this message under
 "The Mod Reference"):
 
-- 2.1: paper-type heat floors (a wording paper rarely goes hotter
-  than warm; a directional paper has a tendency to go hot).
+- 2.1/2.1b: audience baselines and paper-type floors (a wording
+  paper rarely goes hotter than warm; a directional paper has a
+  tendency to go hot).
 - 2.1d: process documents have a distinct calibration ceiling.
-- 2.2: interest tier from technical anchors and from the research
-  summary's signals.
-- 2.3: author-gravity adjustments (a name with strong reputation
-  raises interest even on a dry paper).
-- 2.4: composition (encounters belong on ``hot`` and above; noise
-  scales with heat; signal scales with interest).
+- 2.1e: author-gravity interest floors (a name with strong
+  reputation raises interest even on a dry paper).
+- 2.2b: combine the three research heat signals — public reception
+  is primary; committee history and author/ecosystem adjust it by at
+  most one tier; historical committee drama alone never pushes heat
+  above ``hot``, and an adopted paper with no live controversy caps
+  at ``warm``.
+- 2.3: heat tier comment baselines.
+- 2.4: interest multiplier, the 90-comment cap, and the minimum
+  signal share.
 
 Compute:
 
-- ``target_comment_count`` = heat-baseline x interest-multiplier.
-- ``encounter_count`` >= 1 for ``hot`` and ``thermonuclear``;
-  otherwise 0 unless an anchor's design tension is severe enough to
-  warrant one in a ``warm`` thread.
+- ``target_comment_count`` = heat-baseline x interest-multiplier,
+  clamped to at most 90.
+- ``encounter_count`` >= 1 for ``hot`` and ``thermonuclear``; 0 for
+  ``cold``; at most 1 for ``warm`` (only when an anchor's design
+  tension is severe enough to warrant one); never more than 3.
+- Reserve the slots the skeleton spends outside the signal/noise
+  pool: 3-5 turns per encounter, plus the heat tier's mod actions
+  (cold 0, warm 0-1, hot 1-2, thermonuclear 3-5).
 - ``signal_count`` and ``noise_count`` sum to ``target_comment_count``
-  minus encounter turns minus mod actions.
+  minus that reserve. ``signal_count`` must be at least the interest
+  tier's minimum signal share of the signal+noise pool (2.4): niche
+  25%, relevant 35%, magnetic 45%, gravitational 55%. The teaser slot
+  counts against ``signal_count``; tangent replies count against
+  ``noise_count``.
 
 Write a one-paragraph ``rationale`` for the LLM output that cites the
 paper-type floor, any author-gravity adjustment, and the dominant
@@ -327,7 +340,9 @@ anchor; anchors with no top-level signal slot violate coverage. For
 
 **Teaser slot.** Mark exactly one slot with ``role="teaser"``: the
 slot that presents the single most surprising or counter-intuitive
-insight from the paper. The teaser is the thread's hook.
+insight from the paper. The teaser is the thread's hook. It is drawn
+from the signal budget — one of the ``signal_count`` slots, not an
+extra.
 
 **Encounter slots.** Pre-allocate ``encounter_count`` exchanges as
 chains of ``role="encounter"`` slots. Each chain is 3-5 turns
@@ -342,7 +357,15 @@ palette. Each noise slot gets a one-line brief in the imperative
 
 **Tangent threads.** Seed one short tangent thread per tangent
 magnet (typically 2-3 replies of ``role="tangent"`` with one signal
-or noise reply correcting course).
+or noise reply correcting course). Tangent replies are drawn from
+the noise budget — they count against ``noise_count``, not as
+extras; drop tangent magnets before overrunning the budget.
+
+**Honor the plan.** The Step 3 counts are the contract, not a hint:
+signal-class slots (``signal`` + ``teaser``) must land within
++/-25% (or +/-2, whichever is larger) of ``signal_count``, and
+noise-class slots (``noise`` + ``tangent``) within the same band of
+``noise_count``. The pipeline rejects skeletons that drift further.
 
 **Mod actions.** Per the-mod.md section 5b, allocate
 ``role="mod"`` slots scaled to heat: 0 for cold, 1 for warm, 2 for

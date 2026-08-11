@@ -208,6 +208,36 @@ def test_validate_blueprint_case_c_without_prior_raises():
         _validate_blueprint(state, [], [])
 
 
+def test_validate_blueprint_composition_drift_raises():
+    # The 2026-07-17 drift shape: plan said 6 signal / 24 noise, the
+    # skeleton delivered 16 / 12.
+    state = PipelineState(interest="niche", signal_count=6, noise_count=24)
+    replies = [_reply(f"s{n:02d}") for n in range(1, 17)] + [
+        _reply(f"s{n:02d}", role="noise") for n in range(17, 29)
+    ]
+    with pytest.raises(ValidationStepError, match="signal-class"):
+        _validate_blueprint(state, replies, [])
+
+
+def test_validate_blueprint_composition_within_tolerance_ok():
+    # Teasers count as signal-class, tangents as noise-class; drift of
+    # +2 signal / -5 noise sits inside the +/-25%-or-2 band.
+    state = PipelineState(interest="niche", signal_count=10, noise_count=20)
+    replies = (
+        [_reply(f"s{n:02d}") for n in range(1, 12)]
+        + [_reply("s12", role="teaser")]
+        + [_reply(f"s{n:02d}", role="noise") for n in range(13, 26)]
+        + [_reply(f"s{n:02d}", role="tangent") for n in range(26, 28)]
+    )
+    _validate_blueprint(state, replies, [])
+
+
+def test_validate_blueprint_composition_skipped_without_plan():
+    state = PipelineState(interest="niche")
+    replies = [_reply(f"s{n:02d}") for n in range(1, 17)]
+    _validate_blueprint(state, replies, [])
+
+
 def test_validate_blueprint_valid_thread_passes():
     state = PipelineState(
         technical_anchors=[_anchor("a01")],
