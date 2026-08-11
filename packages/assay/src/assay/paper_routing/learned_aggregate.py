@@ -27,13 +27,12 @@ from assay.paper_routing.features import (
     extract_paper_features,
     vectorize_features,
 )
-from assay.paper_routing.types import RoutingGroup, Sentence
+from assay.paper_routing.types import ROUTING_GROUP_ORDER, RoutingGroup, Sentence
 
 _ROUTING_DATA_DIR = Path("data") / "routing"
 _MODEL_FILE = "aggregator_hgb.joblib"
 _FEATURE_NAMES_FILE = "feature_names.json"
 _GROUP_THRESHOLDS_FILE = "group_thresholds.json"
-_GROUP_ORDER: tuple[RoutingGroup, ...] = tuple(RoutingGroup)
 _LEARNED_GROUP_THRESHOLD_FALLBACK: float = 0.5
 
 
@@ -102,10 +101,15 @@ def predict_learned_groups(
     vector = vectorize_features(features, feature_names)
     model = _load_model()
     prob_row = model.predict_proba([vector])[0]  # type: ignore[union-attr]
+    if len(prob_row) != len(ROUTING_GROUP_ORDER):
+        raise ValueError(
+            f"learned aggregator predict_proba length {len(prob_row)} "
+            f"does not match ROUTING_GROUP_ORDER ({len(ROUTING_GROUP_ORDER)})",
+        )
     thresholds = _load_group_thresholds()
 
     probs: dict[RoutingGroup, float] = {}
-    for idx, group in enumerate(_GROUP_ORDER):
+    for idx, group in enumerate(ROUTING_GROUP_ORDER):
         probs[group] = float(prob_row[idx])
 
     groups: dict[RoutingGroup, float] = {

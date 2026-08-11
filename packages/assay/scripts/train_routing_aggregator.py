@@ -18,7 +18,7 @@ from assay.paper_routing.features import (
     vectorize_features,
 )
 from assay.paper_routing.hypotheses import score_hypotheses
-from assay.paper_routing.types import RoutingGroup
+from assay.paper_routing.types import ROUTING_GROUP_ORDER, RoutingGroup
 from eval_common import (
     assay_package_root,
     default_paperstore_dir,
@@ -30,7 +30,6 @@ from eval_common import (
 
 _log = logging.getLogger(__name__)
 
-_GROUP_ORDER: tuple[RoutingGroup, ...] = tuple(RoutingGroup)
 _TRAIN_SEED = 0
 _CV_FOLDS = 5
 
@@ -45,7 +44,7 @@ def _load_golden(path: Path) -> list[dict[str, object]]:
 
 
 def _labels_vector(groups: set[RoutingGroup]) -> list[int]:
-    return [1 if group in groups else 0 for group in _GROUP_ORDER]
+    return [1 if group in groups else 0 for group in ROUTING_GROUP_ORDER]
 
 
 def _exact_match_rate(
@@ -64,7 +63,7 @@ def _sweep_group_thresholds(
 ) -> dict[RoutingGroup, float]:
     thresholds: dict[RoutingGroup, float] = {}
     candidates = [i / 20 for i in range(1, 20)]
-    for group_idx, group in enumerate(_GROUP_ORDER):
+    for group_idx, group in enumerate(ROUTING_GROUP_ORDER):
         y_col = [row[group_idx] for row in y_true]
         probs = [row[group_idx] for row in prob_rows]
         best_t = 0.5
@@ -101,7 +100,7 @@ def _apply_thresholds(
     for row in prob_rows:
         bits = [
             1 if row[idx] >= thresholds[group] else 0
-            for idx, group in enumerate(_GROUP_ORDER)
+            for idx, group in enumerate(ROUTING_GROUP_ORDER)
         ]
         out.append(bits)
     return out
@@ -190,7 +189,7 @@ def train_and_freeze(
         fold_probs = fold_model.predict_proba([x_rows[i] for i in test_idx])
         for local_idx, global_idx in enumerate(test_idx):
             oof_probs[global_idx] = [
-                float(fold_probs[local_idx][j]) for j in range(len(_GROUP_ORDER))
+                float(fold_probs[local_idx][j]) for j in range(len(ROUTING_GROUP_ORDER))
             ]
 
     thresholds = _sweep_group_thresholds(y_rows, oof_probs)
@@ -207,7 +206,7 @@ def train_and_freeze(
     final_model.fit(x_rows, y_rows)
     in_probs = final_model.predict_proba(x_rows)
     in_prob_rows = [
-        [float(in_probs[row_idx][j]) for j in range(len(_GROUP_ORDER))]
+        [float(in_probs[row_idx][j]) for j in range(len(ROUTING_GROUP_ORDER))]
         for row_idx in range(len(x_rows))
     ]
     in_preds = _apply_thresholds(in_prob_rows, thresholds)
@@ -223,7 +222,7 @@ def train_and_freeze(
     )
     (output_dir / "group_thresholds.json").write_text(
         json.dumps(
-            {group.value: thresholds[group] for group in _GROUP_ORDER},
+            {group.value: thresholds[group] for group in ROUTING_GROUP_ORDER},
             indent=2,
             sort_keys=True,
         )
@@ -236,7 +235,7 @@ def train_and_freeze(
                 "n_papers": len(rows),
                 "oof_exact_match": oof_exact,
                 "in_sample_exact_match": in_exact,
-                "group_thresholds": {g.value: thresholds[g] for g in _GROUP_ORDER},
+                "group_thresholds": {g.value: thresholds[g] for g in ROUTING_GROUP_ORDER},
             },
             indent=2,
             sort_keys=True,

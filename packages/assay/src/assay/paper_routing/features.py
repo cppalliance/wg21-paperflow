@@ -23,10 +23,15 @@ from assay.paper_routing.axis_hist import (
 )
 from assay.paper_routing.hypotheses import CATALOG
 from assay.paper_routing.sustain import min_sustained_threshold, sustained_counts
-from assay.paper_routing.types import HypothesisAxis, RoutingGroup, SectionType, Sentence
+from assay.paper_routing.types import (
+    ROUTING_GROUP_ORDER,
+    HypothesisAxis,
+    RoutingGroup,
+    SectionType,
+    Sentence,
+)
 
 _SECTION_ORDER: tuple[SectionType, ...] = tuple(SectionType)
-_GROUP_ORDER: tuple[RoutingGroup, ...] = tuple(RoutingGroup)
 _AXIS_ORDER: tuple[HypothesisAxis, ...] = (
     HypothesisAxis.LIBRARY_DOMAIN,
     HypothesisAxis.LANGUAGE_DOMAIN,
@@ -60,7 +65,7 @@ def build_feature_names(catalog_ids: Sequence[str]) -> tuple[str, ...]:
             names.append(f"axis_density_{section.value}_{axis.value}")
     for hyp_id in sorted(catalog_ids):
         names.append(f"hyp_density_{hyp_id}")
-    for group in _GROUP_ORDER:
+    for group in ROUTING_GROUP_ORDER:
         names.append(f"sustained_{group.value}")
     names.append("min_sustained")
     names.append("sentence_count_log1p")
@@ -103,7 +108,7 @@ def extract_paper_features(
             features[f"hyp_density_{hyp_id}"] = 0.0
 
     sustained = sustained_counts(sentences)
-    for group in _GROUP_ORDER:
+    for group in ROUTING_GROUP_ORDER:
         features[f"sustained_{group.value}"] = float(sustained[group])
     features["min_sustained"] = float(min_sustained_threshold(total))
     features["sentence_count_log1p"] = math.log1p(total)

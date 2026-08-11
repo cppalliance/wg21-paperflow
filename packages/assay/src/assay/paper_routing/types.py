@@ -51,6 +51,16 @@ class RoutingGroup(str, Enum):
         return HypothesisAxis.WORDING_MODE
 
 
+# OneVsRest predict_proba column order for the learned aggregator. Training and
+# inference must use this tuple; do not reorder without retraining aggregator_hgb.
+ROUTING_GROUP_ORDER: tuple[RoutingGroup, ...] = (
+    RoutingGroup.LEWG,
+    RoutingGroup.LWG,
+    RoutingGroup.EWG,
+    RoutingGroup.CWG,
+)
+
+
 class SectionType(str, Enum):
     """WG21 paper section categories for section-aware aggregation."""
 

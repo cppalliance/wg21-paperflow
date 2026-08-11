@@ -27,7 +27,7 @@ from assay.paper_routing.learned_aggregate import (
     _load_group_thresholds,
     _load_model,
 )
-from assay.paper_routing.types import RoutingGroup, SectionType, Sentence
+from assay.paper_routing.types import ROUTING_GROUP_ORDER, RoutingGroup, SectionType, Sentence
 from pipeline.classifier_backends import (
     MultiLabelClassifierBackend,
     NliCrossEncoderBackend,
@@ -59,6 +59,10 @@ def _sentence(text: str, hits: frozenset[str]) -> Sentence:
     return Sentence(
         text=text, section=SectionType.DESIGN, index=0, hypothesis_hits=hits
     )
+
+
+def test_routing_group_order_matches_enum() -> None:
+    assert ROUTING_GROUP_ORDER == tuple(RoutingGroup)
 
 
 def test_feature_vector_length_stable() -> None:
@@ -134,11 +138,11 @@ def test_learned_aggregate_roundtrip(
             ),
             feature_names,
         )
-        for group in RoutingGroup
+        for group in ROUTING_GROUP_ORDER
     ]
     y = [
-        [1 if group is target else 0 for target in RoutingGroup]
-        for group in RoutingGroup
+        [1 if group is target else 0 for target in ROUTING_GROUP_ORDER]
+        for group in ROUTING_GROUP_ORDER
     ]
 
     model = OneVsRestClassifier(
@@ -156,10 +160,6 @@ def test_learned_aggregate_roundtrip(
     thresholds = {g.value: 0.1 for g in RoutingGroup}
     (data_dir / "group_thresholds.json").write_text(
         json.dumps(thresholds, indent=2) + "\n",
-        encoding="utf-8",
-    )
-    (data_dir / "group_order.json").write_text(
-        json.dumps([g.value for g in RoutingGroup]) + "\n",
         encoding="utf-8",
     )
 
