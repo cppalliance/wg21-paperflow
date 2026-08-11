@@ -133,6 +133,43 @@ def test_process_paper_force_then_truthful_compose(
     assert result.stages_run == [STAGES["convert"]]
 
 
+@pytest.fixture
+def _patch_stage_agora(monkeypatch):
+    """Stub the agora stage body to a backend write (real one runs LLMs)."""
+    async def fake_agora(pid, be, **kwargs):
+        be.write_agora_json(pid, {"document": pid, "replies": []})
+
+    monkeypatch.setattr(process_mod, "_stage_agora", fake_agora)
+
+
+def test_process_paper_walks_through_retired_stage_gap(
+    backend: SqliteBackend, staged_paper: str, _patch_stage_agora,
+):
+    """STAGES has a hole at 2-3 (the retired dissect stages). The
+    agora verb (through=5) must walk a fresh paper download ->
+    convert -> agora without dispatching into the hole."""
+    result = asyncio.run(process_paper(staged_paper, backend, through=5))
+    assert result.stages_run == [
+        STAGES["download"], STAGES["convert"], STAGES["agora"],
+    ]
+    assert result.final_status == 5
+    assert backend.get_agora_path(staged_paper).exists()
+
+
+def test_process_paper_recovers_paper_stuck_in_gap(
+    backend: SqliteBackend, staged_paper: str, _patch_stage_agora,
+):
+    """A paper whose status landed in the hole — including one whose
+    prior run failed there — resumes at the next real stage."""
+    asyncio.run(process_paper(staged_paper, backend, through=2))
+    backend.fail_paper(staged_paper, 2, "Unknown stage 2")
+    assert backend.get_meta(staged_paper).status == -3
+
+    result = asyncio.run(process_paper(staged_paper, backend, through=5))
+    assert result.stages_run == [STAGES["agora"]]
+    assert backend.get_meta(staged_paper).status == 5
+
+
 def test_warn_if_html_image_files_missing_fires(
     backend: SqliteBackend, caplog,
 ):

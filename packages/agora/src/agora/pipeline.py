@@ -14,11 +14,14 @@ structure; this module conforms to it.
 
 One-shot, fully batch. No human-in-the-loop.
 
-The pipeline runs Steps 0-7 (analysis phase). It plans the thread and
-writes ``{pid}.agora.json`` to paperstore. It does **not** generate
-reply text, characters, votes, or Reddit furniture; those
-remain ``None`` on the emitted ``Thread`` and are filled later by a
-future generation phase.
+The pipeline runs Steps 0-7 (analysis phase) followed by Steps 8-9
+(generation phase, :mod:`agora.generate`). Steps 0-7 plan the thread
+and write the blueprint ``{pid}.agora.json`` to paperstore; Step 8
+casts a roster persona on every slot and Step 9 writes the comment
+bodies in those voices, mutating the ``Thread`` in place. Votes,
+scores, orderings, and time labels remain ``None``/empty — the
+reactor pass owns votes, and the full-artifact emit happens with the
+integration work.
 """
 
 from __future__ import annotations
@@ -53,12 +56,15 @@ from pipeline.errors import (
     ValidationStepError,
 )
 from agora import mod_reference
+from agora.casting import MISCONCEPTION_STANCE
 from agora.errors import PaperNotConvertedError, PaperNotFoundError
+from agora.generate import _pure_cast, _pure_voice
 from agora.models import (
     CalibrationOutput,
     Committee,
     EncountersOutput,
     PipelineState,
+    Reply,
     ResearchAgentReport,
     ResearchSummary,
     SkeletonOutput,
@@ -81,6 +87,8 @@ _STEP_4_SUBMISSION = "Step 4 - Submission"
 _STEP_5_SKELETON = "Step 5 - Skeleton"
 _STEP_6_ENCOUNTERS = "Step 6 - Encounters"
 _STEP_7_SERIALIZE = "Step 7 - Serialize"
+_STEP_8_CAST = "Step 8 - Cast"
+_STEP_9_VOICE = "Step 9 - Voice"
 
 
 # -- Committee routing -------------------------------------------------------
@@ -539,7 +547,7 @@ def _prepare_skeleton(state: PipelineState, ctx: StepContext) -> str:
 
 
 def _extract_skeleton(state: PipelineState, output: SkeletonOutput) -> None:
-    state.replies = list(output.replies)
+    state.replies = [Reply(**slot.model_dump()) for slot in output.replies]
     state.encounter_slot_groups = [list(g) for g in output.encounter_slot_groups]
 
 
@@ -640,6 +648,52 @@ _INTEREST_LENS_FLOOR: dict[str, int] = {
 
 def _validate_blueprint(state: PipelineState, replies: list, encounters: list) -> None:
     """Sanity-check the Thread structure before serialisation."""
+    by_slot = {r.slot_id: r for r in replies}
+    for r in replies:
+        chain = {r.slot_id}
+        cursor = r.parent_slot_id
+        while cursor is not None:
+            if cursor in chain:
+                raise ValidationStepError(
+                    7, _STEP_7_SERIALIZE,
+                    ValueError(
+                        f"Reply '{r.slot_id}' sits on a cyclic parent chain"
+                        f" (revisits '{cursor}'). Parent links must form a tree."
+                    ),
+                )
+            chain.add(cursor)
+            parent = by_slot.get(cursor)
+            cursor = parent.parent_slot_id if parent is not None else None
+
+    trap_slots = [r for r in replies if r.noise_stance == MISCONCEPTION_STANCE]
+    wrong_role = sorted(r.slot_id for r in trap_slots if r.role != "noise")
+    if wrong_role:
+        raise ValidationStepError(
+            7, _STEP_7_SERIALIZE,
+            ValueError(
+                f"misconception stance requires role 'noise' (the confused"
+                f" question); offending slot(s): {wrong_role}."
+            ),
+        )
+    unanswered_traps = sorted(
+        r.slot_id for r in trap_slots
+        if not any(
+            child.parent_slot_id == r.slot_id
+            and child.role in ("signal", "teaser")
+            for child in replies
+        )
+    )
+    if unanswered_traps:
+        raise ValidationStepError(
+            7, _STEP_7_SERIALIZE,
+            ValueError(
+                f"{len(unanswered_traps)} misconception-trap slot(s) have no"
+                f" signal/teaser child delivering the correction:"
+                f" {unanswered_traps}. Step 5 allocates a two-slot pair per"
+                f" trap (the confused question and its answer)."
+            ),
+        )
+
     anchor_ids = {a.id for a in (state.technical_anchors or [])}
     addressed: set[str] = set()
     lens_used: set[int] = set()
@@ -750,6 +804,8 @@ def _build_hooks(*, research: bool = True) -> dict[str, StepHooks]:
             guard=_guard_encounter_count_positive,
         ),
         _STEP_7_SERIALIZE: StepHooks(custom=_pure_serialize),
+        _STEP_8_CAST: StepHooks(custom=_pure_cast),
+        _STEP_9_VOICE: StepHooks(custom=_pure_voice),
     }
 
 
@@ -766,13 +822,15 @@ async def agora_paper(
     trace: bool = False,
     research: bool = True,
 ) -> Thread | str:
-    """Plan a Reddit thread for a dissected WG21 paper.
+    """Plan and generate a Reddit thread for a dissected WG21 paper.
 
     Loads ``agora.md``, resolves its ``## Services`` block against
-    SERVICES.toml, builds agents, runs the 8-step analysis pipeline,
-    writes ``{pid}.agora.json`` via ``backend.write_agora_json``, and
-    returns the planned :class:`Thread`. Generation-phase fields stay
-    ``None``.
+    SERVICES.toml, builds agents, and runs the 10-step pipeline:
+    Steps 0-7 plan the thread and write the blueprint
+    ``{pid}.agora.json`` via ``backend.write_agora_json``; Steps 8-9
+    cast personas and write every comment body onto the returned
+    :class:`Thread`. Votes and scores stay ``None``/empty for the
+    reactor pass.
 
     ``research=False`` turns Step 2 off for this run: no web search
     or MCP traffic; the thread calibrates from paper signals alone

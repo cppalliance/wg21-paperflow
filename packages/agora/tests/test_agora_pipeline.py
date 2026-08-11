@@ -27,11 +27,14 @@ from agora.models import (
     PipelineState,
     Reply,
     ResearchAgentReport,
+    SkeletonOutput,
+    SkeletonReply,
     TechnicalAnchor,
 )
 from agora.pipeline import (
     _STEP_2_RESEARCH,
     _build_hooks,
+    _extract_skeleton,
     _guard_encounter_count_positive,
     _prepare_calibrate,
     _prepare_encounters,
@@ -56,6 +59,7 @@ def _placeholder_api_keys(monkeypatch):
     # ``packages/pipeline/tests/test_services.py``.
     monkeypatch.setenv("ANTHROPIC_API_KEY", "placeholder-for-tests")
     monkeypatch.setenv("RUNPOD_API_KEY", "placeholder-for-tests")
+    monkeypatch.setenv("VLLM_DEEPSEEK_API_KEY", "placeholder-for-tests")
 
 
 def test_guard_encounter_count_skips_when_zero():
@@ -228,6 +232,49 @@ def test_validate_blueprint_no_anchors_passes_vacuously():
     _validate_blueprint(state, [_reply("s01", role="noise")], [])
 
 
+def test_validate_blueprint_cyclic_parent_chain_raises():
+    state = PipelineState(interest="niche")
+    replies = [
+        _reply("s01", role="noise", parent_slot_id="s02", depth=1),
+        _reply("s02", role="noise", parent_slot_id="s01", depth=2),
+    ]
+    with pytest.raises(ValidationStepError, match="cyclic"):
+        _validate_blueprint(state, replies, [])
+
+
+def test_validate_blueprint_self_parent_raises():
+    state = PipelineState(interest="niche")
+    replies = [_reply("s01", role="noise", parent_slot_id="s01", depth=1)]
+    with pytest.raises(ValidationStepError, match="cyclic"):
+        _validate_blueprint(state, replies, [])
+
+
+def test_validate_blueprint_trap_without_correction_child_raises():
+    state = PipelineState(interest="niche")
+    replies = [
+        _reply("s01", role="noise", noise_stance="misconception"),
+        _reply("s02", role="noise", parent_slot_id="s01", depth=1),
+    ]
+    with pytest.raises(ValidationStepError, match="misconception-trap"):
+        _validate_blueprint(state, replies, [])
+
+
+def test_validate_blueprint_trap_with_signal_child_passes():
+    state = PipelineState(interest="niche")
+    replies = [
+        _reply("s01", role="noise", noise_stance="misconception"),
+        _reply("s02", role="signal", parent_slot_id="s01", depth=1),
+    ]
+    _validate_blueprint(state, replies, [])
+
+
+def test_validate_blueprint_misconception_on_non_noise_role_raises():
+    state = PipelineState(interest="niche")
+    replies = [_reply("s01", role="signal", noise_stance="misconception")]
+    with pytest.raises(ValidationStepError, match="role 'noise'"):
+        _validate_blueprint(state, replies, [])
+
+
 # -- the-mod.md prompt injection -------------------------------------------
 
 
@@ -273,6 +320,27 @@ def test_encounters_prompt_carries_mod_reference(prepare_ctx: StepContext):
     message = _prepare_encounters(PipelineState(), prepare_ctx)
     assert "### 11. The Encounter" in message
     assert "Never more than 5 exchanges" in message
+
+
+def test_extract_skeleton_widens_slots_to_replies():
+    state = PipelineState()
+    output = SkeletonOutput(
+        replies=[
+            SkeletonReply(slot_id="s01", depth=0, role="teaser", brief="hook"),
+            SkeletonReply(
+                slot_id="s02", parent_slot_id="s01", depth=1, role="noise",
+                brief="react", noise_tone="snark", noise_stance="process-cynic",
+            ),
+        ],
+        encounter_slot_groups=[["s03", "s04"]],
+    )
+    _extract_skeleton(state, output)
+    assert state.replies is not None
+    assert all(isinstance(r, Reply) for r in state.replies)
+    assert state.replies[1].noise_tone == "snark"
+    assert state.replies[1].content is None
+    assert state.replies[1].votes == []
+    assert state.encounter_slot_groups == [["s03", "s04"]]
 
 
 def test_prepare_is_deterministic(prepare_ctx: StepContext):

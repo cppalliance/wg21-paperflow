@@ -202,7 +202,7 @@ The top of the thread.
 
 - **Title:** Paper number followed by paper title, verbatim. `P2900R10 - Contracts for C++`. The paper number IS the r/wg21 convention.
 - **Flair:** Derived from audience. "WG21" or "Standards" or audience-specific.
-- **Poster:** A power user or regular. Generated username from section 5.
+- **Poster:** A power user or regular from the fixed roster (section 5). `casting.select_submission_poster` picks a signal-tier regular deterministically; the poster also appears in the thread as the OP.
 - **Link:** Resolution cascade - try `https://wg21.link/pNNNNrN` first. If unreachable, try `https://www.open-std.org/jtc1/sc22/wg21/docs/papers/YYYY/pNNNNrN.html` (and `.pdf`). Must be a real, clickable URL.
 - **Body:** Two parts:
   - Metadata block: author, document number, date, target audience, revision, link
@@ -233,25 +233,15 @@ Scaled by heat tier and interest tier together.
 
 ---
 
-### 5. Username Generation
+### 5. Usernames - The Fixed Roster
 
-Generated per-thread, never reused across runs. Two mechanisms:
+Usernames come from the fixed persona roster (`roster.py`): 15 community personas - signal regulars, learners, and noise jokesters - plus the human mods and `AutoModerator`. Fixed roster, stable usernames. Not regenerated per-run: the same personas recur across threads the way a real subreddit's regulars do.
 
-**Palette components** - three slots that concatenate:
-
-| Slot | Role | Examples |
-|------|------|----------|
-| A (prefix) | adjective, label, domain signal | `daily_`, `not_a_`, `actually_`, `senior_`, `the_real_`, `just_a_`, `former_`, `yet_another_`, `lord_`, `xX_` |
-| B (core) | C++ culture, internet culture, job title | `template_wizard`, `cpp_dev`, `segfault_enjoyer`, `coroutine_hater`, `allocator_guy`, `undefined_behavior`, `build_system_victim`, `constexpr_everything`, `linker_error`, `move_semantics` |
-| C (suffix) | number, year, tag, or empty | `_2019`, `_42`, `_cpp`, `_irl`, `_420`, `_xx`, `_throwaway`, nothing |
-
-Pick one from each, concatenate. `daily_template_wizard_2019`, `not_a_real_cpp_dev`, `former_boost_contributor`.
-
-**LLM synthesis** - palette seeds but does not limit. Also generate from Reddit naming conventions: gaming references (`masterchief_117`), ironic self-description (`compiles_first_try`, `definitely_knows_what_volatile_does`), random word pairs (`turbo_llama_9000`), throwaways (`throwaway_84729`, `definitely_not_a_committee_member`).
+Casting (`casting.py`) decides deterministically which personas appear in a given thread and which slot each one owns - stable-hash draws keyed by the document id, no LLM - so re-running the same paper reproduces the same cast. The submission poster comes from `select_submission_poster`: a signal-tier regular who also appears in the thread as the OP.
 
 **Constraints:**
 - No real person's name or recognizable handle from the C++ community
-- Noise usernames lean absurd/memey (`UB_enjoyer_69`). Signal usernames lean plausible (`async_skeptic`, `embedded_for_20_years`)
+- Noise usernames lean absurd/memey (`segfault_enjoyer_69`, `just_use_rust_lol`). Signal usernames lean plausible (`async_skeptic`, `embedded_for_20_years`)
 - At most one `[deleted]` user per thread
 
 ---
@@ -378,18 +368,14 @@ Four tables. A long-path character is composed by picking one entry from each.
 
 ### 8. Link Inventory
 
-**Static link table** (sites r/wg21 commenters reference):
-
-| Site | URL pattern | Use |
-|------|-------------|-----|
-| cppreference | `en.cppreference.com/w/cpp/...` | Standard library features relevant to the paper |
-| Compiler Explorer | `godbolt.org/z/XXXXX` | Codegen demos, compile tests |
-| wg21.link | `wg21.link/pNNNNrN` | Other papers in the same space |
-| GitHub | `github.com/[org]/[repo]` | Compiler repos, library repos, reference implementations |
-| CppCon YouTube | `youtube.com/watch?v=XXXXX` | Conference talks on the paper's topic |
-| Blog posts | Various | Arthur O'Dwyer, Barry Revzin, Jonathan Boccara, etc. |
-| Hacker News | `news.ycombinator.com/item?id=XXXXX` | Meta-commentary, prior discussion |
-| lobste.rs | `lobste.rs/s/XXXXX` | Tech community discussion |
+**Verified links only.** Every URL in the thread comes from the
+verified link inventory the pipeline assembles per paper: the
+submission's resolved paper link, URLs the research sub-agents
+actually visited, URLs from the paper's own external citations, and
+`wg21.link/<paper-id>` for papers the paper's text cites. Commenters
+never invent URLs — no fabricated godbolt short-links, video ids, or
+discussion-thread ids. A commenter reaching for a codegen demo talks
+about it in prose ("throw it in godbolt") without a link.
 
 **Research-sourced links.** The heat check sub-agents surface real related papers, blog posts, and talks. Signal-tier commenters drop these: "have you seen P3456? It takes a completely different approach." These are real links to real resources discovered during research.
 
@@ -444,7 +430,7 @@ The thread is planned as a skeleton, then fleshed out in priority order.
 
 **Anchor to findings (mandatory).** Every technical anchor from the smell test **must** appear in the thread as at least one comment. No anchor gets dropped to save space, fit a comment count, or because the heat tier is low. If the smell test produced 6 anchors and the heat tier only calls for 4 signal comments, the floor rises to 6. Signal comments and encounters engage with specific anchors - soft benchmarking gets poked, logical gaps get noticed, unsupported claims get quoted and challenged. Comments reference section numbers, table data, code examples. The thread reads like people who opened the PDF.
 
-**Code in comments.** Signal-tier comments sometimes contain code - 3-8 lines in Reddit code blocks. Counter-examples ("you could just do this instead"), breakage demos, clarifications, godbolt links. Syntactically plausible C++. Maybe a small typo someone corrects in a reply.
+**Code in comments.** Signal-tier comments sometimes contain code - 3-8 lines in Reddit code blocks. Counter-examples ("you could just do this instead"), breakage demos, clarifications. Syntactically plausible C++. Maybe a small typo someone corrects in a reply.
 
 **Technical floor.** Even noise comments are C++-flavored. Nobody says "lol what." They say "great, another paper that will take 10 years to get through LEWG." The dumbest comment in the thread sounds like a programmer wrote it.
 

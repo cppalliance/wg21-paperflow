@@ -116,7 +116,7 @@ def test_render_trace_skeleton_lists_replies():
               role="signal", brief="Address anchor a01.", anchor_id="a01"),
         Reply(slot_id="s02", parent_slot_id="s01", depth=1,
               role="noise", brief="Low-stakes complaint.",
-              noise_tone="snark", noise_stance="con"),
+              noise_tone="snark", noise_stance="process-cynic"),
     ]
     state = PipelineState(
         paper_id="P5000R0", paper_title="Skeleton",
