@@ -24,7 +24,6 @@ from assay.paper_routing.learned_aggregate import (
     learned_model_available,
     predict_learned_groups,
     _load_feature_names,
-    _load_group_order,
     _load_group_thresholds,
     _load_model,
 )
@@ -52,7 +51,6 @@ def _clear_learned_aggregate_caches():
     """Prevent one test's monkeypatched routing_data_dir from leaking into another."""
     yield
     _load_feature_names.cache_clear()
-    _load_group_order.cache_clear()
     _load_group_thresholds.cache_clear()
     _load_model.cache_clear()
 
