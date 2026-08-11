@@ -7,11 +7,14 @@ license = {text = "BSL-1.0"}
 authors = [{name = "Vinnie Falco", email = "vinnie.falco@gmail.com"}]
 dependencies = [
     "jinja2",
+    "joblib",
     "numpy",
     "paperstore",
     "pipeline",
     "pydantic-ai",
     "pydantic>=2.0",
+    "pysbd>=0.3.4",
+    "scikit-learn",
 ]
 
 [build-system]

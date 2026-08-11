@@ -166,8 +166,11 @@ tools_capable = true
 # [classifier_defaults] is the framework fallback layer: resolve_classifiers()
 # loads it only when the caller passes binding=None (no binding declared).
 # An explicit binding, including {}, is authoritative and does not merge
-# defaults underneath. No in-repo pipeline calls resolve_classifiers yet;
-# it is guarded by tests.
+# defaults underneath. assay is the in-repo caller (paper routing, Survey
+# step): it always passes an explicit binding parsed from its own
+# ## Classifiers block, so [classifier_defaults] never applies to it.
+# Other packages that call resolve_classifiers(None) fall back to this
+# table; the fallback path itself remains guarded by tests.
 
 # Default: small NLI cross-encoder. ~150MB, ~15-25ms/sentence on CPU.
 # With the cross-validated TARGET hypothesis label and structural
