@@ -26,7 +26,6 @@ from assay.paper_routing.sustain import min_sustained_threshold, sustained_count
 from assay.paper_routing.types import (
     ROUTING_GROUP_ORDER,
     HypothesisAxis,
-    RoutingGroup,
     SectionType,
     Sentence,
 )
