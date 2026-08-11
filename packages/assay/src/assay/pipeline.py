@@ -139,6 +139,7 @@ def _classifiers_for_routing(
         return None
     return tuple(dict.fromkeys(ctx.classifiers.values()))
 
+
 CHALLENGE_CHUNK_CHAR_CAP = 8_000
 
 _MCP_TOML_SECTION = "mcp"
@@ -677,13 +678,13 @@ async def _custom_survey(state: PipelineState, ctx: StepContext, spec) -> None:
         return
 
     result = _run_paper_routing(state, ctx)
-    if result.is_administrative:
-        await _apply_survey_skip(
-            state,
-            "Administrative: no routing labels (LEWG/LWG/EWG/CWG) above threshold.",
-            "administrative",
-            triage.stats,
-        )
+    # if result.is_administrative:
+    #     await _apply_survey_skip(
+    #         state,
+    #         "Administrative: no routing labels (LEWG/LWG/EWG/CWG) above threshold.",
+    #         "administrative",
+    #         triage.stats,
+    #     )
 
 
 async def _custom_extract(state: PipelineState, ctx: StepContext, spec) -> None:
@@ -1237,7 +1238,9 @@ async def _verify_against_one_companion(
             label=f"verify-{companion.paper_id}",
             debug_log=ctx.debug_log if ctx.debug else None,
         )
-    except Exception as exc:  # batch worker firewall: one companion must not fail Verify
+    except (
+        Exception
+    ) as exc:  # batch worker firewall: one companion must not fail Verify
         logger.warning("Verify against %s failed: %s", companion.paper_id, exc)
         return None
 
@@ -1431,7 +1434,9 @@ async def _custom_research(state: PipelineState, ctx: StepContext, spec) -> None
                 debug_log=ctx.debug_log if ctx.debug else None,
             )
             research_results[lens] = result
-        except Exception as exc:  # batch worker firewall: one lens must not fail Research
+        except (
+            Exception
+        ) as exc:  # batch worker firewall: one lens must not fail Research
             logger.warning("Research for %s failed: %s", lens, exc)
             research_results[lens] = ResearchLensOutput(lens=lens, findings=[])
 
@@ -2170,7 +2175,9 @@ async def assay_since(
             )
             backend.write_assay_md(pid, report)
             results.append({"paper_id": pid, "status": "ok", "error": None})
-        except Exception as exc:  # batch worker firewall: one paper must not fail assay_since
+        except (
+            Exception
+        ) as exc:  # batch worker firewall: one paper must not fail assay_since
             logger.error("assay failed for %s: %s", pid, exc)
             results.append({"paper_id": pid, "status": "error", "error": str(exc)})
 
