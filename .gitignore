@@ -28,10 +28,13 @@ data/
 reports/
 .cursor/
 
-# Assay golden dataset (negate global data/ ignore for golden/ only)
+# Assay package data: allow only committed subtrees (negates global data/ above)
 !packages/assay/data/
-# packages/assay/data/*
+packages/assay/data/*
 !packages/assay/data/golden/
 !packages/assay/data/golden/**
-packages/assay/data/golden/._*
-packages/assay/data/golden/**/._*
+!packages/assay/data/routing/
+!packages/assay/data/routing/**
+!packages/assay/data/seqcls/
+!packages/assay/data/seqcls/**
+packages/assay/data/**/._*
