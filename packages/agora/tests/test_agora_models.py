@@ -8,10 +8,15 @@
 
 from __future__ import annotations
 
+import math
+
 import pytest
 from pydantic import ValidationError
 
 from agora.models import (
+    ENCOUNTER_TURNS,
+    MOD_ACTION_RESERVE,
+    SIGNAL_RATIO_FLOOR,
     CalibrationOutput,
     DesignTension,
     EncounterPlan,
@@ -252,6 +257,94 @@ def test_calibration_output_hot_without_encounter_rejected():
             encounter_count=0, signal_count=16, noise_count=28,
             rationale="r",
         )
+
+
+def _calibration_plan(heat, interest, target, encounter_count):
+    """Plan kwargs with the reserve at its lower bound and the signal
+    share at the interest floor - valid except where a test perturbs
+    the target or encounter count."""
+    mods_low, _ = MOD_ACTION_RESERVE[heat]
+    pool = target - encounter_count * ENCOUNTER_TURNS[0] - mods_low
+    signal = math.ceil(SIGNAL_RATIO_FLOOR[interest] * pool)
+    return {
+        "heat": heat,
+        "interest": interest,
+        "target_comment_count": target,
+        "encounter_count": encounter_count,
+        "signal_count": signal,
+        "noise_count": pool - signal,
+        "rationale": "r",
+    }
+
+
+@pytest.mark.parametrize(
+    ("heat", "interest", "encounter_count", "target", "ok"),
+    [
+        # cold x niche: baseline 5-10 x 1.0.
+        ("cold", "niche", 0, 4, False),
+        ("cold", "niche", 0, 5, True),
+        ("cold", "niche", 0, 10, True),
+        ("cold", "niche", 0, 11, False),
+        # warm x relevant: 15-30 x 1.5 -> 22-45.
+        ("warm", "relevant", 0, 21, False),
+        ("warm", "relevant", 0, 22, True),
+        ("warm", "relevant", 0, 45, True),
+        ("warm", "relevant", 0, 46, False),
+        # hot x relevant: 30-60 x 1.5 -> 45-90.
+        ("hot", "relevant", 1, 44, False),
+        ("hot", "relevant", 1, 45, True),
+        ("hot", "relevant", 1, 90, True),
+        ("hot", "relevant", 1, 91, False),
+        # thermonuclear x gravitational: 180-450 uncapped, so the
+        # 90-comment ceiling is the only admissible target.
+        ("thermonuclear", "gravitational", 1, 89, False),
+        ("thermonuclear", "gravitational", 1, 90, True),
+        ("thermonuclear", "gravitational", 1, 91, False),
+    ],
+)
+def test_calibration_output_target_boundaries(
+    heat, interest, encounter_count, target, ok
+):
+    kwargs = _calibration_plan(heat, interest, target, encounter_count)
+    if ok:
+        assert CalibrationOutput(**kwargs).target_comment_count == target
+    else:
+        with pytest.raises(ValidationError, match="outside"):
+            CalibrationOutput(**kwargs)
+
+
+def test_calibration_output_encounter_count_over_max_rejected():
+    with pytest.raises(ValidationError, match="exceeds the maximum"):
+        CalibrationOutput(
+            **_calibration_plan("thermonuclear", "gravitational", 90, 4)
+        )
+
+
+def test_calibration_output_warm_second_encounter_rejected():
+    with pytest.raises(ValidationError, match="at most 1 encounter"):
+        CalibrationOutput(**_calibration_plan("warm", "relevant", 30, 2))
+
+
+def test_calibration_output_warm_single_encounter_accepted():
+    o = CalibrationOutput(**_calibration_plan("warm", "relevant", 30, 1))
+    assert o.encounter_count == 1
+
+
+def test_calibration_output_reports_every_violation_at_once():
+    # The retry budget is 3: a draft that breaks four rules must not
+    # spend one retry per rule discovering them.
+    with pytest.raises(ValidationError) as excinfo:
+        CalibrationOutput(
+            heat="cold", interest="niche",
+            target_comment_count=50,
+            encounter_count=5, signal_count=1, noise_count=1,
+            rationale="r",
+        )
+    message = str(excinfo.value)
+    assert "outside" in message
+    assert "exceeds the maximum" in message
+    assert "no encounters" in message
+    assert "encounters and mod actions" in message
 
 
 def test_submission_output_default_case_A():

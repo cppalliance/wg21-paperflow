@@ -9,9 +9,20 @@
 
 from __future__ import annotations
 
+import importlib.resources
+
 import pytest
 
 from agora import mod_reference
+from agora.models import (
+    ENCOUNTER_COUNT_MAX,
+    ENCOUNTER_TURNS,
+    HEAT_BASELINE,
+    INTEREST_MULTIPLIER,
+    MOD_ACTION_RESERVE,
+    SIGNAL_RATIO_FLOOR,
+    TARGET_COMMENT_CAP,
+)
 
 
 def test_document_loads_from_package_data():
@@ -76,3 +87,48 @@ def test_encounters_excerpts_carry_shape_rules():
     text = mod_reference.encounters_excerpts()
     assert text.startswith("### 11. The Encounter")
     assert "Never more than 5 exchanges" in text
+
+
+def test_calibration_table_numbers_pinned_in_docs():
+    """The figures the CalibrationOutput validator enforces must appear
+    in the prose the model reads — the tables are the contract, and a
+    retune that touches only one side burns retry budget on rules the
+    model was never shown. Narrow pin: the specific numbers, in the
+    doc slice the step is actually served, not a full prose scrape.
+    """
+    calibrate = mod_reference.calibrate_excerpts()
+
+    # 2.3 heat tier comment baselines.
+    for low, high in HEAT_BASELINE.values():
+        assert f"{low}-{high} comments" in calibrate
+
+    # 2.4 interest multipliers.
+    for multiplier in INTEREST_MULTIPLIER.values():
+        assert f"multiplier: {multiplier:g}x" in calibrate
+
+    # 2.4 generation ceiling.
+    assert f"capped at **{TARGET_COMMENT_CAP} comments**" in calibrate
+
+    # 2.4 minimum signal share, in roster order.
+    floors = ", ".join(
+        f"{interest} {ratio:.0%}"
+        for interest, ratio in SIGNAL_RATIO_FLOOR.items()
+    )
+    assert floors in calibrate
+
+    # agora.md Step 3 carries the reserve arithmetic the slot
+    # validator checks: turns per encounter, the encounter ceiling,
+    # and the per-tier mod action reserve.
+    agora_md = (
+        importlib.resources.files("agora")
+        .joinpath("agora.md")
+        .read_text(encoding="utf-8")
+    )
+    turns_low, turns_high = ENCOUNTER_TURNS
+    assert f"{turns_low}-{turns_high} turns per encounter" in agora_md
+    assert f"never more than {ENCOUNTER_COUNT_MAX}" in agora_md
+    reserve = ", ".join(
+        f"{heat} {low}" if low == high else f"{heat} {low}-{high}"
+        for heat, (low, high) in MOD_ACTION_RESERVE.items()
+    )
+    assert f"({reserve})" in agora_md
