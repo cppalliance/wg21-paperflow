@@ -6,7 +6,7 @@ import re
 import urllib.parse
 from collections import deque
 
-from bs4 import BeautifulSoup, CData, Comment, Tag, NavigableString
+from bs4 import BeautifulSoup, CData, Comment, ProcessingInstruction, Tag, NavigableString
 
 from .. import CODE_LANG_LABELS, strip_format_chars, ALLOWED_LINK_SCHEMES
 from ..wording_markup import WORDING_FENCE_CLOSE, wording_fence_open, wording_tag_open
@@ -15,6 +15,7 @@ from ..pdf.code_format import is_diagram_block
 
 _BOLD_WRAP_RE = re.compile(r"^\*\*(.+)\*\*$")
 _LOSSY_TABLE_MARKER = "<!-- tomd:lossy-table -->"
+_DROPPED_SVG_MARKER = "<!-- tomd:svg-dropped -->"
 _COLLAPSE_WS_RE = re.compile(r"\s+")
 
 _HEADING_TAGS = frozenset({"h1", "h2", "h3", "h4", "h5", "h6"})
@@ -512,7 +513,10 @@ def _normalize_heading_levels(body: Tag) -> None:
 def _render_children(element, parts: list[str], generator: str):
     """Render each child of element, appending Markdown strings to parts."""
     for child in element.children:
-        if isinstance(child, Comment):
+        # ProcessingInstruction is a NavigableString subclass, so an XML prolog
+        # ("<?xml version=...?>", as shipped ahead of inline SVG) would otherwise
+        # fall through to the text branch below and leak into the body.
+        if isinstance(child, (Comment, ProcessingInstruction)):
             continue
         if isinstance(child, NavigableString):
             text = str(child).strip()
@@ -529,6 +533,15 @@ def _render_element(el: Tag, generator: str) -> str | None:
     tag = el.name
 
     if tag in ("style", "script", "link", "meta", "head"):
+        return None
+
+    # An <svg> subtree is foreign-namespace vector geometry, not HTML content.
+    # Walking it shreds every <text>/<tspan> into a standalone paragraph in draw
+    # order with all geometry lost, so drop the subtree. Text-bearing figures
+    # disclose the loss; decorative icon SVGs extract nothing either way.
+    if tag == "svg":
+        if any(t.get_text(strip=True) for t in el.find_all(("text", "tspan"))):
+            return _DROPPED_SVG_MARKER
         return None
 
     if tag in _HEADING_TAGS:
