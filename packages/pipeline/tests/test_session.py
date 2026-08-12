@@ -23,6 +23,7 @@ from pipeline.session import (
     SearchResult,
     WebResearcher,
     _MAX_FETCH_BYTES,
+    _MAX_FETCH_RETRIES,
 )
 
 
@@ -614,6 +615,70 @@ async def test_fetch_transport_error_not_cached():
             response = await r.fetch("https://example.com/flaky")
     assert failing_stream.call_count == 2
     assert response.content.startswith("Error: Failed to fetch URL")
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("status", [503, 429])
+async def test_fetch_retryable_status_not_cached_after_retries(status):
+    stream, _resp = _stream_mock(
+        status_code=status,
+        headers={"content-type": "text/html"},
+        chunks=[b"ignored"],
+    )
+
+    backend = FakeBackend()
+    async with WebResearcher(backend=backend) as r:
+        with patch.object(r._client, "stream", stream), \
+                patch("pipeline.session.asyncio.sleep", new=AsyncMock()):
+            first = await r.fetch("https://example.com/flaky")
+            second = await r.fetch("https://example.com/flaky")
+    # Both fetches run the full in-call retry loop: a 5xx/429 can recover
+    # later in the run, so exhausting retries must not poison the cache.
+    assert stream.call_count == 2 * (_MAX_FETCH_RETRIES + 1)
+    assert first.status_code == status
+    assert second.content == (
+        f"Error: HTTP {status} for https://example.com/flaky"
+    )
+    assert "already failed this run" not in second.content
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    "exc", [httpx.ConnectError("boom"), httpx.TimeoutException("slow")],
+)
+async def test_fetch_transport_error_retries_then_not_cached(exc):
+    failing_stream = MagicMock(side_effect=exc)
+
+    backend = FakeBackend()
+    async with WebResearcher(backend=backend) as r:
+        with patch.object(r._client, "stream", failing_stream), \
+                patch("pipeline.session.asyncio.sleep", new=AsyncMock()):
+            first = await r.fetch("https://example.com/flaky")
+            second = await r.fetch("https://example.com/flaky")
+    assert failing_stream.call_count == 2 * (_MAX_FETCH_RETRIES + 1)
+    assert first.content.startswith("Error: Failed to fetch URL")
+    assert "already failed this run" not in second.content
+
+
+@pytest.mark.anyio
+async def test_fetch_oversized_response_cached_within_run():
+    chunk = b"x" * (1024 * 1024)
+    chunks = [chunk] * (_MAX_FETCH_BYTES // len(chunk) + 1)
+    stream, _resp = _stream_mock(
+        status_code=200,
+        headers={"content-type": "text/html"},
+        chunks=chunks,
+    )
+
+    backend = FakeBackend()
+    async with WebResearcher(backend=backend) as r:
+        with patch.object(r._client, "stream", stream):
+            first = await r.fetch("https://example.com/big")
+            second = await r.fetch("https://example.com/big")
+    assert stream.call_count == 1
+    assert first.content.startswith("Error: Response exceeded")
+    assert second.content.startswith("Error: Response exceeded")
+    assert "already failed this run" in second.content
 
 
 @pytest.mark.anyio
