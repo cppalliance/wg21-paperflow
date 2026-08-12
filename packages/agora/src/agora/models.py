@@ -9,10 +9,12 @@
 
 One schema, fields filled progressively. The analysis-phase steps in
 this package populate every structural and analytical field of
-``Thread`` / ``Reply`` / ``EncounterPlan``. Generation-phase fields
-(``content``, ``character_username``, ``score``, furniture flags,
-``votes``) stay ``None`` until a future generation phase fills
-them in.
+``Thread`` / ``Reply`` / ``EncounterPlan``. The generation phase then
+fills the rest in place: Step 8 casts ``character_username`` and the
+pre-text furniture flags, Step 9 writes every ``content`` body, and
+Step 10 fills ``votes``. Display furniture (``score``, ordering, time
+labels) stays unset — the website derives it from revealed votes at
+render time.
 
 ``SourceLoc`` is imported from ``paperstore`` (the canonical home for
 the loc type at the storage layer). Each ``TechnicalAnchor`` carries
@@ -76,6 +78,12 @@ RevisionCase = Literal["A", "B", "C"]
 """``A``: new paper, no prior thread. ``B``: re-run of an existing
 revision (regenerate same thread). ``C``: new revision; the prior
 thread is referenced and the submission body calls out the delta."""
+
+SUBMISSION_TARGET = "submission"
+"""Target id naming the submission itself rather than a reply: the
+reactor's vote hash-salt target and the QA finding label. Reply slot
+ids are ``sNN``-shaped in practice (nothing enforces it); a collision
+would only mean that one reply shares the submission's vote draws."""
 
 
 # -- Domain models -----------------------------------------------------------
@@ -195,10 +203,10 @@ class Reply(BaseModel):
 
     Analysis-phase fields are required and describe what the reply
     must accomplish; generation-phase fields (``content``,
-    ``character_username``, ``score``, furniture flags) are
-    ``Optional`` and stay ``None`` until a future generation phase
-    runs. ``brief`` is permanent - the audit trail for why this reply
-    was planned.
+    ``character_username``, ``votes``, furniture flags) are
+    ``Optional`` and are filled by Steps 8-10. ``score`` stays
+    ``None`` for the website to derive. ``brief`` is permanent - the
+    audit trail for why this reply was planned.
 
     Not frozen: the generation phase mutates these in place.
     """

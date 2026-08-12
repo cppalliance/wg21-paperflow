@@ -122,7 +122,7 @@ def test_generated_case_a_fixture_is_a_full_thread():
     assert artifact["revision_case"] == "A"
     assert artifact["prior_revision"] is None
     assert artifact["generated_at"]
-    assert len(artifact["comments"]) >= 30
+    assert len(artifact["comments"]) == len(artifact["blueprint"]["replies"])
     assert all(c["body"] and c["persona"] for c in artifact["comments"])
     assert sum(len(c["votes"]) for c in artifact["comments"]) > 0
     for slot in artifact["blueprint"]["replies"]:
@@ -134,6 +134,7 @@ def test_generated_case_c_fixture_carries_lineage():
     assert artifact["revision_case"] == "C"
     assert artifact["prior_revision"] == "P3125R4"
     assert artifact["document"] == "P3125R5"
+    assert len(artifact["comments"]) == len(artifact["blueprint"]["replies"])
 
 
 # -- Invariant violations ----------------------------------------------------
