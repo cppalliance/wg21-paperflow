@@ -579,6 +579,11 @@ def test_voice_wraps_untrusted_content_in_guard_markers(
     # The submission body (previously generated) is wrapped.
     _assert_inside_guard_markers(
         prompts["s01"], thread.submission_body, tag)
+    # The submission title and anchor summary (paper-derived) are wrapped.
+    _assert_inside_guard_markers(
+        prompts["s01"], thread.submission_title, tag)
+    _assert_inside_guard_markers(
+        prompts["s01"], thread.technical_anchors[0].summary, tag)
     # Ancestor comment text (previously generated) is wrapped.
     _assert_inside_guard_markers(
         prompts["s04"], "generated body for s03", tag)

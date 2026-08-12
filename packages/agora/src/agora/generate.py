@@ -313,9 +313,9 @@ def _thread_context(thread: Thread, inject: Callable[[str], str]) -> str:
         f"- authors: {', '.join(thread.authors)}\n"
         f"- committee: {thread.committee}; heat: {thread.heat};"
         f" interest: {thread.interest}\n"
-        f"- submission by u/{thread.submission_poster_id}:"
-        f" **{thread.submission_title}**\n"
+        f"- submission by u/{thread.submission_poster_id}\n"
         f"- link: {thread.submission_link}\n\n"
+        f"### Submission title\n\n{inject(thread.submission_title)}\n\n"
         f"### Submission body\n\n{inject(thread.submission_body)}"
     )
 
@@ -346,7 +346,10 @@ def _assignment(
             "",
             f"### Anchor {anchor.id} ({anchor.kind})",
             "",
-            f"- summary: {anchor.summary}",
+            "- summary:",
+            "",
+            inject(anchor.summary),
+            "",
             "- the paper says (verbatim):",
             "",
             inject(anchor.claim_text),

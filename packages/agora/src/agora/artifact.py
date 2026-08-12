@@ -248,6 +248,11 @@ def _validate_comments(
             raise ArtifactError("Every comment needs a non-empty slot_id.")
         if slot_id in by_slot:
             raise ArtifactError(f"Duplicate comment slot_id {slot_id!r}.")
+        depth = comment.get("depth")
+        if not isinstance(depth, int) or depth < 0 or depth > 6:
+            raise ArtifactError(
+                f"Comment {slot_id!r} has out-of-range depth {depth!r}."
+            )
         by_slot[slot_id] = comment
 
     anchor_ids = {anchor["id"] for anchor in artifact["technical_anchors"]}
@@ -275,10 +280,6 @@ def _validate_comments(
                     f"Comment {slot_id!r} has depth {depth}; its parent"
                     f" {parent_slot_id!r} has depth {parent['depth']}."
                 )
-        if not isinstance(depth, int) or depth < 0 or depth > 6:
-            raise ArtifactError(
-                f"Comment {slot_id!r} has out-of-range depth {depth!r}."
-            )
 
         if comment.get("role") not in _COMMENT_ROLES:
             raise ArtifactError(
