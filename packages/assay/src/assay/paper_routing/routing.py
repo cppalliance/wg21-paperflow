@@ -51,7 +51,7 @@ def route_paper(
     *,
     audience: list[str] | None = None,
     classifiers: ClassifierBackend | Sequence[ClassifierBackend] | None = None,
-    use_regex: bool = True,
+    use_regex: bool = False,
     use_learned_aggregator: bool = True,
     debug_log: list[str] | None = None,
 ) -> RoutingResult:
