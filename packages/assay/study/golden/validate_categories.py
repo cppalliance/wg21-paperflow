@@ -9,14 +9,27 @@
 
 from __future__ import annotations
 
+import argparse
 import json
 import sys
 from collections import Counter
+from collections.abc import Sequence
 from itertools import combinations
 from pathlib import Path
+from typing import Literal
 
-MIN_ENTRIES = 200
-MIN_PER_PRIMARY = 30
+MIN_ENTRIES_TRAIN = 200
+MIN_PER_PRIMARY_ANY_TRAIN = 30
+
+MIN_ENTRIES_TEST = 80
+MIN_PRIMARY_TEST = {
+    "library-design": 28,
+    "language-evolution": 18,
+    "language-wording": 12,
+    "informational": 13,
+    "library-wording": 8,
+}
+PROPORTION_TOLERANCE_PP = 3.0
 
 PRIMARY_CATEGORIES = frozenset(
     {
@@ -56,14 +69,19 @@ REQUIRED_FIELDS = frozenset(
     }
 )
 
+Profile = Literal["train", "test"]
 
-def _default_jsonl_path() -> Path:
-    return (
-        Path(__file__).resolve().parents[2]
-        / "data"
-        / "golden"
-        / "paper_categories.jsonl"
-    )
+
+def _golden_dir() -> Path:
+    return Path(__file__).resolve().parents[2] / "data" / "golden"
+
+
+def train_path() -> Path:
+    return _golden_dir() / "paper_categories_train.jsonl"
+
+
+def test_path() -> Path:
+    return _golden_dir() / "paper_categories_test.jsonl"
 
 
 def load_entries(path: Path) -> list[dict]:
@@ -151,9 +169,18 @@ def validate_schema(entries: list[dict]) -> list[str]:
     return errors
 
 
+def _primary_counts(entries: list[dict]) -> Counter[str]:
+    return Counter(entry["categories"][0] for entry in entries)
+
+
+def _paper_ids(entries: list[dict]) -> set[str]:
+    return {entry["paper_id"] for entry in entries}
+
+
 def print_distribution(entries: list[dict]) -> None:
     label_counts: Counter[str] = Counter()
     high_counts: Counter[str] = Counter()
+    primary_counts = _primary_counts(entries)
     multi_label = 0
     overlap: Counter[tuple[str, str]] = Counter()
 
@@ -174,7 +201,11 @@ def print_distribution(entries: list[dict]) -> None:
 
     print(f"Total entries: {len(entries)}")
     print()
-    print("Per-label counts (primary + informational):")
+    print("Primary category counts (categories[0]):")
+    for cat in sorted(primary_counts):
+        print(f"  {cat}: {primary_counts[cat]}")
+    print()
+    print("Per-label counts (any category + informational):")
     for cat in sorted(label_counts):
         print(f"  {cat}: {label_counts[cat]}")
     print()
@@ -189,10 +220,46 @@ def print_distribution(entries: list[dict]) -> None:
             print(f"  {pair[0]} + {pair[1]}: {count}")
 
 
-def acceptance_errors(entries: list[dict]) -> list[str]:
+def print_train_test_proportion_notes(
+    test_entries: list[dict],
+    train_entries: list[dict],
+) -> None:
+    if not test_entries or not train_entries:
+        return
+
+    train_primary = _primary_counts(train_entries)
+    test_primary = _primary_counts(test_entries)
+    categories = sorted(set(train_primary) | set(test_primary))
+
+    for cat in categories:
+        train_pct = 100.0 * train_primary[cat] / len(train_entries)
+        test_pct = 100.0 * test_primary[cat] / len(test_entries)
+        delta = test_pct - train_pct
+        if abs(delta) > PROPORTION_TOLERANCE_PP:
+            print(
+                f"NOTE: {cat} primary proportion differs from train by "
+                f"{delta:+.1f}pp (train {train_pct:.1f}%, test {test_pct:.1f}%)",
+            )
+
+
+def acceptance_errors(entries: list[dict], profile: Profile) -> list[str]:
     errors: list[str] = []
-    if len(entries) < MIN_ENTRIES:
-        errors.append(f"entry count {len(entries)} < {MIN_ENTRIES}")
+
+    if profile == "test":
+        if len(entries) < MIN_ENTRIES_TEST:
+            errors.append(f"entry count {len(entries)} < {MIN_ENTRIES_TEST}")
+
+        primary_counts = _primary_counts(entries)
+        for cat, minimum in sorted(MIN_PRIMARY_TEST.items()):
+            count = primary_counts[cat]
+            if count < minimum:
+                errors.append(
+                    f"{cat} (primary): {count} papers < {minimum}",
+                )
+        return errors
+
+    if len(entries) < MIN_ENTRIES_TRAIN:
+        errors.append(f"entry count {len(entries)} < {MIN_ENTRIES_TRAIN}")
 
     per_primary: Counter[str] = Counter()
     high_per_primary: Counter[str] = Counter()
@@ -204,47 +271,144 @@ def acceptance_errors(entries: list[dict]) -> list[str]:
                     high_per_primary[cat] += 1
 
     for cat in sorted(PRIMARY_CATEGORIES):
-        if per_primary[cat] < MIN_PER_PRIMARY:
+        if per_primary[cat] < MIN_PER_PRIMARY_ANY_TRAIN:
             errors.append(
-                f"{cat}: {per_primary[cat]} papers < {MIN_PER_PRIMARY}",
+                f"{cat}: {per_primary[cat]} papers < {MIN_PER_PRIMARY_ANY_TRAIN}",
             )
-        if high_per_primary[cat] < MIN_PER_PRIMARY:
+        if high_per_primary[cat] < MIN_PER_PRIMARY_ANY_TRAIN:
             print(
                 f"NOTE: {cat} has {high_per_primary[cat]} high-confidence "
-                f"labels (< {MIN_PER_PRIMARY}); total labels={per_primary[cat]}",
+                f"labels (< {MIN_PER_PRIMARY_ANY_TRAIN}); "
+                f"total labels={per_primary[cat]}",
             )
 
     return errors
 
 
-def main(argv: list[str] | None = None) -> int:
-    args = argv if argv is not None else sys.argv[1:]
-    path = Path(args[0]) if args else _default_jsonl_path()
+def disjointness_errors(
+    train_entries: list[dict],
+    test_entries: list[dict],
+) -> list[str]:
+    overlap = sorted(_paper_ids(train_entries) & _paper_ids(test_entries))
+    if overlap:
+        return [f"train/test paper_id overlap: {overlap}"]
+    return []
 
+
+def validate_entries(
+    entries: list[dict],
+    *,
+    profile: Profile,
+    label: str,
+    train_entries: list[dict] | None = None,
+) -> list[str]:
+    errors: list[str] = []
+
+    schema_errors = validate_schema(entries)
+    if schema_errors:
+        errors.extend(f"{label}: {err}" for err in schema_errors)
+        return errors
+
+    print(f"=== {label} ===")
+    print()
+    print_distribution(entries)
+    print()
+
+    if profile == "test" and train_entries is not None:
+        print_train_test_proportion_notes(entries, train_entries)
+        print()
+
+    gate_errors = acceptance_errors(entries, profile)
+    if gate_errors:
+        errors.extend(f"{label}: {err}" for err in gate_errors)
+        return errors
+
+    print(f"{label}: validation passed.")
+    print()
+    return errors
+
+
+def validate_file(
+    path: Path,
+    *,
+    profile: Profile,
+    train_entries: list[dict] | None = None,
+) -> tuple[list[dict], list[str]]:
     if not path.is_file():
-        print(f"error: file not found: {path}", file=sys.stderr)
-        return 1
+        return [], [f"{path.name}: file not found"]
 
     try:
         entries = load_entries(path)
     except ValueError as exc:
-        print(f"error: {exc}", file=sys.stderr)
-        return 1
+        return [], [f"{path.name}: {exc}"]
 
-    schema_errors = validate_schema(entries)
-    if schema_errors:
-        print("Schema errors:", file=sys.stderr)
-        for err in schema_errors:
-            print(f"  {err}", file=sys.stderr)
-        return 1
+    label = path.name
+    errors = validate_entries(
+        entries,
+        profile=profile,
+        label=label,
+        train_entries=train_entries,
+    )
+    return entries, errors
 
-    print_distribution(entries)
-    print()
 
-    gate_errors = acceptance_errors(entries)
-    if gate_errors:
-        print("Acceptance failures:", file=sys.stderr)
-        for err in gate_errors:
+def _parse_args(argv: Sequence[str]) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="Validate golden paper category labels.",
+    )
+    group = parser.add_mutually_exclusive_group()
+    group.add_argument(
+        "--train",
+        action="store_true",
+        help="validate the training golden only",
+    )
+    group.add_argument(
+        "--test",
+        action="store_true",
+        help="validate the test golden only",
+    )
+    return parser.parse_args(list(argv))
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = _parse_args(argv if argv is not None else sys.argv[1:])
+
+    if args.train:
+        _, errors = validate_file(train_path(), profile="train")
+    elif args.test:
+        train_entries: list[dict] | None
+        train_file = train_path()
+        if train_file.is_file():
+            try:
+                train_entries = load_entries(train_file)
+            except ValueError:
+                train_entries = None
+        else:
+            train_entries = None
+        _, errors = validate_file(
+            test_path(),
+            profile="test",
+            train_entries=train_entries,
+        )
+    else:
+        train_entries, train_errors = validate_file(
+            train_path(),
+            profile="train",
+        )
+        test_entries, test_errors = validate_file(
+            test_path(),
+            profile="test",
+            train_entries=train_entries,
+        )
+        errors = train_errors + test_errors
+        if not errors:
+            errors = disjointness_errors(train_entries, test_entries)
+            if not errors:
+                print("Train and test paper_id sets are disjoint.")
+
+    if errors:
+        print("Validation failures:", file=sys.stderr)
+        for err in errors:
             print(f"  {err}", file=sys.stderr)
         return 1
 

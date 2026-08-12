@@ -5,6 +5,13 @@ Taxonomy and routing rules are defined in
 [`paper-routing-classifier.md`](../../../../paper-routing-classifier.md) at the
 repo root.
 
+## Files
+
+| File | Role |
+|------|------|
+| `paper_categories_train.jsonl` | Training golden (245 papers). Straight rename of the original Issue #239 set; labels unchanged. |
+| `paper_categories_test.jsonl` | Held-out test golden (88 papers). Disjoint paper IDs from train; same schema and labeling rules. |
+
 ## Label taxonomy
 
 | Category | Meaning |
@@ -34,14 +41,40 @@ frozen at initial labeling time and are not auto-promoted.
 
 ```bash
 uv run python packages/assay/study/golden/validate_categories.py
-uv run python packages/assay/study/golden/validate_categories.py \
-  packages/assay/data/golden/paper_categories.jsonl
+uv run python packages/assay/study/golden/validate_categories.py --train
+uv run python packages/assay/study/golden/validate_categories.py --test
 ```
 
-The script checks schema, prints label distribution and overlap matrix, and
-exits non-zero on schema errors, fewer than 200 entries, or fewer than 30
-papers per primary category. It also prints a NOTE when any primary category
-has fewer than 30 `high` confidence labels (informational only; does not fail).
+With no flags, the script validates both golden files and checks that train and
+test `paper_id` sets are disjoint. Use `--train` or `--test` to validate one
+file only.
+
+The script checks schema, prints label and primary-category distribution, and
+exits non-zero on schema errors or acceptance gate failures.
+
+**Training gates** (`paper_categories_train.jsonl`):
+
+- at least 200 entries
+- at least 30 papers containing each primary category (any label position)
+- NOTE (non-failing) when any primary category has fewer than 30 `high`
+  confidence labels
+
+**Test gates** (`paper_categories_test.jsonl`):
+
+- at least 80 entries
+- primary (`categories[0]`) counts at least:
+
+| Primary category | Minimum |
+|------------------|--------:|
+| `library-design` | 28 |
+| `language-evolution` | 18 |
+| `language-wording` | 12 |
+| `informational` | 13 |
+| `library-wording` | 8 |
+
+When validating the test golden (`--test` or the default all-files run), the
+script also prints NOTE lines for primary proportions that differ from the
+training file by more than 3 percentage points.
 
 ## Bias note
 
