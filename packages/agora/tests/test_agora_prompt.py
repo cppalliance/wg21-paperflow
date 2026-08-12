@@ -29,9 +29,9 @@ def _agora_prompt() -> PipelinePrompt:
 def test_load_returns_all_step_headers():
     prompt = _agora_prompt()
     step_names = [s.name for s in prompt.steps]
-    assert len(step_names) == 10
+    assert len(step_names) == 11
     assert step_names[0] == "Step 0 - Load"
-    assert step_names[-1] == "Step 9 - Voice"
+    assert step_names[-1] == "Step 10 - Reactor"
     assert set(step_names) == set(_build_hooks())
 
 
@@ -60,13 +60,14 @@ def test_step_9_voice_uses_the_signal_model():
     by_name = {s.step.name: s for s in specs}
     assert by_name["Step 9 - Voice"].step.model == "signal"
     assert by_name["Step 8 - Cast"].step.model == "none"
+    assert by_name["Step 10 - Reactor"].step.model == "none"
 
 
-def test_build_pipeline_returns_10_specs_in_numeric_order():
+def test_build_pipeline_returns_11_specs_in_numeric_order():
     prompt = _agora_prompt()
     specs = build_pipeline(prompt, _build_hooks())
-    assert len(specs) == 10
-    assert [s.step.number for s in specs] == list(range(10))
+    assert len(specs) == 11
+    assert [s.step.number for s in specs] == list(range(11))
 
 
 def test_step_2_research_uses_a_real_model():
