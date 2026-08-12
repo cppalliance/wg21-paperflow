@@ -51,7 +51,7 @@ def route_paper(
     *,
     audience: list[str] | None = None,
     classifiers: ClassifierBackend | Sequence[ClassifierBackend] | None = None,
-    use_regex: bool = False,
+    use_regex: bool = True,
     use_learned_aggregator: bool = True,
     debug_log: list[str] | None = None,
 ) -> RoutingResult:
@@ -77,7 +77,7 @@ def route_paper(
     sustained = sustained_counts(sentences)
     use_learned = (
         use_learned_aggregator
-        and is_learned_aggregator_path(classifiers, use_regex=use_regex)
+        and is_learned_aggregator_path(classifiers)
         and learned_model_available()
     )
     if use_learned:

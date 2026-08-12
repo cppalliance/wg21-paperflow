@@ -87,13 +87,12 @@ def test_is_seqcls_only_path() -> None:
 
 
 def test_is_learned_aggregator_path() -> None:
-    assert is_learned_aggregator_path(_StubSeqcls(model="m"), use_regex=False)
-    assert is_learned_aggregator_path(_StubNli(model="m"), use_regex=False)
-    assert not is_learned_aggregator_path(_StubSeqcls(model="m"), use_regex=True)
+    assert is_learned_aggregator_path(_StubSeqcls(model="m"))
+    assert is_learned_aggregator_path(_StubNli(model="m"))
     assert not is_learned_aggregator_path(
         [_StubSeqcls(model="m"), _StubNli(model="m")],
-        use_regex=False,
     )
+    assert not is_learned_aggregator_path(None)
 
 
 def test_predict_learned_groups_raises_when_artifacts_missing(

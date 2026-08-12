@@ -132,15 +132,14 @@ def _classifier_backends(classifiers: object) -> list[object]:
 
 def is_learned_aggregator_path(
     classifiers: object,
-    *,
-    use_regex: bool,
 ) -> bool:
     """True when routing should use the learned aggregator instead of hand rules.
 
-    Eligible: regex off, homogeneous single-family backends (NLI-only or seqcls-only).
-    Mixed NLI+seqcls ensembles and regex paths keep the hand aggregate.
+    Eligible: homogeneous single-family backends (NLI-only or seqcls-only).
+    Mixed NLI+seqcls ensembles keep the hand aggregate. Hypothesis scoring
+    (regex vs classifier) is independent of this aggregation choice.
     """
-    if use_regex or classifiers is None:
+    if classifiers is None:
         return False
 
     backends = _classifier_backends(classifiers)
