@@ -456,6 +456,38 @@ def test_research_enabled_dispatches_all_three_agents(
     assert summary.author_ecosystem.agent == "author_ecosystem"
 
 
+def test_agora_since_firewall_logs_and_continues(tmp_path: Path, monkeypatch):
+    """One failing paper in a batch is recorded as an error; the loop
+    still runs every other paper to completion."""
+    import agora.pipeline as pipeline_mod
+    from agora import agora_since
+
+    backend = SqliteBackend(tmp_path)
+    backend.upsert_year("2026", [
+        {"paper_id": "P1111R0", "mailing_date": "2026-01"},
+        {"paper_id": "P2222R0", "mailing_date": "2026-01"},
+    ])
+
+    attempted: list[str] = []
+
+    async def fake_agora_paper(pid, be, **kwargs):
+        attempted.append(pid)
+        if pid == "P1111R0":
+            raise RuntimeError("model exploded")
+
+    monkeypatch.setattr(pipeline_mod, "agora_paper", fake_agora_paper)
+
+    results = asyncio.run(agora_since("2026-01", backend))
+
+    assert attempted == ["P1111R0", "P2222R0"]
+    by_pid = {r["paper_id"]: r for r in results}
+    assert by_pid["P1111R0"]["status"] == "error"
+    assert "model exploded" in by_pid["P1111R0"]["error"]
+    assert by_pid["P2222R0"] == {
+        "paper_id": "P2222R0", "status": "ok", "error": None,
+    }
+
+
 def test_paperstore_agora_round_trip(tmp_path: Path):
     """write_agora_json/read_agora_json/get_agora_path/clear_agora behave."""
     backend = SqliteBackend(tmp_path)

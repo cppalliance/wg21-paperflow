@@ -656,3 +656,12 @@ class PipelineState(BaseModel):
     # -- Step 7 (Serialize) --------------------------------------------------
 
     thread: Optional[Thread] = None
+
+    # Steps 8-10 (Cast, Voice, Reactor) add no state fields: they
+    # mutate ``thread`` in place, filling the generation-phase fields
+    # on ``Thread`` and ``Reply``.
+
+    # -- Step 11 (Emit) --------------------------------------------------------
+
+    artifact_path: Optional[str] = None
+    qa_findings: Optional[list[str]] = None

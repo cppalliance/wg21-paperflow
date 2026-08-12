@@ -14,16 +14,19 @@ structure; this module conforms to it.
 
 One-shot, fully batch. No human-in-the-loop.
 
-The pipeline runs Steps 0-7 (analysis phase) followed by Steps 8-10
-(generation phase, :mod:`agora.generate` and :mod:`agora.reactor`).
-Steps 0-7 plan the thread and write the blueprint
-``{pid}.agora.json`` to paperstore; Step 8 casts a roster persona on
-every slot, Step 9 writes the comment bodies in those voices, and
-Step 10 runs the reactor pass — every persona's individual votes —
-mutating the ``Thread`` in place. Scores, orderings, and time labels
-remain ``None``/empty (the website derives them from revealed
-votes), and the full-artifact emit happens with the integration
-work.
+The pipeline runs Steps 0-7 (analysis phase), Steps 8-10 (generation
+phase, :mod:`agora.generate` and :mod:`agora.reactor`), then Step 11
+(emit, :mod:`agora.artifact` + :mod:`agora.qa`). Steps 0-7 plan the
+thread and assemble the validated ``Thread``; Step 8 casts a roster
+persona on every slot, Step 9 writes the comment bodies in those
+voices, and Step 10 runs the reactor pass — every persona's
+individual votes — mutating the ``Thread`` in place. Step 11 maps
+the finished thread to the ``.agora.json`` artifact, runs the
+generation QA report, validates the producer contract, and writes
+the artifact to paperstore — the pipeline's only artifact write, so
+a failed run never persists a partial artifact. Scores, orderings,
+and time labels remain ``None``/empty; the website derives them from
+revealed votes.
 """
 
 from __future__ import annotations
@@ -33,6 +36,7 @@ import json
 import logging
 import re
 from collections.abc import Callable
+from datetime import datetime, timezone
 from typing import Any
 
 from paperstore import StorageBackend
@@ -58,10 +62,13 @@ from pipeline.errors import (
     ValidationStepError,
 )
 from agora import mod_reference
+from agora.artifact import ArtifactError, thread_to_artifact, validate_artifact
 from agora.casting import MISCONCEPTION_STANCE
 from agora.errors import PaperNotConvertedError, PaperNotFoundError
 from agora.generate import _pure_cast, _pure_voice
+from agora.qa import qa_report
 from agora.reactor import _pure_react
+from agora.roster import roster_usernames
 from agora.models import (
     CalibrationOutput,
     Committee,
@@ -93,6 +100,7 @@ _STEP_7_SERIALIZE = "Step 7 - Serialize"
 _STEP_8_CAST = "Step 8 - Cast"
 _STEP_9_VOICE = "Step 9 - Voice"
 _STEP_10_REACTOR = "Step 10 - Reactor"
+_STEP_11_EMIT = "Step 11 - Emit"
 
 
 # -- Committee routing -------------------------------------------------------
@@ -587,8 +595,12 @@ def _extract_encounters(state: PipelineState, output: EncountersOutput) -> None:
 
 
 async def _pure_serialize(state: PipelineState, ctx: StepContext, spec: StepSpec) -> None:
-    """Assemble the final Thread, validate, write to paperstore."""
-    assert ctx.backend is not None
+    """Assemble the final Thread and validate its structure.
+
+    Nothing is persisted here: the artifact write happens in Step 11
+    (Emit) after generation, so a failed run never leaves a partial
+    artifact on disk.
+    """
     assert state.subreddit is not None
     assert state.paper_type is not None
     assert state.heat is not None
@@ -634,11 +646,10 @@ async def _pure_serialize(state: PipelineState, ctx: StepContext, spec: StepSpec
         encounters=encounters,
     )
 
-    payload = thread.model_dump(mode="json")
-    out_path = await asyncio.to_thread(
-        ctx.backend.write_agora_json, ctx.pid, payload,
+    logger.info(
+        "Step 7: assembled thread blueprint (%d slots, %d encounters)",
+        len(replies), len(encounters),
     )
-    logger.info("Step 7: wrote agora thread blueprint -> %s", out_path)
     state.thread = thread
 
 
@@ -784,6 +795,44 @@ def _validate_blueprint(state: PipelineState, replies: list, encounters: list) -
         )
 
 
+# -- Step 11 - Emit ------------------------------------------------------------
+
+
+async def _pure_emit(state: PipelineState, ctx: StepContext, spec: StepSpec) -> None:
+    """Map the finished thread to the artifact, validate, persist.
+
+    The pipeline's only artifact write. Validation runs before the
+    write, so a contract violation fails the run and persists nothing.
+    QA findings are advisory: logged and recorded on the state for the
+    trace, never fatal — the hard invariants are the validator's job.
+    """
+    assert ctx.backend is not None
+    thread = state.thread
+    assert thread is not None, "Step 11 requires the Thread from Step 7."
+
+    thread.generated_at = datetime.now(timezone.utc)
+    artifact = thread_to_artifact(thread)
+
+    findings = qa_report(thread)
+    state.qa_findings = [str(f) for f in findings]
+    for finding in findings:
+        logger.warning("Step 11 QA: %s", finding)
+
+    try:
+        validate_artifact(artifact, roster=roster_usernames())
+    except ArtifactError as exc:
+        raise ValidationStepError(11, _STEP_11_EMIT, exc) from exc
+
+    out_path = await asyncio.to_thread(
+        ctx.backend.write_agora_json, ctx.pid, artifact,
+    )
+    state.artifact_path = str(out_path)
+    logger.info(
+        "Step 11: wrote agora artifact (%d comments, %d QA findings) -> %s",
+        len(artifact["comments"]), len(findings), out_path,
+    )
+
+
 # -- JSON helper -------------------------------------------------------------
 
 
@@ -839,6 +888,7 @@ def _build_hooks(*, research: bool = True) -> dict[str, StepHooks]:
         _STEP_8_CAST: StepHooks(custom=_pure_cast),
         _STEP_9_VOICE: StepHooks(custom=_pure_voice),
         _STEP_10_REACTOR: StepHooks(custom=_pure_react),
+        _STEP_11_EMIT: StepHooks(custom=_pure_emit),
     }
 
 
@@ -858,13 +908,15 @@ async def agora_paper(
     """Plan and generate a Reddit thread for a dissected WG21 paper.
 
     Loads ``agora.md``, resolves its ``## Services`` block against
-    SERVICES.toml, builds agents, and runs the 11-step pipeline:
-    Steps 0-7 plan the thread and write the blueprint
-    ``{pid}.agora.json`` via ``backend.write_agora_json``; Steps
-    8-10 cast personas, write every comment body, and fill the
-    per-persona votes onto the returned :class:`Thread`. Scores and
-    time labels stay ``None`` — the website derives them from
-    revealed votes.
+    SERVICES.toml, builds agents, and runs the 12-step pipeline:
+    Steps 0-7 plan the thread; Steps 8-10 cast personas, write every
+    comment body, and fill the per-persona votes onto the returned
+    :class:`Thread`; Step 11 maps the finished thread to the full
+    ``.agora.json`` artifact, validates it against the producer
+    contract, and writes it via ``backend.write_agora_json`` — the
+    run's only artifact write, so a failure never persists a partial
+    artifact. Scores and time labels stay ``None`` — the website
+    derives them from revealed votes.
 
     ``research=False`` turns Step 2 off for this run: no web search
     or MCP traffic; the thread calibrates from paper signals alone
@@ -981,7 +1033,7 @@ async def agora_since(
     """Plan threads for all papers with ``mailing_date >= month``.
 
     Iterates sequentially, calling :func:`agora_paper` for each
-    (``research`` is passed through). The JSON is written inside
+    (``research`` is passed through). The artifact is written inside
     :func:`agora_paper` via ``backend.write_agora_json``; this
     function only collects status.
 

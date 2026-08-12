@@ -170,6 +170,25 @@ def test_process_paper_recovers_paper_stuck_in_gap(
     assert backend.get_meta(staged_paper).status == 5
 
 
+def test_process_paper_passes_research_flag_to_agora_stage(
+    backend: SqliteBackend, staged_paper: str, monkeypatch,
+):
+    """``research=False`` must reach the agora stage body (which hands
+    it to ``agora_paper``); the default stays ``True``."""
+    seen: list[bool] = []
+
+    async def fake_agora(pid, be, **kwargs):
+        seen.append(kwargs["research"])
+        be.write_agora_json(pid, {"document": pid, "replies": []})
+
+    monkeypatch.setattr(process_mod, "_stage_agora", fake_agora)
+
+    asyncio.run(process_paper(staged_paper, backend, through=5,
+                              research=False))
+    asyncio.run(process_paper(staged_paper, backend, through=5, force=True))
+    assert seen == [False, True]
+
+
 def test_warn_if_html_image_files_missing_fires(
     backend: SqliteBackend, caplog,
 ):

@@ -57,6 +57,7 @@ async def process_paper(
     keep_downstream: bool = False,
     extract_vector: bool = False,
     whiteout_text: bool = False,
+    research: bool = True,
     on_progress: object = None,
 ) -> ProcessResult:
     """Advance a paper through pipeline stages up to ``through``.
@@ -65,6 +66,10 @@ async def process_paper(
     a time. Each stage does its work, then calls ``advance_status``
     (CAS) to record completion. On failure, calls ``fail_paper`` and
     re-raises.
+
+    ``research=False`` turns the agora pipeline's web research step
+    off: the thread calibrates from paper signals alone, with no web
+    search or MCP traffic. Other stages ignore the flag.
 
     When ``force`` is True, resets status to ``through - 1`` so the
     target stage re-runs without redoing earlier stages. For example,
@@ -148,6 +153,7 @@ async def process_paper(
                 keep_downstream=keep_downstream,
                 extract_vector=extract_vector,
                 whiteout_text=whiteout_text,
+                research=research,
                 on_progress=on_progress,
             )
         except Exception as exc:
@@ -227,6 +233,7 @@ async def _run_stage(
     keep_downstream: bool = False,
     extract_vector: bool = False,
     whiteout_text: bool = False,
+    research: bool = True,
     on_progress: object = None,
 ) -> Any:
     """Execute a single pipeline stage for one paper."""
@@ -242,7 +249,8 @@ async def _run_stage(
     elif stage == STAGES["agora"]:
         await _stage_agora(
             pid, backend, debug=debug, trace=trace,
-            stop_after=stop_after, on_progress=on_progress,
+            stop_after=stop_after, research=research,
+            on_progress=on_progress,
         )
     elif stage == STAGES["herald"]:
         pass
@@ -517,6 +525,7 @@ async def _stage_convert(
 async def _stage_agora(
     pid: str, backend: StorageBackend, *, debug: bool = False, trace: bool = False,
     stop_after: int | None = None,
+    research: bool = True,
     on_progress: object = None,
 ) -> None:
     """Run agora pipeline on the paper.
@@ -530,5 +539,6 @@ async def _stage_agora(
     await agora_paper(
         pid, backend, debug=debug, trace=trace,
         stop_after=stop_after,
+        research=research,
         on_progress=on_progress,
     )

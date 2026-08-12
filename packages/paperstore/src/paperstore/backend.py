@@ -206,11 +206,11 @@ class StorageBackend(ABC):
 
     @abstractmethod
     def write_agora_json(self, paper_id: str, payload: Any) -> Path:
-        """Persist the agora thread blueprint as JSON. Atomic write. Returns path.
+        """Persist the ``.agora.json`` artifact. Atomic write. Returns path.
 
         ``payload`` is serialised with ``json.dumps(..., indent=2,
-        ensure_ascii=False)``. Pass a ``Thread.model_dump(mode='json')``
-        dict.
+        ensure_ascii=False)``. Pass the artifact dict produced by
+        ``agora.artifact.thread_to_artifact``.
         """
 
     @abstractmethod
@@ -226,7 +226,7 @@ class StorageBackend(ABC):
         """Delete the agora file and clear its path in the store.
 
         Called at the start of an agora run so a crash does not leave
-        a stale thread blueprint from a previous run.
+        a stale artifact from a previous run.
         """
 
     @abstractmethod
