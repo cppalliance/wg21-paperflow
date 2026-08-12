@@ -95,8 +95,15 @@ class ThreadCasting(BaseModel, frozen=True):
     )
 
 
-def _stable_key(*parts: str) -> int:
-    """Deterministic tie-break key (unlike ``hash()``, stable across runs)."""
+def stable_key(*parts: str) -> int:
+    """Deterministic draw key (unlike ``hash()``, stable across runs).
+
+    The shared determinism primitive for the whole generation phase:
+    casting selection, the edited-flag draw (:mod:`agora.generate`),
+    and the reactor's vote draws (:mod:`agora.reactor`) all key their
+    decisions on it, so re-running the same document reproduces the
+    same thread.
+    """
     digest = hashlib.sha256(":".join(parts).encode("utf-8")).digest()
     return int.from_bytes(digest[:8], "big")
 
@@ -157,7 +164,7 @@ def _pick(
         return (
             not preferred,
             -used if preferred else used,
-            _stable_key(document, slot_id, persona.username),
+            stable_key(document, slot_id, persona.username),
         )
 
     return min(candidates, key=sort_key)
@@ -206,7 +213,7 @@ def select_regulars(
 
     def order(names: Iterable[str]) -> list[str]:
         return sorted(
-            names, key=lambda name: _stable_key(document, "regular", name),
+            names, key=lambda name: stable_key(document, "regular", name),
         )
 
     return tuple(
