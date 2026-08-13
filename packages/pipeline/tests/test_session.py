@@ -644,7 +644,12 @@ async def test_fetch_retryable_status_not_cached_after_retries(status):
 
 @pytest.mark.anyio
 @pytest.mark.parametrize(
-    "exc", [httpx.ConnectError("boom"), httpx.TimeoutException("slow")],
+    "exc",
+    [
+        httpx.ConnectError("boom"),
+        httpx.ReadError("cut"),
+        httpx.TimeoutException("slow"),
+    ],
 )
 async def test_fetch_transport_error_retries_then_not_cached(exc):
     failing_stream = MagicMock(side_effect=exc)
