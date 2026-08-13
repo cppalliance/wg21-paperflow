@@ -198,17 +198,6 @@ class Hypothesis:
         return self.regex is not None and self.regex.search(sentence) is not None
 
 
-def _h(
-    hid: str,
-    name: str,
-    axis: HypothesisAxis,
-    *,
-    regex: re.Pattern[str] | None = None,
-    nli_text: str | None = None,
-) -> Hypothesis:
-    return Hypothesis(id=hid, name=name, axis=axis, regex=regex, nli_text=nli_text)
-
-
 _LIB = HypothesisAxis.LIBRARY_DOMAIN
 _LANG = HypothesisAxis.LANGUAGE_DOMAIN
 _DES = HypothesisAxis.DESIGN_MODE
@@ -217,21 +206,21 @@ _STR = HypothesisAxis.STRUCTURAL
 
 
 CATALOG: tuple[Hypothesis, ...] = (
-    _h(
+    Hypothesis(
         "D1",
         "REFERENCES_LIBRARY_HEADER",
         _LIB,
         regex=_D1_RE,
         nli_text="The sentence names a standard library header in angle brackets.",
     ),
-    _h(
+    Hypothesis(
         "D2",
         "REFERENCES_LIBRARY_SECTION",
         _LIB,
         regex=_D2_RE,
         nli_text="The sentence cites a library clause number or stable name from the standard.",
     ),
-    _h(
+    Hypothesis(
         "D3",
         "NAMES_STD_ENTITY",
         _LIB,
@@ -241,7 +230,7 @@ CATALOG: tuple[Hypothesis, ...] = (
             "that lives in the standard library."
         ),
     ),
-    _h(
+    Hypothesis(
         "D4",
         "NAMESPACE_STD_MUTATION",
         _LIB,
@@ -251,7 +240,7 @@ CATALOG: tuple[Hypothesis, ...] = (
             "in namespace std."
         ),
     ),
-    _h(
+    Hypothesis(
         "D5",
         "REFERENCES_LWG_LEWG",
         _LIB,
@@ -261,7 +250,7 @@ CATALOG: tuple[Hypothesis, ...] = (
             "or prior library paper."
         ),
     ),
-    _h(
+    Hypothesis(
         "D6",
         "REFERENCES_LIBRARY_CONCEPT",
         _LIB,
@@ -270,7 +259,7 @@ CATALOG: tuple[Hypothesis, ...] = (
             "The sentence discusses a standard library concept or named requirement."
         ),
     ),
-    _h(
+    Hypothesis(
         "D7",
         "REFERENCES_LIBRARY_CUSTOMIZATION",
         _LIB,
@@ -280,21 +269,21 @@ CATALOG: tuple[Hypothesis, ...] = (
             "or trait specialization in a library context."
         ),
     ),
-    _h(
+    Hypothesis(
         "D8",
         "REFERENCES_CORE_SECTION",
         _LANG,
         regex=_D8_RE,
         nli_text="The sentence cites a core language clause number or stable name.",
     ),
-    _h(
+    Hypothesis(
         "D9",
         "NAMES_LANGUAGE_FEATURE",
         _LANG,
         regex=_D9_RE,
         nli_text="The sentence names a core language feature by its recognized name.",
     ),
-    _h(
+    Hypothesis(
         "D10",
         "GRAMMAR_PRODUCTION",
         _LANG,
@@ -303,7 +292,7 @@ CATALOG: tuple[Hypothesis, ...] = (
             "The sentence contains or proposes a grammar production in BNF style."
         ),
     ),
-    _h(
+    Hypothesis(
         "D11",
         "OVERLOAD_RESOLUTION",
         _LANG,
@@ -312,7 +301,7 @@ CATALOG: tuple[Hypothesis, ...] = (
             "The sentence discusses overload resolution, ADL, or name lookup rules."
         ),
     ),
-    _h(
+    Hypothesis(
         "D12",
         "TEMPLATE_INSTANTIATION",
         _LANG,
@@ -321,7 +310,7 @@ CATALOG: tuple[Hypothesis, ...] = (
             "The sentence discusses template instantiation, specialization rules, or SFINAE."
         ),
     ),
-    _h(
+    Hypothesis(
         "D13",
         "LIFETIME_SEMANTICS",
         _LANG,
@@ -330,7 +319,7 @@ CATALOG: tuple[Hypothesis, ...] = (
             "The sentence discusses object lifetime, storage duration, or destruction order."
         ),
     ),
-    _h(
+    Hypothesis(
         "D14",
         "REFERENCES_EWG_CWG",
         _LANG,
@@ -340,7 +329,7 @@ CATALOG: tuple[Hypothesis, ...] = (
             "or prior language paper."
         ),
     ),
-    _h(
+    Hypothesis(
         "D15",
         "TYPE_SYSTEM_RULES",
         _LANG,
@@ -350,42 +339,42 @@ CATALOG: tuple[Hypothesis, ...] = (
             "or type relationships as language rules."
         ),
     ),
-    _h(
+    Hypothesis(
         "M1",
         "PROPOSES_ADDITION",
         _DES,
         regex=_M1_RE,
         nli_text="The sentence explicitly proposes adding new functionality to the standard.",
     ),
-    _h(
+    Hypothesis(
         "M2",
         "PROPOSES_MODIFICATION",
         _DES,
         regex=_M2_RE,
         nli_text="The sentence proposes changing existing behavior or specification.",
     ),
-    _h(
+    Hypothesis(
         "M3",
         "PROPOSES_REMOVAL",
         _DES,
         regex=_M3_RE,
         nli_text="The sentence proposes deprecating or removing something from the standard.",
     ),
-    _h(
+    Hypothesis(
         "M4",
         "DESIGN_RATIONALE",
         _DES,
         regex=_M4_RE,
         nli_text="The sentence explains why a design choice was made.",
     ),
-    _h(
+    Hypothesis(
         "M5",
         "NAMING_CONVENTION",
         _DES,
         regex=_M5_RE,
         nli_text="The sentence discusses naming patterns, suffixes, prefixes, or naming policy.",
     ),
-    _h(
+    Hypothesis(
         "M6",
         "COMPARATIVE_EVALUATION",
         _DES,
@@ -394,7 +383,7 @@ CATALOG: tuple[Hypothesis, ...] = (
             "The sentence compares two or more alternative designs, syntaxes, or API forms."
         ),
     ),
-    _h(
+    Hypothesis(
         "M7",
         "USER_ERGONOMICS",
         _DES,
@@ -404,28 +393,28 @@ CATALOG: tuple[Hypothesis, ...] = (
             "or usability."
         ),
     ),
-    _h(
+    Hypothesis(
         "M8",
         "API_SURFACE_DESCRIPTION",
         _DES,
         regex=_M8_RE,
         nli_text="The sentence describes the shape of a proposed interface or API.",
     ),
-    _h(
+    Hypothesis(
         "M9",
         "PURE_EXTENSION_CLAIM",
         _DES,
         regex=_M9_RE,
         nli_text="The sentence claims the change is purely additive and non-breaking.",
     ),
-    _h(
+    Hypothesis(
         "M10",
         "SCOPE_BOUNDARY",
         _DES,
         regex=_M10_RE,
         nli_text="The sentence bounds what the proposal does or does not affect.",
     ),
-    _h(
+    Hypothesis(
         "M11",
         "IMPLEMENTATION_EVIDENCE",
         _DES,
@@ -434,7 +423,7 @@ CATALOG: tuple[Hypothesis, ...] = (
             "The sentence reports implementation experience or successful compilation."
         ),
     ),
-    _h(
+    Hypothesis(
         "M12",
         "EXISTING_PRACTICE",
         _DES,
@@ -444,7 +433,7 @@ CATALOG: tuple[Hypothesis, ...] = (
             "or other languages."
         ),
     ),
-    _h(
+    Hypothesis(
         "M13",
         "PERFORMANCE_ARGUMENT",
         _DES,
@@ -453,70 +442,70 @@ CATALOG: tuple[Hypothesis, ...] = (
             "The sentence argues about runtime or compile-time performance characteristics."
         ),
     ),
-    _h(
+    Hypothesis(
         "W1",
         "NORMATIVE_SPECIFICATION",
         _WOR,
         regex=_W1_RE,
         nli_text="The sentence contains normative specification language.",
     ),
-    _h(
+    Hypothesis(
         "W2",
         "WORDING_DIRECTIVE",
         _WOR,
         regex=_W2_RE,
         nli_text="The sentence instructs an editorial change to the standard text.",
     ),
-    _h(
+    Hypothesis(
         "W3",
         "STABLE_NAME_EDIT",
         _WOR,
         regex=_W3_RE,
         nli_text="The sentence targets a specific stable name for textual modification.",
     ),
-    _h(
+    Hypothesis(
         "W4",
         "TABLE_MODIFICATION",
         _WOR,
         regex=_W4_RE,
         nli_text="The sentence proposes changes to a table in the standard.",
     ),
-    _h(
+    Hypothesis(
         "W5",
         "FEATURE_TEST_MACRO",
         _WOR,
         regex=_W5_RE,
         nli_text="The sentence proposes or modifies a feature-test macro.",
     ),
-    _h(
+    Hypothesis(
         "S1",
         "AUDIENCE_METADATA",
         _STR,
         regex=_S1_RE,
         nli_text="The paper's metadata explicitly names a target audience.",
     ),
-    _h(
+    Hypothesis(
         "S2",
         "CROSS_REFERENCE_PAPER",
         _STR,
         regex=_S2_RE,
         nli_text="The sentence references another WG21 paper by document number.",
     ),
-    _h(
+    Hypothesis(
         "S3",
         "BACKWARD_COMPATIBILITY",
         _STR,
         regex=_S3_RE,
         nli_text="The sentence discusses backward compatibility or migration burden.",
     ),
-    _h(
+    Hypothesis(
         "S4",
         "ABI_DISCUSSION",
         _STR,
         regex=_S4_RE,
         nli_text="The sentence discusses ABI stability or binary compatibility.",
     ),
-    _h(
+    Hypothesis(
         "S5",
         "POLL_RESULT",
         _STR,
