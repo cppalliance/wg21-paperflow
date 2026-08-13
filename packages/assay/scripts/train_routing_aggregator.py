@@ -34,7 +34,7 @@ from eval_common import (
     resolve_classifier,
 )
 
-_log = logging.getLogger(__name__)
+logger = logging.getLogger(__name__)
 
 _TRAIN_SEED = 0
 _CV_FOLDS = 5
@@ -176,10 +176,7 @@ def train_and_freeze(
 ) -> dict[str, object]:
     catalog_ids: tuple[str, ...] = default_catalog_ids()
     feature_names: tuple[str, ...] = build_feature_names(catalog_ids)
-    x_rows = [
-        vectorize_features(row["features"], feature_names)
-        for row in rows
-    ]
+    x_rows = [vectorize_features(row["features"], feature_names) for row in rows]
     y_rows = [list(row["labels"]) for row in rows]
 
     kfold = KFold(n_splits=_CV_FOLDS, shuffle=True, random_state=_TRAIN_SEED)
@@ -246,7 +243,9 @@ def train_and_freeze(
                 "n_papers": len(rows),
                 "oof_exact_match": oof_exact,
                 "in_sample_exact_match": in_exact,
-                "group_thresholds": {g.value: thresholds[g] for g in ROUTING_GROUP_ORDER},
+                "group_thresholds": {
+                    g.value: thresholds[g] for g in ROUTING_GROUP_ORDER
+                },
             },
             indent=2,
             sort_keys=True,
@@ -289,7 +288,7 @@ def main() -> int:
     if not rows:
         raise SystemExit("no training rows with markdown in paperstore")
     summary = train_and_freeze(rows, output_dir=args.output)
-    _log.info("trained aggregator: %s", summary)
+    logger.info("trained aggregator: %s", summary)
     return 0
 
 
