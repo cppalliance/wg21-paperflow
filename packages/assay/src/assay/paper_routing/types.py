@@ -10,10 +10,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from enum import Enum
+from enum import StrEnum
 
 
-class HypothesisAxis(str, Enum):
+class HypothesisAxis(StrEnum):
     """Hypothesis axis categories from the classifier spec (Section 3).
 
     Two independent axes (Domain and Mode) plus structural/meta signals.
@@ -26,7 +26,7 @@ class HypothesisAxis(str, Enum):
     STRUCTURAL = "structural"
 
 
-class RoutingGroup(str, Enum):
+class RoutingGroup(StrEnum):
     """WG21 review-group labels: the 2x2 grid of Domain x Mode.
 
     Each member sits at the intersection of one domain axis and one mode
@@ -53,6 +53,7 @@ class RoutingGroup(str, Enum):
 
 # OneVsRest predict_proba column order for the learned aggregator. Training and
 # inference must use this tuple; do not reorder without retraining aggregator_hgb.
+# Persisted as group_order.json next to aggregator_hgb.joblib and validated at load.
 ROUTING_GROUP_ORDER: tuple[RoutingGroup, ...] = (
     RoutingGroup.LEWG,
     RoutingGroup.LWG,
@@ -61,7 +62,7 @@ ROUTING_GROUP_ORDER: tuple[RoutingGroup, ...] = (
 )
 
 
-class SectionType(str, Enum):
+class SectionType(StrEnum):
     """WG21 paper section categories for section-aware aggregation."""
 
     PREAMBLE = "PREAMBLE"

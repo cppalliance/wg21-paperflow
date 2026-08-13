@@ -10,6 +10,12 @@ import argparse
 import json
 import logging
 from pathlib import Path
+from typing import TypedDict
+
+import joblib  # type: ignore[import-untyped]
+from sklearn.ensemble import HistGradientBoostingClassifier
+from sklearn.model_selection import KFold
+from sklearn.multiclass import OneVsRestClassifier
 
 from assay.paper_routing.features import (
     build_feature_names,
@@ -32,6 +38,13 @@ _log = logging.getLogger(__name__)
 
 _TRAIN_SEED = 0
 _CV_FOLDS = 5
+
+
+class TrainingRow(TypedDict):
+    paper_id: str
+    features: dict[str, float]
+    labels: list[int]
+    sentence_count: int
 
 
 def _load_golden(path: Path) -> list[dict[str, object]]:
@@ -112,9 +125,9 @@ def build_training_rows(
     golden_path: Path,
     seqcls_name: str,
     cache_path: Path | None,
-) -> list[dict[str, object]]:
+) -> list[TrainingRow]:
     if cache_path is not None and cache_path.is_file():
-        rows: list[dict[str, object]] = []
+        rows: list[TrainingRow] = []
         for line in cache_path.read_text(encoding="utf-8").splitlines():
             stripped = line.strip()
             if stripped:
@@ -123,7 +136,7 @@ def build_training_rows(
 
     classifier = resolve_classifier(seqcls_name)
     golden_rows = _load_golden(golden_path)
-    built: list[dict[str, object]] = []
+    built: list[TrainingRow] = []
     for row in golden_rows:
         paper_id = str(row["paper_id"]).lower()
         md_path = paperstore_dir / f"{paper_id}.md"
@@ -142,7 +155,7 @@ def build_training_rows(
         features = extract_paper_features(sentences, audience=audience)
         built.append(
             {
-                "paper_id": row["paper_id"],
+                "paper_id": str(row["paper_id"]),
                 "features": features,
                 "labels": _labels_vector(expected),
                 "sentence_count": len(sentences),
@@ -157,21 +170,17 @@ def build_training_rows(
 
 
 def train_and_freeze(
-    rows: list[dict[str, object]],
+    rows: list[TrainingRow],
     *,
     output_dir: Path,
 ) -> dict[str, object]:
-    from sklearn.ensemble import HistGradientBoostingClassifier
-    from sklearn.model_selection import KFold
-    from sklearn.multiclass import OneVsRestClassifier
-
-    catalog_ids = default_catalog_ids()
-    feature_names = build_feature_names(catalog_ids)
+    catalog_ids: tuple[str, ...] = default_catalog_ids()
+    feature_names: tuple[str, ...] = build_feature_names(catalog_ids)
     x_rows = [
-        vectorize_features(row["features"], feature_names)  # type: ignore[arg-type]
+        vectorize_features(row["features"], feature_names)
         for row in rows
     ]
-    y_rows = [list(row["labels"]) for row in rows]  # type: ignore[misc]
+    y_rows = [list(row["labels"]) for row in rows]
 
     kfold = KFold(n_splits=_CV_FOLDS, shuffle=True, random_state=_TRAIN_SEED)
     oof_probs: list[list[float]] = [[] for _ in range(len(x_rows))]
@@ -213,8 +222,6 @@ def train_and_freeze(
     in_exact = _exact_match_rate(y_rows, in_preds)
 
     output_dir.mkdir(parents=True, exist_ok=True)
-    import joblib  # type: ignore[import-untyped]
-
     joblib.dump(final_model, output_dir / "aggregator_hgb.joblib")
     (output_dir / "feature_names.json").write_text(
         json.dumps(list(feature_names), indent=2) + "\n",
@@ -227,6 +234,10 @@ def train_and_freeze(
             sort_keys=True,
         )
         + "\n",
+        encoding="utf-8",
+    )
+    (output_dir / "group_order.json").write_text(
+        json.dumps([group.value for group in ROUTING_GROUP_ORDER], indent=2) + "\n",
         encoding="utf-8",
     )
     (output_dir / "train_report.json").write_text(

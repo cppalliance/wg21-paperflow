@@ -21,10 +21,7 @@ import json
 import logging
 from collections import Counter
 
-try:
-    import tomllib
-except ModuleNotFoundError:
-    import tomli as tomllib  # type: ignore[no-redef]
+import tomllib
 
 from paperstore import StorageBackend
 

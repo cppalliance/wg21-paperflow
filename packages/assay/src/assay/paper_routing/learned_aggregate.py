@@ -33,6 +33,7 @@ _ROUTING_DATA_DIR = Path("data") / "routing"
 _MODEL_FILE = "aggregator_hgb.joblib"
 _FEATURE_NAMES_FILE = "feature_names.json"
 _GROUP_THRESHOLDS_FILE = "group_thresholds.json"
+_GROUP_ORDER_FILE = "group_order.json"
 _LEARNED_GROUP_THRESHOLD_FALLBACK: float = 0.5
 
 
@@ -50,6 +51,7 @@ def learned_model_available() -> bool:
         (root / _MODEL_FILE).is_file()
         and (root / _FEATURE_NAMES_FILE).is_file()
         and (root / _GROUP_THRESHOLDS_FILE).is_file()
+        and (root / _GROUP_ORDER_FILE).is_file()
     )
 
 
@@ -75,6 +77,22 @@ def _load_group_thresholds() -> dict[RoutingGroup, float]:
 
 
 @lru_cache(maxsize=1)
+def _load_group_order() -> tuple[RoutingGroup, ...]:
+    path = routing_data_dir() / _GROUP_ORDER_FILE
+    raw = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(raw, list) or not all(isinstance(x, str) for x in raw):
+        raise ValueError(f"{path}: expected JSON array of strings")
+    order = tuple(RoutingGroup(x) for x in raw)
+    if order != ROUTING_GROUP_ORDER:
+        raise ValueError(
+            f"{path}: group order {list(g.value for g in order)} does not match "
+            f"ROUTING_GROUP_ORDER {list(g.value for g in ROUTING_GROUP_ORDER)}; "
+            "retrain the aggregator or restore the matching group_order.json",
+        )
+    return order
+
+
+@lru_cache(maxsize=1)
 def _load_model() -> object:
     path = routing_data_dir() / _MODEL_FILE
     return joblib.load(path)
@@ -92,6 +110,7 @@ def predict_learned_groups(
         )
 
     feature_names = _load_feature_names()
+    group_order = _load_group_order()
     catalog_ids = default_catalog_ids()
     features = extract_paper_features(
         sentences,
@@ -101,15 +120,15 @@ def predict_learned_groups(
     vector = vectorize_features(features, feature_names)
     model = _load_model()
     prob_row = model.predict_proba([vector])[0]  # type: ignore[union-attr]
-    if len(prob_row) != len(ROUTING_GROUP_ORDER):
+    if len(prob_row) != len(group_order):
         raise ValueError(
             f"learned aggregator predict_proba length {len(prob_row)} "
-            f"does not match ROUTING_GROUP_ORDER ({len(ROUTING_GROUP_ORDER)})",
+            f"does not match group_order ({len(group_order)})",
         )
     thresholds = _load_group_thresholds()
 
     probs: dict[RoutingGroup, float] = {}
-    for idx, group in enumerate(ROUTING_GROUP_ORDER):
+    for idx, group in enumerate(group_order):
         probs[group] = float(prob_row[idx])
 
     groups: dict[RoutingGroup, float] = {

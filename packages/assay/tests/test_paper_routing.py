@@ -284,7 +284,7 @@ def test_metadata_bonus_audience_tokens(
     audience: list[str], expected: dict[RoutingGroup, float]
 ):
     scores = _zeroed_scores()
-    _apply_metadata_bonus(scores, [], audience)
+    _apply_metadata_bonus(scores, audience)
     assert scores == expected
 
 

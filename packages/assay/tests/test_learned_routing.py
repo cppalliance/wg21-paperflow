@@ -24,6 +24,7 @@ from assay.paper_routing.learned_aggregate import (
     learned_model_available,
     predict_learned_groups,
     _load_feature_names,
+    _load_group_order,
     _load_group_thresholds,
     _load_model,
 )
@@ -51,6 +52,7 @@ def _clear_learned_aggregate_caches():
     """Prevent one test's monkeypatched routing_data_dir from leaking into another."""
     yield
     _load_feature_names.cache_clear()
+    _load_group_order.cache_clear()
     _load_group_thresholds.cache_clear()
     _load_model.cache_clear()
 
@@ -161,6 +163,10 @@ def test_learned_aggregate_roundtrip(
         json.dumps(thresholds, indent=2) + "\n",
         encoding="utf-8",
     )
+    (data_dir / "group_order.json").write_text(
+        json.dumps([g.value for g in ROUTING_GROUP_ORDER], indent=2) + "\n",
+        encoding="utf-8",
+    )
 
     monkeypatch.setattr(
         "assay.paper_routing.learned_aggregate.routing_data_dir",
@@ -172,3 +178,50 @@ def test_learned_aggregate_roundtrip(
     assert RoutingGroup.LEWG in groups
     assert probs[RoutingGroup.LEWG] >= 0.1
     assert probs[RoutingGroup.LEWG] == max(probs.values())
+
+
+def test_predict_learned_groups_raises_on_mismatched_group_order(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    pytest.importorskip("sklearn")
+    from sklearn.ensemble import HistGradientBoostingClassifier
+    from sklearn.multiclass import OneVsRestClassifier
+    import joblib
+
+    catalog = default_catalog_ids()
+    feature_names = build_feature_names(catalog)
+    sentences = [_sentence("proposal", frozenset({"D1"}))]
+    x_rows = [
+        vectorize_features(
+            extract_paper_features(sentences, audience=["LEWG"], catalog_ids=catalog),
+            feature_names,
+        )
+    ]
+    y = [[1, 0, 0, 0]]
+    model = OneVsRestClassifier(
+        HistGradientBoostingClassifier(random_state=0, max_depth=3, max_iter=50),
+    )
+    model.fit(x_rows, y)
+
+    data_dir = tmp_path / "routing"
+    data_dir.mkdir()
+    joblib.dump(model, data_dir / "aggregator_hgb.joblib")
+    (data_dir / "feature_names.json").write_text(
+        json.dumps(list(feature_names)) + "\n",
+        encoding="utf-8",
+    )
+    (data_dir / "group_thresholds.json").write_text(
+        json.dumps({g.value: 0.1 for g in RoutingGroup}, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    (data_dir / "group_order.json").write_text(
+        json.dumps(["CWG", "LEWG", "LWG", "EWG"], indent=2) + "\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        "assay.paper_routing.learned_aggregate.routing_data_dir",
+        lambda: data_dir,
+    )
+
+    with pytest.raises(ValueError, match="does not match ROUTING_GROUP_ORDER"):
+        predict_learned_groups(sentences, audience=["LEWG"])

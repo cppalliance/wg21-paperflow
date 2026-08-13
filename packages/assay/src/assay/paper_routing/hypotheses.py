@@ -20,7 +20,10 @@ from pipeline.classifier_backends import (
 )
 from pipeline.nli_batch import score_entailment_pairs
 from assay.paper_routing.sections import line_section_map, section_for_sentence
-from assay.paper_routing.seqcls_thresholds import seqcls_threshold_for_label
+from assay.paper_routing.seqcls_thresholds import (
+    _ROUTING_SEQCLS_THRESHOLD_FALLBACK,
+    load_seqcls_hypothesis_thresholds,
+)
 from assay.paper_routing.split import RawSentence, split_sentences
 from assay.paper_routing.types import HypothesisAxis, SectionType, Sentence
 
@@ -28,14 +31,18 @@ _ROUTING_NLI_THRESHOLD = 0.6
 _MIN_SENTENCE_CHARS = 20
 _MAX_SENTENCES_PER_PAPER = 3000
 
+# D1 REFERENCES_LIBRARY_HEADER
 _D1_RE = re.compile(r"<\s*[a-z_][a-z0-9_]*\s*>")
+# D2 REFERENCES_LIBRARY_SECTION
 _D2_RE = re.compile(r"\b\d{1,2}\.\d+(?:\.\d+)*\s+\[[\w.]+\]")
+# D3 NAMES_STD_ENTITY
 _D3_RE = re.compile(
     r"\bstd::|"
     r"\b\w+_v\b|\b\w+_t\b|"
     r"\b(is_same|is_convertible|tuple_size|decay_t|enable_if|type_traits)\b",
     re.IGNORECASE,
 )
+# D4 NAMESPACE_STD_MUTATION
 _D4_RE = re.compile(
     r"(?i)\bnamespace\s+std\b|"
     r"\b(?:standard\s+)?library\b.{0,60}?\b(?:should|shall|must|will|needs?\s+to)\s+be\s+"
@@ -43,101 +50,135 @@ _D4_RE = re.compile(
     r"\b(?:should|shall|must|will|needs?\s+to)\s+be\s+"
     r"(?:updated|modified|changed|extended|amended)\b.{0,60}?\b(?:standard\s+)?library\b"
 )
+# D8 REFERENCES_CORE_SECTION
 _D8_RE = re.compile(
     r"\[(?:expr|dcl|class|stmt|decl|basic|conv|temp|cpp|lex)\.[\w.]+\]|"
     r"\b(?:[1-9]|1[0-6])\.\d+(?:\.\d+)*\s+\[",
     re.IGNORECASE,
 )
+# D9 NAMES_LANGUAGE_FEATURE
 _D9_RE = re.compile(
     r"(?i)\b(concepts?|modules?|coroutines?|structured\s+bindings?|constexpr|"
     r"variable\s+templates?|ranges?|attributes?|lambdas?)\b",
 )
+# M1 PROPOSES_ADDITION
 _M1_RE = re.compile(
     r"(?i)\b(proposal\s+to\s+add|we\s+propose|this\s+paper\s+introduces?|this\s+proposal\s+adds?)\b",
 )
+# M2 PROPOSES_MODIFICATION
 _M2_RE = re.compile(
     r"(?i)\b(?:should|shall|must|will|needs?\s+to)\s+be\s+"
     r"(?:changed|modified|updated|revised|amended)\b|"
     r"\bwe\s+modify\b|"
     r"\bupdat(?:e|ed)\s+accordingly\b",
 )
+# M5 NAMING_CONVENTION
 _M5_RE = re.compile(r"(?i)\b(_v\s+suffix|_t\s+suffix|naming\s+convention)\b")
+# M6 COMPARATIVE_EVALUATION
 _M6_RE = re.compile(r"(?i)\b(superior\s+to|compared\s+to|alternative\s+approach)\b")
+# M7 USER_ERGONOMICS
 _M7_RE = re.compile(
     r"(?i)\b(simple\s+to\s+learn|less\s+verbose|easier\s+to|unintuitive)\b",
 )
+# M9 PURE_EXTENSION_CLAIM
 _M9_RE = re.compile(
     r"(?i)\b(pure\s+extension|no\s+breaking\s+changes?|backward\s+compatible)\b"
 )
+# M10 SCOPE_BOUNDARY
 _M10_RE = re.compile(
     r"(?i)\b(does(?:n't| not)\s+(?:touch|affect)|limited\s+to|out\s+of\s+scope)\b",
 )
+# M13 PERFORMANCE_ARGUMENT
 _M13_RE = re.compile(
     r"(?i)\b(zero\s+overhead|compile[- ]time\s+cost|no\s+runtime\s+penalty)\b",
 )
+# W1 NORMATIVE_SPECIFICATION
 _W1_RE = re.compile(
     r"(?i)\b(shall\b|Effects:|Returns:|Mandates:|Preconditions:)\b",
 )
+# W2 WORDING_DIRECTIVE
 _W2_RE = re.compile(
     r"(?i)\b(add\s+the\s+following|modify\s+paragraph|strike\b|insert\s+before)\b|(?:,\s*)?add:\s*$",
 )
+# W3 STABLE_NAME_EDIT
 _W3_RE = re.compile(
     r"\b\d{1,2}\.\d+(?:\.\d+)*\s+\[[\w.]+\].*(?:modify|add)", re.IGNORECASE
 )
+# S3 BACKWARD_COMPATIBILITY
 _S3_RE = re.compile(
     r"(?i)\b(does(?:n't| not)\s+affect\s+existing\s+user\s+code|migration\s+path)\b",
 )
+# S1 AUDIENCE_METADATA
 _S1_RE = re.compile(r"(?i)\baudience:\s*")
+# D5 REFERENCES_LWG_LEWG
 _D5_RE = re.compile(
     r"(?i)\b(LWG|LEWG|Library\s+Evolution|library\s+evolution)\b|\bLWG\s+\d+",
 )
+# D6 REFERENCES_LIBRARY_CONCEPT
 _D6_RE = re.compile(
     r"(?i)\b(Iterator|Allocator\s+model|Ranges|Container\s+requirements|named\s+requirement)\b",
 )
+# D7 REFERENCES_LIBRARY_CUSTOMIZATION
 _D7_RE = re.compile(
     r"(?i)\b(customization\s+point|users?\s+may\s+specialize|customization\s+point\s+object)\b",
 )
+# D10 GRAMMAR_PRODUCTION
 _D10_RE = re.compile(
     r"(?i)\b[a-z][a-z0-9]*(?:-[a-z0-9]+)+:\s*"
     r"|(?:^|\n)\s*[a-z][a-z0-9]*(?:-[a-z0-9]+)+\s*::="
     r"|\blambda-expression\b|\bassignment-expression\b",
 )
+# D11 OVERLOAD_RESOLUTION
 _D11_RE = re.compile(
     r"(?i)\b(overload\s+resolution|argument-dependent\s+lookup|name\s+lookup|"
     r"candidate\s+set|ADL)\b",
 )
+# D12 TEMPLATE_INSTANTIATION
 _D12_RE = re.compile(
     r"(?i)\b(template\s+(argument\s+deduction|instantiation)|substitution\s+failure|SFINAE)\b",
 )
+# D13 LIFETIME_SEMANTICS
 _D13_RE = re.compile(
     r"(?i)\b(lifetime|storage\s+duration|temporary\s+materialization|destruction\s+order)\b",
 )
+# D14 REFERENCES_EWG_CWG
 _D14_RE = re.compile(
     r"(?i)\b(EWG|CWG|Evolution\s+Working\s+Group|Core\s+Working\s+Group)\b|"
     r"\b(?:CWG|EWG)\s+\d+",
 )
+# D15 TYPE_SYSTEM_RULES
 _D15_RE = re.compile(
     r"(?i)\b(implicit\s+conversion\s+sequence|decltype|type\s+deduction)\b",
 )
+# M3 PROPOSES_REMOVAL
 _M3_RE = re.compile(
     r"(?i)\b(should\s+be\s+deprecated|propose\s+removing|proposes?\s+removing)\b",
 )
+# M4 DESIGN_RATIONALE
 _M4_RE = re.compile(
     r"(?i)\b(for\s+consistency\s+with|for\s+several\s+reasons|because)\b",
 )
+# M8 API_SURFACE_DESCRIPTION
 _M8_RE = re.compile(
     r"(?i)\b(the\s+function\s+takes|returns\s+a|template\s+parameter)\b",
 )
+# M11 IMPLEMENTATION_EVIDENCE
 _M11_RE = re.compile(r"(?i)\b(successfully\s+compiled|implemented\s+in)\b")
+# M12 EXISTING_PRACTICE
 _M12_RE = re.compile(
     r"(?i)\b(existing\s+practice\s+in\s+Boost|other\s+languages\s+provide|widely\s+used)\b",
 )
+# W4 TABLE_MODIFICATION
 _W4_RE = re.compile(r"(?i)\b(Table\s+\d+|modify\s+Table|add\s+a\s+row\s+to\s+Table)\b")
+# W5 FEATURE_TEST_MACRO
 _W5_RE = re.compile(r"(?i)__cpp|__has_cpp_attribute|feature-test\s+macro")
+# S2 CROSS_REFERENCE_PAPER
 _S2_RE = re.compile(r"\b[PND]\d{4}R\d+\b")
+# S4 ABI_DISCUSSION
 _S4_RE = re.compile(
     r"(?i)\b(ABI\s+break|binary\s+compatibility|layout\s+compatible)\b",
 )
+# S5 POLL_RESULT
 _S5_RE = re.compile(
     r"(?i)\b(unanimous\s+consent|no\s+objection|poll\s+result|straw\s+poll|SF/F/N/A/SA)\b",
 )
@@ -700,11 +741,12 @@ def _apply_seqcls_scores(
         candidate_labels,
         multi_label=True,
     )
+    thresholds = load_seqcls_hypothesis_thresholds()
 
     updated: dict[int, set[str]] = {s.index: set(s.hypothesis_hits) for s in sentences}
     for sent, scores in zip(sentences, batch_scores, strict=True):
         for hyp_id, score in scores.items():
-            threshold = seqcls_threshold_for_label(hyp_id)
+            threshold = thresholds.get(hyp_id, _ROUTING_SEQCLS_THRESHOLD_FALLBACK)
             if score >= threshold:
                 updated[sent.index].add(hyp_id)
             if debug_log is not None and score >= threshold:

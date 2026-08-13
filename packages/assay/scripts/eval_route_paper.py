@@ -43,7 +43,7 @@ import logging
 import sys
 import time
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from pathlib import Path
 
 from assay.paper_routing import RoutingGroup, route_paper
@@ -76,14 +76,12 @@ ABLATION_MODES: dict[str, tuple[bool, tuple[str, ...]]] = {
 
 _LEARNED_AGGREGATOR_MODES: frozenset[str] = frozenset({"seqcls+hgb", "nli+hgb"})
 
+# Default ablation-matrix sweep. Combined modes remain in ABLATION_MODES
+# and can be selected with --mode; they are excluded here for runtime cost.
 _ABLATION_ORDER: tuple[str, ...] = (
     "regex",
     "seqcls",
-    # "regex+seqcls",
     "nli",
-    # "regex+nli",
-    # "regex+nli+seqcls",
-    # "nli+seqcls",
 )
 
 
@@ -336,8 +334,8 @@ def _summarize_rows(rows: list[PaperEvalRow]) -> dict[str, object]:
         "papers_missing_md": len(missing),
         "exact_match": report.exact_match,
         "exact_match_rate": report.exact_match_rate(),
-        "micro": micro.__dict__,
-        "macro": macro.__dict__,
+        "micro": asdict(micro),
+        "macro": asdict(macro),
         "target_group_recall": (
             target_hits / len(target_rows) if target_rows else None
         ),
@@ -353,7 +351,7 @@ def _summarize_rows(rows: list[PaperEvalRow]) -> dict[str, object]:
         "primary_total": primary_total,
         "cardinality_histogram": dict(sorted(cardinality_hist.items())),
         "per_group": {
-            label: prf_from_counts(counts).__dict__
+            label: asdict(prf_from_counts(counts))
             for label, counts in sorted(report.per_label.items())
             if prf_from_counts(counts).support > 0 or counts.tp > 0
         },

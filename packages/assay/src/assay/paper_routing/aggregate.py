@@ -91,7 +91,7 @@ def aggregate_quadrant_scores(
             wording_weight * min(lang_density, wording_density) * mass_factor
         )
 
-    _apply_metadata_bonus(scores, sentences, audience)
+    _apply_metadata_bonus(scores, audience)
     _apply_domain_arbitration(scores)
     return scores
 
@@ -116,7 +116,6 @@ def _apply_domain_arbitration(scores: dict[RoutingGroup, float]) -> None:
 
 def _apply_metadata_bonus(
     scores: dict[RoutingGroup, float],
-    _sentences: list[Sentence],
     audience: list[str] | None,
 ) -> None:
     blob = audience_blob(audience)
