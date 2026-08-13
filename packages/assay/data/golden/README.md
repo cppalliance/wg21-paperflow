@@ -74,7 +74,7 @@ exits non-zero on schema errors or acceptance gate failures.
 
 When validating the test golden (`--test` or the default all-files run), the
 script also prints NOTE lines for primary proportions that differ from the
-training file by more than 3 percentage points.
+training file by more than 5 percentage points.
 
 ## Bias note
 

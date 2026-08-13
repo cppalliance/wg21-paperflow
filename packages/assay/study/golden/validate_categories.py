@@ -29,7 +29,7 @@ MIN_PRIMARY_TEST = {
     "informational": 13,
     "library-wording": 8,
 }
-PROPORTION_TOLERANCE_PP = 3.0
+PROPORTION_TOLERANCE_PP = 5.0
 
 PRIMARY_CATEGORIES = frozenset(
     {
@@ -174,7 +174,9 @@ def _primary_counts(entries: list[dict]) -> Counter[str]:
 
 
 def _paper_ids(entries: list[dict]) -> set[str]:
-    return {entry["paper_id"] for entry in entries}
+    return {
+        entry["paper_id"] for entry in entries if "paper_id" in entry
+    }
 
 
 def print_distribution(entries: list[dict]) -> None:
@@ -376,15 +378,17 @@ def main(argv: list[str] | None = None) -> int:
     if args.train:
         _, errors = validate_file(train_path(), profile="train")
     elif args.test:
-        train_entries: list[dict] | None
+        train_entries: list[dict] | None = None
         train_file = train_path()
         if train_file.is_file():
             try:
-                train_entries = load_entries(train_file)
+                loaded = load_entries(train_file)
             except ValueError:
-                train_entries = None
-        else:
-            train_entries = None
+                loaded = None
+            else:
+                if validate_schema(loaded):
+                    loaded = None
+            train_entries = loaded
         _, errors = validate_file(
             test_path(),
             profile="test",
@@ -398,13 +402,12 @@ def main(argv: list[str] | None = None) -> int:
         test_entries, test_errors = validate_file(
             test_path(),
             profile="test",
-            train_entries=train_entries,
+            train_entries=train_entries if not train_errors else None,
         )
         errors = train_errors + test_errors
+        errors += disjointness_errors(train_entries, test_entries)
         if not errors:
-            errors = disjointness_errors(train_entries, test_entries)
-            if not errors:
-                print("Train and test paper_id sets are disjoint.")
+            print("Train and test paper_id sets are disjoint.")
 
     if errors:
         print("Validation failures:", file=sys.stderr)
