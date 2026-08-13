@@ -58,7 +58,7 @@ from eval_common import (
 )
 from eval_metrics import MultilabelReport, prf_from_counts
 
-_log = logging.getLogger(__name__)
+logger = logging.getLogger(__name__)
 
 _ALL_GROUPS = frozenset(RoutingGroup)
 
@@ -206,9 +206,7 @@ def _evaluate_paper(
         return PaperEvalRow(
             paper_id=golden.paper_id,
             title=golden.title,
-            expected_groups=sorted(
-                g.value for g in expected_groups(golden.categories)
-            ),
+            expected_groups=sorted(g.value for g in expected_groups(golden.categories)),
             predicted_groups=[],
             target_group=golden.target_group,
             categories=list(golden.categories),
@@ -470,7 +468,7 @@ def _run_mode(
         classifier_cache=classifier_cache,
         cpu_classifiers=cpu_classifiers,
     )
-    _log.info(
+    logger.info(
         "Evaluating mode %s (use_regex=%s, classifiers=%d)",
         mode,
         config.use_regex,
@@ -488,7 +486,7 @@ def _run_mode(
     ]
     elapsed = time.perf_counter() - started
     summary = _summary_from_rows(rows, mode=mode, elapsed=elapsed)
-    _log.info("Mode %s finished in %.1fs", mode, elapsed)
+    logger.info("Mode %s finished in %.1fs", mode, elapsed)
     return rows, summary, elapsed
 
 
@@ -533,7 +531,7 @@ def _summarize_output_dir(output_dir: Path) -> list[dict[str, object]]:
     for mode in _ABLATION_ORDER:
         mode_path = output_dir / f"{mode}.json"
         if not mode_path.is_file():
-            _log.warning("Skipping missing mode artifact: %s", mode_path)
+            logger.warning("Skipping missing mode artifact: %s", mode_path)
             continue
         payload = json.loads(mode_path.read_text(encoding="utf-8"))
         rows = _rows_from_payload(payload)
@@ -563,8 +561,8 @@ def _write_ablation_artifacts(
         ),
         encoding="utf-8",
     )
-    _log.info("Wrote %s", summary_path)
-    _log.info("Wrote %s", md_path)
+    logger.info("Wrote %s", summary_path)
+    logger.info("Wrote %s", md_path)
     print(md_path.read_text(encoding="utf-8"))
 
 
@@ -723,7 +721,7 @@ def main(argv: list[str] | None = None) -> int:
             json.dumps(_rows_to_payload(rows), indent=2) + "\n",
             encoding="utf-8",
         )
-        _log.info("Wrote %s", mode_path)
+        logger.info("Wrote %s", mode_path)
 
     _write_ablation_artifacts(
         summaries,
