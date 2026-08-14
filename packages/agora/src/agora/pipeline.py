@@ -754,10 +754,38 @@ def _validate_blueprint(state: PipelineState, replies: list, encounters: list) -
             ),
         )
 
-    encounter_slot_ids = {sid for e in encounters for sid in e.slot_ids}
+    # The turn-count check below reads len(e.slot_ids) as delivered
+    # turns; that is only true when every claimed id names a distinct
+    # encounter-role slot in the skeleton.
+    encounter_slot_ids: set[str] = set()
+    double_claimed: set[str] = set()
+    for e in encounters:
+        for sid in e.slot_ids:
+            if sid in encounter_slot_ids:
+                double_claimed.add(sid)
+            encounter_slot_ids.add(sid)
+    if double_claimed:
+        raise ValidationStepError(
+            7, _STEP_7_SERIALIZE,
+            ValueError(
+                f"{len(double_claimed)} slot id(s) are claimed more than "
+                f"once across the EncounterPlans: {sorted(double_claimed)}. "
+                f"Each encounter turn is one distinct slot."
+            ),
+        )
     skel_encounter_ids = {
         r.slot_id for r in replies if r.role == "encounter"
     }
+    phantom_claims = sorted(encounter_slot_ids - skel_encounter_ids)
+    if phantom_claims:
+        raise ValidationStepError(
+            7, _STEP_7_SERIALIZE,
+            ValueError(
+                f"{len(phantom_claims)} EncounterPlan slot id(s) do not name "
+                f"an encounter-role reply in the skeleton: {phantom_claims}. "
+                f"Plans may only claim slots Step 5 pre-allocated."
+            ),
+        )
     orphan_encounter = sorted(skel_encounter_ids - encounter_slot_ids)
     if orphan_encounter:
         raise ValidationStepError(

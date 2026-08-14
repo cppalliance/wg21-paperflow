@@ -149,9 +149,11 @@ def _reply(slot_id: str, **overrides) -> Reply:
     return Reply(**fields)
 
 
-def _encounter_plan(slot_ids: list[str]) -> EncounterPlan:
+def _encounter_plan(
+    slot_ids: list[str], encounter_id: str = "e01",
+) -> EncounterPlan:
     return EncounterPlan(
-        encounter_id="e01",
+        encounter_id=encounter_id,
         design_tension_id="t01",
         design_tension="Ergonomics versus compile-time cost.",
         position_a="The API is worth the instantiation cost.",
@@ -189,6 +191,56 @@ def test_validate_blueprint_orphan_raises_even_with_plans_present():
     plans = [_encounter_plan(["s01", "s03", "s04"])]
     with pytest.raises(ValidationStepError, match="s02"):
         _validate_blueprint(state, replies, plans)
+
+
+def test_validate_blueprint_double_claimed_slot_raises():
+    # A duplicated id would let len(slot_ids) count as a 3-turn chain
+    # while the skeleton delivers fewer distinct turns.
+    state = PipelineState(interest="niche")
+    replies = [
+        _reply("s01", role="encounter", depth=3),
+        _reply("s02", role="encounter", depth=4),
+    ]
+    plans = [_encounter_plan(["s01", "s01", "s02"])]
+    with pytest.raises(ValidationStepError, match="claimed more than once"):
+        _validate_blueprint(state, replies, plans)
+
+
+def test_validate_blueprint_phantom_claim_raises():
+    state = PipelineState(interest="niche")
+    replies = [
+        _reply("s01", role="encounter", depth=3),
+        _reply("s02", role="encounter", depth=4),
+    ]
+    plans = [_encounter_plan(["s01", "s02", "s99"])]
+    with pytest.raises(ValidationStepError, match="s99"):
+        _validate_blueprint(state, replies, plans)
+
+
+def test_validate_blueprint_non_encounter_role_claim_raises():
+    # Claiming a real slot of the wrong role is a phantom claim too:
+    # chains are made of the encounter-role slots Step 5 pre-allocated.
+    state = PipelineState(interest="niche")
+    replies = [
+        _reply("s01", role="encounter", depth=3),
+        _reply("s02", role="encounter", depth=4),
+        _reply("s03", role="noise"),
+    ]
+    plans = [_encounter_plan(["s01", "s02", "s03"])]
+    with pytest.raises(ValidationStepError, match="s03"):
+        _validate_blueprint(state, replies, plans)
+
+
+def test_validate_blueprint_distinct_chains_pass():
+    state = PipelineState(interest="niche")
+    replies = [
+        _reply(f"s{n:02d}", role="encounter", depth=3) for n in range(1, 7)
+    ]
+    plans = [
+        _encounter_plan(["s01", "s02", "s03"], encounter_id="e01"),
+        _encounter_plan(["s04", "s05", "s06"], encounter_id="e02"),
+    ]
+    _validate_blueprint(state, replies, plans)
 
 
 def test_validate_blueprint_lens_floor_shortfall_raises():
