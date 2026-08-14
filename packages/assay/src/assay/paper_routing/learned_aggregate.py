@@ -13,6 +13,7 @@ import json
 from collections.abc import Mapping, Sequence
 from functools import lru_cache
 from pathlib import Path
+from typing import Literal
 
 import joblib  # type: ignore[import-untyped]
 
@@ -29,35 +30,66 @@ from assay.paper_routing.features import (
 )
 from assay.paper_routing.types import ROUTING_GROUP_ORDER, RoutingGroup, Sentence
 
-_ROUTING_DATA_DIR = Path("data") / "routing"
+_ROUTING_METADATA_DIR = Path("data") / "routing"
+_NLI_DATA_DIR = Path("data") / "nli"
+_SEQCLS_DATA_DIR = Path("data") / "seqcls"
 _MODEL_FILE = "aggregator_hgb.joblib"
 _FEATURE_NAMES_FILE = "feature_names.json"
 _GROUP_THRESHOLDS_FILE = "group_thresholds.json"
 _GROUP_ORDER_FILE = "group_order.json"
 _LEARNED_GROUP_THRESHOLD_FALLBACK: float = 0.5
 
+AggregatorFamily = Literal["nli", "seqcls"]
+
 
 def _assay_package_root() -> Path:
     return Path(__file__).resolve().parents[3]
 
 
+def routing_metadata_dir() -> Path:
+    """Shared routing metadata (feature names, group order, thresholds)."""
+    return _assay_package_root() / _ROUTING_METADATA_DIR
+
+
 def routing_data_dir() -> Path:
-    return _assay_package_root() / _ROUTING_DATA_DIR
+    """Backward-compatible alias for :func:`routing_metadata_dir`."""
+    return routing_metadata_dir()
 
 
-def learned_model_available() -> bool:
-    root = routing_data_dir()
+def aggregator_model_dir(classifiers: object) -> Path:
+    """Return ``data/nli`` or ``data/seqcls`` for the homogeneous classifier family."""
+    family = _aggregator_family(classifiers)
+    if family == "nli":
+        return _assay_package_root() / _NLI_DATA_DIR
+    return _assay_package_root() / _SEQCLS_DATA_DIR
+
+
+def _metadata_artifacts_present() -> bool:
+    root = routing_metadata_dir()
     return (
-        (root / _MODEL_FILE).is_file()
-        and (root / _FEATURE_NAMES_FILE).is_file()
+        (root / _FEATURE_NAMES_FILE).is_file()
         and (root / _GROUP_THRESHOLDS_FILE).is_file()
         and (root / _GROUP_ORDER_FILE).is_file()
     )
 
 
+def learned_model_available(classifiers: object | None = None) -> bool:
+    """True when shared metadata and the family-specific HGB model are on disk."""
+    if not _metadata_artifacts_present():
+        return False
+    if classifiers is None:
+        root = _assay_package_root()
+        return (root / _NLI_DATA_DIR / _MODEL_FILE).is_file() or (
+            root / _SEQCLS_DATA_DIR / _MODEL_FILE
+        ).is_file()
+    if not is_learned_aggregator_path(classifiers):
+        return False
+    return (aggregator_model_dir(classifiers) / _MODEL_FILE).is_file()
+
+
 @lru_cache(maxsize=1)
 def _load_feature_names() -> tuple[str, ...]:
-    path = routing_data_dir() / _FEATURE_NAMES_FILE
+    path = routing_metadata_dir() / _FEATURE_NAMES_FILE
     raw = json.loads(path.read_text(encoding="utf-8"))
     if not isinstance(raw, list) or not all(isinstance(x, str) for x in raw):
         raise ValueError(f"{path}: expected JSON array of strings")
@@ -66,7 +98,7 @@ def _load_feature_names() -> tuple[str, ...]:
 
 @lru_cache(maxsize=1)
 def _load_group_thresholds() -> dict[RoutingGroup, float]:
-    path = routing_data_dir() / _GROUP_THRESHOLDS_FILE
+    path = routing_metadata_dir() / _GROUP_THRESHOLDS_FILE
     raw = json.loads(path.read_text(encoding="utf-8"))
     if not isinstance(raw, dict):
         raise ValueError(f"{path}: expected JSON object")
@@ -78,7 +110,7 @@ def _load_group_thresholds() -> dict[RoutingGroup, float]:
 
 @lru_cache(maxsize=1)
 def _load_group_order() -> tuple[RoutingGroup, ...]:
-    path = routing_data_dir() / _GROUP_ORDER_FILE
+    path = routing_metadata_dir() / _GROUP_ORDER_FILE
     raw = json.loads(path.read_text(encoding="utf-8"))
     if not isinstance(raw, list) or not all(isinstance(x, str) for x in raw):
         raise ValueError(f"{path}: expected JSON array of strings")
@@ -92,9 +124,11 @@ def _load_group_order() -> tuple[RoutingGroup, ...]:
     return order
 
 
-@lru_cache(maxsize=1)
-def _load_model() -> object:
-    path = routing_data_dir() / _MODEL_FILE
+@lru_cache(maxsize=2)
+def _load_model(family: AggregatorFamily) -> object:
+    root = _assay_package_root()
+    model_dir = root / (_NLI_DATA_DIR if family == "nli" else _SEQCLS_DATA_DIR)
+    path = model_dir / _MODEL_FILE
     return joblib.load(path)
 
 
@@ -102,13 +136,17 @@ def predict_learned_groups(
     sentences: list[Sentence],
     *,
     audience: list[str] | None = None,
+    classifiers: object,
 ) -> tuple[dict[RoutingGroup, float], dict[RoutingGroup, float]]:
     """Return emitted groups and per-group probabilities."""
-    if not learned_model_available():
+    if not learned_model_available(classifiers):
         raise FileNotFoundError(
-            f"learned routing aggregator artifacts missing under {routing_data_dir()}",
+            "learned routing aggregator artifacts missing: "
+            f"metadata under {routing_metadata_dir()}, "
+            f"model under {aggregator_model_dir(classifiers)}",
         )
 
+    family = _aggregator_family(classifiers)
     feature_names = _load_feature_names()
     group_order = _load_group_order()
     catalog_ids = default_catalog_ids()
@@ -118,7 +156,7 @@ def predict_learned_groups(
         catalog_ids=catalog_ids,
     )
     vector = vectorize_features(features, feature_names)
-    model = _load_model()
+    model = _load_model(family)
     prob_row = model.predict_proba([vector])[0]  # type: ignore[union-attr]
     if len(prob_row) != len(group_order):
         raise ValueError(
@@ -149,14 +187,29 @@ def _classifier_backends(classifiers: object) -> list[object]:
     return []
 
 
+def _aggregator_family(classifiers: object) -> AggregatorFamily:
+    backends = _classifier_backends(classifiers)
+    if not backends:
+        raise ValueError("classifiers required for learned aggregation")
+    if all(isinstance(b, NliCrossEncoderBackend) for b in backends):
+        return "nli"
+    if all(isinstance(b, MultiLabelClassifierBackend) for b in backends):
+        return "seqcls"
+    raise ValueError(
+        "learned aggregation requires a homogeneous NLI-only or seqcls-only "
+        f"classifier set, got {[type(b).__name__ for b in backends]}",
+    )
+
+
 def is_learned_aggregator_path(
     classifiers: object,
 ) -> bool:
     """True when routing should use the learned aggregator instead of hand rules.
 
     Eligible: homogeneous single-family backends (NLI-only or seqcls-only).
-    Mixed NLI+seqcls ensembles keep the hand aggregate. Hypothesis scoring
-    (regex vs classifier) is independent of this aggregation choice.
+    Mixed NLI+seqcls ensembles keep the hand aggregate. Frozen HGB models
+    were trained on regex+classifier hits; ``route_paper`` also requires
+    ``use_regex=True`` before applying this path.
     """
     if classifiers is None:
         return False
@@ -173,20 +226,3 @@ def is_learned_aggregator_path(
     if has_seqcls:
         return all(isinstance(b, MultiLabelClassifierBackend) for b in backends)
     return False
-
-
-def is_seqcls_only_path(
-    classifiers: object,
-    *,
-    use_regex: bool,
-) -> bool:
-    """True when classifiers are seqcls-only (no regex, no NLI)."""
-    if use_regex or classifiers is None:
-        return False
-
-    backends = _classifier_backends(classifiers)
-    if not backends:
-        return False
-    if any(not isinstance(b, MultiLabelClassifierBackend) for b in backends):
-        return False
-    return True

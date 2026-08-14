@@ -2,7 +2,12 @@
 #
 # Distributed under the Boost Software License, Version 1.0. (See accompanying
 # file LICENSE_1_0.txt or copy at http://www.boost.org/LICENSE_1_0.txt)
-"""Train and freeze the seqcls paper-level HistGradientBoosting aggregator."""
+"""Train and freeze the paper-level HistGradientBoosting aggregator.
+
+Features come from regex catalog hits unioned with the chosen classifier
+(seqcls by default). Inference must keep regex on; HGB was trained on
+regex+classifier hypothesis densities.
+"""
 
 from __future__ import annotations
 
@@ -148,7 +153,7 @@ def build_training_rows(
             md,
             audience=audience,
             classifiers=classifier,
-            use_regex=False,
+            use_regex=True,
         )
         categories = list(row.get("categories") or [])
         expected = expected_groups([str(c) for c in categories])
@@ -172,7 +177,8 @@ def build_training_rows(
 def train_and_freeze(
     rows: list[TrainingRow],
     *,
-    output_dir: Path,
+    model_output_dir: Path,
+    metadata_dir: Path,
 ) -> dict[str, object]:
     catalog_ids: tuple[str, ...] = default_catalog_ids()
     feature_names: tuple[str, ...] = build_feature_names(catalog_ids)
@@ -218,13 +224,14 @@ def train_and_freeze(
     in_preds = _apply_thresholds(in_prob_rows, thresholds)
     in_exact = _exact_match_rate(y_rows, in_preds)
 
-    output_dir.mkdir(parents=True, exist_ok=True)
-    joblib.dump(final_model, output_dir / "aggregator_hgb.joblib")
-    (output_dir / "feature_names.json").write_text(
+    model_output_dir.mkdir(parents=True, exist_ok=True)
+    metadata_dir.mkdir(parents=True, exist_ok=True)
+    joblib.dump(final_model, model_output_dir / "aggregator_hgb.joblib")
+    (metadata_dir / "feature_names.json").write_text(
         json.dumps(list(feature_names), indent=2) + "\n",
         encoding="utf-8",
     )
-    (output_dir / "group_thresholds.json").write_text(
+    (metadata_dir / "group_thresholds.json").write_text(
         json.dumps(
             {group.value: thresholds[group] for group in ROUTING_GROUP_ORDER},
             indent=2,
@@ -233,11 +240,11 @@ def train_and_freeze(
         + "\n",
         encoding="utf-8",
     )
-    (output_dir / "group_order.json").write_text(
+    (metadata_dir / "group_order.json").write_text(
         json.dumps([group.value for group in ROUTING_GROUP_ORDER], indent=2) + "\n",
         encoding="utf-8",
     )
-    (output_dir / "train_report.json").write_text(
+    (metadata_dir / "train_report.json").write_text(
         json.dumps(
             {
                 "n_papers": len(rows),
@@ -266,9 +273,16 @@ def main() -> int:
     parser.add_argument("--paperstore", type=Path, default=None)
     parser.add_argument("--golden", type=Path, default=paper_golden_path())
     parser.add_argument(
-        "--output",
+        "--model-output",
+        type=Path,
+        default=assay_package_root() / "data" / "seqcls",
+        help="Directory for aggregator_hgb.joblib",
+    )
+    parser.add_argument(
+        "--metadata-dir",
         type=Path,
         default=assay_package_root() / "data" / "routing",
+        help="Directory for feature_names.json, group_thresholds.json, group_order.json",
     )
     parser.add_argument("--seqcls", default="routing-tagger")
     parser.add_argument(
@@ -287,7 +301,11 @@ def main() -> int:
     )
     if not rows:
         raise SystemExit("no training rows with markdown in paperstore")
-    summary = train_and_freeze(rows, output_dir=args.output)
+    summary = train_and_freeze(
+        rows,
+        model_output_dir=args.model_output,
+        metadata_dir=args.metadata_dir,
+    )
     logger.info("trained aggregator: %s", summary)
     return 0
 

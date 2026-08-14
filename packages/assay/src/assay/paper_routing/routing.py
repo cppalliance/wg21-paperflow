@@ -66,6 +66,11 @@ def route_paper(
     ``classifiers`` is an optional single backend or ordered sequence used
     for hypothesis scoring (NLI, fine-tuned seqcls). It is not the
     ``StepContext.classifiers`` slot dict from SERVICES.toml.
+
+    The frozen HGB aggregators were trained on regex+NLI or regex+seqcls
+    hits. Learned aggregation therefore requires ``use_regex=True`` plus a
+    homogeneous NLI-only or seqcls-only classifier set. Assay Survey is
+    regex+nli+hgb (``use_regex=True``, ``nli-small``, learned aggregator).
     """
     sentences = score_hypotheses(
         paper_md,
@@ -77,13 +82,15 @@ def route_paper(
     sustained = sustained_counts(sentences)
     use_learned = (
         use_learned_aggregator
+        and use_regex
         and is_learned_aggregator_path(classifiers)
-        and learned_model_available()
+        and learned_model_available(classifiers)
     )
     if use_learned:
         groups, quadrant_scores = predict_learned_groups(
             sentences,
             audience=audience,
+            classifiers=classifiers,
         )
         perf_count = performance_sustained_count(sentences)
         is_performance_focused = perf_count >= min_sustained_threshold(len(sentences))

@@ -315,14 +315,14 @@ class _StubNliClassifier(NliCrossEncoderBackend):
 
 
 def test_routing_nli_threshold_constant():
-    assert _ROUTING_NLI_THRESHOLD == 0.6
+    assert _ROUTING_NLI_THRESHOLD == 0.9
 
 
 def test_score_hypotheses_nli_path_fires_on_high_entailment():
     sentence = _NLI_ONLY_SENTENCE
     assert get_hits_from_text(sentence) == set()
 
-    classifier = _StubNliClassifier(0.9, match_hypothesis=_M4_NLI_TEXT)
+    classifier = _StubNliClassifier(0.91, match_hypothesis=_M4_NLI_TEXT)
     scored = score_hypotheses([sentence], classifiers=classifier)
 
     assert len(scored) == 1
@@ -376,19 +376,18 @@ def test_seqcls_hypothesis_thresholds_cover_full_catalog():
 
 def test_score_hypotheses_seqcls_uses_per_label_threshold_not_flat_default():
     thresholds = load_seqcls_hypothesis_thresholds()
-    # D4's calibrated threshold (~0.03) is far below the flat fallback
-    # (0.25): a score in between proves per-label thresholds are actually
-    # consulted, not just the flat _ROUTING_SEQCLS_THRESHOLD default.
-    assert thresholds["D4"] < 0.1 < _ROUTING_SEQCLS_THRESHOLD
+    # W4's calibrated threshold (0.5) is above the flat fallback (0.25): a
+    # score in between proves per-label thresholds are consulted.
+    assert thresholds["W4"] > _ROUTING_SEQCLS_THRESHOLD
     sentence = "Add a free function defined as follows to namespace std."
-    classifier = _StubSeqclsClassifier({"D4": 0.1})
+    classifier = _StubSeqclsClassifier({"W4": 0.3})
     scored = score_hypotheses(
         [sentence],
         use_regex=False,
         classifiers=[classifier],
     )
 
-    assert scored[0].hypothesis_hits == frozenset({"D4"})
+    assert "W4" not in scored[0].hypothesis_hits
 
 
 def test_score_hypotheses_seqcls_path_fires_on_high_score():
@@ -421,7 +420,7 @@ def test_score_hypotheses_nli_only_skips_regex_hits():
 
 def test_score_hypotheses_regex_nli_seqcls_union():
     sentence = "We propose to add std::widget."
-    nli = _StubNliClassifier(0.9, match_hypothesis=_M4_NLI_TEXT)
+    nli = _StubNliClassifier(0.91, match_hypothesis=_M4_NLI_TEXT)
     seqcls = _StubSeqclsClassifier({"W4": 0.9})
     scored = score_hypotheses(
         [sentence],

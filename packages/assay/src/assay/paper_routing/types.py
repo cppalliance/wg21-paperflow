@@ -53,7 +53,7 @@ class RoutingGroup(StrEnum):
 
 # OneVsRest predict_proba column order for the learned aggregator. Training and
 # inference must use this tuple; do not reorder without retraining aggregator_hgb.
-# Persisted as group_order.json next to aggregator_hgb.joblib and validated at load.
+# Persisted as group_order.json under data/routing/ and validated at load.
 ROUTING_GROUP_ORDER: tuple[RoutingGroup, ...] = (
     RoutingGroup.LEWG,
     RoutingGroup.LWG,

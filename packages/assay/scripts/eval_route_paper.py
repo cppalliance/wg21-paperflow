@@ -17,14 +17,21 @@ Golden paper-level labels map content categories to expected routing groups:
 
 Ablation modes (``--mode`` or ``--ablation-matrix``):
 
-| Mode | use_regex | Classifiers |
-|------|-----------|-------------|
-| regex | yes | none |
-| nli | no | nli-small |
-| seqcls | no | routing-tagger |
-| regex+nli | yes | nli-small |
-| regex+seqcls | yes | routing-tagger |
-| regex+nli+seqcls | yes | nli-small, routing-tagger |
+| Mode | use_regex | Classifiers | Aggregator |
+|------|-----------|-------------|------------|
+| regex | yes | none | hand |
+| nli | no | nli-small | hand |
+| seqcls | no | routing-tagger | hand |
+| nli+seqcls | no | nli-small, routing-tagger | hand |
+| regex+nli | yes | nli-small | hand |
+| regex+seqcls | yes | routing-tagger | hand |
+| regex+nli+seqcls | yes | nli-small, routing-tagger | hand |
+| regex+nli+hgb | yes | nli-small | HGB (trained on regex+nli) |
+| regex+seqcls+hgb | yes | routing-tagger | HGB (trained on regex+seqcls) |
+
+HGB modes always include regex. The frozen aggregators were trained on
+regex+classifier hypothesis hits; applying HGB without regex is a
+train/serve mismatch.
 
 Usage (from repo root):
 
@@ -66,15 +73,25 @@ ABLATION_MODES: dict[str, tuple[bool, tuple[str, ...]]] = {
     "regex": (True, ()),
     "nli": (False, ("nli-small",)),
     "seqcls": (False, ("routing-tagger",)),
-    "seqcls+hgb": (False, ("routing-tagger",)),
-    "nli+hgb": (False, ("nli-small",)),
     "nli+seqcls": (False, ("nli-small", "routing-tagger")),
     "regex+nli": (True, ("nli-small",)),
     "regex+seqcls": (True, ("routing-tagger",)),
     "regex+nli+seqcls": (True, ("nli-small", "routing-tagger")),
+    "regex+nli+hgb": (True, ("nli-small",)),
+    "regex+seqcls+hgb": (True, ("routing-tagger",)),
+    # Aliases: HGB was trained with regex on; these names still run regex.
+    "nli+hgb": (True, ("nli-small",)),
+    "seqcls+hgb": (True, ("routing-tagger",)),
 }
 
-_LEARNED_AGGREGATOR_MODES: frozenset[str] = frozenset({"seqcls+hgb", "nli+hgb"})
+_LEARNED_AGGREGATOR_MODES: frozenset[str] = frozenset(
+    {
+        "regex+nli+hgb",
+        "regex+seqcls+hgb",
+        "nli+hgb",
+        "seqcls+hgb",
+    }
+)
 
 # Default ablation-matrix sweep. Combined modes remain in ABLATION_MODES
 # and can be selected with --mode; they are excluded here for runtime cost.

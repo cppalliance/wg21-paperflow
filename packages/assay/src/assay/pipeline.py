@@ -625,13 +625,20 @@ async def _apply_survey_skip(
 
 
 def _run_paper_routing(state: PipelineState, ctx: StepContext) -> RoutingResult:
-    """Run Stages 1-6 and store routing on pipeline state."""
+    """Run Stages 1-6 and store routing on pipeline state.
+
+    Default path is regex+nli+hgb: regex catalog hits, the ``nli-small``
+    slot from assay.md, then the frozen NLI HGB aggregator. HGB was
+    trained on regex+classifier features, so regex stays on.
+    """
     classifiers = _classifiers_for_routing(ctx)
     debug_log = ctx.debug_log if ctx.debug else None
     result = route_paper(
         state.paper_md,
         audience=state.audience,
         classifiers=classifiers,
+        use_regex=True,
+        use_learned_aggregator=True,
         debug_log=debug_log,
     )
     state.routing = result

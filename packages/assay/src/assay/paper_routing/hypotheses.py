@@ -27,7 +27,7 @@ from assay.paper_routing.seqcls_thresholds import (
 from assay.paper_routing.split import RawSentence, split_sentences
 from assay.paper_routing.types import HypothesisAxis, SectionType, Sentence
 
-_ROUTING_NLI_THRESHOLD = 0.6
+_ROUTING_NLI_THRESHOLD = 0.9
 _MIN_SENTENCE_CHARS = 20
 _MAX_SENTENCES_PER_PAPER = 3000
 

@@ -35,6 +35,8 @@ flowchart TD
 
 ## Classifiers
 
+Survey routing is regex + this slot + the frozen NLI HGB aggregator.
+
 - **selector:** nli-small
 
 ## Config

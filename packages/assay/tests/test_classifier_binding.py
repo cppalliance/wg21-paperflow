@@ -37,6 +37,7 @@ def test_assay_md_declares_at_least_one_classifier_slot():
     binding = _parse_classifier_binding(prompt)
     assert binding
     assert all(binding.values())
+    assert binding["selector"] == "nli-small"
 
 
 def test_parse_classifier_binding_raises_when_section_missing():

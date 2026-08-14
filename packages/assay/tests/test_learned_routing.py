@@ -19,16 +19,23 @@ from assay.paper_routing.features import (
     vectorize_features,
 )
 from assay.paper_routing.learned_aggregate import (
+    aggregator_model_dir,
     is_learned_aggregator_path,
-    is_seqcls_only_path,
     learned_model_available,
     predict_learned_groups,
+    routing_metadata_dir,
     _load_feature_names,
     _load_group_order,
     _load_group_thresholds,
     _load_model,
 )
-from assay.paper_routing.types import ROUTING_GROUP_ORDER, RoutingGroup, SectionType, Sentence
+from assay.paper_routing.routing import route_paper
+from assay.paper_routing.types import (
+    ROUTING_GROUP_ORDER,
+    RoutingGroup,
+    SectionType,
+    Sentence,
+)
 from pipeline.classifier_backends import (
     MultiLabelClassifierBackend,
     NliCrossEncoderBackend,
@@ -49,7 +56,7 @@ class _StubNli(NliCrossEncoderBackend):
 
 @pytest.fixture(autouse=True)
 def _clear_learned_aggregate_caches():
-    """Prevent one test's monkeypatched routing_data_dir from leaking into another."""
+    """Prevent one test's monkeypatched dirs from leaking into another."""
     yield
     _load_feature_names.cache_clear()
     _load_group_order.cache_clear()
@@ -60,6 +67,15 @@ def _clear_learned_aggregate_caches():
 def _sentence(text: str, hits: frozenset[str]) -> Sentence:
     return Sentence(
         text=text, section=SectionType.DESIGN, index=0, hypothesis_hits=hits
+    )
+
+
+def _write_metadata(data_dir: Path) -> None:
+    (data_dir / "feature_names.json").write_text("[]\n", encoding="utf-8")
+    (data_dir / "group_thresholds.json").write_text("{}\n", encoding="utf-8")
+    (data_dir / "group_order.json").write_text(
+        json.dumps([g.value for g in ROUTING_GROUP_ORDER], indent=2) + "\n",
+        encoding="utf-8",
     )
 
 
@@ -79,15 +95,6 @@ def test_feature_vector_length_stable() -> None:
     assert len(vector) == len(names)
 
 
-def test_is_seqcls_only_path() -> None:
-    assert is_seqcls_only_path(_StubSeqcls(model="m"), use_regex=False)
-    assert not is_seqcls_only_path(_StubSeqcls(model="m"), use_regex=True)
-    assert not is_seqcls_only_path([_StubNli(model="m")], use_regex=False)
-    assert not is_seqcls_only_path(
-        [_StubSeqcls(model="m"), _StubNli(model="m")], use_regex=False
-    )
-
-
 def test_is_learned_aggregator_path() -> None:
     assert is_learned_aggregator_path(_StubSeqcls(model="m"))
     assert is_learned_aggregator_path(_StubNli(model="m"))
@@ -97,18 +104,78 @@ def test_is_learned_aggregator_path() -> None:
     assert not is_learned_aggregator_path(None)
 
 
+def test_route_paper_hgb_requires_regex(monkeypatch: pytest.MonkeyPatch) -> None:
+    """HGB was trained on regex+classifier hits; skip it when regex is off."""
+    sentences = [
+        _sentence("We propose to add std::widget to the library.", frozenset({"D3"})),
+    ]
+    monkeypatch.setattr(
+        "assay.paper_routing.routing.score_hypotheses",
+        lambda *args, **kwargs: sentences,
+    )
+    monkeypatch.setattr(
+        "assay.paper_routing.routing.learned_model_available",
+        lambda classifiers: True,
+    )
+    called: list[bool] = []
+
+    def _fake_predict(scored, *, audience=None, classifiers=None):
+        del scored, audience, classifiers
+        called.append(True)
+        empty = {group: 0.0 for group in RoutingGroup}
+        return {RoutingGroup.LEWG: 0.9}, {**empty, RoutingGroup.LEWG: 0.9}
+
+    monkeypatch.setattr(
+        "assay.paper_routing.routing.predict_learned_groups",
+        _fake_predict,
+    )
+    classifier = _StubNli(model="m")
+    md = "We propose to add std::widget to the library."
+
+    route_paper(
+        md,
+        classifiers=classifier,
+        use_regex=False,
+        use_learned_aggregator=True,
+    )
+    assert called == []
+
+    route_paper(
+        md,
+        classifiers=classifier,
+        use_regex=True,
+        use_learned_aggregator=True,
+    )
+    assert called == [True]
+
+
+def test_bundled_learned_artifacts_available() -> None:
+    assert learned_model_available(_StubSeqcls(model="m"))
+    assert learned_model_available(_StubNli(model="m"))
+
+
 def test_predict_learned_groups_raises_when_artifacts_missing(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    meta_dir = tmp_path / "data" / "routing"
+    meta_dir.mkdir(parents=True)
+    _write_metadata(meta_dir)
     monkeypatch.setattr(
-        "assay.paper_routing.learned_aggregate.routing_data_dir",
+        "assay.paper_routing.learned_aggregate._assay_package_root",
         lambda: tmp_path,
+    )
+    monkeypatch.setattr(
+        "assay.paper_routing.learned_aggregate.routing_metadata_dir",
+        lambda: meta_dir,
     )
 
     with pytest.raises(
         FileNotFoundError, match="learned routing aggregator artifacts missing"
     ):
-        predict_learned_groups([_sentence("proposal", frozenset({"D1"}))])
+        predict_learned_groups(
+            [_sentence("proposal", frozenset({"D1"}))],
+            classifiers=_StubSeqcls(model="m"),
+        )
 
 
 def test_learned_aggregate_roundtrip(
@@ -122,6 +189,7 @@ def test_learned_aggregate_roundtrip(
     catalog = default_catalog_ids()
     feature_names = build_feature_names(catalog)
     sentences = [_sentence("proposal", frozenset({"D1"}))]
+    classifier = _StubSeqcls(model="m")
 
     # One training row per group, distinguished by audience so the fitted
     # model actually associates a feature signal with each label instead of
@@ -151,30 +219,42 @@ def test_learned_aggregate_roundtrip(
     )
     model.fit(x_rows, y)
 
-    data_dir = tmp_path / "routing"
-    data_dir.mkdir()
-    joblib.dump(model, data_dir / "aggregator_hgb.joblib")
-    (data_dir / "feature_names.json").write_text(
+    meta_dir = tmp_path / "data" / "routing"
+    meta_dir.mkdir(parents=True)
+    model_dir = tmp_path / "data" / "seqcls"
+    model_dir.mkdir(parents=True)
+    joblib.dump(model, model_dir / "aggregator_hgb.joblib")
+    (meta_dir / "feature_names.json").write_text(
         json.dumps(list(feature_names)) + "\n",
         encoding="utf-8",
     )
     thresholds = {g.value: 0.1 for g in RoutingGroup}
-    (data_dir / "group_thresholds.json").write_text(
+    (meta_dir / "group_thresholds.json").write_text(
         json.dumps(thresholds, indent=2) + "\n",
         encoding="utf-8",
     )
-    (data_dir / "group_order.json").write_text(
+    (meta_dir / "group_order.json").write_text(
         json.dumps([g.value for g in ROUTING_GROUP_ORDER], indent=2) + "\n",
         encoding="utf-8",
     )
 
     monkeypatch.setattr(
-        "assay.paper_routing.learned_aggregate.routing_data_dir",
-        lambda: data_dir,
+        "assay.paper_routing.learned_aggregate.routing_metadata_dir",
+        lambda: meta_dir,
+    )
+    monkeypatch.setattr(
+        "assay.paper_routing.learned_aggregate._assay_package_root",
+        lambda: tmp_path,
     )
 
-    assert learned_model_available()
-    groups, probs = predict_learned_groups(sentences, audience=["LEWG"])
+    assert learned_model_available(classifier)
+    assert routing_metadata_dir() == meta_dir
+    assert aggregator_model_dir(classifier) == model_dir
+    groups, probs = predict_learned_groups(
+        sentences,
+        audience=["LEWG"],
+        classifiers=classifier,
+    )
     assert RoutingGroup.LEWG in groups
     assert probs[RoutingGroup.LEWG] >= 0.1
     assert probs[RoutingGroup.LEWG] == max(probs.values())
@@ -191,6 +271,7 @@ def test_predict_learned_groups_raises_on_mismatched_group_order(
     catalog = default_catalog_ids()
     feature_names = build_feature_names(catalog)
     sentences = [_sentence("proposal", frozenset({"D1"}))]
+    classifier = _StubNli(model="m")
     x_rows = [
         vectorize_features(
             extract_paper_features(sentences, audience=["LEWG"], catalog_ids=catalog),
@@ -203,25 +284,35 @@ def test_predict_learned_groups_raises_on_mismatched_group_order(
     )
     model.fit(x_rows, y)
 
-    data_dir = tmp_path / "routing"
-    data_dir.mkdir()
-    joblib.dump(model, data_dir / "aggregator_hgb.joblib")
-    (data_dir / "feature_names.json").write_text(
+    meta_dir = tmp_path / "data" / "routing"
+    meta_dir.mkdir(parents=True)
+    model_dir = tmp_path / "data" / "nli"
+    model_dir.mkdir(parents=True)
+    joblib.dump(model, model_dir / "aggregator_hgb.joblib")
+    (meta_dir / "feature_names.json").write_text(
         json.dumps(list(feature_names)) + "\n",
         encoding="utf-8",
     )
-    (data_dir / "group_thresholds.json").write_text(
+    (meta_dir / "group_thresholds.json").write_text(
         json.dumps({g.value: 0.1 for g in RoutingGroup}, indent=2) + "\n",
         encoding="utf-8",
     )
-    (data_dir / "group_order.json").write_text(
+    (meta_dir / "group_order.json").write_text(
         json.dumps(["CWG", "LEWG", "LWG", "EWG"], indent=2) + "\n",
         encoding="utf-8",
     )
     monkeypatch.setattr(
-        "assay.paper_routing.learned_aggregate.routing_data_dir",
-        lambda: data_dir,
+        "assay.paper_routing.learned_aggregate.routing_metadata_dir",
+        lambda: meta_dir,
+    )
+    monkeypatch.setattr(
+        "assay.paper_routing.learned_aggregate._assay_package_root",
+        lambda: tmp_path,
     )
 
     with pytest.raises(ValueError, match="does not match ROUTING_GROUP_ORDER"):
-        predict_learned_groups(sentences, audience=["LEWG"])
+        predict_learned_groups(
+            sentences,
+            audience=["LEWG"],
+            classifiers=classifier,
+        )
