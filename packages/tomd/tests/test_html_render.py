@@ -2328,3 +2328,128 @@ class TestListItemNesting:
         html = self._html("<ol><li>a</li><p>loose</p><li>b</li></ol>")
         # 'loose' is inside item a; one <ol> with two items
         assert html == "<ol><li><p>a</p><p>loose</p></li><li><p>b</p></li></ol>"
+
+
+class TestInlineSvg:
+    """Inline <svg> subtrees are dropped, never walked as HTML content."""
+
+    # Shape taken from P3125R5, which ships an XML prolog ahead of an inline
+    # <svg> whose labels are in draw order, not reading order.
+    _TEXT_SVG = """
+    <p>Before.</p>
+    <div class="svg"><?xml version="1.0" encoding="UTF-8"?>
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 125">
+      <g id="outside-text">
+        <rect x="1" y="2" width="3" height="4"/>
+        <text transform="translate(95 102)">Intel's LAM U57</text>
+        <text transform="translate(95 72)">ARM's top byte ignore</text>
+        <text transform="translate(648 71)"><tspan x="0" y="0">bits with</tspan>
+        <tspan x="0" y="14">zeros due</tspan></text>
+      </g>
+    </svg></div>
+    <p>After.</p>
+    """
+
+    def _md(self, html: str) -> str:
+        return render_body(parse_html(html), "mpark")
+
+    def test_svg_labels_do_not_leak_as_paragraphs(self):
+        md = self._md(self._TEXT_SVG)
+        for label in (
+            "Intel's LAM U57",
+            "ARM's top byte ignore",
+            "bits with",
+            "zeros due",
+        ):
+            assert label not in md
+
+    def test_xml_prolog_does_not_leak(self):
+        md = self._md(self._TEXT_SVG)
+        assert "xml version" not in md
+        assert "<?xml" not in md
+
+    def test_text_bearing_svg_discloses_the_drop(self):
+        md = self._md(self._TEXT_SVG)
+        assert md.count("<!-- tomd:svg-dropped -->") == 1
+
+    def test_surrounding_body_text_survives(self):
+        md = self._md(self._TEXT_SVG)
+        assert "Before." in md
+        assert "After." in md
+        assert md.index("Before.") < md.index("After.")
+
+    def test_decorative_svg_emits_nothing(self):
+        md = self._md(
+            '<p>Before.</p><svg viewBox="0 0 16 16">'
+            '<path d="M1 1 L2 2"/><circle cx="8" cy="8" r="4"/>'
+            "</svg><p>After.</p>"
+        )
+        assert "<!-- tomd:svg-dropped -->" not in md
+        assert md == "Before.\n\nAfter."
+
+    def test_empty_text_element_is_not_disclosed(self):
+        md = self._md('<svg><text> </text><text></text></svg>')
+        assert "<!-- tomd:svg-dropped -->" not in md
+
+    def test_two_text_svgs_disclose_separately(self):
+        md = self._md(
+            "<svg><text>one</text></svg><p>mid</p><svg><text>two</text></svg>"
+        )
+        assert md.count("<!-- tomd:svg-dropped -->") == 2
+        assert "one" not in md and "two" not in md
+
+    def test_standalone_processing_instruction_is_dropped(self):
+        md = self._md('<p>a</p><?xml version="1.0"?><p>b</p>')
+        assert "xml version" not in md
+        assert "a" in md and "b" in md
+
+
+class TestInlineContextSvg:
+    """<svg> nested in an inline context bypasses the block-level drop."""
+
+    _SVG = (
+        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 125">'
+        '<g><rect x="1" y="2" width="3" height="4"/>'
+        '<text transform="translate(95 102)">Intel\'s LAM U57</text>'
+        '<text transform="translate(95 72)">ARM top byte ignore</text>'
+        '<text transform="translate(648 71)"><tspan x="0" y="0">bits with</tspan>'
+        '<tspan x="0" y="14">zeros due</tspan></text></g></svg>'
+    )
+    _LABELS = ("Intel's LAM U57", "ARM top byte ignore", "bits with", "zeros due")
+
+    def _md(self, html: str) -> str:
+        return render_body(parse_html(html), "mpark")
+
+    def _assert_no_labels(self, md: str) -> None:
+        for label in self._LABELS:
+            assert label not in md
+
+    def test_svg_in_paragraph_does_not_leak(self):
+        md = self._md(f"<p>Before. {self._SVG} After.</p>")
+        self._assert_no_labels(md)
+        assert md == "Before. After."
+
+    def test_svg_in_list_item_does_not_leak(self):
+        md = self._md(f"<ul><li>Item {self._SVG}</li></ul>")
+        self._assert_no_labels(md)
+        assert md == "- Item"
+
+    def test_svg_in_heading_does_not_leak(self):
+        md = self._md(f"<h2>Heading {self._SVG}</h2>")
+        self._assert_no_labels(md)
+        assert md == "## Heading"
+
+    def test_svg_in_table_cell_does_not_leak(self):
+        md = self._md(f"<table><tr><td>Cell {self._SVG}</td></tr></table>")
+        self._assert_no_labels(md)
+        assert "| Cell |" in md
+
+    def test_svg_in_link_text_does_not_leak(self):
+        md = self._md(f'<p><a href="https://x.com">link {self._SVG}</a></p>')
+        self._assert_no_labels(md)
+        assert md == "[link](https://x.com)"
+
+    def test_inline_processing_instruction_does_not_leak(self):
+        md = self._md('<p>Before. <?xml version="1.0"?> After.</p>')
+        assert "xml version" not in md
+        assert "Before." in md and "After." in md
