@@ -200,12 +200,14 @@ class WebResearcher:
         meaningful raw text form for LLM tools, and the registry is the
         entry point for getting useful text out of them.
 
-        A URL that terminally failed with a non-200 HTTP status is
-        remembered for the researcher's lifetime and answered from that
-        memory on later calls, without touching the network. An LLM
-        agent that keeps re-requesting a dead URL otherwise burns its
-        whole request budget on it. Transport errors (DNS, timeouts)
-        are not remembered - those can recover within a run.
+        A URL that terminally failed - a non-retryable non-200 HTTP
+        status, or a body that exceeded the size cap - is remembered
+        for the researcher's lifetime and answered from that memory on
+        later calls, without touching the network. An LLM agent that
+        keeps re-requesting a dead URL otherwise burns its whole
+        request budget on it. Transport errors (DNS, timeouts) and
+        retryable statuses (5xx, 429) that exhaust their in-call
+        retries are not remembered - those can recover within a run.
         """
         if self._closed:
             raise RuntimeError("Researcher is closed.")
@@ -217,7 +219,7 @@ class WebResearcher:
         cached = self._failed_fetches.get(url)
         if cached is not None:
             logger.info(
-                "Fetch skipped for %r: HTTP %d already returned this run",
+                "Fetch skipped for %r: already failed this run (HTTP %d)",
                 url, cached.status_code,
             )
             return FetchResponse(
@@ -262,7 +264,8 @@ class WebResearcher:
                             status_code=resp.status_code,
                             content=f"Error: HTTP {resp.status_code} for {url}",
                         )
-                        self._failed_fetches[url] = failure
+                        if resp.status_code not in _RETRYABLE_STATUS:
+                            self._failed_fetches[url] = failure
                         return failure
 
                     chunks: list[bytes] = []
@@ -274,13 +277,15 @@ class WebResearcher:
                                 "Fetch aborted at %d bytes (cap %d) for %r",
                                 total, _MAX_FETCH_BYTES, url,
                             )
-                            return FetchResponse(
+                            failure = FetchResponse(
                                 status_code=resp.status_code,
                                 content=(
                                     f"Error: Response exceeded "
                                     f"{_MAX_FETCH_BYTES} bytes for {url}"
                                 ),
                             )
+                            self._failed_fetches[url] = failure
+                            return failure
                         chunks.append(chunk)
                     body = b"".join(chunks)
                     content_type = (
