@@ -433,45 +433,46 @@ class CalibrationOutput(BaseModel, frozen=True):
     )
 
     @model_validator(mode="after")
-    def _check_target_bounds(self) -> "CalibrationOutput":
+    def _check_plan(self) -> "CalibrationOutput":
+        """Report every table violation at once.
+
+        The retry budget is 3; a draft that breaks several rules must
+        see all of them in one round trip, not one per retry.
+        """
+        problems: list[str] = []
+
         base_low, base_high = HEAT_BASELINE[self.heat]
         multiplier = INTEREST_MULTIPLIER[self.interest]
         target_low = min(round(base_low * multiplier), TARGET_COMMENT_CAP)
         target_high = min(round(base_high * multiplier), TARGET_COMMENT_CAP)
         if not target_low <= self.target_comment_count <= target_high:
-            raise ValueError(
+            problems.append(
                 f"target_comment_count={self.target_comment_count} is outside "
                 f"[{target_low}, {target_high}] for heat={self.heat} x "
                 f"interest={self.interest} (baseline {base_low}-{base_high} x "
                 f"{multiplier}, capped at {TARGET_COMMENT_CAP})"
             )
-        return self
 
-    @model_validator(mode="after")
-    def _check_encounter_count(self) -> "CalibrationOutput":
         if self.encounter_count > ENCOUNTER_COUNT_MAX:
-            raise ValueError(
+            problems.append(
                 f"encounter_count={self.encounter_count} exceeds the maximum "
                 f"of {ENCOUNTER_COUNT_MAX}"
             )
         if self.heat == "cold" and self.encounter_count != 0:
-            raise ValueError("cold threads have no encounters")
+            problems.append("cold threads have no encounters")
         if self.heat == "warm" and self.encounter_count > 1:
-            raise ValueError("warm threads carry at most 1 encounter")
+            problems.append("warm threads carry at most 1 encounter")
         if self.heat in ("hot", "thermonuclear") and self.encounter_count < 1:
-            raise ValueError(f"{self.heat} threads need at least 1 encounter")
-        return self
+            problems.append(f"{self.heat} threads need at least 1 encounter")
 
-    @model_validator(mode="after")
-    def _check_slot_arithmetic(self) -> "CalibrationOutput":
-        """The signal/noise pool plus the encounter/mod reserve is the target."""
+        # The signal/noise pool plus the encounter/mod reserve is the target.
         turns_low, turns_high = ENCOUNTER_TURNS
         mods_low, mods_high = MOD_ACTION_RESERVE[self.heat]
         reserve = self.target_comment_count - self.signal_count - self.noise_count
         reserve_low = self.encounter_count * turns_low + mods_low
         reserve_high = self.encounter_count * turns_high + mods_high
         if not reserve_low <= reserve <= reserve_high:
-            raise ValueError(
+            problems.append(
                 f"signal_count + noise_count leaves {reserve} of "
                 f"target_comment_count={self.target_comment_count} for "
                 f"encounters and mod actions, but {self.encounter_count} "
@@ -479,19 +480,19 @@ class CalibrationOutput(BaseModel, frozen=True):
                 f"{mods_low}-{mods_high} mod action(s) for heat={self.heat} "
                 f"needs {reserve_low}-{reserve_high}"
             )
-        return self
 
-    @model_validator(mode="after")
-    def _check_signal_ratio(self) -> "CalibrationOutput":
         pool = self.signal_count + self.noise_count
         floor = math.ceil(SIGNAL_RATIO_FLOOR[self.interest] * pool)
         if pool and self.signal_count < floor:
-            raise ValueError(
+            problems.append(
                 f"signal_count={self.signal_count} is below the "
                 f"interest={self.interest} minimum signal share "
                 f"({SIGNAL_RATIO_FLOOR[self.interest]:.0%} of the "
                 f"{pool}-slot signal+noise pool = {floor})"
             )
+
+        if problems:
+            raise ValueError("; ".join(problems))
         return self
 
 

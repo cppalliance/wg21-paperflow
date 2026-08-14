@@ -167,8 +167,8 @@ Author gravity is a floor. Sub-agent findings can push interest higher but never
 
 - **Cold** (CWG bugfix, no public discussion) - 5-10 comments, 0 encounters
 - **Warm** (LEWG proposal, some discussion) - 15-30 comments, maybe 1 encounter
-- **Hot** (LEWG/EWG, competing proposals, public debate) - 30-60 comments, 1 encounter likely
-- **Thermonuclear** (contracts, executors, ABI, safety) - 60-150 comments, 1-2 encounters, multiple sub-threads, at least one [removed by moderator]
+- **Hot** (LEWG/EWG, competing proposals, public debate) - 30-60 comments, at least 1 encounter
+- **Thermonuclear** (contracts, executors, ABI, safety) - 60-150 comments, 1-3 encounters, multiple sub-threads, at least one [removed by moderator]
 
 How many of those comments are signal is governed by the interest tier's minimum signal share (2.4), not by heat — heat sets the size and temperature of the room, interest sets how much of the room is saying something.
 
@@ -252,7 +252,7 @@ Casting (`casting.py`) decides deterministically which personas appear in a give
 
 ### 5b. Mod Presence
 
-Not every thread. 30-40% of runs. Green distinguished username with `[M]` tag. Mod usernames are drawn from the **Mod Roster** table below - pick one appropriate to the action. `AutoModerator` handles pinned metadata comments. Human mods handle removals, warnings, and locks.
+Not every thread - presence follows heat (see the frequency table below: cold threads have no mod, hot and thermonuclear always do). Green distinguished username with `[M]` tag. Mod usernames are drawn from the **Mod Roster** table below - pick one appropriate to the action. `AutoModerator` handles pinned metadata comments. Human mods handle removals, warnings, and locks.
 
 **What mods do:**
 
@@ -463,7 +463,7 @@ The thread is planned as a skeleton, then fleshed out in priority order.
 Rules for when two long-path characters collide.
 
 - **Trigger:** A signal comment touches a design tension the paper exposes. Another character has domain expertise on the other side.
-- **Frequency:** Cold: never. Warm: 30%. Hot: 70%. Thermonuclear: 90%, possibly two.
+- **Frequency:** Cold: never. Warm: at most one, and only when an anchor's design tension is severe enough to warrant it. Hot and thermonuclear: at least one, always. Never more than three per thread.
 - **Shape:** First exchange is polite disagreement. Second sharpens. Third either resolves (one side concedes a point) or narrows (they agree on the real question, disagree on the answer). Never more than 5 exchanges.
 - **Location:** Always nested deep - depth 3-5. Never top-level. The reader scrolls past noise to find it.
 

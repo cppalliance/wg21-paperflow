@@ -378,8 +378,9 @@ noise-class slots (``noise`` + ``tangent``) within the same band of
 ``noise_count``. The pipeline rejects skeletons that drift further.
 
 **Mod actions.** Per the-mod.md section 5b, allocate
-``role="mod"`` slots scaled to heat: 0 for cold, 1 for warm, 2 for
-hot, 3+ for thermonuclear. Mod actions are short and procedural.
+``role="mod"`` slots from the heat tier's reserve computed in
+Step 3: 0 for cold, 0-1 for warm, 1-2 for hot, 3-5 for
+thermonuclear. Mod actions are short and procedural.
 
 **Depth.** Max depth 6. Most chains are depth <= 3. Encounter chains
 may reach depth 4-5.

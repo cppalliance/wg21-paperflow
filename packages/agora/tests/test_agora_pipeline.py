@@ -219,6 +219,17 @@ def test_validate_blueprint_composition_drift_raises():
         _validate_blueprint(state, replies, [])
 
 
+def test_validate_blueprint_noise_class_drift_raises():
+    # Signal-class delivered exactly on plan, so only the noise-class
+    # branch of the composition check can fire.
+    state = PipelineState(interest="niche", signal_count=10, noise_count=10)
+    replies = [_reply(f"s{n:02d}") for n in range(1, 11)] + [
+        _reply(f"s{n:02d}", role="noise") for n in range(11, 31)
+    ]
+    with pytest.raises(ValidationStepError, match="noise-class"):
+        _validate_blueprint(state, replies, [])
+
+
 def test_validate_blueprint_composition_within_tolerance_ok():
     # Teasers count as signal-class, tangents as noise-class; drift of
     # +2 signal / -5 noise sits inside the +/-25%-or-2 band.
