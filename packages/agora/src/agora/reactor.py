@@ -49,16 +49,18 @@ import logging
 from pipeline import StepContext, StepSpec
 
 from agora.casting import _stable_key
-from agora.models import PipelineState, Reply, Thread, Vote
+from agora.models import (
+    SUBMISSION_TARGET,
+    PipelineState,
+    Reply,
+    Thread,
+    Vote,
+)
 from agora.roster import MODS, ROSTER, Persona
 
 logger = logging.getLogger(__name__)
 
 _STEP_10_NUMBER = 10
-
-SUBMISSION_TARGET = "submission"
-"""Hash-salt target id for votes on the submission itself. Reply
-slot ids are ``sNN``, so this can never collide with one."""
 
 _VOTERS: tuple[Persona, ...] = ROSTER + tuple(
     mod for mod in MODS if mod.username != "AutoModerator"

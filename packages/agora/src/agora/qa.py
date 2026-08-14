@@ -35,11 +35,8 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
-from agora.models import Thread
+from agora.models import SUBMISSION_TARGET, Thread
 from agora.roster import roster_usernames
-
-SUBMISSION_TARGET = "submission"
-"""Target label for findings against the submission body."""
 
 _HANDLE_RE = re.compile(r"\bu/([A-Za-z0-9_-]{3,})")
 
@@ -92,19 +89,23 @@ def qa_report(thread: Thread) -> list[QaFinding]:
     placeholder, not content.
     """
     findings: list[QaFinding] = []
+    known = roster_usernames()
     findings.extend(
-        _scan_body(SUBMISSION_TARGET, thread.submission_body)
+        _scan_body(SUBMISSION_TARGET, thread.submission_body, known)
     )
     for reply in thread.replies:
         if reply.deleted or reply.role == "deleted":
             continue
-        findings.extend(_scan_body(reply.slot_id, reply.content or ""))
+        findings.extend(
+            _scan_body(reply.slot_id, reply.content or "", known)
+        )
     return findings
 
 
-def _scan_body(target: str, body: str) -> list[QaFinding]:
+def _scan_body(
+    target: str, body: str, known: frozenset[str],
+) -> list[QaFinding]:
     findings: list[QaFinding] = []
-    known = roster_usernames()
 
     for match in _HANDLE_RE.finditer(body):
         handle = match.group(1)

@@ -162,6 +162,7 @@ async def _pure_voice(state: PipelineState, ctx: StepContext, spec: StepSpec) ->
         if reply.role == "deleted":
             reply.content = DELETED_BODY
             reply.deleted = True
+            ctx.sub_progress(index, total, f"{spec.step.name} {reply.slot_id}")
             continue
 
         username = reply.character_username or ""
