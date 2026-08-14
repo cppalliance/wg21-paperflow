@@ -32,6 +32,7 @@ from agora.models import (
 )
 from agora.reactor import (
     SUBMISSION_TARGET,
+    _is_snarky,
     _pure_react,
     decide_vote,
     react_thread,
@@ -201,6 +202,33 @@ def test_upvote_bias_raises_probability_everywhere():
         assert upvote_probability(
             generous, snarky=snarky, consensus=consensus,
         ) > upvote_probability(stingy, snarky=snarky, consensus=consensus)
+
+
+@pytest.mark.parametrize(
+    "tone,expected",
+    [
+        # The full the-mod.md section 6 tone palette, classified: the
+        # quip-like tones get the snark_affinity swing, the earnest
+        # ones don't.
+        ("sarcastic", True),
+        ("confused", False),
+        ("angry", False),
+        ("smug", True),
+        ("memey", True),
+        ("earnest-but-wrong", False),
+        ("bored", False),
+        ("condescending", True),
+        ("performatively-tired", True),
+        ("deadpan", True),
+        # Off-palette free text still classifies by substring family.
+        ("self-aware snark", True),
+        ("gentle question", False),
+        (None, False),
+    ],
+)
+def test_is_snarky_classifies_the_section_6_palette(tone, expected):
+    reply = _reply("s01", role="noise", noise_tone=tone)
+    assert _is_snarky(reply) is expected
 
 
 def test_snark_affinity_swings_snarky_targets_only():

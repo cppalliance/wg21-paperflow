@@ -49,7 +49,7 @@ from pipeline.agents import AgentBackend
 from pipeline.errors import ValidationStepError
 
 from agora import mod_reference
-from agora.casting import MISCONCEPTION_STANCE, _stable_key, cast_thread
+from agora.casting import MISCONCEPTION_STANCE, stable_key, cast_thread
 from agora.models import CommentOutput, PipelineState, Reply, Thread
 from agora.roster import MODS, PERSONA_BY_USERNAME
 
@@ -122,14 +122,14 @@ def _flag_edited(thread: Thread) -> None:
     re-running the same blueprint flags the same comment. The voice
     step reads the flag and appends the EDIT line.
     """
-    if _stable_key(thread.document, "edited") % _EDITED_PARITY_MOD:
+    if stable_key(thread.document, "edited") % _EDITED_PARITY_MOD:
         return
     signal_slots = [r for r in thread.replies if r.role == "signal"]
     if not signal_slots:
         return
     chosen = min(
         signal_slots,
-        key=lambda r: _stable_key(thread.document, "edited", r.slot_id),
+        key=lambda r: stable_key(thread.document, "edited", r.slot_id),
     )
     chosen.edited = True
 

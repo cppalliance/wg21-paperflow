@@ -22,7 +22,7 @@ import pytest
 from pipeline import PipelinePrompt, StepContext, build_pipeline
 from pipeline.errors import ValidationStepError
 
-from agora.casting import MISCONCEPTION_STANCE, _stable_key
+from agora.casting import MISCONCEPTION_STANCE, stable_key
 from agora.generate import (
     DELETED_BODY,
     _ancestry,
@@ -289,7 +289,7 @@ def test_flag_edited_is_deterministic_and_hash_gated():
         flagged_first = [r.slot_id for r in first.replies if r.edited]
         flagged_second = [r.slot_id for r in second.replies if r.edited]
         assert flagged_first == flagged_second
-        expect_edit = _stable_key(document, "edited") % 2 == 0
+        expect_edit = stable_key(document, "edited") % 2 == 0
         assert len(flagged_first) == (1 if expect_edit else 0)
         if flagged_first:
             by_slot = {r.slot_id: r for r in first.replies}

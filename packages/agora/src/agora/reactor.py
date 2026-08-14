@@ -48,7 +48,7 @@ import logging
 
 from pipeline import StepContext, StepSpec
 
-from agora.casting import _stable_key
+from agora.casting import stable_key
 from agora.models import (
     SUBMISSION_TARGET,
     PipelineState,
@@ -118,10 +118,23 @@ _CONSENSUS_ROLES = frozenset({"signal", "teaser", "encounter", "mod"})
 """Roles whose comments read as the thread's respectable consensus:
 the targets contrarians push against."""
 
+_QUIP_TONES = frozenset({
+    "sarcastic",
+    "smug",
+    "memey",
+    "condescending",
+    "performatively-tired",
+    "deadpan",
+})
+"""The the-mod.md section 6 palette tones that read as quips — the
+targets the section 4 vote dynamic rewards. The earnest tones
+(``confused``, ``angry``, ``earnest-but-wrong``, ``bored``) carry no
+comedic distance, so they get no snark swing."""
+
 _SNARK_MARKERS = ("snark", "sarcas", "quip", "joke", "meme", "mock")
-"""``noise_tone`` substrings that mark a comment as a quip. The tone
-labels are free text from the planner, so this matches families, not
-exact values."""
+"""Substring fallback for tones outside the section 6 palette:
+``noise_tone`` is free text from the planner, so an off-palette label
+still classifies by family."""
 
 
 # -- Heuristic core ------------------------------------------------------------
@@ -129,11 +142,13 @@ exact values."""
 
 def _uniform(*parts: str) -> float:
     """Deterministic draw in ``[0, 1)`` from the stable hash."""
-    return _stable_key(*parts) / 2**64
+    return stable_key(*parts) / 2**64
 
 
 def _is_snarky(reply: Reply) -> bool:
-    tone = (reply.noise_tone or "").lower()
+    tone = (reply.noise_tone or "").strip().lower()
+    if tone in _QUIP_TONES:
+        return True
     return any(marker in tone for marker in _SNARK_MARKERS)
 
 
