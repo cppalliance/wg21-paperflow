@@ -1602,7 +1602,7 @@ def _inline_text_nodes(nodes, skip_classes: frozenset[str] = frozenset()) -> str
     """
     parts = []
     for child in nodes:
-        if isinstance(child, Comment):
+        if isinstance(child, (Comment, ProcessingInstruction)):
             continue
         if isinstance(child, NavigableString):
             parts.append(str(child))
@@ -1613,6 +1613,12 @@ def _inline_text_nodes(nodes, skip_classes: frozenset[str] = frozenset()) -> str
                 continue
 
             if tag in ("style", "script"):
+                continue
+
+            # <svg> is phrasing content, so it reaches here from a <p>, <li>,
+            # heading, cell or <a>, bypassing the block-level drop. No marker:
+            # one would corrupt heading text and table cells.
+            if tag == "svg":
                 continue
 
             if tag in ("table", "thead", "tbody", "tfoot", "tr"):

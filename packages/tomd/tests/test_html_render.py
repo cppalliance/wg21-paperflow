@@ -2402,3 +2402,54 @@ class TestInlineSvg:
         md = self._md('<p>a</p><?xml version="1.0"?><p>b</p>')
         assert "xml version" not in md
         assert "a" in md and "b" in md
+
+
+class TestInlineContextSvg:
+    """<svg> nested in an inline context bypasses the block-level drop."""
+
+    _SVG = (
+        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 125">'
+        '<g><rect x="1" y="2" width="3" height="4"/>'
+        '<text transform="translate(95 102)">Intel\'s LAM U57</text>'
+        '<text transform="translate(95 72)">ARM top byte ignore</text>'
+        '<text transform="translate(648 71)"><tspan x="0" y="0">bits with</tspan>'
+        '<tspan x="0" y="14">zeros due</tspan></text></g></svg>'
+    )
+    _LABELS = ("Intel's LAM U57", "ARM top byte ignore", "bits with", "zeros due")
+
+    def _md(self, html: str) -> str:
+        return render_body(parse_html(html), "mpark")
+
+    def _assert_no_labels(self, md: str) -> None:
+        for label in self._LABELS:
+            assert label not in md
+
+    def test_svg_in_paragraph_does_not_leak(self):
+        md = self._md(f"<p>Before. {self._SVG} After.</p>")
+        self._assert_no_labels(md)
+        assert md == "Before. After."
+
+    def test_svg_in_list_item_does_not_leak(self):
+        md = self._md(f"<ul><li>Item {self._SVG}</li></ul>")
+        self._assert_no_labels(md)
+        assert md == "- Item"
+
+    def test_svg_in_heading_does_not_leak(self):
+        md = self._md(f"<h2>Heading {self._SVG}</h2>")
+        self._assert_no_labels(md)
+        assert md == "## Heading"
+
+    def test_svg_in_table_cell_does_not_leak(self):
+        md = self._md(f"<table><tr><td>Cell {self._SVG}</td></tr></table>")
+        self._assert_no_labels(md)
+        assert "| Cell |" in md
+
+    def test_svg_in_link_text_does_not_leak(self):
+        md = self._md(f'<p><a href="https://x.com">link {self._SVG}</a></p>')
+        self._assert_no_labels(md)
+        assert md == "[link](https://x.com)"
+
+    def test_inline_processing_instruction_does_not_leak(self):
+        md = self._md('<p>Before. <?xml version="1.0"?> After.</p>')
+        assert "xml version" not in md
+        assert "Before." in md and "After." in md
