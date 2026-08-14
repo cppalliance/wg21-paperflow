@@ -51,7 +51,7 @@ def _assay_package_root() -> Path:
 
 
 def routing_metadata_dir() -> Path:
-    """Shared routing metadata (feature names, group order, thresholds)."""
+    """Shared routing metadata (feature names, group order)."""
     return _assay_package_root() / _ROUTING_METADATA_DIR
 
 
@@ -60,35 +60,40 @@ def routing_data_dir() -> Path:
     return routing_metadata_dir()
 
 
-def aggregator_model_dir(classifiers: object) -> Path:
-    """Return ``data/nli`` or ``data/seqcls`` for the homogeneous classifier family."""
-    family = _aggregator_family(classifiers)
+def _family_data_dir(family: AggregatorFamily) -> Path:
     if family == "nli":
         return _assay_package_root() / _NLI_DATA_DIR
     return _assay_package_root() / _SEQCLS_DATA_DIR
 
 
+def aggregator_model_dir(classifiers: object) -> Path:
+    """Return ``data/nli`` or ``data/seqcls`` for the homogeneous classifier family."""
+    return _family_data_dir(_aggregator_family(classifiers))
+
+
 def _metadata_artifacts_present() -> bool:
     root = routing_metadata_dir()
-    return (
-        (root / _FEATURE_NAMES_FILE).is_file()
-        and (root / _GROUP_THRESHOLDS_FILE).is_file()
-        and (root / _GROUP_ORDER_FILE).is_file()
-    )
+    return (root / _FEATURE_NAMES_FILE).is_file() and (
+        root / _GROUP_ORDER_FILE
+    ).is_file()
+
+
+def _family_artifacts_present(family: AggregatorFamily) -> bool:
+    model_dir = _family_data_dir(family)
+    return (model_dir / _MODEL_FILE).is_file() and (
+        model_dir / _GROUP_THRESHOLDS_FILE
+    ).is_file()
 
 
 def learned_model_available(classifiers: object | None = None) -> bool:
-    """True when shared metadata and the family-specific HGB model are on disk."""
+    """True when shared metadata, family HGB model, and family thresholds are on disk."""
     if not _metadata_artifacts_present():
         return False
     if classifiers is None:
-        root = _assay_package_root()
-        return (root / _NLI_DATA_DIR / _MODEL_FILE).is_file() or (
-            root / _SEQCLS_DATA_DIR / _MODEL_FILE
-        ).is_file()
+        return _family_artifacts_present("nli") or _family_artifacts_present("seqcls")
     if not is_learned_aggregator_path(classifiers):
         return False
-    return (aggregator_model_dir(classifiers) / _MODEL_FILE).is_file()
+    return _family_artifacts_present(_aggregator_family(classifiers))
 
 
 @lru_cache(maxsize=1)
@@ -100,9 +105,9 @@ def _load_feature_names() -> tuple[str, ...]:
     return tuple(raw)
 
 
-@lru_cache(maxsize=1)
-def _load_group_thresholds() -> dict[RoutingGroup, float]:
-    path = routing_metadata_dir() / _GROUP_THRESHOLDS_FILE
+@lru_cache(maxsize=2)
+def _load_group_thresholds(family: AggregatorFamily) -> dict[RoutingGroup, float]:
+    path = _family_data_dir(family) / _GROUP_THRESHOLDS_FILE
     raw = json.loads(path.read_text(encoding="utf-8"))
     if not isinstance(raw, dict):
         raise ValueError(f"{path}: expected JSON object")
@@ -130,9 +135,7 @@ def _load_group_order() -> tuple[RoutingGroup, ...]:
 
 @lru_cache(maxsize=2)
 def _load_model(family: AggregatorFamily) -> object:
-    root = _assay_package_root()
-    model_dir = root / (_NLI_DATA_DIR if family == "nli" else _SEQCLS_DATA_DIR)
-    path = model_dir / _MODEL_FILE
+    path = _family_data_dir(family) / _MODEL_FILE
     return joblib.load(path)
 
 
@@ -167,7 +170,7 @@ def predict_learned_groups(
             f"learned aggregator predict_proba length {len(prob_row)} "
             f"does not match group_order ({len(group_order)})",
         )
-    thresholds = _load_group_thresholds()
+    thresholds = _load_group_thresholds(family)
 
     probs: dict[RoutingGroup, float] = {}
     for idx, group in enumerate(group_order):

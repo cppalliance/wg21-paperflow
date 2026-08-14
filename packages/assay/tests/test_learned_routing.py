@@ -72,9 +72,20 @@ def _sentence(text: str, hits: frozenset[str]) -> Sentence:
 
 def _write_metadata(data_dir: Path) -> None:
     (data_dir / "feature_names.json").write_text("[]\n", encoding="utf-8")
-    (data_dir / "group_thresholds.json").write_text("{}\n", encoding="utf-8")
     (data_dir / "group_order.json").write_text(
         json.dumps([g.value for g in ROUTING_GROUP_ORDER], indent=2) + "\n",
+        encoding="utf-8",
+    )
+
+
+def _write_group_thresholds(
+    model_dir: Path,
+    thresholds: dict[str, float] | None = None,
+) -> None:
+    if thresholds is None:
+        thresholds = {g.value: 0.1 for g in RoutingGroup}
+    (model_dir / "group_thresholds.json").write_text(
+        json.dumps(thresholds, indent=2) + "\n",
         encoding="utf-8",
     )
 
@@ -224,13 +235,9 @@ def test_learned_aggregate_roundtrip(
     model_dir = tmp_path / "data" / "seqcls"
     model_dir.mkdir(parents=True)
     joblib.dump(model, model_dir / "aggregator_hgb.joblib")
+    _write_group_thresholds(model_dir)
     (meta_dir / "feature_names.json").write_text(
         json.dumps(list(feature_names)) + "\n",
-        encoding="utf-8",
-    )
-    thresholds = {g.value: 0.1 for g in RoutingGroup}
-    (meta_dir / "group_thresholds.json").write_text(
-        json.dumps(thresholds, indent=2) + "\n",
         encoding="utf-8",
     )
     (meta_dir / "group_order.json").write_text(
@@ -289,12 +296,9 @@ def test_predict_learned_groups_raises_on_mismatched_group_order(
     model_dir = tmp_path / "data" / "nli"
     model_dir.mkdir(parents=True)
     joblib.dump(model, model_dir / "aggregator_hgb.joblib")
+    _write_group_thresholds(model_dir)
     (meta_dir / "feature_names.json").write_text(
         json.dumps(list(feature_names)) + "\n",
-        encoding="utf-8",
-    )
-    (meta_dir / "group_thresholds.json").write_text(
-        json.dumps({g.value: 0.1 for g in RoutingGroup}, indent=2) + "\n",
         encoding="utf-8",
     )
     (meta_dir / "group_order.json").write_text(
@@ -316,3 +320,30 @@ def test_predict_learned_groups_raises_on_mismatched_group_order(
             audience=["LEWG"],
             classifiers=classifier,
         )
+
+
+def test_group_thresholds_load_independently_per_family(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    nli_dir = tmp_path / "data" / "nli"
+    seqcls_dir = tmp_path / "data" / "seqcls"
+    nli_dir.mkdir(parents=True)
+    seqcls_dir.mkdir(parents=True)
+    _write_group_thresholds(
+        nli_dir,
+        {"CWG": 0.1, "EWG": 0.25, "LEWG": 0.4, "LWG": 0.15},
+    )
+    _write_group_thresholds(
+        seqcls_dir,
+        {"CWG": 0.1, "EWG": 0.25, "LEWG": 0.9, "LWG": 0.15},
+    )
+    monkeypatch.setattr(
+        "assay.paper_routing.learned_aggregate._assay_package_root",
+        lambda: tmp_path,
+    )
+    _load_group_thresholds.cache_clear()
+
+    nli = _load_group_thresholds("nli")
+    seqcls = _load_group_thresholds("seqcls")
+    assert nli[RoutingGroup.LEWG] == 0.4
+    assert seqcls[RoutingGroup.LEWG] == 0.9

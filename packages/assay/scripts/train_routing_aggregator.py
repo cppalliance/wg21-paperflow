@@ -236,7 +236,7 @@ def train_and_freeze(
         json.dumps(list(feature_names), indent=2) + "\n",
         encoding="utf-8",
     )
-    (metadata_dir / "group_thresholds.json").write_text(
+    (model_output_dir / "group_thresholds.json").write_text(
         json.dumps(
             {group.value: thresholds[group] for group in ROUTING_GROUP_ORDER},
             indent=2,
@@ -281,13 +281,13 @@ def main() -> int:
         "--model-output",
         type=Path,
         default=assay_package_root() / "data" / "nli",
-        help="Directory for aggregator_hgb.joblib",
+        help="Directory for aggregator_hgb.joblib and group_thresholds.json",
     )
     parser.add_argument(
         "--metadata-dir",
         type=Path,
         default=assay_package_root() / "data" / "routing",
-        help="Directory for feature_names.json, group_thresholds.json, group_order.json",
+        help="Directory for feature_names.json and group_order.json",
     )
     parser.add_argument("--classifier", default="nli-small")
     parser.add_argument(
