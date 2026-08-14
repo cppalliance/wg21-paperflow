@@ -204,10 +204,9 @@ model = "MoritzLaurer/deberta-v3-base-zeroshot-v2.0"
 # Uncomment once a checkpoint exists (train via
 # packages/pipeline/scripts/finetune_seqcls.py). Assay binds via
 # ``assay.md`` ``## Classifiers`` (e.g. selector: assay-routing-tagger).
-# [classifiers.assay-routing-tagger]
+# [classifiers.routing-tagger]
 # backend = "multilabel_seqcls"
-# model = "/path/to/routing-tagger-v1"
-# provider = "cpu-fp32"
+# model = "data/routing_tagger/checkpoint-deberta-v3-base"
 
 # Example future addition: specialized claim detector. Demonstrates
 # that the abstraction makes adding a new classifier a config change,
