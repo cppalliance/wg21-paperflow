@@ -43,6 +43,23 @@ logger = logging.getLogger(__name__)
 
 _TRAIN_SEED = 0
 _CV_FOLDS = 5
+_HGB_MAX_DEPTH = 4
+_HGB_MAX_ITER = 200
+
+
+def _make_aggregator() -> OneVsRestClassifier:
+    """Unfitted OvR-HGB with the pinned training hyperparameters.
+
+    CV folds and the final freeze each need a new instance; sklearn
+    estimators are mutated by ``fit``.
+    """
+    return OneVsRestClassifier(
+        HistGradientBoostingClassifier(
+            random_state=_TRAIN_SEED,
+            max_depth=_HGB_MAX_DEPTH,
+            max_iter=_HGB_MAX_ITER,
+        ),
+    )
 
 
 class TrainingRow(TypedDict):
@@ -190,13 +207,7 @@ def train_and_freeze(
     for train_idx, test_idx in kfold.split(x_rows):
         x_train = [x_rows[i] for i in train_idx]
         y_train = [y_rows[i] for i in train_idx]
-        fold_model = OneVsRestClassifier(
-            HistGradientBoostingClassifier(
-                random_state=_TRAIN_SEED,
-                max_depth=4,
-                max_iter=200,
-            ),
-        )
+        fold_model = _make_aggregator()
         fold_model.fit(x_train, y_train)
         fold_probs = fold_model.predict_proba([x_rows[i] for i in test_idx])
         for local_idx, global_idx in enumerate(test_idx):
@@ -208,13 +219,7 @@ def train_and_freeze(
     oof_preds = _apply_thresholds(oof_probs, thresholds)
     oof_exact = _exact_match_rate(y_rows, oof_preds)
 
-    final_model = OneVsRestClassifier(
-        HistGradientBoostingClassifier(
-            random_state=_TRAIN_SEED,
-            max_depth=4,
-            max_iter=200,
-        ),
-    )
+    final_model = _make_aggregator()
     final_model.fit(x_rows, y_rows)
     in_probs = final_model.predict_proba(x_rows)
     in_prob_rows = [
