@@ -5,7 +5,7 @@
 """Train and freeze the paper-level HistGradientBoosting aggregator.
 
 Features come from regex catalog hits unioned with the chosen classifier
-(seqcls by default). Inference must keep regex on; HGB was trained on
+(nli-small by default). Inference must keep regex on; HGB was trained on
 regex+classifier hypothesis densities.
 """
 
@@ -35,7 +35,7 @@ from eval_common import (
     default_paperstore_dir,
     expected_groups,
     parse_audience_from_md,
-    paper_golden_path,
+    paper_golden_train_path,
     resolve_classifier,
 )
 
@@ -145,7 +145,7 @@ def build_training_rows(
     *,
     paperstore_dir: Path,
     golden_path: Path,
-    seqcls_name: str,
+    classifier_name: str,
     cache_path: Path | None,
 ) -> list[TrainingRow]:
     if cache_path is not None and cache_path.is_file():
@@ -156,7 +156,7 @@ def build_training_rows(
                 rows.append(json.loads(stripped))
         return rows
 
-    classifier = resolve_classifier(seqcls_name)
+    classifier = resolve_classifier(classifier_name)
     golden_rows = _load_golden(golden_path)
     built: list[TrainingRow] = []
     for row in golden_rows:
@@ -276,11 +276,11 @@ def main() -> int:
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--paperstore", type=Path, default=None)
-    parser.add_argument("--golden", type=Path, default=paper_golden_path())
+    parser.add_argument("--golden", type=Path, default=paper_golden_train_path())
     parser.add_argument(
         "--model-output",
         type=Path,
-        default=assay_package_root() / "data" / "seqcls",
+        default=assay_package_root() / "data" / "nli",
         help="Directory for aggregator_hgb.joblib",
     )
     parser.add_argument(
@@ -289,7 +289,7 @@ def main() -> int:
         default=assay_package_root() / "data" / "routing",
         help="Directory for feature_names.json, group_thresholds.json, group_order.json",
     )
-    parser.add_argument("--seqcls", default="routing-tagger")
+    parser.add_argument("--classifier", default="nli-small")
     parser.add_argument(
         "--cache",
         type=Path,
@@ -301,7 +301,7 @@ def main() -> int:
     rows = build_training_rows(
         paperstore_dir=paperstore,
         golden_path=args.golden,
-        seqcls_name=args.seqcls,
+        classifier_name=args.classifier,
         cache_path=args.cache,
     )
     if not rows:

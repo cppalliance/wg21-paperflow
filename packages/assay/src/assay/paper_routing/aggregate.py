@@ -91,8 +91,8 @@ def aggregate_quadrant_scores(
             wording_weight * min(lang_density, wording_density) * mass_factor
         )
 
-    _apply_metadata_bonus(scores, audience)
     _apply_domain_arbitration(scores)
+    _apply_metadata_bonus(scores, audience)
     return scores
 
 

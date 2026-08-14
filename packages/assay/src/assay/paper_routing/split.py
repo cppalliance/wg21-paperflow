@@ -76,10 +76,7 @@ def split_sentences(paper_md: str) -> list[RawSentence]:
             while i < len(lines):
                 block_lines.append(lines[i])
                 stripped = lines[i].strip()
-                if (
-                    stripped.startswith(fence_char * fence_len)
-                    and len(stripped) >= fence_len
-                ):
+                if stripped.startswith(fence_char * fence_len):
                     tail = stripped[fence_len:].strip()
                     if not tail or not tail[0].isalnum():
                         break

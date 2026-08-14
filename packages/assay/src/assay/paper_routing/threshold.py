@@ -67,14 +67,14 @@ def apply_thresholds(
     candidates: dict[RoutingGroup, float] = {}
     for group, score in quadrant_scores.items():
         threshold = _GROUP_THRESHOLDS[group]
-        if score > threshold and counts.get(group, 0) >= min_sustained:
+        if score >= threshold and counts.get(group, 0) >= min_sustained:
             candidates[group] = score
 
     if not candidates:
         # Fallback: emit global argmax if it passes its threshold
         best_group = max(quadrant_scores, key=lambda g: quadrant_scores[g])
         best_score = quadrant_scores[best_group]
-        if best_score > _GROUP_THRESHOLDS[best_group]:
+        if best_score >= _GROUP_THRESHOLDS[best_group]:
             return {best_group: best_score}, is_performance_focused
         return {}, is_performance_focused
 

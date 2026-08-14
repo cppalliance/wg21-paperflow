@@ -23,3 +23,8 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/assay"]
+
+[tool.hatch.build.targets.wheel.force-include]
+"data/routing" = "assay/data/routing"
+"data/nli" = "assay/data/nli"
+"data/seqcls" = "assay/data/seqcls"

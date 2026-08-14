@@ -37,4 +37,6 @@ packages/assay/data/*
 !packages/assay/data/routing/**
 !packages/assay/data/seqcls/
 !packages/assay/data/seqcls/**
+!packages/assay/data/nli/
+!packages/assay/data/nli/**
 packages/assay/data/**/._*

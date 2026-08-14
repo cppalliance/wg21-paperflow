@@ -3,7 +3,7 @@
 # Distributed under the Boost Software License, Version 1.0. (See accompanying
 # file LICENSE_1_0.txt or copy at http://www.boost.org/LICENSE_1_0.txt)
 """
-Evaluate ``route_paper()`` against ``data/golden/paper_categories.jsonl``.
+Evaluate ``route_paper()`` against ``data/golden/paper_categories_test.jsonl``.
 
 Golden paper-level labels map content categories to expected routing groups:
 
@@ -60,7 +60,7 @@ from eval_common import (
     default_paperstore_dir,
     expected_groups,
     parse_audience_from_md,
-    paper_golden_path,
+    paper_golden_test_path,
     resolve_classifier,
 )
 from eval_metrics import MultilabelReport, prf_from_counts
@@ -93,12 +93,14 @@ _LEARNED_AGGREGATOR_MODES: frozenset[str] = frozenset(
     }
 )
 
-# Default ablation-matrix sweep. Combined modes remain in ABLATION_MODES
-# and can be selected with --mode; they are excluded here for runtime cost.
+# Default ablation-matrix sweep. Combined non-HGB modes remain in
+# ABLATION_MODES and can be selected with --mode. regex+nli+hgb is the
+# shipped Survey path and is included last because of NLI runtime cost.
 _ABLATION_ORDER: tuple[str, ...] = (
     "regex",
     "seqcls",
     "nli",
+    "regex+nli+hgb",
 )
 
 
@@ -139,7 +141,7 @@ class AblationConfig:
 
 
 def _default_golden_path() -> Path:
-    return paper_golden_path()
+    return paper_golden_test_path()
 
 
 def _default_paperstore_dir() -> Path:
@@ -589,7 +591,7 @@ def main(argv: list[str] | None = None) -> int:
         "--golden",
         type=Path,
         default=_default_golden_path(),
-        help="Path to data/golden/paper_categories.jsonl",
+        help="Path to data/golden/paper_categories_test.jsonl",
     )
     parser.add_argument(
         "--paperstore",

@@ -43,7 +43,11 @@ AggregatorFamily = Literal["nli", "seqcls"]
 
 
 def _assay_package_root() -> Path:
-    return Path(__file__).resolve().parents[3]
+    here = Path(__file__).resolve()
+    src_layout = here.parents[3]
+    if (src_layout / "data").is_dir():
+        return src_layout
+    return here.parents[1]
 
 
 def routing_metadata_dir() -> Path:

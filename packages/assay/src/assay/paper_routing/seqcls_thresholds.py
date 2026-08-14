@@ -19,7 +19,11 @@ _THRESHOLDS_REL = _SEQCLS_DATA_DIR / "per_label_thresholds.json"
 
 
 def _assay_package_root() -> Path:
-    return Path(__file__).resolve().parents[3]
+    here = Path(__file__).resolve()
+    src_layout = here.parents[3]
+    if (src_layout / "data").is_dir():
+        return src_layout
+    return here.parents[1]
 
 
 def thresholds_path() -> Path:

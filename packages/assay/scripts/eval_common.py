@@ -36,8 +36,12 @@ def golden_data_dir() -> Path:
     return assay_package_root() / "data" / "golden"
 
 
-def paper_golden_path() -> Path:
-    return golden_data_dir() / "paper_categories.jsonl"
+def paper_golden_train_path() -> Path:
+    return golden_data_dir() / "paper_categories_train.jsonl"
+
+
+def paper_golden_test_path() -> Path:
+    return golden_data_dir() / "paper_categories_test.jsonl"
 
 
 def sentence_golden_dir() -> Path:

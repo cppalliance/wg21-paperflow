@@ -31,6 +31,7 @@ from assay.paper_routing.split import split_sentences
 from assay.paper_routing.headings import classify_routing_section
 from assay.paper_routing.types import SectionType
 from assay.paper_routing.aggregate import (
+    _apply_domain_arbitration,
     _apply_metadata_bonus,
     aggregate_quadrant_scores,
 )
@@ -562,6 +563,31 @@ def _make_sentences(count: int, *, hits: frozenset[str]) -> list:
         Sentence(f"sentence {i}", SectionType.MOTIVATION, i, hits)
         for i in range(count)
     ]
+
+
+def test_apply_thresholds_emits_on_exact_threshold():
+    sentences = _make_sentences(200, hits=frozenset({"D1", "M1"}))
+    scores = {
+        RoutingGroup.LEWG: THRESHOLD_LEWG,
+        RoutingGroup.LWG: 0.0,
+        RoutingGroup.EWG: 0.0,
+        RoutingGroup.CWG: 0.0,
+    }
+    groups, _ = apply_thresholds(scores, sentences)
+    assert RoutingGroup.LEWG in groups
+
+
+def test_arbitration_before_bonus_keeps_near_language_domain():
+    scores = {
+        RoutingGroup.LEWG: 0.35,
+        RoutingGroup.LWG: 0.0,
+        RoutingGroup.EWG: 0.30,
+        RoutingGroup.CWG: 0.0,
+    }
+    _apply_domain_arbitration(scores)
+    _apply_metadata_bonus(scores, ["LEWG"])
+    assert scores[RoutingGroup.EWG] == 0.30
+    assert scores[RoutingGroup.LEWG] == pytest.approx(0.55)
 
 
 def test_admin_gate_fires_on_low_scores():
