@@ -70,6 +70,7 @@ from agora.qa import qa_report
 from agora.reactor import _pure_react
 from agora.roster import roster_usernames
 from agora.models import (
+    ENCOUNTER_TURNS,
     CalibrationOutput,
     Committee,
     EncountersOutput,
@@ -670,6 +671,19 @@ _COMPOSITION_TOLERANCE_MIN = 2
 def _validate_blueprint(state: PipelineState, replies: list, encounters: list) -> None:
     """Sanity-check the Thread structure before serialisation."""
     by_slot = {r.slot_id: r for r in replies}
+    unknown_parents = sorted(
+        r.slot_id for r in replies
+        if r.parent_slot_id is not None and r.parent_slot_id not in by_slot
+    )
+    if unknown_parents:
+        raise ValidationStepError(
+            7, _STEP_7_SERIALIZE,
+            ValueError(
+                f"{len(unknown_parents)} reply slot(s) reference a"
+                f" parent_slot_id that is not in the skeleton:"
+                f" {unknown_parents}. Every parent must be a planned slot."
+            ),
+        )
     for r in replies:
         chain = {r.slot_id}
         cursor = r.parent_slot_id
@@ -740,10 +754,38 @@ def _validate_blueprint(state: PipelineState, replies: list, encounters: list) -
             ),
         )
 
-    encounter_slot_ids = {sid for e in encounters for sid in e.slot_ids}
+    # The turn-count check below reads len(e.slot_ids) as delivered
+    # turns; that is only true when every claimed id names a distinct
+    # encounter-role slot in the skeleton.
+    encounter_slot_ids: set[str] = set()
+    double_claimed: set[str] = set()
+    for e in encounters:
+        for sid in e.slot_ids:
+            if sid in encounter_slot_ids:
+                double_claimed.add(sid)
+            encounter_slot_ids.add(sid)
+    if double_claimed:
+        raise ValidationStepError(
+            7, _STEP_7_SERIALIZE,
+            ValueError(
+                f"{len(double_claimed)} slot id(s) are claimed more than "
+                f"once across the EncounterPlans: {sorted(double_claimed)}. "
+                f"Each encounter turn is one distinct slot."
+            ),
+        )
     skel_encounter_ids = {
         r.slot_id for r in replies if r.role == "encounter"
     }
+    phantom_claims = sorted(encounter_slot_ids - skel_encounter_ids)
+    if phantom_claims:
+        raise ValidationStepError(
+            7, _STEP_7_SERIALIZE,
+            ValueError(
+                f"{len(phantom_claims)} EncounterPlan slot id(s) do not name "
+                f"an encounter-role reply in the skeleton: {phantom_claims}. "
+                f"Plans may only claim slots Step 5 pre-allocated."
+            ),
+        )
     orphan_encounter = sorted(skel_encounter_ids - encounter_slot_ids)
     if orphan_encounter:
         raise ValidationStepError(
@@ -752,6 +794,21 @@ def _validate_blueprint(state: PipelineState, replies: list, encounters: list) -
                 f"{len(orphan_encounter)} encounter slot(s) are not claimed by "
                 f"any EncounterPlan: {orphan_encounter}. Step 6 must emit one "
                 f"plan per encounter chain covering every encounter-role slot."
+            ),
+        )
+
+    turns_low, turns_high = ENCOUNTER_TURNS
+    bad_chains = sorted(
+        e.encounter_id for e in encounters
+        if not turns_low <= len(e.slot_ids) <= turns_high
+    )
+    if bad_chains:
+        raise ValidationStepError(
+            7, _STEP_7_SERIALIZE,
+            ValueError(
+                f"encounter plan(s) {bad_chains} fall outside the "
+                f"{turns_low}-{turns_high} turns-per-encounter range the "
+                f"Step 3 reserve arithmetic assumes."
             ),
         )
 
@@ -787,6 +844,24 @@ def _validate_blueprint(state: PipelineState, replies: list, encounters: list) -
                         f"composition."
                     ),
                 )
+
+    if state.target_comment_count is not None:
+        total = len(replies)
+        tolerance = max(
+            _COMPOSITION_TOLERANCE_MIN,
+            round(_COMPOSITION_TOLERANCE_RATIO * state.target_comment_count),
+        )
+        if abs(total - state.target_comment_count) > tolerance:
+            raise ValidationStepError(
+                7, _STEP_7_SERIALIZE,
+                ValueError(
+                    f"the skeleton delivered {total} total slots against "
+                    f"target_comment_count={state.target_comment_count} "
+                    f"(tolerance +/-{tolerance}); encounter chains and mod "
+                    f"actions must fit the Step 3 reserve, not grow the "
+                    f"thread past its calibrated size."
+                ),
+            )
 
     if state.revision_case == "C" and not state.prior_revision:
         raise ValidationStepError(

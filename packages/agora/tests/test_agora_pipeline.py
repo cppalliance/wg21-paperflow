@@ -149,9 +149,11 @@ def _reply(slot_id: str, **overrides) -> Reply:
     return Reply(**fields)
 
 
-def _encounter_plan(slot_ids: list[str]) -> EncounterPlan:
+def _encounter_plan(
+    slot_ids: list[str], encounter_id: str = "e01",
+) -> EncounterPlan:
     return EncounterPlan(
-        encounter_id="e01",
+        encounter_id=encounter_id,
         design_tension_id="t01",
         design_tension="Ergonomics versus compile-time cost.",
         position_a="The API is worth the instantiation cost.",
@@ -183,10 +185,62 @@ def test_validate_blueprint_orphan_raises_even_with_plans_present():
     replies = [
         _reply("s01", role="encounter", depth=3),
         _reply("s02", role="encounter", depth=4),
+        _reply("s03", role="encounter", depth=4),
+        _reply("s04", role="encounter", depth=5),
     ]
-    plans = [_encounter_plan(["s01"])]
+    plans = [_encounter_plan(["s01", "s03", "s04"])]
     with pytest.raises(ValidationStepError, match="s02"):
         _validate_blueprint(state, replies, plans)
+
+
+def test_validate_blueprint_double_claimed_slot_raises():
+    # A duplicated id would let len(slot_ids) count as a 3-turn chain
+    # while the skeleton delivers fewer distinct turns.
+    state = PipelineState(interest="niche")
+    replies = [
+        _reply("s01", role="encounter", depth=3),
+        _reply("s02", role="encounter", depth=4),
+    ]
+    plans = [_encounter_plan(["s01", "s01", "s02"])]
+    with pytest.raises(ValidationStepError, match="claimed more than once"):
+        _validate_blueprint(state, replies, plans)
+
+
+def test_validate_blueprint_phantom_claim_raises():
+    state = PipelineState(interest="niche")
+    replies = [
+        _reply("s01", role="encounter", depth=3),
+        _reply("s02", role="encounter", depth=4),
+    ]
+    plans = [_encounter_plan(["s01", "s02", "s99"])]
+    with pytest.raises(ValidationStepError, match="s99"):
+        _validate_blueprint(state, replies, plans)
+
+
+def test_validate_blueprint_non_encounter_role_claim_raises():
+    # Claiming a real slot of the wrong role is a phantom claim too:
+    # chains are made of the encounter-role slots Step 5 pre-allocated.
+    state = PipelineState(interest="niche")
+    replies = [
+        _reply("s01", role="encounter", depth=3),
+        _reply("s02", role="encounter", depth=4),
+        _reply("s03", role="noise"),
+    ]
+    plans = [_encounter_plan(["s01", "s02", "s03"])]
+    with pytest.raises(ValidationStepError, match="s03"):
+        _validate_blueprint(state, replies, plans)
+
+
+def test_validate_blueprint_distinct_chains_pass():
+    state = PipelineState(interest="niche")
+    replies = [
+        _reply(f"s{n:02d}", role="encounter", depth=3) for n in range(1, 7)
+    ]
+    plans = [
+        _encounter_plan(["s01", "s02", "s03"], encounter_id="e01"),
+        _encounter_plan(["s04", "s05", "s06"], encounter_id="e02"),
+    ]
+    _validate_blueprint(state, replies, plans)
 
 
 def test_validate_blueprint_lens_floor_shortfall_raises():
@@ -260,10 +314,11 @@ def test_validate_blueprint_valid_thread_passes():
         _reply("s03", domain_lens=11, depth=1),
         _reply("s04", role="encounter", depth=3, encounter_id="e01"),
         _reply("s05", role="encounter", depth=4, encounter_id="e01"),
-        _reply("s06", role="noise", noise_tone="sarcastic",
+        _reply("s06", role="encounter", depth=5, encounter_id="e01"),
+        _reply("s07", role="noise", noise_tone="sarcastic",
                noise_stance="didn't-read", depth=0),
     ]
-    plans = [_encounter_plan(["s04", "s05"])]
+    plans = [_encounter_plan(["s04", "s05", "s06"])]
     _validate_blueprint(state, replies, plans)
 
 
@@ -271,6 +326,59 @@ def test_validate_blueprint_no_anchors_passes_vacuously():
     """Process documents legitimately plan zero anchors."""
     state = PipelineState(interest="niche")
     _validate_blueprint(state, [_reply("s01", role="noise")], [])
+
+
+def test_validate_blueprint_unknown_parent_raises():
+    state = PipelineState(interest="niche")
+    replies = [
+        _reply("s01"),
+        _reply("s02", parent_slot_id="s99", depth=1),
+    ]
+    with pytest.raises(ValidationStepError, match="not in the skeleton"):
+        _validate_blueprint(state, replies, [])
+
+
+@pytest.mark.parametrize("turns", [2, 6])
+def test_validate_blueprint_encounter_chain_length_raises(turns: int):
+    state = PipelineState(interest="niche")
+    slot_ids = [f"s{n:02d}" for n in range(1, turns + 1)]
+    replies = [
+        _reply(sid, role="encounter", depth=n, encounter_id="e01")
+        for n, sid in enumerate(slot_ids)
+    ]
+    plans = [_encounter_plan(slot_ids)]
+    with pytest.raises(ValidationStepError, match="turns-per-encounter"):
+        _validate_blueprint(state, replies, plans)
+
+
+def test_validate_blueprint_total_drift_raises():
+    # Composition can hold while encounter chains / mod slots balloon
+    # the thread: plan 10+14 against target 30, but 45 slots delivered.
+    state = PipelineState(
+        interest="niche", target_comment_count=30,
+        signal_count=10, noise_count=14,
+    )
+    replies = (
+        [_reply(f"s{n:02d}") for n in range(1, 11)]
+        + [_reply(f"s{n:02d}", role="noise") for n in range(11, 25)]
+        + [_reply(f"s{n:02d}", role="mod") for n in range(25, 46)]
+    )
+    with pytest.raises(ValidationStepError, match="total slots"):
+        _validate_blueprint(state, replies, [])
+
+
+def test_validate_blueprint_total_within_tolerance_ok():
+    # 34 delivered against target 30 sits inside the +/-25%-or-2 band.
+    state = PipelineState(
+        interest="niche", target_comment_count=30,
+        signal_count=10, noise_count=14,
+    )
+    replies = (
+        [_reply(f"s{n:02d}") for n in range(1, 11)]
+        + [_reply(f"s{n:02d}", role="noise") for n in range(11, 25)]
+        + [_reply(f"s{n:02d}", role="mod") for n in range(25, 35)]
+    )
+    _validate_blueprint(state, replies, [])
 
 
 def test_validate_blueprint_cyclic_parent_chain_raises():

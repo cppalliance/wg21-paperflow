@@ -186,6 +186,22 @@ def test_depth_inconsistent_with_parent_rejected(rich_artifact: dict):
         validate_artifact(rich_artifact)
 
 
+def test_late_parent_with_non_int_depth_rejected(rich_artifact: dict):
+    # A parent listed after its child, carrying a null depth, must
+    # surface as ArtifactError - not as a TypeError from the child's
+    # parent-depth arithmetic running before the parent's own check.
+    comments = rich_artifact["comments"]
+    child = next(c for c in comments if c["parent_slot_id"] is not None)
+    parent = next(
+        c for c in comments if c["slot_id"] == child["parent_slot_id"]
+    )
+    parent["depth"] = None
+    comments.remove(parent)
+    comments.append(parent)
+    with pytest.raises(ArtifactError, match="out-of-range depth"):
+        validate_artifact(rich_artifact)
+
+
 def test_top_level_comment_with_nonzero_depth_rejected(rich_artifact: dict):
     top = next(
         c for c in rich_artifact["comments"] if c["parent_slot_id"] is None
