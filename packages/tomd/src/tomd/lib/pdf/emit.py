@@ -745,10 +745,12 @@ def _render_cell_spans(spans: list, suppress_bold: bool = False) -> str:
         return ""
     # Decode Dingbats font control chars (✓/✗) before rendering
     spans = [_decode_dingbats(s) for s in spans]
-    # Replace newline markers with spaces for pipe-table rendering
+    # Replace newline markers with spaces for pipe-table rendering. The
+    # marker is whitespace-only but its exact spelling varies by producer
+    # ("\n", " \n", "\n  "), so test the shape rather than the literal.
     flat_spans = []
     for s in spans:
-        if s.text == "\n":
+        if not s.text.strip() and "\n" in s.text:
             if flat_spans and flat_spans[-1].text.endswith(" "):
                 continue
             flat_spans.append(Span(text=" "))
@@ -948,6 +950,19 @@ def _render_html_table(sec: Section) -> str:
     return "\n".join(parts)
 
 
+_CELL_WRAP_RE = re.compile(r"\s*\n\s*")
+
+
+def _flatten_cell(text: str) -> str:
+    """Collapse a soft-wrapped cell onto one line for pipe-table rendering.
+
+    Only whitespace runs containing a newline are collapsed, so how much
+    space surrounds the wrap point does not matter and space runs elsewhere
+    (inline code) are left alone.
+    """
+    return _CELL_WRAP_RE.sub(" ", text).strip()
+
+
 def _render_table(sec: Section) -> str:
     """Render a table section according to its assigned strategy."""
     if sec.table_strategy == "code_blocks":
@@ -970,7 +985,7 @@ def _render_table(sec: Section) -> str:
     else:
         header = rows[0]
         header_cells = [
-            _render_cell_spans(cell, suppress_bold=True).replace("\n", " ")
+            _flatten_cell(_render_cell_spans(cell, suppress_bold=True))
             for cell in header
         ]
         while len(header_cells) < num_cols:
@@ -981,7 +996,7 @@ def _render_table(sec: Section) -> str:
 
     for row in data_rows:
         cells = [
-            _render_cell_spans(cell).replace("\n", " ")
+            _flatten_cell(_render_cell_spans(cell))
             for cell in row
         ]
         while len(cells) < num_cols:
