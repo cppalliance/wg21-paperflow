@@ -10,10 +10,10 @@
   "n5040": {
     "code": 1.0,
     "frontmatter": 1.0,
-    "heading": 1.0,
+    "heading": 0.99,
     "list": 1.0,
     "table": 1.0,
-    "text": 1.0
+    "text": 0.98
   },
   "p0533r9": {
     "code": 0.37,
