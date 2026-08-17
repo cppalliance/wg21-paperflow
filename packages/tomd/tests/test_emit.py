@@ -1145,3 +1145,50 @@ class TestEmdashBulletItems:
         assert "- (5.1) if their header-names differ, they import distinct " \
                "header units;" in md
         assert "- (5.2) otherwise, the same header unit." in md
+
+
+# --- pipe-table cell flattening (issue #360) --------------------------------
+#
+# A wrapped prose cell reaches the emitter as several spans separated by a
+# whitespace-only marker. Producers spell that marker inconsistently, so the
+# flattening must key on the shape (whitespace containing a newline) rather
+# than on the literal "\n".
+
+
+def _pipe_table(cells):
+    """Render a one-data-row, N-column pipe table and return its lines."""
+    header = [[make_span(f"H{i}")] for i in range(len(cells))]
+    sec = Section(kind=SectionKind.TABLE, text="", confidence=Confidence.HIGH,
+                  columns=[header, cells], table_strategy="pipe_table")
+    return emit_markdown({}, [sec]).splitlines()
+
+
+class TestFlattenPipeCell:
+    def test_bare_newline_marker_joins_with_one_space(self):
+        cell = [make_span("Allow "), make_span("\n"),
+                make_span("incomplete types")]
+        row = _pipe_table([cell, [make_span("ok")]])[-1]
+        assert row == "| Allow incomplete types | ok |"
+
+    def test_marker_padded_with_spaces_joins_with_one_space(self):
+        cell = [make_span("Allow "), make_span("  \n  "),
+                make_span("incomplete types")]
+        row = _pipe_table([cell, [make_span("ok")]])[-1]
+        assert row == "| Allow incomplete types | ok |"
+
+    def test_marker_without_surrounding_space_still_joins(self):
+        cell = [make_span("sockets"), make_span("\n"), make_span("TLS")]
+        row = _pipe_table([cell, [make_span("ok")]])[-1]
+        assert row == "| sockets TLS | ok |"
+
+    def test_embedded_newline_collapses_without_doubling_spaces(self):
+        """The wrap point survives inside a span, not as its own marker."""
+        cell = [make_span("Bit-precise integers \nSlides for P3666R1")]
+        row = _pipe_table([cell, [make_span("ok")]])[-1]
+        assert row == "| Bit-precise integers Slides for P3666R1 | ok |"
+
+    def test_a_cell_never_emits_a_literal_newline(self):
+        cell = [make_span("a"), make_span("\n\n"), make_span("b"),
+                make_span(" \n"), make_span("c")]
+        lines = _pipe_table([cell, [make_span("ok")]])
+        assert lines[-1] == "| a b c | ok |"

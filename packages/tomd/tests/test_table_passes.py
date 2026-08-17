@@ -861,3 +861,126 @@ class TestFilterOverlappingMupdfTablesCrossPage:
         kept = _filter_overlapping_mupdf_tables(
             page_tables, [self._cross_page_section()])
         assert kept == {}
+
+
+# --- N5040 attendance table (issue #360) ------------------------------------
+#
+# A two-column bordered table whose header cells are CENTERED while every
+# body cell is left-aligned, running past the bottom of one page and
+# continuing at the top of the next. Geometry mirrors the real paper:
+# body names at x0=74, national bodies at x0=367, and the centered header
+# cells at x0=203 / x0=404.
+
+_ATT_NAME_X = 74.0
+_ATT_BODY_X = 367.0
+_ATT_HDR_NAME_X = 203.0
+_ATT_HDR_BODY_X = 404.0
+
+
+def _attendance_page(names, page_num, y0, *, header=False, blank_tail=0):
+    """Build one page's worth of the attendance table as a single Block."""
+    lines, y = [], y0
+    if header:
+        lines.append(_line("Name", _ATT_HDR_NAME_X, y, _ATT_HDR_NAME_X + 36, y + 13))
+        lines.append(_line("National Body", _ATT_HDR_BODY_X, y,
+                           _ATT_HDR_BODY_X + 78, y + 13))
+        y += 17
+    for name, body in names:
+        lines.append(_line(name, _ATT_NAME_X, y, _ATT_NAME_X + 90, y + 13))
+        lines.append(_line(body, _ATT_BODY_X, y, _ATT_BODY_X + 31, y + 13))
+        y += 17
+    for _ in range(blank_tail):
+        lines.append(_line(" ", _ATT_NAME_X, y, _ATT_NAME_X + 3, y + 13))
+        y += 17
+    for ln in lines:
+        ln.page_num = page_num
+    x1 = _ATT_HDR_BODY_X + 78
+    blk = Block(lines=lines, bbox=(_ATT_NAME_X, y0, x1, y), page_num=page_num)
+    return blk, (_ATT_NAME_X, y0, x1, y)
+
+
+class TestInlineGridAttendanceTable:
+    """Issue #360: phantom column, page-break splits, blank trailing rows."""
+
+    @staticmethod
+    def _run(blocks, bboxes):
+        from tomd.lib.pdf.table import _detect_inline_grid_tables
+        mupdf = {}
+        for blk, bbox in zip(blocks, bboxes):
+            mupdf.setdefault(blk.page_num, []).append({"bbox": bbox})
+        return _detect_inline_grid_tables(blocks, mupdf)
+
+    def _two_pages(self, blank_tail=0):
+        page_a = [(f"Name A{i}", "ANSI") for i in range(38)]
+        page_b = [(f"Name B{i}", "BSI") for i in range(20)]
+        blk_a, bb_a = _attendance_page(page_a, 0, 120.0, header=True)
+        blk_b, bb_b = _attendance_page(page_b, 1, 120.0, blank_tail=blank_tail)
+        return self._run([blk_a, blk_b], [bb_a, bb_b])
+
+    def test_centered_header_does_not_create_a_phantom_column(self):
+        sections, _ = self._two_pages()
+        assert len(sections) == 1
+        assert len(sections[0].columns[0]) == 2
+
+    def test_header_row_holds_the_column_labels(self):
+        sections, _ = self._two_pages()
+        header = ["".join(s.text for s in cell).strip()
+                  for cell in sections[0].columns[0]]
+        assert header == ["Name", "National Body"]
+
+    def test_page_break_does_not_start_a_second_table(self):
+        sections, _ = self._two_pages()
+        assert len(sections) == 1
+        # 1 header + 38 + 20 attendees, nothing dropped or duplicated.
+        assert len(sections[0].columns) == 59
+
+    def test_continuation_rows_are_body_rows_not_headers(self):
+        sections, _ = self._two_pages()
+        first_continuation = [
+            "".join(s.text for s in cell).strip()
+            for cell in sections[0].columns[39]
+        ]
+        assert first_continuation == ["Name B0", "BSI"]
+
+    def test_blank_source_lines_do_not_become_empty_rows(self):
+        sections, _ = self._two_pages(blank_tail=2)
+        rows = sections[0].columns
+        assert len(rows) == 59
+        for row in rows:
+            assert any("".join(s.text for s in cell).strip() for cell in row)
+
+
+class TestMergeCrossPageFragments:
+    """The merge helper is shared by the inline-grid and MuPDF-native passes."""
+
+    @staticmethod
+    def _fragment(rows, page_num, y0, y1):
+        from tomd.lib.pdf.types import Confidence, Section, SectionKind
+        lines = [_line(rows[0][0], 74.0, y0, 160.0, y0 + 13),
+                 _line(rows[-1][0], 74.0, y1 - 13, 160.0, y1)]
+        for ln in lines:
+            ln.page_num = page_num
+        columns = [[[Span(text=c)] for c in row] for row in rows]
+        return Section(kind=SectionKind.TABLE, text="",
+                       confidence=Confidence.HIGH, lines=lines,
+                       page_num=page_num, columns=columns)
+
+    def test_merges_fragments_across_a_page_break(self):
+        from tomd.lib.pdf.table import _merge_cross_page_fragments
+        a = self._fragment([["a1", "x"], ["a2", "y"]], 0, 120.0, 760.0)
+        b = self._fragment([["b1", "z"], ["b2", "w"]], 1, 120.0, 300.0)
+        merged = _merge_cross_page_fragments([a, b])
+        assert len(merged) == 1
+        assert len(merged[0].columns) == 4
+
+    def test_leaves_fragments_with_different_column_counts_alone(self):
+        from tomd.lib.pdf.table import _merge_cross_page_fragments
+        a = self._fragment([["a1", "x"], ["a2", "y"]], 0, 120.0, 760.0)
+        b = self._fragment([["b1", "z", "extra"]], 1, 120.0, 300.0)
+        assert len(_merge_cross_page_fragments([a, b])) == 2
+
+    def test_leaves_mid_page_neighbours_alone(self):
+        from tomd.lib.pdf.table import _merge_cross_page_fragments
+        a = self._fragment([["a1", "x"], ["a2", "y"]], 0, 120.0, 300.0)
+        b = self._fragment([["b1", "z"]], 1, 400.0, 500.0)
+        assert len(_merge_cross_page_fragments([a, b])) == 2

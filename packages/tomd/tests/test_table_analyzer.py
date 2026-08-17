@@ -173,3 +173,50 @@ class TestClassifyAndAnnotate:
         kind, strategy, _ = _classify_and_annotate(rows)
         assert kind == "code_comparison"
         assert strategy == "html_table"
+
+    def test_soft_wrapped_prose_stays_a_pipe_table(self):
+        """N5040: a wrapped prose cell is not multi-line content."""
+        wrapped = [
+            make_span("US 70-126 [compare.type] Allow "),
+            make_span("\n"),
+            make_span("incomplete types in type_order"),
+        ]
+        rows = [
+            [_cell("#"), _cell("Title"), _cell("Status")],
+            [_cell("1"), wrapped, _cell("Accepted (C++26)")],
+        ]
+        _, strategy, _ = _classify_and_annotate(rows)
+        assert strategy == "pipe_table"
+
+    def test_multiline_code_cell_still_escapes_to_html(self):
+        """A break inside monospace is semantic and must survive."""
+        code = [
+            make_span("struct Draw {", monospace=True),
+            make_span("\n", monospace=True),
+            make_span("  void f();", monospace=True),
+        ]
+        rows = [
+            [_cell("Before"), _cell("After")],
+            [code, _cell("some prose describing the change")],
+        ]
+        _, strategy, _ = _classify_and_annotate(rows)
+        assert strategy == "html_table"
+
+    def test_mixed_table_escapes_when_any_cell_is_code(self):
+        """p0957r8: prose and assembly in one table; the assembly wins."""
+        prose = [
+            make_span("To evaluate code generation we "),
+            make_span("\n"),
+            make_span("compiled the example."),
+        ]
+        asm = [
+            make_span("mov rax, qword ptr [rdi]", monospace=True),
+            make_span("\n", monospace=True),
+            make_span("jmp qword ptr [rax + 24]", monospace=True),
+        ]
+        rows = [
+            [_cell("Notes"), _cell("Output")],
+            [prose, asm],
+        ]
+        _, strategy, _ = _classify_and_annotate(rows)
+        assert strategy == "html_table"
