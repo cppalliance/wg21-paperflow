@@ -605,6 +605,52 @@ async def test_fetch_failure_cache_keyed_on_normalized_url():
 
 
 @pytest.mark.anyio
+async def test_fetched_urls_records_successes_even_when_extraction_fails():
+    stream, _resp = _stream_mock(
+        status_code=200,
+        headers={"content-type": "text/html"},
+        chunks=[b"<html><body><p>Hello world</p></body></html>"],
+        charset_encoding="utf-8",
+    )
+
+    backend = FakeBackend()
+    async with WebResearcher(backend=backend) as r:
+        assert r.fetched_urls == frozenset()
+        with patch.object(r._client, "stream", stream):
+            await r.fetch("https://example.com/article", extract=False)
+            # extract=True on a page trafilatura can't handle still counts:
+            # the 200 proves the URL exists and was visited.
+            await r.fetch("https://example.com/unextractable")
+        assert r.fetched_urls == frozenset(
+            {"https://example.com/article", "https://example.com/unextractable"}
+        )
+
+
+@pytest.mark.anyio
+async def test_fetched_urls_normalized_and_excludes_failures():
+    base = "https://www.open-std.org/jtc1/sc22/wg21/docs/papers/2026/"
+    ok_stream, _resp = _stream_mock(
+        status_code=200,
+        headers={"content-type": "text/html"},
+        chunks=[b"<html><body><p>Hello world</p></body></html>"],
+        charset_encoding="utf-8",
+    )
+    fail_stream, _fail_resp = _stream_mock(
+        status_code=404,
+        headers={"content-type": "text/html"},
+        chunks=[b"ignored"],
+    )
+
+    backend = FakeBackend()
+    async with WebResearcher(backend=backend) as r:
+        with patch.object(r._client, "stream", ok_stream):
+            await r.fetch(base + "P4148R0.html", extract=False)
+        with patch.object(r._client, "stream", fail_stream):
+            await r.fetch("https://example.com/gone")
+        assert r.fetched_urls == frozenset({base + "p4148r0.html"})
+
+
+@pytest.mark.anyio
 async def test_fetch_transport_error_not_cached():
     failing_stream = MagicMock(side_effect=httpx.HTTPError("boom"))
 

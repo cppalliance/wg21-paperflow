@@ -30,6 +30,7 @@ from agora.generate import (
     _flag_edited,
     _pure_cast,
     _pure_voice,
+    _verified_links,
     generation_order,
 )
 from agora.models import (
@@ -698,3 +699,55 @@ def test_voice_prompt_lists_verified_links(agora_prompt, specs_by_name,
         assert thread.submission_link in prompt_text, slot_id
     # The carries_link slot is pointed at the list, not at invention.
     assert "copied verbatim from the Verified Links" in prompts["s09"]
+
+
+def test_verified_links_admits_only_fetched_research_sources():
+    fetched_source = "https://old.reddit.com/r/cpp/comments/abc123/p4003/"
+    phantom_source = "https://blog.example.com/p4003-review"
+    thread = _full_thread()
+    report = thread.research_summary.public_reception.model_copy(
+        update={"sources": [fetched_source, phantom_source]}
+    )
+    thread = thread.model_copy(
+        update={
+            "research_summary": thread.research_summary.model_copy(
+                update={"public_reception": report}
+            )
+        }
+    )
+    # The fetch log carries the URL as the session normalized it —
+    # trailing-slash and case differences must not defeat the match.
+    state = PipelineState(
+        thread=thread,
+        research_fetched_urls=["https://old.reddit.com/r/cpp/comments/abc123/p4003"],
+    )
+
+    section, allowed = _verified_links(state, thread)
+
+    assert fetched_source in section
+    assert phantom_source not in section
+    assert "https://old.reddit.com/r/cpp/comments/abc123/p4003" in allowed
+    assert "https://blog.example.com/p4003-review" not in allowed
+
+
+def test_verified_links_drops_all_sources_without_a_fetch_log():
+    source = "https://old.reddit.com/r/cpp/comments/abc123/p4003"
+    thread = _full_thread()
+    report = thread.research_summary.public_reception.model_copy(
+        update={"sources": [source]}
+    )
+    thread = thread.model_copy(
+        update={
+            "research_summary": thread.research_summary.model_copy(
+                update={"public_reception": report}
+            )
+        }
+    )
+    state = PipelineState(thread=thread)
+
+    section, allowed = _verified_links(state, thread)
+
+    assert source not in section
+    assert source not in allowed
+    # The by-construction entries are untouched by the filter.
+    assert thread.submission_link in section

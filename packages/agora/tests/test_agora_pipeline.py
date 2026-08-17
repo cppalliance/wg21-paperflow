@@ -573,6 +573,46 @@ def test_research_enabled_dispatches_all_three_agents(
     # Slot names are forced even if the model echoed something else.
     assert summary.committee_history.agent == "committee_history"
     assert summary.author_ecosystem.agent == "author_ecosystem"
+    # No researcher on this ctx: the fetch log records as empty, not None.
+    assert state.research_fetched_urls == []
+
+
+def test_research_copies_fetch_log_into_state(
+    agora_prompt: PipelinePrompt, monkeypatch,
+):
+    async def fake_run_task(agent, system_prompt, user_message, output_type,
+                            **kwargs):
+        return ResearchAgentReport(
+            agent="public_reception",
+            findings="stub findings",
+            sources=["https://b.example/x"],
+            heat_signal="warm",
+            interest_signal="relevant",
+        )
+
+    class _StubResearcher:
+        fetched_urls = frozenset(
+            {"https://b.example/x", "https://a.example/y"}
+        )
+
+    monkeypatch.setattr("agora.pipeline.run_task", fake_run_task)
+    hooks = _build_hooks()
+    specs = build_pipeline(agora_prompt, hooks)
+    spec = next(s for s in specs if s.step.name == _STEP_2_RESEARCH)
+    ctx = StepContext(
+        prompt=agora_prompt,
+        agents={spec.step.model: object()},
+        researcher=_StubResearcher(),
+        tool_registry={
+            "deep_search": lambda *a, **k: None,
+            "web_fetch": lambda *a, **k: None,
+        },
+    )
+    state = PipelineState()
+    asyncio.run(_pure_research(state, ctx, spec))
+    assert state.research_fetched_urls == [
+        "https://a.example/y", "https://b.example/x",
+    ]
 
 
 def test_agora_since_firewall_logs_and_continues(tmp_path: Path, monkeypatch):
