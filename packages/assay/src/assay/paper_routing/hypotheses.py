@@ -24,6 +24,7 @@ from assay.paper_routing.seqcls_thresholds import (
     _ROUTING_SEQCLS_THRESHOLD_FALLBACK,
     load_seqcls_hypothesis_thresholds,
 )
+from assay.paper_routing.sample import sample_sentences_with_summary
 from assay.paper_routing.split import RawSentence, split_sentences
 from assay.paper_routing.types import HypothesisAxis, SectionType, Sentence
 
@@ -599,6 +600,38 @@ def _raw_units_from_input(
     )
 
 
+def _build_filtered_sentences(
+    raw_units: list[RawSentence],
+    line_sections: list[SectionType],
+) -> list[Sentence]:
+    """Length-eligible units with empty hits and stable indices among kept rows."""
+    sentences: list[Sentence] = []
+    for raw in raw_units:
+        if len(raw.text) < _MIN_SENTENCE_CHARS:
+            continue
+        sentences.append(
+            Sentence(
+                text=raw.text,
+                section=section_for_sentence(raw, line_sections),
+                index=len(sentences),
+                hypothesis_hits=frozenset(),
+            ),
+        )
+    return sentences
+
+
+def _apply_regex_hits(sentences: list[Sentence]) -> list[Sentence]:
+    return [
+        Sentence(
+            text=sent.text,
+            section=sent.section,
+            index=sent.index,
+            hypothesis_hits=frozenset(get_hits_from_text(sent.text)),
+        )
+        for sent in sentences
+    ]
+
+
 def score_hypotheses(
     paper_md_or_sentences: str | list[str],
     *,
@@ -632,27 +665,16 @@ def score_hypotheses(
 
     raw_units, line_sections = _raw_units_from_input(paper_md_or_sentences)
 
-    sentences: list[Sentence] = []
-    for idx, raw in enumerate(raw_units):
-        if len(raw.text) < _MIN_SENTENCE_CHARS:
-            continue
-        if len(sentences) >= _MAX_SENTENCES_PER_PAPER:
-            if debug_log is not None:
-                debug_log.append(
-                    f"[routing] sentence cap ({_MAX_SENTENCES_PER_PAPER}) reached "
-                    f"at raw unit {idx}; {len(raw_units) - idx - 1} units dropped\n",
-                )
-            break
+    filtered = _build_filtered_sentences(raw_units, line_sections)
+    sentences, sample_summary = sample_sentences_with_summary(
+        filtered,
+        cap=_MAX_SENTENCES_PER_PAPER,
+    )
+    if sample_summary is not None and debug_log is not None:
+        debug_log.append(sample_summary)
 
-        hits = get_hits_from_text(raw.text) if use_regex else set()
-        sentences.append(
-            Sentence(
-                text=raw.text,
-                section=section_for_sentence(raw, line_sections),
-                index=len(sentences),
-                hypothesis_hits=frozenset(hits),
-            ),
-        )
+    if use_regex:
+        sentences = _apply_regex_hits(sentences)
 
     for backend in resolved:
         if isinstance(backend, NliCrossEncoderBackend):

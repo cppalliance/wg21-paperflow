@@ -526,6 +526,25 @@ def test_score_hypotheses_use_regex_false_skips_regex_hits():
     assert scored[0].hypothesis_hits == frozenset()
 
 
+def test_section_stratified_sampling_includes_wording_block():
+    design_line = (
+        "We propose adding std::widget to the standard library design section."
+    )
+    wording_line = (
+        "Modify [namespace.std.foo] to add the following normative wording text."
+    )
+    lines = ["## Design"]
+    lines.extend(design_line for _ in range(50))
+    lines.append("## Proposed wording")
+    lines.extend(wording_line for _ in range(400))
+    md = "\n".join(lines)
+    scored = score_hypotheses(md, use_regex=True, classifiers=None)
+    assert len(scored) == 300
+    wording = [s for s in scored if s.section == SectionType.WORDING]
+    assert wording
+    assert max(s.index for s in wording) > 100
+
+
 class _StubSeqcls(MultiLabelClassifierBackend):
     def __init__(self) -> None:
         self.model_id = "fake/seqcls-routing"
