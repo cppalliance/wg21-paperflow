@@ -68,12 +68,12 @@ Table 1 maps the spec's stage names to what this package does today.
 
 **Table 1.** Stage names from `paper-routing-classifier.md` and what ships here.
 
-| Stage | Spec name                               | As shipped                                                           |
-| ----- | --------------------------------------- | -------------------------------------------------------------------- |
+| Stage | Spec name                               | As shipped                                                                                                                    |
+| ----- | --------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
 | 1     | Sentence splitting                      | Split markdown; drop units under 20 characters; section-stratified sample to 300 (Hamilton quotas, stride, APPENDIX excluded) |
-| 2     | Section detection                       | Tag each sentence from headings                                      |
-| 3     | Hypothesis scoring                      | Regex catalog, then NLI (production) or seqcls                       |
-| 4-6   | Aggregation, sustained test, thresholds | HGB paper-level head on the production path; hand math as fallback   |
+| 2     | Section detection                       | Tag each sentence from headings                                                                                               |
+| 3     | Hypothesis scoring                      | Regex catalog, then NLI (production) or seqcls                                                                                |
+| 4-6   | Aggregation, sustained test, thresholds | HGB paper-level head on the production path; hand math as fallback                                                            |
 
 The spec still calls Stage 4 the most important stage and says Stages 2, 4, 5, and 6 need no ML. Production assay replaces that 4-6 block with HGB when the eligibility gate passes. The spec file is unchanged.
 
@@ -88,6 +88,7 @@ The spec still calls Stage 4 the most important stage and says Stages 2, 4, 5, a
 | `headings.py` / `sections.py`                  | Stage 2 heading to section type                             |
 | `standardese.py`                               | Normative-element hints for splitting                       |
 | `hypotheses.py`                                | Stage 3 catalog and scoring                                 |
+| `nli_thresholds.py`                            | Per-label NLI cutoffs                                       |
 | `seqcls_thresholds.py`                         | Per-label seqcls cutoffs                                    |
 | `learned_aggregate.py`                         | Frozen HGB paper-level head                                 |
 | `features.py`                                  | Paper-wide feature vector for HGB                           |
@@ -100,4 +101,4 @@ Routing emits only LEWG, LWG, EWG, and CWG. Study Groups have no labels. This is
 
 Routing scores at most 300 sentences (Hamilton quotas by section, stride inside each section, APPENDIX excluded) and ignores units shorter than 20 characters. Section tags come from headings; mixed design and wording under one heading still confuses stage 2. The hand fallback still uses a sustained-count gate; production HGB does not use that gate to emit labels. Audience metadata is a weak signal, not an override.
 
-Held-out numbers and the NLI+HGB default are in [`../../../data/routing/report_hgb_adoption.md`](../../../data/routing/report_hgb_adoption.md).
+Held-out numbers come from `packages/assay/scripts/eval_route_paper.py`. The train script writes `data/routing/train_report.json` locally. Those reports are generated, not committed. The NLI+HGB default is the Survey binding in [`../assay.md`](../assay.md).

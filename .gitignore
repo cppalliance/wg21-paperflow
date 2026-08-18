@@ -40,3 +40,5 @@ packages/assay/data/*
 !packages/assay/data/nli/
 !packages/assay/data/nli/**
 packages/assay/data/**/._*
+packages/assay/data/routing/train_report.json
+packages/assay/data/routing/report_hgb_adoption.md

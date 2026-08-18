@@ -122,6 +122,13 @@ def sample_sentences_with_summary(
 
     if len(eligible) <= cap:
         kept = sorted(eligible, key=lambda s: s.index)
+        dropped_appendix = len(sentences) - len(eligible)
+        if dropped_appendix > 0:
+            summary = (
+                f"[routing] sampled {len(kept)} of {len(sentences)}: "
+                f"dropped {dropped_appendix} APPENDIX\n"
+            )
+            return kept, summary
         return kept, None
 
     section_counts = {
