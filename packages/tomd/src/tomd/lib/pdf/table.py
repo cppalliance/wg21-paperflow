@@ -428,6 +428,32 @@ def _nearest_column(x: float, col_xs: list[float]) -> int:
 
 
 _SBS_MUPDF_DEFER_MIN_ROWS = 5
+_MUPDF_REGION_MARGIN = 4.0  # pt of slack when testing block containment
+
+
+def _pass1_region_incomplete(
+    region: tuple[float, float, float, float],
+    page_num: int,
+    table_blocks: list[Block],
+    all_blocks: list[Block],
+) -> bool:
+    """True when `region` contains blocks Pass 1 did not claim.
+
+    find_tables() sees the whole bordered table; Pass 1 assembles rows from
+    block geometry and can miss one (P3290R4's enum.detection header shares a
+    block with its first data row). When MuPDF's region covers a block Pass 1
+    left behind, Pass 1 is working from a partial view and must stand down.
+    """
+    x0, y0, x1, y1 = region
+    m = _MUPDF_REGION_MARGIN
+    claimed = {id(b) for b in table_blocks}
+    for blk in all_blocks:
+        if blk.page_num != page_num or id(blk) in claimed:
+            continue
+        if (blk.bbox[0] >= x0 - m and blk.bbox[2] <= x1 + m
+                and blk.bbox[1] >= y0 - m and blk.bbox[3] <= y1 + m):
+            return True
+    return False
 
 def _detect_side_by_side_tables(
     blocks: list[Block],
@@ -1867,6 +1893,7 @@ _SPANNING_HEADER_MIN_COLS = 2
 _TRAILING_HR_MIN_CELLS = 3
 _TRAILING_HR_MAX_CELL_LEN = 4
 _TRAILING_HR_Y_GAP = 8.0
+_TRAILING_HR_MIN_BANDS = 2  # header + at least one data row
 
 
 def _block_horizontal_row(block: Block) -> list[float] | None:
@@ -1994,17 +2021,68 @@ def _block_horizontal_row_relaxed(
     return None
 
 
+def _line_y_center(line: Line) -> float:
+    return (line.bbox[1] + line.bbox[3]) / 2
+
+
+def _is_cell_band(band: list[Line]) -> bool:
+    """True when `band` looks like one row of short, side-by-side cells."""
+    if len(band) < _TRAILING_HR_MIN_CELLS:
+        return False
+    if not all(len(ln.text.strip()) <= _TRAILING_HR_MAX_CELL_LEN
+               for ln in band):
+        return False
+    by_x = sorted(band, key=lambda ln: ln.bbox[0])
+    return not any(by_x[k + 1].bbox[0] < by_x[k].bbox[2]
+                   for k in range(len(by_x) - 1))
+
+
+def _trailing_cell_bands(
+    lines: list[Line],
+) -> tuple[list[list[Line]], int]:
+    """Maximal run of trailing y-bands that all look like table rows.
+
+    Walks backwards grouping lines into y-bands and stops at the first band
+    that fails the cell guards or disagrees on cell count: a header and its
+    data rows describe the same columns, so a differing count means the run
+    has reached unrelated content.
+
+    Returns (bands in document order, index where the run starts).
+    """
+    bands: list[list[Line]] = []
+    idx = len(lines)
+    while idx > 0:
+        y_c = _line_y_center(lines[idx - 1])
+        start = idx
+        while (start > 0
+               and abs(_line_y_center(lines[start - 1]) - y_c)
+               <= _HORIZONTAL_ROW_Y_TOLERANCE):
+            start -= 1
+        band = lines[start:idx]
+        if not _is_cell_band(band):
+            break
+        if bands and len(band) != len(bands[-1]):
+            break
+        bands.append(band)
+        idx = start
+    bands.reverse()
+    return bands, idx
+
+
 def _split_trailing_horizontal_rows(
     blocks: list[Block],
 ) -> tuple[list[Section], list[Block]]:
-    """Split blocks where trailing lines form a merged table header.
+    """Split blocks where trailing lines form merged table rows.
 
-    MuPDF sometimes merges table header cells into the preceding
-    paragraph block when the data cells are empty.  Detects trailing
-    lines that are (a) on the same y-band, (b) very short text,
-    (c) separated by a y-gap from the paragraph text, and (d)
-    non-overlapping in x.  Creates a header-only TABLE section and
-    returns the shortened paragraph block.
+    MuPDF merges table cells into the preceding paragraph block. Two shapes
+    occur: a header row alone when the data cells are empty (P4012R0 §2.2),
+    and a header row plus its data rows when both are populated (P3290R4's
+    poll boxes, issue #368). Peeling only the last band mistakes the data row
+    for the header, so peel every trailing band that qualifies.
+
+    Bands must be (a) on one y-band each, (b) very short text, (c) separated
+    by a y-gap from the paragraph text, and (d) non-overlapping in x. Creates
+    a TABLE section and returns the shortened paragraph block.
     """
     table_sections: list[Section] = []
     result_blocks: list[Block] = []
@@ -2014,65 +2092,57 @@ def _split_trailing_horizontal_rows(
             result_blocks.append(block)
             continue
 
-        best_start = None
-        for start in range(max(1, len(block.lines) - 10),
-                           len(block.lines) - _TRAILING_HR_MIN_CELLS + 1):
-            trailing = block.lines[start:]
-            if len(trailing) < _TRAILING_HR_MIN_CELLS:
-                continue
-            y_centers = [(ln.bbox[1] + ln.bbox[3]) / 2 for ln in trailing]
-            if max(y_centers) - min(y_centers) > _HORIZONTAL_ROW_Y_TOLERANCE:
-                continue
-            if not all(len(ln.text.strip()) <= _TRAILING_HR_MAX_CELL_LEN
-                       for ln in trailing):
-                continue
-            prev_y_c = (block.lines[start - 1].bbox[1]
-                        + block.lines[start - 1].bbox[3]) / 2
-            gap = min(y_centers) - prev_y_c
-            if gap < _TRAILING_HR_Y_GAP:
-                continue
-            by_x = sorted(trailing, key=lambda ln: ln.bbox[0])
-            if any(by_x[k + 1].bbox[0] < by_x[k].bbox[2]
-                   for k in range(len(by_x) - 1)):
-                continue
-            best_start = start
-            break
+        bands, start = _trailing_cell_bands(block.lines)
 
-        if best_start is None:
+        # A lone band is only a merged header when it trails paragraph text.
+        # A block that is entirely one row belongs to the horizontal-row pass.
+        if len(bands) < _TRAILING_HR_MIN_BANDS and start == 0:
+            bands = []
+        # Merged rows sit visibly below the paragraph they were folded into.
+        if bands and start > 0:
+            prev_c = _line_y_center(block.lines[start - 1])
+            first_c = min(_line_y_center(ln) for ln in bands[0])
+            if first_c - prev_c < _TRAILING_HR_Y_GAP:
+                bands = []
+
+        if not bands:
             result_blocks.append(block)
             continue
 
-        para_lines = block.lines[:best_start]
-        header_lines = block.lines[best_start:]
+        para_lines = block.lines[:start]
+        if para_lines:
+            result_blocks.append(Block(
+                lines=para_lines,
+                bbox=(block.bbox[0], block.bbox[1],
+                      block.bbox[2], para_lines[-1].bbox[3]),
+                page_num=block.page_num,
+            ))
 
-        para_block = Block(
-            lines=para_lines,
-            bbox=(block.bbox[0], block.bbox[1],
-                  block.bbox[2], para_lines[-1].bbox[3]),
-            page_num=block.page_num,
-        )
-        result_blocks.append(para_block)
+        rows: list[list[list]] = [
+            [list(ln.spans) for ln in band] for band in bands]
+        if len(rows) < _TRAILING_HR_MIN_BANDS:
+            # Header whose data cells are empty: synthesize the body row so
+            # the table does not render as a bare header.
+            rows.append([[] for _ in bands[0]])
+            text = " | ".join(ln.text.strip() for ln in bands[0])
+        else:
+            text = _render_table_text(rows)
 
-        header_row = [list(ln.spans) for ln in header_lines]
-        empty_row: list[list] = [[] for _ in header_lines]
-        text = " | ".join(ln.text.strip() for ln in header_lines)
-
-        kind_val, strategy_val, rows = _classify_and_annotate(
-            [header_row, empty_row])
+        kind_val, strategy_val, _ = _classify_and_annotate(rows)
 
         table_sections.append(Section(
             kind=SectionKind.TABLE,
             text=text,
             confidence=Confidence.MEDIUM,
-            lines=list(header_lines),
+            lines=[ln for band in bands for ln in band],
             page_num=block.page_num,
-            columns=[header_row, empty_row],
+            columns=rows,
             table_kind=kind_val,
             table_strategy=strategy_val,
         ))
         _log.debug(
-            "Trailing horizontal-row split: page %d, %d header cells",
-            block.page_num, len(header_lines))
+            "Trailing horizontal-row split: page %d, %d band(s) x %d cells",
+            block.page_num, len(bands), len(bands[0]))
 
     return table_sections, result_blocks
 
@@ -4648,7 +4718,10 @@ def detect_tables(
                                 p1_deferred = True
                                 break
                             continue
-                        if tbl.get("row_count", 0) < _SBS_MUPDF_DEFER_MIN_ROWS:
+                        if (tbl.get("row_count", 0)
+                                < _SBS_MUPDF_DEFER_MIN_ROWS
+                                and not _pass1_region_incomplete(
+                                    tb, p1_page, table_blocks, blocks)):
                             continue
                         # Phantom guard: if MuPDF's table is much
                         # taller than what Pass 1 detected, MuPDF has
