@@ -831,6 +831,7 @@ _INLINE_GRID_COL_GAP = 30.0       # min x-gap to count as distinct column
 _INLINE_GRID_Y_BAND = 5.0         # max y-difference for same-row lines
 _INLINE_GRID_VALID_ROW_RATIO = 0.75  # fraction of rows that must span 2+ cols
 _INLINE_GRID_MIN_ROWS = 2
+_INLINE_GRID_MIN_COL_ROWS = 2     # lines needed before an x-cluster is a column
 
 
 def _detect_inline_grid_tables(
@@ -881,8 +882,15 @@ def _detect_inline_grid_tables(
         if not has_mupdf:
             continue
 
+        # Blank lines are layout padding, not table rows: they would end up
+        # as all-empty rows and their x0 could invent a column.
+        ink_lines = [ln for ln in block.lines
+                     if any(sp.text.strip() for sp in ln.spans)]
+        if len(ink_lines) < _INLINE_GRID_MIN_LINES:
+            continue
+
         # Cluster line x0 positions into columns.
-        x_positions: list[float] = [ln.bbox[0] for ln in block.lines]
+        x_positions: list[float] = [ln.bbox[0] for ln in ink_lines]
         col_xs = _cluster_x_positions(x_positions)
         if len(col_xs) < 2:
             continue
@@ -896,7 +904,7 @@ def _detect_inline_grid_tables(
 
         # Group lines into rows by y-position.
         rows: list[list[Line]] = []
-        for ln in block.lines:
+        for ln in ink_lines:
             placed = False
             for row in rows:
                 if abs(ln.bbox[1] - row[0].bbox[1]) <= _INLINE_GRID_Y_BAND:
@@ -908,6 +916,21 @@ def _detect_inline_grid_tables(
 
         if len(rows) < _INLINE_GRID_MIN_ROWS:
             continue
+
+        # Drop x-clusters that too few rows reach. A centered header cell
+        # sits at its own x, well clear of the left-aligned body beneath it,
+        # and would otherwise become a phantom column that shifts every body
+        # cell one place along. Reassigning it to the nearest surviving
+        # column puts it back over the cells it labels.
+        if len(col_xs) > 2:
+            occupancy = Counter(
+                _nearest_column(ln.bbox[0], col_xs)
+                for row in rows for ln in row
+            )
+            kept = [x for ci, x in enumerate(col_xs)
+                    if occupancy[ci] >= _INLINE_GRID_MIN_COL_ROWS]
+            if len(kept) >= 2:
+                col_xs = kept
 
         # Each row must span 2+ columns.
         num_cols = len(col_xs)
@@ -966,7 +989,7 @@ def _detect_inline_grid_tables(
         _log.debug("Inline-grid table: %d rows x %d cols on page %d",
                     len(all_rows_data), num_cols, block.page_num)
 
-    return table_sections, used
+    return _merge_cross_page_fragments(table_sections), used
 
 
 _MUPDF_TABLE_MIN_BBOX_SIZE = 50.0  # minimum width AND height for a real table
@@ -980,11 +1003,93 @@ _MUPDF_TABLE_MIN_BBOX_SIZE = 50.0  # minimum width AND height for a real table
 _MUPDF_TABLE_MAX_PAGE_COVERAGE = 0.80
 _MUPDF_TABLE_MAX_CELL_FRACTION = 0.40
 
-# Cross-page merge thresholds for MuPDF native tables.
-# Used both in the per-page pre-classify absorb and the post-loop merge.
+# Cross-page merge thresholds.  Used by the MuPDF-native per-page
+# pre-classify absorb and by _merge_cross_page_fragments below.
 _CROSS_PAGE_BOTTOM_Y = 600.0
 _CROSS_PAGE_TOP_Y = 200.0
 _CROSS_PAGE_MAX_GAP = 2
+
+
+def _merge_cross_page_fragments(
+    table_sections: list[Section],
+) -> list[Section]:
+    """Merge consecutive table sections that straddle a page break.
+
+    A table running past the bottom of a page is detected once per page, so
+    the fragments arrive as separate sections and every continuation row
+    would render as a fresh pipe table with its first attendee promoted to a
+    header.  Merge by appending continuation rows (skipping any repeated
+    header) to the first fragment and dropping the rest.
+
+    Guards (all must hold):
+      - Same column count (structural identity).
+      - First fragment ends near page bottom (y > _CROSS_PAGE_BOTTOM_Y).
+      - Second fragment starts near page top (y < _CROSS_PAGE_TOP_Y).
+      - Pages within _CROSS_PAGE_MAX_GAP (allows blank separator pages).
+
+    table_kind is intentionally NOT checked: the same logical table gets
+    different kinds per page because _classify_and_annotate runs
+    independently per fragment.  Column count is the structural signal.
+
+    Iterates until stable so A+B+C+D collapses in one pass sequence.
+    """
+    if len(table_sections) < 2:
+        return table_sections
+
+    changed = True
+    while changed:
+        changed = False
+        merged_indices: set[int] = set()
+        for si in range(len(table_sections) - 1):
+            if si in merged_indices:
+                continue
+            sec_a = table_sections[si]
+            sec_b = table_sections[si + 1]
+            # Banded sections are deliberately split at category bands;
+            # never re-merge them.  Their line bboxes are in unrotated
+            # page space, so the y-guards below would be meaningless.
+            if (sec_a.table_source == "banded_grid"
+                    or sec_b.table_source == "banded_grid"):
+                continue
+            if not (sec_a.columns and sec_b.columns):
+                continue
+            if len(sec_a.columns[0]) != len(sec_b.columns[0]):
+                continue
+            # Use max page from lines for adjacency (page_num stays at
+            # the first fragment's page after a merge).
+            a_last_page = sec_a.page_num
+            if sec_a.lines:
+                pages_in_a = {
+                    ln.page_num for ln in sec_a.lines
+                    if hasattr(ln, 'page_num') and ln.page_num is not None
+                }
+                if pages_in_a:
+                    a_last_page = max(pages_in_a)
+            page_gap = sec_b.page_num - a_last_page
+            if page_gap < 1 or page_gap > _CROSS_PAGE_MAX_GAP:
+                continue
+            a_max_y = max((ln.bbox[3] for ln in sec_a.lines), default=0)
+            b_min_y = min((ln.bbox[1] for ln in sec_b.lines), default=999)
+            if not (a_max_y > _CROSS_PAGE_BOTTOM_Y
+                    and b_min_y < _CROSS_PAGE_TOP_Y):
+                continue
+            start = _header_dedup_start(sec_a.columns, sec_b.columns)
+            sec_a.columns.extend(sec_b.columns[start:])
+            sec_a.lines.extend(sec_b.lines)
+            sec_a.text = _render_table_text(sec_a.columns)
+            merged_indices.add(si + 1)
+            changed = True
+            _log.debug(
+                "Cross-page merge: page %d + %d (cols=%d), now %d rows",
+                sec_a.page_num, sec_b.page_num,
+                len(sec_a.columns[0]), len(sec_a.columns))
+        if merged_indices:
+            table_sections = [
+                s for i, s in enumerate(table_sections)
+                if i not in merged_indices
+            ]
+
+    return table_sections
 
 
 _LABEL_MAX_WORDS = 3  # column-0 cells with more words are not labels
@@ -1733,80 +1838,7 @@ def _detect_mupdf_native_tables(
                 len(non_empty_rows), col_count, page_num, kind_val,
             )
 
-    # Cross-page merge: consecutive MuPDF-native table sections with the
-    # same column count that straddle a page break are fragments of one
-    # logical table.  Merge by appending continuation rows (skipping any
-    # duplicate header) to the first fragment and dropping the rest.
-    #
-    # Guards (all must hold):
-    #   - Same column count (structural identity).
-    #   - First fragment ends near page bottom (y > 600).
-    #   - Second fragment starts near page top (y < 200).
-    #   - Pages within 2 of each other (allows blank separator pages).
-    #
-    # table_kind is intentionally NOT checked: the same logical table
-    # gets different kinds per page because _classify_and_annotate runs
-    # independently per fragment.  Column count is the structural signal.
-    #
-    # Iterates until stable so A+B+C+D collapses in one pass sequence.
-    if len(table_sections) >= 2:
-        changed = True
-        while changed:
-            changed = False
-            merged_indices: set[int] = set()
-            for si in range(len(table_sections) - 1):
-                if si in merged_indices:
-                    continue
-                sec_a = table_sections[si]
-                sec_b = table_sections[si + 1]
-                # Banded sections are deliberately split at category
-                # bands; never re-merge them.  Their line bboxes are
-                # in unrotated page space, so the y-guards below would
-                # be meaningless anyway.
-                if (sec_a.table_source == "banded_grid"
-                        or sec_b.table_source == "banded_grid"):
-                    continue
-                if not (sec_a.columns and sec_b.columns):
-                    continue
-                if len(sec_a.columns[0]) != len(sec_b.columns[0]):
-                    continue
-                # Use max page from lines for adjacency (page_num stays
-                # at the first fragment's page after a merge).
-                a_last_page = sec_a.page_num
-                if sec_a.lines:
-                    pages_in_a = {
-                        ln.page_num for ln in sec_a.lines
-                        if hasattr(ln, 'page_num') and ln.page_num is not None
-                    }
-                    if pages_in_a:
-                        a_last_page = max(pages_in_a)
-                page_gap = sec_b.page_num - a_last_page
-                if page_gap < 1 or page_gap > _CROSS_PAGE_MAX_GAP:
-                    continue
-                a_max_y = max(
-                    (ln.bbox[3] for ln in sec_a.lines), default=0)
-                b_min_y = min(
-                    (ln.bbox[1] for ln in sec_b.lines), default=999)
-                if not (a_max_y > _CROSS_PAGE_BOTTOM_Y
-                        and b_min_y < _CROSS_PAGE_TOP_Y):
-                    continue
-                start = _header_dedup_start(
-                    sec_a.columns, sec_b.columns)
-                sec_a.columns.extend(sec_b.columns[start:])
-                sec_a.lines.extend(sec_b.lines)
-                sec_a.text = _render_table_text(sec_a.columns)
-                merged_indices.add(si + 1)
-                changed = True
-                _log.debug(
-                    "Cross-page merge: page %d + %d (cols=%d), "
-                    "now %d rows",
-                    sec_a.page_num, sec_b.page_num,
-                    len(sec_a.columns[0]), len(sec_a.columns))
-            if merged_indices:
-                table_sections = [
-                    s for i, s in enumerate(table_sections)
-                    if i not in merged_indices
-                ]
+    table_sections = _merge_cross_page_fragments(table_sections)
 
     return table_sections, used
 
@@ -2396,6 +2428,25 @@ def _merge_code_rows(rows: list[list[list]]) -> list[list[list]]:
     return merged
 
 
+def _has_multiline_code_cell(rows: list[list[list]]) -> bool:
+    """True when some cell holds monospace text broken across lines.
+
+    A pipe cell cannot contain a line break, but not every break needs one.
+    In code the break is semantic and must survive, so the table has to
+    render as HTML. In prose it is only where the PDF soft-wrapped the cell,
+    and flattening back to one line loses nothing. Monospace is what tells
+    the two apart.
+    """
+    for row in rows:
+        for cell_spans in row:
+            if not any("\n" in s.text for s in cell_spans):
+                continue
+            ink = [s for s in cell_spans if s.text.strip()]
+            if ink and all(s.monospace for s in ink):
+                return True
+    return False
+
+
 def _classify_and_annotate(
     rows: list[list[list]],
 ) -> tuple[str, str, list[list[list]]]:
@@ -2407,16 +2458,11 @@ def _classify_and_annotate(
     if kind == TableKind.CODE_COMPARISON:
         rows = _merge_code_rows(rows)
 
-    # Pipe tables cannot represent multi-line cell content. If any cell
-    # contains a newline, force HTML table rendering regardless of kind.
-    if strategy == TableStrategy.PIPE_TABLE:
-        for row in rows:
-            for cell_spans in row:
-                if any("\n" in s.text for s in cell_spans):
-                    strategy = TableStrategy.HTML_TABLE
-                    break
-            if strategy == TableStrategy.HTML_TABLE:
-                break
+    # Pipe tables cannot represent multi-line cell content. Force HTML
+    # rendering when a break is load-bearing; soft-wrapped prose is
+    # flattened by the emitter instead.
+    if strategy == TableStrategy.PIPE_TABLE and _has_multiline_code_cell(rows):
+        strategy = TableStrategy.HTML_TABLE
 
     return kind.value, strategy.value, rows
 
