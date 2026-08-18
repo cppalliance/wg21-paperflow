@@ -28,8 +28,8 @@ def sustained_counts(sentences: list[Sentence]) -> dict[RoutingGroup, int]:
     """Count sentences participating in domain+mode co-firing per label.
 
     Neighbors are adjacent in the kept sentence list (sorted by ``index``),
-    not raw ``index ± 1``, so stride sampling still allows cross-sentence
-    co-fire when original indices are gapped.
+    not raw ``index ± 1``, so sampling that drops sentences still allows
+    cross-sentence co-fire when original indices are gapped.
     """
     if not sentences:
         return {g: 0 for g in RoutingGroup}

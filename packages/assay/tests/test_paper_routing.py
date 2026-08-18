@@ -23,6 +23,7 @@ from assay.paper_routing.hypotheses import (
     get_hits_from_text,
     score_hypotheses,
 )
+from assay.paper_routing.nli_thresholds import load_nli_hypothesis_thresholds
 from assay.paper_routing.seqcls_thresholds import (
     _ROUTING_SEQCLS_THRESHOLD_FALLBACK as _ROUTING_SEQCLS_THRESHOLD,
     load_seqcls_hypothesis_thresholds,
@@ -35,7 +36,7 @@ from assay.paper_routing.aggregate import (
     _apply_metadata_bonus,
     aggregate_quadrant_scores,
 )
-from assay.paper_routing.sustain import min_sustained_threshold
+from assay.paper_routing.sustain import min_sustained_threshold, sustained_counts
 from assay.paper_routing.threshold import (
     ADMIN_MAX_SCORE_GATE,
     SECONDARY_MARGIN,
@@ -227,6 +228,28 @@ def test_sustained_min_floor():
     assert min_sustained_threshold(500) == 10
 
 
+def test_sustained_counts_gapped_indices_use_kept_list_adjacency():
+    """After sampling, kept indices can be gapped; co-fire uses list adjacency."""
+    from assay.paper_routing.types import Sentence
+
+    sentences = [
+        Sentence(
+            "library header ref",
+            SectionType.MOTIVATION,
+            0,
+            frozenset({"D1"}),
+        ),
+        Sentence(
+            "proposes addition",
+            SectionType.MOTIVATION,
+            2,
+            frozenset({"M1"}),
+        ),
+    ]
+    counts = sustained_counts(sentences)
+    assert counts[RoutingGroup.LEWG] == 2
+
+
 def _zeroed_scores() -> dict[RoutingGroup, float]:
     return {g: 0.0 for g in RoutingGroup}
 
@@ -319,11 +342,32 @@ def test_routing_nli_threshold_constant():
     assert _ROUTING_NLI_THRESHOLD == 0.9
 
 
+def test_nli_hypothesis_thresholds_cover_full_catalog():
+    thresholds = load_nli_hypothesis_thresholds()
+    assert set(thresholds) == _CATALOG_IDS
+    for threshold in thresholds.values():
+        assert 0.0 < threshold <= 1.0
+
+
+def test_score_hypotheses_nli_uses_per_label_threshold_not_flat_default(monkeypatch):
+    # M4's patched cutoff is above the flat fallback (0.9): a score in
+    # between proves per-label thresholds are consulted.
+    monkeypatch.setattr(
+        "assay.paper_routing.hypotheses.load_nli_hypothesis_thresholds",
+        lambda: {"M4": 0.95},
+    )
+    sentence = _NLI_ONLY_SENTENCE
+    classifier = _StubNliClassifier(0.91, match_hypothesis=_M4_NLI_TEXT)
+    scored = score_hypotheses([sentence], classifiers=classifier)
+
+    assert "M4" not in scored[0].hypothesis_hits
+
+
 def test_score_hypotheses_nli_path_fires_on_high_entailment():
     sentence = _NLI_ONLY_SENTENCE
     assert get_hits_from_text(sentence) == set()
 
-    classifier = _StubNliClassifier(0.91, match_hypothesis=_M4_NLI_TEXT)
+    classifier = _StubNliClassifier(0.99, match_hypothesis=_M4_NLI_TEXT)
     scored = score_hypotheses([sentence], classifiers=classifier)
 
     assert len(scored) == 1
@@ -421,7 +465,7 @@ def test_score_hypotheses_nli_only_skips_regex_hits():
 
 def test_score_hypotheses_regex_nli_seqcls_union():
     sentence = "We propose to add std::widget."
-    nli = _StubNliClassifier(0.91, match_hypothesis=_M4_NLI_TEXT)
+    nli = _StubNliClassifier(0.99, match_hypothesis=_M4_NLI_TEXT)
     seqcls = _StubSeqclsClassifier({"W4": 0.9})
     scored = score_hypotheses(
         [sentence],

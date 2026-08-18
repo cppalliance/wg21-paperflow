@@ -70,7 +70,7 @@ Table 1 maps the spec's stage names to what this package does today.
 
 | Stage | Spec name                               | As shipped                                                                                                                    |
 | ----- | --------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
-| 1     | Sentence splitting                      | Split markdown; drop units under 20 characters; section-stratified sample to 300 (Hamilton quotas, stride, APPENDIX excluded) |
+| 1     | Sentence splitting                      | Split markdown; drop units under 20 characters; section-stratified sample to 300 (Hamilton quotas, prefix, APPENDIX excluded) |
 | 2     | Section detection                       | Tag each sentence from headings                                                                                               |
 | 3     | Hypothesis scoring                      | Regex catalog, then NLI (production) or seqcls                                                                                |
 | 4-6   | Aggregation, sustained test, thresholds | HGB paper-level head on the production path; hand math as fallback                                                            |
@@ -84,7 +84,7 @@ The spec still calls Stage 4 the most important stage and says Stages 2, 4, 5, a
 | `routing.py`                                   | `route_paper`, `RoutingResult`, HGB-vs-hand gate            |
 | `types.py`                                     | `RoutingGroup`, `HypothesisAxis`, `Sentence`, section types |
 | `split.py`                                     | Stage 1 sentence split                                      |
-| `sample.py`                                    | Section-stratified stride cap (300 sentences)               |
+| `sample.py`                                    | Section-stratified prefix cap (300 sentences)               |
 | `headings.py` / `sections.py`                  | Stage 2 heading to section type                             |
 | `standardese.py`                               | Normative-element hints for splitting                       |
 | `hypotheses.py`                                | Stage 3 catalog and scoring                                 |
@@ -99,6 +99,6 @@ The spec still calls Stage 4 the most important stage and says Stages 2, 4, 5, a
 
 Routing emits only LEWG, LWG, EWG, and CWG. Study Groups have no labels. This is not a substitute for committee assignment.
 
-Routing scores at most 300 sentences (Hamilton quotas by section, stride inside each section, APPENDIX excluded) and ignores units shorter than 20 characters. Section tags come from headings; mixed design and wording under one heading still confuses stage 2. The hand fallback still uses a sustained-count gate; production HGB does not use that gate to emit labels. Audience metadata is a weak signal, not an override.
+Routing scores at most 300 sentences (Hamilton quotas by section, prefix inside each section, APPENDIX excluded) and ignores units shorter than 20 characters. Section tags come from headings; mixed design and wording under one heading still confuses stage 2. The hand fallback still uses a sustained-count gate; production HGB does not use that gate to emit labels. Audience metadata is a weak signal, not an override.
 
 Held-out numbers come from `packages/assay/scripts/eval_route_paper.py`. The train script writes `data/routing/train_report.json` locally. Those reports are generated, not committed. The NLI+HGB default is the Survey binding in [`../assay.md`](../assay.md).

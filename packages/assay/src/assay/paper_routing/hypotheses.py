@@ -20,6 +20,10 @@ from pipeline.classifier_backends import (
 )
 from pipeline.nli_batch import score_entailment_pairs
 from assay.paper_routing.sections import line_section_map, section_for_sentence
+from assay.paper_routing.nli_thresholds import (
+    _ROUTING_NLI_THRESHOLD_FALLBACK as _ROUTING_NLI_THRESHOLD,
+    load_nli_hypothesis_thresholds,
+)
 from assay.paper_routing.seqcls_thresholds import (
     _ROUTING_SEQCLS_THRESHOLD_FALLBACK,
     load_seqcls_hypothesis_thresholds,
@@ -28,7 +32,6 @@ from assay.paper_routing.sample import sample_sentences_with_summary
 from assay.paper_routing.split import RawSentence, split_sentences
 from assay.paper_routing.types import HypothesisAxis, SectionType, Sentence
 
-_ROUTING_NLI_THRESHOLD = 0.9
 _MIN_SENTENCE_CHARS = 20
 _MAX_SENTENCES_PER_PAPER = 300
 
@@ -710,11 +713,12 @@ def _apply_nli_scores(
         debug_log.append("### paper-routing NLI batch\n")
         debug_log.append(f"pairs: {len(pairs)}\n")
 
-    fired, scores = score_entailment_pairs(
+    _, scores = score_entailment_pairs(
         classifier,
         pairs,
         threshold=_ROUTING_NLI_THRESHOLD,
     )
+    thresholds = load_nli_hypothesis_thresholds()
 
     if debug_log is not None:
         for i, ((premise, _), score) in enumerate(zip(pairs, scores, strict=True)):
@@ -724,8 +728,9 @@ def _apply_nli_scores(
             )
 
     updated: dict[int, set[str]] = {s.index: set(s.hypothesis_hits) for s in sentences}
-    for (sent_idx, hyp_id), hit in zip(pair_map, fired, strict=True):
-        if hit:
+    for (sent_idx, hyp_id), score in zip(pair_map, scores, strict=True):
+        threshold = thresholds.get(hyp_id, _ROUTING_NLI_THRESHOLD)
+        if score.get("entailment", 0.0) >= threshold:
             updated[sent_idx].add(hyp_id)
 
     _rebuild_with_hits(sentences, updated)

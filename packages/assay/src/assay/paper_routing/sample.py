@@ -73,8 +73,19 @@ def _stride_pick(section_sents: list[Sentence], k: int) -> list[Sentence]:
     return [section_sents[pos] for pos in positions]
 
 
-def _group_by_section(sentences: Sequence[Sentence]) -> dict[SectionType, list[Sentence]]:
-    grouped: dict[SectionType, list[Sentence]] = {section: [] for section in SectionType}
+def _prefix_pick(section_sents: list[Sentence], k: int) -> list[Sentence]:
+    """Keep the first ``k`` sentences in document order."""
+    if k <= 0 or not section_sents:
+        return []
+    return list(section_sents[:k])
+
+
+def _group_by_section(
+    sentences: Sequence[Sentence],
+) -> dict[SectionType, list[Sentence]]:
+    grouped: dict[SectionType, list[Sentence]] = {
+        section: [] for section in SectionType
+    }
     for sent in sentences:
         grouped[sent.section].append(sent)
     return grouped
@@ -106,17 +117,13 @@ def sample_sentences_with_summary(
         return list(sentences), None
 
     grouped = _group_by_section(sentences)
-    eligible = [
-        sent
-        for sent in sentences
-        if sent.section is not SectionType.APPENDIX
-    ]
+    eligible = [sent for sent in sentences if sent.section is not SectionType.APPENDIX]
     if not eligible:
-        kept = _stride_pick(list(sentences), cap)
+        kept = _prefix_pick(list(sentences), cap)
         kept.sort(key=lambda s: s.index)
         summary = (
             f"[routing] sampled {len(kept)} of {len(sentences)} "
-            "(appendix-only stride)\n"
+            "(appendix-only prefix)\n"
         )
         return kept, summary
 
@@ -131,13 +138,11 @@ def sample_sentences_with_summary(
             return kept, summary
         return kept, None
 
-    section_counts = {
-        section: len(grouped[section]) for section in _ELIGIBLE_SECTIONS
-    }
+    section_counts = {section: len(grouped[section]) for section in _ELIGIBLE_SECTIONS}
     quotas = _hamilton_quotas(section_counts, cap=cap)
     picked: list[Sentence] = []
     for section in _ELIGIBLE_SECTIONS:
-        picked.extend(_stride_pick(grouped[section], quotas[section]))
+        picked.extend(_prefix_pick(grouped[section], quotas[section]))
     picked.sort(key=lambda s: s.index)
     summary = _format_summary(
         source_n=len(eligible),
@@ -152,6 +157,6 @@ def sample_sentences(
     *,
     cap: int,
 ) -> list[Sentence]:
-    """Section-stratified stride sample; at most ``cap`` sentences."""
+    """Section-stratified prefix sample; at most ``cap`` sentences."""
     kept, _ = sample_sentences_with_summary(sentences, cap=cap)
     return kept

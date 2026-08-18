@@ -8,7 +8,6 @@ from __future__ import annotations
 
 from assay.paper_routing.sample import (
     _hamilton_quotas,
-    _stride_indices,
     sample_sentences,
     sample_sentences_with_summary,
 )
@@ -50,10 +49,10 @@ def test_short_paper_keeps_appendix():
     assert any(s.section == SectionType.APPENDIX for s in kept)
 
 
-def test_all_appendix_strides_full_list():
+def test_all_appendix_prefixes_full_list():
     sentences = _section_block(SectionType.APPENDIX, 0, 400)
     kept = sample_sentences(sentences, cap=300)
-    assert len(kept) == 300
+    assert [s.index for s in kept] == list(range(300))
     assert all(s.section == SectionType.APPENDIX for s in kept)
 
 
@@ -64,6 +63,12 @@ def test_long_paper_drops_appendix_when_eligible_under_cap():
     kept = sample_sentences(sentences, cap=300)
     assert len(kept) == 250
     assert all(s.section != SectionType.APPENDIX for s in kept)
+
+    kept2, summary = sample_sentences_with_summary(sentences, cap=300)
+    assert kept2 == kept
+    assert summary is not None
+    assert "sampled 250 of 350" in summary
+    assert "dropped 100 APPENDIX" in summary
 
 
 def test_hamilton_quotas_1920_fixture():
@@ -85,8 +90,10 @@ def test_hamilton_quotas_1920_fixture():
     assert sum(quotas.values()) == 300
 
 
-def test_stride_indices_ten_four():
-    assert _stride_indices(10, 4) == [0, 3, 6, 9]
+def test_prefix_pick_takes_leading_sentences():
+    sentences = _section_block(SectionType.DESIGN, 0, 10)
+    kept = sample_sentences(sentences, cap=4)
+    assert [s.index for s in kept] == [0, 1, 2, 3]
 
 
 def test_hamilton_tie_break_enum_order():
@@ -137,6 +144,13 @@ def test_sample_1920_fixture_total_kept():
     assert summary is not None
     assert "300 of 1920" in summary
     assert all(s.section != SectionType.APPENDIX for s in kept)
+    design = [s for s in kept if s.section == SectionType.DESIGN]
+    wording = [s for s in kept if s.section == SectionType.WORDING]
+    assert [s.index for s in design] == list(range(200, 200 + len(design)))
+    wording_start = 80 + 120 + 400
+    assert [s.index for s in wording] == list(
+        range(wording_start, wording_start + len(wording)),
+    )
 
 
 def test_sample_summary_none_when_identity():
