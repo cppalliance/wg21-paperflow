@@ -122,7 +122,13 @@ def extract_metadata(sections: list[Section]) -> tuple[dict[str, str | list[str]
                 if is_known:
                     metadata_zone = False
 
-            if SECTION_NUM_RE.match(text.split("\n")[0]):
+            # PDF headings often arrive with the section number on its own
+            # line ("1\nIntroduction"), so test the joined text: matching only
+            # the first line leaves the zone open over the whole document,
+            # where the all-caps rule above eats body content (issue #368).
+            joined = " ".join(
+                ln.strip() for ln in text.split("\n") if ln.strip())
+            if SECTION_NUM_RE.match(joined):
                 metadata_zone = False
 
         remaining.append(sec)

@@ -13,6 +13,7 @@ from tomd.lib.metadata_yaml.strip import (
     strip_pre_heading_fragments,
     strip_pre_content_paragraphs,
 )
+from tomd.lib.metadata_yaml.extract import extract_metadata
 from tomd.lib.metadata_yaml.format import (
     format_front_matter,
     sanitize_metadata,
@@ -280,3 +281,37 @@ class TestSanitizeMetadata:
         result = sanitize_metadata(metadata)
         assert result["title"] == "Test Paper"
         assert result["document"] == "P1234R0"
+
+
+class TestMetadataZoneClose:
+    """The metadata zone must close once body content starts (issue #368).
+
+    While the zone is open, extract_metadata silently consumes all-caps
+    sections of three words or fewer as category labels. P3290R4's zone was
+    only ever closed by a malformed poll table whose text happened to read
+    "8 | 3 | 1 | 0 | 0" and so matched SECTION_NUM_RE. Repairing the table
+    removed that accident and the extractor then ate a macro name from the
+    body twelve pages later.
+    """
+
+    def _sections(self, heading_text):
+        return [
+            make_section("Document Number: P3290R4"),
+            make_section(heading_text, page_num=1),
+            make_section("ASSERT_USES_CONTRACT_VIOLATION_HANDLER.", page_num=12),
+        ]
+
+    def test_numbered_heading_split_across_lines_closes_the_zone(self):
+        """PDF headings arrive as "1\\nIntroduction": number on its own line."""
+        _, remaining = extract_metadata(self._sections("1\nIntroduction"))
+        kept = [s.text for s in remaining]
+        assert "ASSERT_USES_CONTRACT_VIOLATION_HANDLER." in kept
+
+    def test_numbered_heading_on_one_line_still_closes_the_zone(self):
+        _, remaining = extract_metadata(self._sections("1 Introduction"))
+        kept = [s.text for s in remaining]
+        assert "ASSERT_USES_CONTRACT_VIOLATION_HANDLER." in kept
+
+    def test_document_field_is_still_extracted(self):
+        meta, _ = extract_metadata(self._sections("1\nIntroduction"))
+        assert meta["document"] == "P3290R4"

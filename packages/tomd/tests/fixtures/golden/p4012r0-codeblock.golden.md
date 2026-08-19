@@ -6,7 +6,7 @@ reply-to:
 
 ---
 
-## In [simd.ctore], change:
+#### In [simd.ctore], change:
 
 :::wording
 
@@ -89,4 +89,4 @@ template <typename From, typename To>
                                      and not converting_limits_throws<To, From>();
 ```
 
-## 11
+### 11
