@@ -393,6 +393,14 @@ def _committed_family_dir(family: str) -> Path:
     return _ASSAY_ROOT / "data" / family
 
 
+def test_file_sha256_normalizes_crlf_to_lf(tmp_path: Path) -> None:
+    path = tmp_path / "artifact.json"
+    path.write_bytes(b'{"D1": 0.9}\n')
+    lf_hash = file_sha256(path)
+    path.write_bytes(b'{"D1": 0.9}\r\n')
+    assert file_sha256(path) == lf_hash
+
+
 def test_validate_provenance_sklearn_mismatch_raises(tmp_path: Path) -> None:
     pytest.importorskip("sklearn")
     thresholds_path = tmp_path / "per_label_thresholds.json"

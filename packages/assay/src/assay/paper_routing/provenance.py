@@ -22,12 +22,13 @@ from assay.paper_routing.hypotheses import (
 
 
 def file_sha256(path: Path) -> str:
-    """Return lowercase hex SHA-256 of ``path`` contents."""
-    digest = hashlib.sha256()
-    with path.open("rb") as fh:
-        for chunk in iter(lambda: fh.read(65536), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
+    """Return lowercase hex SHA-256 of ``path`` contents.
+
+    CRLF bytes are normalized to LF so hashes match across platforms when
+    git checks out JSON artifacts with platform-specific line endings.
+    """
+    data = path.read_bytes().replace(b"\r\n", b"\n")
+    return hashlib.sha256(data).hexdigest()
 
 
 def _git_commit_id() -> str:
