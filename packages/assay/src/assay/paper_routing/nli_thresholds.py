@@ -48,8 +48,3 @@ def load_nli_hypothesis_thresholds() -> dict[str, float]:
             raise ValueError(f"{path}: invalid entry {key!r}: {value!r}")
         out[key] = float(value)
     return out
-
-
-def nli_threshold_for_label(hyp_id: str) -> float:
-    thresholds = load_nli_hypothesis_thresholds()
-    return thresholds.get(hyp_id, _ROUTING_NLI_THRESHOLD_FALLBACK)

@@ -34,6 +34,7 @@ from assay.paper_routing.types import HypothesisAxis, SectionType, Sentence
 
 _MIN_SENTENCE_CHARS = 20
 _MAX_SENTENCES_PER_PAPER = 300
+SAMPLING_METHOD = "prefix"
 
 # D1 REFERENCES_LIBRARY_HEADER
 _D1_RE = re.compile(r"<\s*[a-z_][a-z0-9_]*\s*>")
@@ -713,11 +714,7 @@ def _apply_nli_scores(
         debug_log.append("### paper-routing NLI batch\n")
         debug_log.append(f"pairs: {len(pairs)}\n")
 
-    _, scores = score_entailment_pairs(
-        classifier,
-        pairs,
-        threshold=_ROUTING_NLI_THRESHOLD,
-    )
+    _, scores = score_entailment_pairs(classifier, pairs)
     thresholds = load_nli_hypothesis_thresholds()
 
     if debug_log is not None:

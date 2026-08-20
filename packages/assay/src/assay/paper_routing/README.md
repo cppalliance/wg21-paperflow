@@ -91,6 +91,7 @@ The spec still calls Stage 4 the most important stage and says Stages 2, 4, 5, a
 | `nli_thresholds.py`                            | Per-label NLI cutoffs                                       |
 | `seqcls_thresholds.py`                         | Per-label seqcls cutoffs                                    |
 | `learned_aggregate.py`                         | Frozen HGB paper-level head                                 |
+| `provenance.py`                                | Train/serve artifact provenance checks                      |
 | `features.py`                                  | Paper-wide feature vector for HGB                           |
 | `aggregate.py` / `threshold.py` / `sustain.py` | Hand Stage 4-6                                              |
 | `axis_hist.py` / `audience.py`                 | Shared axis hits and audience phrases                       |
@@ -101,4 +102,4 @@ Routing emits only LEWG, LWG, EWG, and CWG. Study Groups have no labels. This is
 
 Routing scores at most 300 sentences (Hamilton quotas by section, prefix inside each section, APPENDIX excluded) and ignores units shorter than 20 characters. Section tags come from headings; mixed design and wording under one heading still confuses stage 2. The hand fallback still uses a sustained-count gate; production HGB does not use that gate to emit labels. Audience metadata is a weak signal, not an override.
 
-Held-out numbers come from `packages/assay/scripts/eval_route_paper.py`. The train script writes `data/routing/train_report.json` locally. Those reports are generated, not committed. The NLI+HGB default is the Survey binding in [`../assay.md`](../assay.md).
+Held-out numbers come from `packages/assay/scripts/eval_route_paper.py`. The train script writes `data/routing/train_report.json` locally. Those reports are generated, not committed. The NLI+HGB default is the Survey binding in [`../assay.md`](../assay.md). The learned path fails at load when committed `provenance.json` does not match runtime sampling, per-label thresholds, feature names, or the locked sklearn version.

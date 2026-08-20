@@ -55,24 +55,6 @@ def _hamilton_quotas(
     return quotas
 
 
-def _stride_indices(n_s: int, k: int) -> list[int]:
-    """Evenly spaced positions in ``0..n_s-1``; exactly ``k`` picks when ``k <= n_s``."""
-    if k <= 0:
-        return []
-    if k == 1:
-        return [0]
-    if k >= n_s:
-        return list(range(n_s))
-    return [i * (n_s - 1) // (k - 1) for i in range(k)]
-
-
-def _stride_pick(section_sents: list[Sentence], k: int) -> list[Sentence]:
-    if k <= 0 or not section_sents:
-        return []
-    positions = _stride_indices(len(section_sents), k)
-    return [section_sents[pos] for pos in positions]
-
-
 def _prefix_pick(section_sents: list[Sentence], k: int) -> list[Sentence]:
     """Keep the first ``k`` sentences in document order."""
     if k <= 0 or not section_sents:

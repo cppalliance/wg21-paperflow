@@ -7,6 +7,9 @@
 Features come from regex catalog hits unioned with the chosen classifier
 (nli-small by default). Inference must keep regex on; HGB was trained on
 regex+classifier hypothesis densities.
+
+Retraining writes ``provenance.json`` next to each family joblib so load
+time can fail closed on sampling, threshold, or sklearn skew.
 """
 
 from __future__ import annotations
@@ -29,6 +32,7 @@ from assay.paper_routing.features import (
     vectorize_features,
 )
 from assay.paper_routing.hypotheses import score_hypotheses
+from assay.paper_routing.provenance import build_provenance_record
 from assay.paper_routing.types import ROUTING_GROUP_ORDER, RoutingGroup
 from eval_common import (
     assay_package_root,
@@ -265,6 +269,16 @@ def train_and_freeze(
         + "\n",
         encoding="utf-8",
     )
+    per_label_thresholds_path = model_output_dir / "per_label_thresholds.json"
+    feature_names_path = metadata_dir / "feature_names.json"
+    provenance = build_provenance_record(
+        per_label_thresholds_path=per_label_thresholds_path,
+        feature_names_path=feature_names_path,
+    )
+    (model_output_dir / "provenance.json").write_text(
+        json.dumps(provenance, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
     return {
         "oof_exact_match": oof_exact,
         "in_sample_exact_match": in_exact,
@@ -281,7 +295,7 @@ def main() -> int:
         "--model-output",
         type=Path,
         default=assay_package_root() / "data" / "nli",
-        help="Directory for aggregator_hgb.joblib and group_thresholds.json",
+        help="Directory for aggregator_hgb.joblib, group_thresholds.json, and provenance.json",
     )
     parser.add_argument(
         "--metadata-dir",

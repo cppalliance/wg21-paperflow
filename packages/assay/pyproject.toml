@@ -14,7 +14,7 @@ dependencies = [
     "pydantic-ai",
     "pydantic>=2.0",
     "pysbd>=0.3.4",
-    "scikit-learn",
+    "scikit-learn=1.8.0",
 ]
 
 [build-system]

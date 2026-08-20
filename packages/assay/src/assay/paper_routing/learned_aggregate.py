@@ -28,6 +28,7 @@ from assay.paper_routing.features import (
     extract_paper_features,
     vectorize_features,
 )
+from assay.paper_routing.provenance import validate_provenance
 from assay.paper_routing.types import ROUTING_GROUP_ORDER, RoutingGroup, Sentence
 
 _ROUTING_METADATA_DIR = Path("data") / "routing"
@@ -37,6 +38,8 @@ _MODEL_FILE = "aggregator_hgb.joblib"
 _FEATURE_NAMES_FILE = "feature_names.json"
 _GROUP_THRESHOLDS_FILE = "group_thresholds.json"
 _GROUP_ORDER_FILE = "group_order.json"
+_PROVENANCE_FILE = "provenance.json"
+_PER_LABEL_THRESHOLDS_FILE = "per_label_thresholds.json"
 _LEARNED_GROUP_THRESHOLD_FALLBACK: float = 0.5
 
 AggregatorFamily = Literal["nli", "seqcls"]
@@ -80,9 +83,11 @@ def _metadata_artifacts_present() -> bool:
 
 def _family_artifacts_present(family: AggregatorFamily) -> bool:
     model_dir = _family_data_dir(family)
-    return (model_dir / _MODEL_FILE).is_file() and (
-        model_dir / _GROUP_THRESHOLDS_FILE
-    ).is_file()
+    return (
+        (model_dir / _MODEL_FILE).is_file()
+        and (model_dir / _GROUP_THRESHOLDS_FILE).is_file()
+        and (model_dir / _PROVENANCE_FILE).is_file()
+    )
 
 
 def learned_model_available(classifiers: object | None = None) -> bool:
@@ -134,6 +139,26 @@ def _load_group_order() -> tuple[RoutingGroup, ...]:
 
 
 @lru_cache(maxsize=2)
+def _load_provenance(family: AggregatorFamily) -> dict[str, object]:
+    path = _family_data_dir(family) / _PROVENANCE_FILE
+    raw = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(raw, dict):
+        raise ValueError(f"{path}: expected JSON object")
+    return raw
+
+
+def _validate_provenance(family: AggregatorFamily) -> None:
+    model_dir = _family_data_dir(family)
+    meta_dir = routing_metadata_dir()
+    validate_provenance(
+        _load_provenance(family),
+        provenance_path=model_dir / _PROVENANCE_FILE,
+        per_label_thresholds_path=model_dir / _PER_LABEL_THRESHOLDS_FILE,
+        feature_names_path=meta_dir / _FEATURE_NAMES_FILE,
+    )
+
+
+@lru_cache(maxsize=2)
 def _load_model(family: AggregatorFamily) -> object:
     path = _family_data_dir(family) / _MODEL_FILE
     return joblib.load(path)
@@ -156,6 +181,7 @@ def predict_learned_groups(
     family = _aggregator_family(classifiers)
     feature_names = _load_feature_names()
     group_order = _load_group_order()
+    _validate_provenance(family)
     catalog_ids = default_catalog_ids()
     features = extract_paper_features(
         sentences,
