@@ -30,6 +30,7 @@ from jinja2 import Template
 
 from pipeline import extract_code_blocks, load_sections
 
+from assay.harness import targets_cwg_lwg
 from assay.models import (
     AskOutput,
     GapOutput,
@@ -513,19 +514,21 @@ def load_assay_state(pid: str, backend) -> PipelineState:
     surviving: list[FindingOutput] = []
     killed: list[KilledFinding] = []
     findings_all: list[FindingOutput] = []
-    major_titles: set[str] = set()
+    major_ids: set[int] = set()
 
     for f in finding_rows:
         if f.survived:
             fo = FindingOutput(
+                id=f.uid,
                 title=f.title, lens=f.lens, severity=f.severity,
                 quote=f.quote, line=f.loc_line, explanation=f.explanation,
-                test=f.test,
+                test=f.test, from_gap_ids=list(f.from_gap_ids or []),
+                examiner=f.examiner, damage=f.damage,
             )
             findings_all.append(fo)
             surviving.append(fo)
             if f.major:
-                major_titles.add(f.title)
+                major_ids.add(f.uid)
         else:
             killed.append(KilledFinding(
                 finding_id=f.uid, finding_title=f.title, lens=f.lens,
@@ -578,8 +581,8 @@ def load_assay_state(pid: str, backend) -> PipelineState:
 
     synthesis = None
     if synthesis_row:
-        major_findings = [f for f in surviving if f.title in major_titles]
-        regular_findings = [f for f in surviving if f.title not in major_titles]
+        major_findings = [f for f in surviving if f.id in major_ids]
+        regular_findings = [f for f in surviving if f.id not in major_ids]
         synthesis = SynthesisOutput(
             verdict_label=synthesis_row.verdict,
             verdict_confidence=synthesis_row.verdict_confidence,
@@ -596,9 +599,14 @@ def load_assay_state(pid: str, backend) -> PipelineState:
         )
 
     skipped = synthesis is not None and synthesis.verdict_label == "Skipped"
+    audience = [meta.target_group] if meta.target_group else []
     state = PipelineState(
         paper_id=pid,
         paper_title=meta.title or "",
+        intent=meta.intent or "",
+        audience=audience,
+        wording_lines=synthesis_row.wording_lines if synthesis_row else 0,
+        targets_cwg_lwg=targets_cwg_lwg(audience),
         items=items,
         gaps_by_lens=gaps_by_lens,
         derive=derive,

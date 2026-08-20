@@ -40,6 +40,7 @@ from assay.harness import (
     dedupe_findings,
     ground_quotes,
     synthesize,
+    targets_cwg_lwg,
     upgrade_gaps,
 )
 from assay.locs import format_numbered_lines
@@ -598,8 +599,7 @@ async def _custom_survey(state: PipelineState, ctx: StepContext, spec) -> None:
 
     wording_headings = [s for s in sections if SURVEY_WORDING_HEADING_RE.search(s.heading)]
     state.wording_lines = sum(s.end_line - s.start_line for s in wording_headings)
-    audience = " ".join(state.audience).upper()
-    state.targets_cwg_lwg = "CWG" in audience or "LWG" in audience
+    state.targets_cwg_lwg = targets_cwg_lwg(state.audience)
 
     triage = should_analyze(
         state.chunk_map, state.paper_title, state.intent, state.audience, state.paper_md
@@ -1674,7 +1674,17 @@ def _persist_step_couple(_spec, state: PipelineState, ctx: StepContext) -> None:
 
 
 def _persist_step_synthesize(_spec, state: PipelineState, ctx: StepContext) -> None:
-    _persist_synthesis(ctx.backend, ctx.pid, state.synthesis)
+    _persist_synthesis(ctx.backend, ctx.pid, state.synthesis, state.wording_lines)
+    # Challenge wrote these rows before promotion was known, so every major
+    # flag landed False. store_assay_findings is delete-then-insert per paper,
+    # so rewriting them here is idempotent.
+    _persist_findings(
+        ctx.backend,
+        ctx.pid,
+        state.surviving or [],
+        state.killed or [],
+        state.synthesis,
+    )
 
 
 _PERSIST_BY_SLUG = {
@@ -1892,10 +1902,14 @@ def _persist_findings(backend, pid, surviving: list, killed: list, synthesis=Non
         challenge: str
         reasoning: str
         from_gap_ids: list = _field(default_factory=list)
+        examiner: str = ""
+        damage: str = ""
 
-    major_set: set[str] = set()
+    # Match on id, not title: titles are not unique, and synthesize() promotes
+    # the same FindingOutput objects that are in `surviving`.
+    major_ids: set[int] = set()
     if synthesis is not None:
-        major_set = {f.title for f in synthesis.major_findings}
+        major_ids = {f.id for f in synthesis.major_findings}
 
     rows = []
     for f in surviving:
@@ -1910,10 +1924,12 @@ def _persist_findings(backend, pid, surviving: list, killed: list, synthesis=Non
                 f.explanation,
                 f.test,
                 True,
-                f.title in major_set,
+                f.id in major_ids,
                 "",
                 "",
                 list(getattr(f, "from_gap_ids", []) or []),
+                f.examiner,
+                f.damage,
             )
         )
     for k in killed:
@@ -1951,7 +1967,7 @@ def _persist_compounds(backend, pid, compounds: list):
     backend.store_assay_compounds(pid, rows)
 
 
-def _persist_synthesis(backend, pid, synthesis):
+def _persist_synthesis(backend, pid, synthesis, wording_lines: int = 0):
     if synthesis is None:
         return
     row = {
@@ -1965,6 +1981,7 @@ def _persist_synthesis(backend, pid, synthesis):
         "significant_count": synthesis.significant_count,
         "skip_reason": synthesis.skip_reason,
         "paper_stats": json.dumps(synthesis.paper_stats),
+        "wording_lines": wording_lines,
     }
     backend.store_assay_synthesis(pid, row)
 

@@ -19,7 +19,12 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from assay.harness import cross_examine, dedupe_findings, upgrade_gaps
+from assay.harness import (
+    cross_examine,
+    dedupe_findings,
+    targets_cwg_lwg,
+    upgrade_gaps,
+)
 from assay.models import CrossExamVerdict, FindingOutput, GapOutput, _ensure_int_list
 
 
@@ -271,3 +276,23 @@ def test_cosine_handles_zero_norm():
 
     assert _cosine(np.zeros(3), np.array([1.0, 0.0, 0.0])) == 0.0
     assert _cosine(np.array([1.0, 0.0]), np.array([1.0, 0.0])) == pytest.approx(1.0)
+
+
+# -- targets_cwg_lwg --------------------------------------------------------
+
+
+@pytest.mark.parametrize("audience,expected", [
+    (["CWG"], True),
+    (["LWG"], True),
+    (["LEWG, CWG"], True),
+    (["EWG", "LWG"], True),
+    (["cwg"], True),
+    (["LEWG"], False),
+    (["EWG"], False),
+    (["SG1, SG9"], False),
+    ([], False),
+    ([""], False),
+])
+def test_targets_cwg_lwg(audience, expected):
+    """Survey (Step 3) and --rerender must agree on the wording-review flag."""
+    assert targets_cwg_lwg(audience) is expected

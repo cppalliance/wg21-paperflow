@@ -202,6 +202,8 @@ class AssayFindingRow:
     challenge: str = ""
     reasoning: str = ""
     from_gap_ids: list = field(default_factory=list)
+    examiner: str = ""
+    damage: str = ""
 
 
 @dataclass(frozen=True)
@@ -290,6 +292,7 @@ class AssaySynthesisRow:
     significant_count: int = 0
     skip_reason: str = ""
     paper_stats: dict | None = None
+    wording_lines: int = 0
 
     def __post_init__(self):
         if self.paper_stats is None:

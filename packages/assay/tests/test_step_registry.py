@@ -15,6 +15,7 @@ from assay.models import (
     FindingOutput,
     KilledFinding,
     PipelineState,
+    SynthesisOutput,
 )
 from assay.pipeline import (
     _PERSIST_BY_SLUG,
@@ -128,3 +129,45 @@ def test_persist_findings_uses_pipeline_ids(store):
     assert by_uid[42].survived is False
     assert by_uid[42].challenge == "concession"
     assert by_uid[42].reasoning == "paper already admits it"
+
+
+def test_persist_findings_flags_major_by_id_not_title(store):
+    """Two findings can share a title; only the promoted one is Major.
+
+    Matching on title would flag both, which silently invents a Major
+    finding on --rerender.
+    """
+    promoted = FindingOutput(
+        id=1, title="unclear ownership", lens="Design", severity="critical",
+        quote="q1", line=10, explanation="e1",
+    )
+    namesake = FindingOutput(
+        id=2, title="unclear ownership", lens="Usability", severity="minor",
+        quote="q2", line=20, explanation="e2",
+    )
+    synthesis = SynthesisOutput(
+        verdict_label="Weakened",
+        major_findings=[promoted],
+        regular_findings=[namesake],
+    )
+
+    _persist_findings(store, "P1000R0", [promoted, namesake], [], synthesis)
+
+    by_uid = {r.uid: r for r in store.get_assay_findings("P1000R0")}
+    assert by_uid[1].major is True
+    assert by_uid[2].major is False
+
+
+def test_persist_findings_writes_examiner_and_damage(store):
+    """Examiner/Damage reach the DB so --rerender can emit both blocks."""
+    finding = FindingOutput(
+        id=1, title="F1", lens="Design", severity="significant",
+        quote="q1", line=10, explanation="e1",
+        examiner="LEWG reviewer", damage="Breaks ABI.",
+    )
+
+    _persist_findings(store, "P1000R0", [finding], [])
+
+    row = store.get_assay_findings("P1000R0")[0]
+    assert row.examiner == "LEWG reviewer"
+    assert row.damage == "Breaks ABI."
