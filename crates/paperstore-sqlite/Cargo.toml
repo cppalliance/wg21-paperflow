@@ -1,0 +1,19 @@
+[package]
+name = "paperstore-sqlite"
+description = "SQLite backend for the paperstore abstract storage API"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+paperstore = { version = "0.1.0", path = "../paperstore" }
+rusqlite = { version = "0.40.2", features = ["bundled"] }
+
+[dev-dependencies]
+temp-env = "0.3.6"
+tempfile = "3.27.0"
