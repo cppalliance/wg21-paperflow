@@ -1,0 +1,18 @@
+[package]
+name = "paperstore"
+description = "Abstract storage API for WG21 paperflow artifacts"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+serde_json = "1.0.151"
+thiserror = "2.0.20"
+
+[lints]
+workspace = true
+
+[dev-dependencies]
+temp-env = "0.3.6"
