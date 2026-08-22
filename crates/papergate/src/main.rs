@@ -2,7 +2,8 @@
 //!
 //! `papergate [PAPER_NUM] [--file <PATH>] [--output <PATH>] [--prompt <PATH>]`
 //! runs the vendored papergate promptforge prompt against one WG21 paper and
-//! writes the analysis report to disk. Exactly one input is required: a paper
+//! writes the analysis report to stdout, or to `--output` when given. Exactly
+//! one input is required: a paper
 //! number resolved through the SQLite paper store, or `--file` to read a
 //! markdown file verbatim. A paper number needs `WG21_DATA_DIR` pointing at
 //! the paperflow workspace; `--file` never touches it. The gateway
@@ -38,7 +39,7 @@ async fn main() -> ExitCode {
     let input = cli.input();
     let request = RunRequest {
         input: &input,
-        output: &cli.output,
+        output: cli.output.as_deref(),
         prompt: cli.prompt.as_deref(),
         cancel,
     };

@@ -7,8 +7,8 @@
 //! the SQLite paper store for a paper number, verbatim from disk for
 //! `--file`), seeds a fresh per-run store with the paper under the prompt's
 //! declared `paper.md` input key, runs the prompt against the live model
-//! catalog, and extracts the prompt's declared `report.md` output to the
-//! requested path.
+//! catalog, and extracts the prompt's declared `report.md` output to
+//! `--output`, or to stdout when no path is given.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -42,9 +42,9 @@ pub(crate) struct Cli {
     /// Analyze the paper markdown file at PATH instead of a store lookup.
     #[arg(long, value_name = "PATH")]
     pub(crate) file: Option<PathBuf>,
-    /// Where to write the analysis report.
-    #[arg(long, value_name = "PATH", default_value = "report.md")]
-    pub(crate) output: PathBuf,
+    /// Write the analysis report to PATH instead of stdout.
+    #[arg(long, value_name = "PATH")]
+    pub(crate) output: Option<PathBuf>,
     /// Read the prompt from PATH instead of the embedded papergate prompt.
     #[arg(long, value_name = "PATH")]
     pub(crate) prompt: Option<PathBuf>,
@@ -80,8 +80,8 @@ pub(crate) enum PaperInput {
 pub(crate) struct RunRequest<'a> {
     /// The paper input to analyze.
     pub(crate) input: &'a PaperInput,
-    /// Where the analysis report is written.
-    pub(crate) output: &'a Path,
+    /// Where the analysis report is written; stdout when `None`.
+    pub(crate) output: Option<&'a Path>,
     /// An optional prompt file overriding the embedded default.
     pub(crate) prompt: Option<&'a Path>,
     /// The cooperative cancellation handle wired to Ctrl-C.
@@ -144,7 +144,7 @@ pub(crate) async fn run(request: RunRequest<'_>) -> Result<()> {
     let picker = ToolPicker::build(Catalog::new(Vec::new()), PickerConfig::default())
         .context("build the tool picker")?;
 
-    let output = output.to_owned();
+    let output = output.map(Path::to_owned);
     let written = output.clone();
     let execution_id = execution.clone();
     with_temp_store(&execution, move |store| async move {
@@ -161,12 +161,33 @@ pub(crate) async fn run(request: RunRequest<'_>) -> Result<()> {
             config,
         )
         .await?;
-        extract_report(&store, &output)
+        let report = read_report(&store)?;
+        match &output {
+            Some(path) => std::fs::write(path, &report)
+                .with_context(|| format!("write the report to {}", path.display()))?,
+            None => write_stdout(report.as_bytes())?,
+        }
+        Ok(())
     })
     .await?;
 
-    println!("{}", written.display());
+    if let Some(path) = &written {
+        println!("{}", path.display());
+    }
     Ok(())
+}
+
+/// Writes bytes to stdout verbatim, flushing before return.
+///
+/// Verbatim (no added newline) keeps the output pipe-friendly; the explicit
+/// flush guarantees delivery before the process exits.
+fn write_stdout(bytes: &[u8]) -> Result<()> {
+    use std::io::Write as _;
+    let mut stdout = std::io::stdout().lock();
+    stdout
+        .write_all(bytes)
+        .and_then(|()| stdout.flush())
+        .context("write the report to stdout")
 }
 
 /// Loads the paper markdown for the selected input.
@@ -259,23 +280,19 @@ fn seed_store(store: &StoreRef, paper_md: &str) -> Result<()> {
         .context("seed the run store with paper.md")
 }
 
-/// Extracts the prompt's declared output from the store and writes it to disk.
+/// Reads the prompt's declared output from the run store.
 ///
 /// A missing `report.md` is an explicit error naming the prompt's output
-/// contract, never an empty-file write.
-fn extract_report(store: &StoreRef, output: &Path) -> Result<()> {
-    let report = match store.read("report.md") {
-        Ok(report) => report,
-        Err(error @ StoreError::NotFound { .. }) => {
-            return Err(error).context(
-                "the prompt did not produce its declared output: report.md is missing \
-                 from the run store",
-            );
-        }
-        Err(error) => return Err(error).context("read report.md from the run store"),
-    };
-    std::fs::write(output, report)
-        .with_context(|| format!("write the report to {}", output.display()))
+/// contract, never an empty write.
+fn read_report(store: &StoreRef) -> Result<String> {
+    match store.read("report.md") {
+        Ok(report) => Ok(report),
+        Err(error @ StoreError::NotFound { .. }) => Err(error).context(
+            "the prompt did not produce its declared output: report.md is missing \
+             from the run store",
+        ),
+        Err(error) => Err(error).context("read report.md from the run store"),
+    }
 }
 
 /// An observer that writes one progress line per event to stderr.
@@ -302,7 +319,7 @@ mod tests {
     use tempfile::TempDir;
 
     use super::{
-        Cli, PaperInput, extract_report, load_input_markdown, load_paper_md, seed_store,
+        Cli, PaperInput, load_input_markdown, load_paper_md, read_report, seed_store,
         with_temp_store,
     };
 
@@ -348,7 +365,7 @@ mod tests {
         let cli = Cli::parse_from(["papergate", "p4003r2"]);
         assert_eq!(cli.paper.as_ref().map(PaperNum::as_str), Some("P4003R2"));
         assert_eq!(cli.file, None);
-        assert_eq!(cli.output, Path::new("report.md"));
+        assert_eq!(cli.output, None, "no --output means the report goes to stdout");
         assert_eq!(cli.prompt, None);
 
         let cli = Cli::parse_from([
@@ -359,7 +376,7 @@ mod tests {
             "--prompt",
             "custom.md",
         ]);
-        assert_eq!(cli.output, Path::new("out/analysis.md"));
+        assert_eq!(cli.output.as_deref(), Some(Path::new("out/analysis.md")));
         assert_eq!(cli.prompt.as_deref(), Some(Path::new("custom.md")));
     }
 
@@ -481,39 +498,31 @@ mod tests {
     }
 
     #[test]
-    fn extraction_writes_the_output_file_from_the_store_report() {
+    fn read_report_returns_the_store_report_verbatim() {
         let dir = TempDir::new().unwrap_or_else(|e| panic!("create temp dir: {e}"));
         let store = file_store(&dir);
         store
             .write("report.md", "Verdict: Strong\n")
             .unwrap_or_else(|e| panic!("write report.md: {e}"));
-        let output = dir.path().join("analysis.md");
 
-        extract_report(&store, &output).unwrap_or_else(|e| panic!("extract report: {e}"));
+        let report = read_report(&store).unwrap_or_else(|e| panic!("read report: {e}"));
 
-        let written =
-            std::fs::read_to_string(&output).unwrap_or_else(|e| panic!("read output file: {e}"));
-        assert_eq!(written, "Verdict: Strong\n");
+        assert_eq!(report, "Verdict: Strong\n");
     }
 
     #[test]
-    fn missing_report_is_an_explicit_contract_error_and_writes_nothing() {
+    fn missing_report_is_an_explicit_contract_error() {
         let dir = TempDir::new().unwrap_or_else(|e| panic!("create temp dir: {e}"));
         let store = file_store(&dir);
-        let output = dir.path().join("analysis.md");
 
-        let error = match extract_report(&store, &output) {
-            Ok(()) => panic!("a missing report.md must fail"),
+        let error = match read_report(&store) {
+            Ok(report) => panic!("a missing report.md must fail, got {report:?}"),
             Err(error) => error.to_string(),
         };
 
         assert!(
             error.contains("declared output") && error.contains("report.md"),
             "the error must name the prompt's output contract: {error}",
-        );
-        assert!(
-            !output.exists(),
-            "a missing report must never become an empty-file write",
         );
     }
 
