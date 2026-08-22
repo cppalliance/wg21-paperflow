@@ -51,6 +51,34 @@ CREATE TABLE papers (
 );
 ";
 
+/// A `papers` table as migrated by an older Python paperstore: `assay_path`
+/// already added, `citations_extracted_at` not yet present.
+const PRE_CITATIONS_TABLE: &str = "
+CREATE TABLE papers (
+    paper_id         TEXT PRIMARY KEY,
+    year             TEXT DEFAULT '',
+    title            TEXT DEFAULT '',
+    authors          TEXT DEFAULT '',
+    target_group     TEXT DEFAULT '',
+    intent           TEXT DEFAULT '',
+    url              TEXT DEFAULT '',
+    document_date    TEXT DEFAULT '',
+    mailing_date     TEXT DEFAULT '',
+    disposition      TEXT DEFAULT '',
+    previous_version TEXT DEFAULT '',
+    source_file      TEXT DEFAULT '',
+    markdown_path    TEXT DEFAULT '',
+    dissect_path     TEXT DEFAULT '',
+    advocatus_path   TEXT DEFAULT '',
+    agora_path       TEXT DEFAULT '',
+    assay_path       TEXT DEFAULT '',
+    line_count       INTEGER DEFAULT 0,
+    status           INTEGER NOT NULL DEFAULT 0,
+    error            TEXT DEFAULT '',
+    updated_at       TEXT DEFAULT ''
+);
+";
+
 struct Workspace {
     dir: TempDir,
 }
@@ -246,6 +274,22 @@ fn existing_table_without_assay_path_is_migrated() {
         .meta(&paper_num())
         .unwrap_or_else(|e| panic!("meta: {e}"));
     assert_eq!(row.assay_path, "");
+}
+
+#[test]
+fn existing_table_without_citations_extracted_at_is_migrated() {
+    let ws = Workspace::new();
+    ws.raw_connection()
+        .execute_batch(PRE_CITATIONS_TABLE)
+        .unwrap_or_else(|e| panic!("create old table: {e}"));
+
+    let backend = ws.open_backend();
+    ws.insert_row("P4003R2", "");
+
+    let row = backend
+        .meta(&paper_num())
+        .unwrap_or_else(|e| panic!("meta: {e}"));
+    assert_eq!(row.citations_extracted_at, "");
 }
 
 #[test]

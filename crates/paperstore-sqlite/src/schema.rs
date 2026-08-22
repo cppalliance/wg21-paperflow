@@ -2,7 +2,8 @@
 //!
 //! The DDL is copied column-for-column from the `_SCHEMA` string in the
 //! Python `paperstore.sqlite_backend`, and [`ensure_schema`] ports the
-//! `_migrate`-style guard that adds `assay_path` to older databases.
+//! `_migrate`-style guards that add `assay_path` and
+//! `citations_extracted_at` to older databases.
 
 use rusqlite::Connection;
 
@@ -36,8 +37,9 @@ CREATE TABLE IF NOT EXISTS papers (
 );
 ";
 
-/// Creates the `papers` table if needed, then adds `assay_path` when
-/// `pragma_table_info` shows it missing (the `_migrate` guard).
+/// Creates the `papers` table if needed, then adds `assay_path` and
+/// `citations_extracted_at` when `pragma_table_info` shows them missing
+/// (the `_migrate` guards).
 pub(crate) fn ensure_schema(conn: &Connection) -> rusqlite::Result<()> {
     conn.execute_batch(SCHEMA)?;
     let mut stmt = conn.prepare("PRAGMA table_info(papers)")?;
@@ -46,6 +48,11 @@ pub(crate) fn ensure_schema(conn: &Connection) -> rusqlite::Result<()> {
         .collect::<rusqlite::Result<Vec<_>>>()?;
     if !columns.iter().any(|column| column == "assay_path") {
         conn.execute_batch("ALTER TABLE papers ADD COLUMN assay_path TEXT DEFAULT ''")?;
+    }
+    if !columns.iter().any(|column| column == "citations_extracted_at") {
+        conn.execute_batch(
+            "ALTER TABLE papers ADD COLUMN citations_extracted_at TEXT DEFAULT ''",
+        )?;
     }
     Ok(())
 }
