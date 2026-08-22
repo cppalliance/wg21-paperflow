@@ -1,11 +1,14 @@
 //! The `papergate` command-line tool.
 //!
-//! `papergate <PAPER.md> [--output <PATH>] [--prompt <PATH>]` runs the vendored
-//! papergate promptforge prompt against a WG21 paper markdown file and writes
-//! the analysis report to disk. The gateway credentials
-//! `PROMPTFORGE_GATEWAY_URL` and `PROMPTFORGE_GATEWAY_API_KEY` must both be set:
-//! the prompt binds its writer model through the gateway, so a local-only run
-//! can only fail.
+//! `papergate [PAPER_NUM] [--file <PATH>] [--output <PATH>] [--prompt <PATH>]`
+//! runs the vendored papergate promptforge prompt against one WG21 paper and
+//! writes the analysis report to disk. Exactly one input is required: a paper
+//! number resolved through the SQLite paper store, or `--file` to read a
+//! markdown file verbatim. A paper number needs `WG21_DATA_DIR` pointing at
+//! the paperflow workspace; `--file` never touches it. The gateway
+//! credentials `PROMPTFORGE_GATEWAY_URL` and `PROMPTFORGE_GATEWAY_API_KEY`
+//! must both be set: the prompt binds its writer model through the gateway,
+//! so a local-only run can only fail.
 //!
 //! `main` is the process boundary: it parses arguments, installs the Ctrl-C
 //! signal, invokes the application runner, and selects the exit status. All
@@ -32,8 +35,9 @@ mod app;
 async fn main() -> ExitCode {
     let cli = Cli::parse();
     let cancel = install_cancel();
+    let input = cli.input();
     let request = RunRequest {
-        paper: &cli.paper,
+        input: &input,
         output: &cli.output,
         prompt: cli.prompt.as_deref(),
         cancel,

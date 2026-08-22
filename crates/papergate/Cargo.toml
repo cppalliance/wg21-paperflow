@@ -14,9 +14,12 @@ workspace = true
 anyhow = "1.0.104"
 clap = { version = "4.6.6", features = ["derive"] }
 fastrand = "2.5.0"
+paperstore = { version = "0.1.0", path = "../paperstore" }
+paperstore-sqlite = { version = "0.1.0", path = "../paperstore-sqlite" }
 promptforge-core = { path = "../../../promptforge/crates/promptforge-core" }
 promptforge-tool-picker = { path = "../../../promptforge/crates/promptforge-tool-picker" }
 tokio = { version = "1.53.1", features = ["rt-multi-thread", "macros", "signal", "fs"] }
 
 [dev-dependencies]
+rusqlite = { version = "0.40.2", features = ["bundled"] }
 tempfile = "3.27.0"

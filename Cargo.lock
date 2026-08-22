@@ -2179,8 +2179,11 @@ dependencies = [
  "anyhow",
  "clap",
  "fastrand",
+ "paperstore",
+ "paperstore-sqlite",
  "promptforge-core",
  "promptforge-tool-picker",
+ "rusqlite",
  "tempfile",
  "tokio",
 ]
