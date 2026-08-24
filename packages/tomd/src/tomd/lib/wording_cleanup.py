@@ -7,34 +7,27 @@
 # Official repository: https://github.com/cppalliance/wg21-paperflow
 #
 
-"""Post-render cleanup for Pandoc fenced wording divs.
+"""Redundant-tag cleanup for a rendered wording section.
 
-This module runs against the **assembled Markdown**, not against any
-PDF- or HTML-internal representation. Both the PDF emitter (``lib/pdf/
-emit.py``) and the HTML renderer (``lib/html/render.py``) produce the
-same Pandoc shape:
+When a section is overwhelmingly one role, its inline ``<ins>`` /
+``<del>`` tags say nothing the section's own role does not, and they
+bury the prose in markup. :func:`strip_redundant_tags` removes them
+while preserving contrarian tags (a ``<del>`` inside an otherwise
+inserted block marks an intra-block edit and must survive).
 
-    :::wording-add
+Both the PDF emitter (``lib/pdf/wording_emit.py``) and the HTML renderer
+(``lib/html/render.py``) call this on the text they have just rendered,
+passing the section's wording class. It used to run instead as a pass
+over the assembled Markdown, keyed on the ``:::wording-add`` fences the
+emitters wrapped each section in; those fences are no longer emitted, so
+the role is handed in directly rather than parsed back out. The
+character-ratio policy is unchanged.
 
-    <ins>added clause</ins> existing context <ins>more added</ins>
-
-    :::
-
-When the section is overwhelmingly its declared role, the inline
-``<ins>`` / ``<del>`` tags duplicate the div-level signal and become
-noise. This pass strips the redundant tags while preserving contrarian
-tags (a ``<del>`` inside a ``:::wording-add`` block marks an intra-
-block edit and must survive).
-
-Code promotion (turning a multi-line monospace-dominant wording
-section into a fenced ``cpp`` block inside the div) lives in the PDF
-emitter because it needs span-level structure that the rendered
-Markdown has already collapsed. This module never touches code-
-promoted divs: a uniform-role fence carries no inline role tags and
-trips the "no role chars" early return, while a mixed fenced diff sits
-in a neutral ``:::wording`` div and trips the ``implicit is None`` early
-return (its ``<ins>`` / ``<del>`` markers are deliberately literal
-inside the fence).
+Code-shaped sections are unaffected, exactly as before. A uniform-role
+fenced block carries no inline role tags and trips the "no role chars"
+early return; a mixed fenced diff is rendered as a neutral ``wording``
+section and trips the ``implicit is None`` early return, so its
+``<ins>`` / ``<del>`` markers stay literal inside the fence.
 """
 
 from __future__ import annotations
@@ -42,11 +35,6 @@ from __future__ import annotations
 import re
 
 from .wording_policy import UNIFORM_ROLE_THRESHOLD, implicit_role_for
-
-_WORDING_OPEN_RE = re.compile(
-    r":::(wording(?:-add|-remove)?)[ \t]*$",
-)
-_WORDING_CLOSE = ":::"
 
 # Non-greedy across lines so multi-line tag spans match correctly,
 # while not accidentally swallowing an unrelated downstream tag of the
@@ -57,61 +45,21 @@ _ANY_ROLE_TAG_RE = re.compile(r"</?(?:ins|del)>")
 _WHITESPACE_RE = re.compile(r"\s")
 
 
-def clean_wording_blocks(md: str) -> str:
-    """Strip redundant inline role tags inside uniform-role wording divs.
+def strip_redundant_tags(div_class: str, text: str) -> str:
+    """Strip inline role tags that a uniform-role wording section repeats.
 
-    Idempotent: running this on already-clean output is a no-op.
-    Neutral ``:::wording`` divs are never modified (they exist exactly
-    to carry mixed ``<ins>`` / ``<del>`` diffs).
+    ``div_class`` is the section's wording class (``wording-add``,
+    ``wording-remove``, or the neutral ``wording``); ``text`` is the
+    already-rendered Markdown for that one section.
+
+    Idempotent: running this on already-clean output is a no-op. Neutral
+    sections are never modified (they exist exactly to carry mixed
+    ``<ins>`` / ``<del>`` diffs).
     """
-    out: list[str] = []
-    lines = md.split("\n")
-    i = 0
-    while i < len(lines):
-        m = _WORDING_OPEN_RE.match(lines[i])
-        if not m:
-            out.append(lines[i])
-            i += 1
-            continue
-        close = _find_close(lines, i + 1)
-        if close is None:
-            # Unclosed div; leave the rest of the document untouched.
-            out.extend(lines[i:])
-            break
-        div_class = m.group(1)
-        inner = lines[i + 1:close]
-        cleaned = _strip_redundant_tags(div_class, inner)
-        out.append(lines[i])
-        out.extend(cleaned)
-        out.append(lines[close])
-        i = close + 1
-    return "\n".join(out)
-
-
-def _find_close(lines: list[str], start: int) -> int | None:
-    """Return the index of the next bare ``:::`` line, or ``None``.
-
-    Skips over any nested fenced code blocks so a ``:::`` line buried
-    inside a ``` block (theoretically possible, currently never emitted
-    by tomd) is not mistaken for the div terminator.
-    """
-    in_code_fence = False
-    for j in range(start, len(lines)):
-        stripped = lines[j].strip()
-        if stripped.startswith("```"):
-            in_code_fence = not in_code_fence
-            continue
-        if not in_code_fence and stripped == _WORDING_CLOSE:
-            return j
-    return None
-
-
-def _strip_redundant_tags(div_class: str, inner_lines: list[str]) -> list[str]:
     implicit = implicit_role_for(div_class)
     if implicit is None:
-        return inner_lines
+        return text
 
-    inner = "\n".join(inner_lines)
     matching_re = _INS_RE if implicit == "ins" else _DEL_RE
 
     # Numerator: visible non-whitespace chars inside the matching role
@@ -119,15 +67,14 @@ def _strip_redundant_tags(div_class: str, inner_lines: list[str]) -> list[str]:
     # both kinds of role wrappers (what the reader actually sees).
     tag_chars = sum(
         len(_WHITESPACE_RE.sub("", m.group(1)))
-        for m in matching_re.finditer(inner)
+        for m in matching_re.finditer(text)
     )
-    visible = _ANY_ROLE_TAG_RE.sub("", inner)
+    visible = _ANY_ROLE_TAG_RE.sub("", text)
     total_chars = len(_WHITESPACE_RE.sub("", visible))
 
     if total_chars == 0:
-        return inner_lines
+        return text
     if tag_chars / total_chars < UNIFORM_ROLE_THRESHOLD:
-        return inner_lines
+        return text
 
-    stripped = matching_re.sub(lambda m: m.group(1), inner)
-    return stripped.split("\n")
+    return matching_re.sub(lambda m: m.group(1), text)

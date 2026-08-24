@@ -371,26 +371,42 @@ class TestTableDetection:
 
 
 class TestWordingSectionCount:
-    def test_wording_divs_counted(self):
+    """tomd emits no wording div, so a wording section is detected by the
+    inline ``<ins>`` / ``<del>`` tags it carries.
+    """
+
+    def test_tagged_blocks_counted(self):
         md = (
             "## Wording\n\n"
-            ":::wording\n\nSome text.\n\n:::\n\n"
-            ":::wording-add\n\nAdded text.\n\n:::\n"
+            "Some <ins>added</ins> text.\n\n"
+            "More <del>removed</del> text.\n"
         )
         m = compute_metrics(md)
         assert m.wording_section_count == 2
 
-    def test_no_wording_divs(self):
+    def test_untagged_blocks_not_counted(self):
         md = "## Heading\n\nJust text.\n"
         m = compute_metrics(md)
         assert m.wording_section_count == 0
 
+    def test_one_block_with_two_tags_counts_once(self):
+        md = "## W\n\n<ins>new</ins> and <del>old</del> in one block.\n"
+        m = compute_metrics(md)
+        assert m.wording_section_count == 1
+
+    def test_tagged_code_fence_counted(self):
+        md = "## W\n\n```cpp\nint a;\n<ins>int b;</ins>\n```\n"
+        m = compute_metrics(md)
+        assert m.wording_section_count == 1
+
     def test_p2583r3_has_wording_sections(self):
+        # Legacy-shaped fixture (still carries the retired ``:::`` divs).
+        # Its 15 inline tags are spread across 8 top-level blocks.
         md = (_FIXTURES_DIR / "p2583r3-symmetric-transfer.md").read_text(
             encoding="utf-8"
         )
         m = compute_metrics(md, file="p2583r3")
-        assert m.wording_section_count == 10
+        assert m.wording_section_count == 8
 
 
 class TestTableParseErrors:

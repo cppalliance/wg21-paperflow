@@ -108,29 +108,23 @@ def p2583r3_md():
 class TestP2583R3Wording:
     """Validate wording section handling on P2583R3 (proposed wording paper)."""
 
-    def test_has_wording_blocks(self, p2583r3_md):
-        wording_markers = re.findall(r"^:::wording(?:-\w+)?$", p2583r3_md, re.MULTILINE)
-        assert len(wording_markers) >= 5, (
-            f"Expected many wording blocks, found {len(wording_markers)}"
-        )
-
-    def test_has_wording_add(self, p2583r3_md):
-        assert ":::wording-add" in p2583r3_md
-
-    def test_has_wording_remove(self, p2583r3_md):
-        assert ":::wording-remove" in p2583r3_md
+    def test_emits_no_wording_divs(self, p2583r3_md):
+        # The Pandoc fenced div is retired: it said nothing the section's
+        # own shape and inline tags do not, and it was noise in the output.
+        assert ":::" not in p2583r3_md
 
     def test_has_ins_del_tags(self, p2583r3_md):
         assert "<ins>" in p2583r3_md or "<del>" in p2583r3_md, (
             "Wording paper should preserve insertion/deletion annotations"
         )
 
-    def test_wording_blocks_are_closed(self, p2583r3_md):
-        opens = len(re.findall(r"^:::wording", p2583r3_md, re.MULTILINE))
-        closes = len(re.findall(r"^:::\s*$", p2583r3_md, re.MULTILINE))
-        assert opens == closes, (
-            f"Mismatched wording blocks: {opens} opens vs {closes} closes"
-        )
+    def test_wording_tags_are_balanced(self, p2583r3_md):
+        for tag in ("ins", "del"):
+            opens = len(re.findall(rf"<{tag}>", p2583r3_md))
+            closes = len(re.findall(rf"</{tag}>", p2583r3_md))
+            assert opens == closes, (
+                f"Mismatched <{tag}> tags: {opens} opens vs {closes} closes"
+            )
 
     def test_has_front_matter(self, p2583r3_md):
         assert p2583r3_md.startswith("---")

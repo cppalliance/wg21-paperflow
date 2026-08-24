@@ -64,7 +64,6 @@ from .types import (
 from .. import DOC_NUM_RE
 from ..shared import override_revision_from_filename
 from ..toc import find_toc_indices, has_dot_leader, is_toc_label
-from ..wording_cleanup import clean_wording_blocks
 from ..metadata_yaml.strip import (
     strip_metadata_headings as _strip_metadata_headings_new,
     strip_pre_heading_fragments as _strip_pre_heading_fragments,
@@ -2162,7 +2161,6 @@ def run_pipeline(
         vector_uncertainty=result.vector_uncertainty,
         glyph_stats=result.glyph_stats,
     )
-    md = clean_wording_blocks(md)
     prompts = emit_prompts(sections)
 
     if wording_problems:

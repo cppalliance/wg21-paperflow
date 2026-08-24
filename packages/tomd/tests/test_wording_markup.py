@@ -9,12 +9,15 @@
 
 """Round-trip guard: the checker strip rules must match the emitter output.
 
-This is the automated link between the wording-markup *producers* (the
-format helpers the emitters call) and the *consumer* (the checker strip
+This is the automated link between the wording-markup *producer* (the
+format helper the emitters call) and the *consumer* (the checker strip
 regexes). Both are derived from the same constants in ``lib.wording_markup``;
 this test asserts they agree, so a future format change that updates one
 without the other fails CI instead of silently re-depressing wording-paper
 coverage scores.
+
+The fenced-div cases cover a syntax tomd no longer emits: they pin the
+recognizer ``lib.check_content`` needs for markdown an older tomd wrote.
 """
 
 import sys
@@ -26,26 +29,26 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from tomd.lib.pdf.types import SectionKind
 from tomd.lib.wording_markup import (
+    LEGACY_FENCE_MARKER,
+    LEGACY_WORDING_FENCE_RE,
     WORDING_CLASSES,
-    WORDING_FENCE_CLOSE,
-    WORDING_FENCE_RE,
     WORDING_TAG_RE,
     WORDING_TAGS,
-    wording_fence_open,
     wording_tag_open,
 )
 
 
 @pytest.mark.parametrize("div_class", WORDING_CLASSES)
-def test_fence_regex_matches_emitter_open(div_class):
-    # The strip regex must recognize the exact opening fence the emitters
-    # produce. Fails if wording_fence_open changes shape (e.g. to pandoc
-    # brace syntax) without WORDING_FENCE_RE following.
-    assert WORDING_FENCE_RE.match(wording_fence_open(div_class)) is not None
+def test_legacy_fence_regex_matches_open(div_class):
+    # tomd no longer emits fenced wording divs, but check_content still
+    # normalizes markdown an older tomd wrote, so the recognizer must keep
+    # matching every opening fence that syntax ever produced.
+    fence = f"{LEGACY_FENCE_MARKER}{div_class}"
+    assert LEGACY_WORDING_FENCE_RE.match(fence) is not None
 
 
-def test_fence_regex_matches_emitter_close():
-    assert WORDING_FENCE_RE.match(WORDING_FENCE_CLOSE) is not None
+def test_legacy_fence_regex_matches_close():
+    assert LEGACY_WORDING_FENCE_RE.match(LEGACY_FENCE_MARKER) is not None
 
 
 @pytest.mark.parametrize("tag", WORDING_TAGS)

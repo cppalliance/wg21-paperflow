@@ -9,7 +9,8 @@ from collections import deque
 from bs4 import BeautifulSoup, CData, Comment, ProcessingInstruction, Tag, NavigableString
 
 from .. import CODE_LANG_LABELS, strip_format_chars, ALLOWED_LINK_SCHEMES
-from ..wording_markup import WORDING_FENCE_CLOSE, wording_fence_open, wording_tag_open
+from ..wording_cleanup import strip_redundant_tags
+from ..wording_markup import wording_tag_open
 from .. import tables as _tables
 from ..pdf.code_format import is_diagram_block
 
@@ -964,20 +965,24 @@ def _render_div(el: Tag, generator: str) -> str | None:
 
 
 def _render_wording_div(el: Tag, generator: str) -> str:
-    """Render a wording section with Pandoc fenced div markers."""
+    """Render a wording section's content, without a Pandoc fenced div.
+
+    The div wrapper was noise in the output, so only its *role* is used,
+    and only to decide whether the content's own inline ``<ins>`` /
+    ``<del>`` tags are redundant with it (``lib.wording_cleanup``).
+    """
     classes = el.get("class", [])
-    # Class-selection precedence stays local; only the fence-string
-    # construction is shared (lib.wording_markup). Do not reorder these.
+    # Class-selection precedence stays local. Do not reorder these.
     if "wording-add" in classes:
-        fence = wording_fence_open("wording-add")
+        div_class = "wording-add"
     elif "wording-remove" in classes:
-        fence = wording_fence_open("wording-remove")
+        div_class = "wording-remove"
     else:
-        fence = wording_fence_open("wording")
+        div_class = "wording"
     parts = []
     _render_children(el, parts, generator)
     inner = "\n\n".join(p for p in parts if p.strip())
-    return f"{fence}\n\n{inner}\n\n{WORDING_FENCE_CLOSE}"
+    return strip_redundant_tags(div_class, inner)
 
 
 def _render_eelis_block(el: Tag, generator: str) -> str | None:

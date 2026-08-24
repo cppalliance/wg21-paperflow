@@ -9,26 +9,30 @@
 
 """Wording-section rendering for the PDF emitter.
 
-A wording section (``:::wording-add`` / ``:::wording-remove`` / neutral
-``:::wording``) renders in one of three shapes, fidelity first: a
+A wording section renders in one of three shapes, fidelity first: a
 wholesale fenced code block, a fenced code diff (a code fence carrying
-inline ``<ins>`` / ``<del>`` markers), or prose. All
-three live here so :mod:`emit` keeps to general block dispatch. The
-uniform-role boundary shared with the post-render cleanup pass lives in
+inline ``<ins>`` / ``<del>`` markers), or prose. All three live here so
+:mod:`emit` keeps to general block dispatch. The uniform-role boundary
+shared with :mod:`lib.wording_cleanup` lives in
 :mod:`lib.wording_policy`; the code-promotion knobs below are emit-only
 because they need span-level structure the assembled Markdown has
 already collapsed.
+
+No Pandoc fenced div (``:::wording-add`` and friends) wraps the result:
+the divs said nothing the shape and the inline tags do not, and they
+were noise in the converted Markdown. Which shape a section takes, and
+which inline tags survive, is unchanged.
 """
 
 from __future__ import annotations
 
 from .. import DEFAULT_FENCE_LANG
-from ..wording_markup import WORDING_FENCE_CLOSE, wording_fence_open
+from ..wording_cleanup import strip_redundant_tags
 from ..wording_policy import UNIFORM_ROLE_THRESHOLD, implicit_role_for
 from .cleanup import escape_leading_atx, normalize_whitespace
 from .code_format import normalize_code_line
 from .code_grid import CodeGrid
-from .types import Line, Span, Section, SectionKind
+from .types import Line, Span, Section
 
 # Monospace fraction at or above which a wording section reads as code.
 _MONO_DOMINANT_THRESHOLD = 0.80
@@ -140,9 +144,8 @@ def _render_wording_line(line: Line) -> str:
     the group. ``ins`` / ``del`` runs become HTML tags; any other named
     role (e.g. ``context``) and bare whitespace render as prose, with
     monospace spans backticked. Stripping redundant tags (when the whole
-    div is uniformly one role) is delegated to the post-render pass in
-    ``lib.wording_cleanup``, which sees the assembled Markdown and is
-    shared between PDF and HTML emitters.
+    section is uniformly one role) is delegated to
+    ``lib.wording_cleanup``, shared between the PDF and HTML emitters.
     """
     parts: list[str] = []
     for role, spans in _group_wording_spans(line):
@@ -272,42 +275,43 @@ def _render_wording_code_diff(sec: Section, lang: str) -> str:
 
 
 def _render_wording_section(sec: Section) -> str:
-    """Render a wording section with Pandoc fenced div markers.
+    """Render a wording section as plain Markdown, no Pandoc fenced div.
 
     Three rendering shapes, fidelity first (never collapse code line
     structure, never drop a diff):
 
     1. **Wholesale code (fence).** Monospace-dominant, multi-line, and
-       uniformly the div's role: emit a fenced ``cpp`` block inside the
-       directional div, dropping the now-redundant inline tags.
+       uniformly one role: emit a fenced ``cpp`` block, dropping the
+       now-redundant inline tags.
     2. **Fenced code diff.** Monospace-dominant and multi-line but not
-       uniform: a *partial* change. Emit a neutral ``:::wording`` div
-       (never the directional ``wording-add`` / ``wording-remove``, which
-       would paint the unchanged context as inserted/removed) wrapping a
-       real ``cpp`` fence, so the code stays copy-pasteable; the intra-
-       block edit is carried by inline ``<ins>`` / ``<del>`` markers that
-       survive inside the fence as literal text.
-    3. **Prose (default).** Render each span faithfully in the
-       directional div; the post-render pass in ``lib.wording_cleanup``
-       decides whether the inline tags are redundant with the div role.
+       uniform: a *partial* change. Emit a real ``cpp`` fence so the code
+       stays copy-pasteable; the intra-block edit is carried by inline
+       ``<ins>`` / ``<del>`` markers that survive inside the fence as
+       literal text.
+    3. **Prose (default).** Render each span faithfully, then let
+       ``lib.wording_cleanup`` decide whether the inline tags are
+       redundant with the section's own role.
     """
     div_class = sec.kind.value
     implicit_role = implicit_role_for(div_class)
 
     total, mono, roles = _wording_glyph_stats(sec.lines)
-    # The directional-fence path (shape 1) drops the inline tags and lets
-    # the ``:::wording-add`` / ``:::wording-remove`` div carry the role for
-    # the whole block, so it is gated on two clauses: the dominant role
-    # must clear ``UNIFORM_ROLE_THRESHOLD`` (the share contract with
-    # ``lib.wording_cleanup``), AND no contrarian-role chars may exist. The
-    # strict zero check prevents a small ``<del>`` inside an otherwise-
-    # uniform ``<ins>`` block from being silently flattened into the div
-    # role; when one is present the section falls through to
+    # The wholesale-fence path (shape 1) drops the inline tags because the
+    # whole block is one role, so it is gated on two clauses: the dominant
+    # role must clear ``UNIFORM_ROLE_THRESHOLD`` (the share contract with
+    # ``lib.wording_cleanup``), AND no chars of the OPPOSING diff role may
+    # exist. The strict zero check prevents a small ``<del>`` inside an
+    # otherwise-uniform ``<ins>`` block from being silently flattened into
+    # the div role; when one is present the section falls through to
     # ``_render_wording_code_diff`` (shape 2), a neutral fence that keeps
-    # every ``<ins>`` / ``<del>`` marker verbatim inside the code.
-    contrarian_chars = sum(
-        n for role, n in roles.items() if role != implicit_role
-    )
+    # every ``<ins>`` / ``<del>`` marker verbatim inside the code. Scoped to
+    # the opposing role specifically (not "any other role"): a "context"
+    # span (achromatic pre-existing text quoted for context, e.g. a stray
+    # brace in an exposition-only label) is neither an insertion nor a
+    # deletion, so a sliver of it does not carry the same do-not-lose
+    # weight as an actual opposing edit and must not block the fence.
+    opposing_role = "del" if implicit_role == "ins" else "ins"
+    contrarian_chars = roles.get(opposing_role, 0)
     uniform_role = (
         implicit_role is not None
         and total > 0
@@ -325,17 +329,18 @@ def _render_wording_section(sec: Section) -> str:
         lang = sec.fence_lang or DEFAULT_FENCE_LANG
         code = _render_wording_code_block(sec, lang)
         if code:
-            return f"{wording_fence_open(div_class)}\n\n{code}\n\n{WORDING_FENCE_CLOSE}"
+            return code
 
     if code_shaped:
         lang = sec.fence_lang or DEFAULT_FENCE_LANG
         diff = _render_wording_code_diff(sec, lang)
         if diff:
-            neutral = SectionKind.WORDING.value
-            return f"{wording_fence_open(neutral)}\n\n{diff}\n\n{WORDING_FENCE_CLOSE}"
+            # Rendered as a neutral section: the surrounding context is
+            # unchanged, so its tags are never redundant and stay literal.
+            return diff
 
     rendered_lines = [_render_wording_line(line) for line in sec.lines]
     text = normalize_whitespace("\n".join(rendered_lines))
     inner = escape_leading_atx(
         " ".join(ln.strip() for ln in text.split("\n") if ln.strip()))
-    return f"{wording_fence_open(div_class)}\n\n{inner}\n\n{WORDING_FENCE_CLOSE}"
+    return strip_redundant_tags(div_class, inner)

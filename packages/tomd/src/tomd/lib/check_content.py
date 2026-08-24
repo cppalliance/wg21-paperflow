@@ -55,7 +55,7 @@ from tomd.errors import CheckContentArgError
 from tomd.lib.batch import run_parallel_batch
 from tomd.lib.html.extract import detect_generator, strip_boilerplate
 from tomd.lib.metadata_yaml.format import strip_front_matter
-from tomd.lib.wording_markup import WORDING_FENCE_RE, WORDING_TAG_RE
+from tomd.lib.wording_markup import LEGACY_WORDING_FENCE_RE, WORDING_TAG_RE
 
 __all__ = [
     "ContentCheckBatchResult",
@@ -424,8 +424,9 @@ def _extract_markdown_stream(md_text: str) -> tuple[str, ...]:
     """Return the normalized token stream for the converted Markdown.
 
     Front matter, tomd-emitted ``<!-- tomd:* -->`` markers, and tomd
-    wording markup (``<ins>``/``<del>`` tags and ``:::wording*`` fenced-div
-    lines) are stripped before AST parsing so the markup syntax does not
+    wording markup (``<ins>``/``<del>`` tags, plus ``:::wording*`` fenced-div
+    lines from markdown an older tomd produced) are stripped before AST
+    parsing so the markup syntax does not
     appear as drift tokens. Wording *prose* (the inner text) is retained,
     since it is present in the source document. The strip rules come from
     ``lib.wording_markup``, the same module the emitters format from, so the
@@ -440,7 +441,7 @@ def _extract_markdown_stream(md_text: str) -> tuple[str, ...]:
     body = strip_front_matter(md_text)
     body = _TOMD_HTML_MARKER_RE.sub(" ", body)
     body = WORDING_TAG_RE.sub(" ", body)
-    body = WORDING_FENCE_RE.sub(" ", body)
+    body = LEGACY_WORDING_FENCE_RE.sub(" ", body)
     tokens_raw: list[str] = []
     for node in _AST_RENDERER(body):
         if isinstance(node, dict):

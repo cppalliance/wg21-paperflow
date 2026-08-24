@@ -470,9 +470,9 @@ class TestIntegrationCoverage:
 
     def test_wording_markup_does_not_depress_coverage(self, tmp_path):
         # End-to-end: stage a wording SOURCE, run the real HTML converter so
-        # render.py emits its actual :::wording / <ins> / <del> syntax, then
-        # check. If the emitter's syntax and the checker's strip rules ever
-        # diverge, the markup would register as missing/extra and this fails.
+        # render.py emits its actual <ins> / <del> syntax, then check. If the
+        # emitter's syntax and the checker's strip rules ever diverge, the
+        # markup would register as missing/extra and this fails.
         store = SqliteBackend(tmp_path)
         prose_a = (
             "The motivation section explains why the current language "
@@ -498,7 +498,9 @@ class TestIntegrationCoverage:
         # Real conversion (the same entrypoint `convert` uses for HTML).
         md, _ = convert_html(store.get_source_path("P0009"))
         # Sanity: the emitter actually produced the markup we mean to strip.
-        assert ":::wording-add" in md
+        # No fenced div is emitted any more; the source's own <ins> survives
+        # (its paragraph is mixed, so the tag is not redundant).
+        assert ":::" not in md
         assert "<ins>" in md
         store.write_paper_md("P0009", md)
 
