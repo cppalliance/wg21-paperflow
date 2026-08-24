@@ -9,8 +9,7 @@ Features come from regex catalog hits unioned with the chosen classifier
 regex+classifier hypothesis densities.
 
 Retraining writes ``provenance.json`` next to each family joblib so load
-time can fail closed on sampling, threshold, or sklearn skew. Use
-``--provenance-only`` to rewrite provenance without re-fitting the HGB.
+time can fail closed on sampling, threshold, or sklearn skew.
 """
 
 from __future__ import annotations
@@ -298,11 +297,6 @@ def main() -> int:
         default=assay_package_root() / "data" / "routing",
         help="Directory for feature_names.json and group_order.json",
     )
-    parser.add_argument(
-        "--provenance-only",
-        action="store_true",
-        help="Write provenance.json only; skip training and joblib output.",
-    )
     parser.add_argument("--classifier", default="nli-small")
     parser.add_argument(
         "--cache",
@@ -311,13 +305,6 @@ def main() -> int:
         help="Optional JSONL cache of extracted features (read or write).",
     )
     args = parser.parse_args()
-    if args.provenance_only:
-        provenance_path = write_family_provenance(
-            model_output_dir=args.model_output,
-            metadata_dir=args.metadata_dir,
-        )
-        logger.info("wrote provenance: %s", provenance_path)
-        return 0
     paperstore = args.paperstore or default_paperstore_dir()
     rows = build_training_rows(
         paperstore_dir=paperstore,
