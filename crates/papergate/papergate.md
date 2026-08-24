@@ -87,6 +87,8 @@ You are the reviewer of a C++ Standardization proposal, evaluating this evidence
 
 The justification for a proposal to have need of standardization must demonstrate why the proposal's benefits cannot be obtained simply by publishing its artifiacts. For example on github, or on a blog. Describe the extent that the evidence justifies the need for standardization (using the definition given) by providing the evidence of that need as a series of sentences, up to five sentences total. Use the best evidence. Where each of the sentence of the evidence sentence paraphrases the information that's provided in the bullets.
 
+Use the verdict n/a only when the document is not a proposal at all, so the question of standardization does not apply: a schedule, agenda, meeting minutes, business plan, working draft, or other administrative or editorial document. Use the verdict None when the document is a proposal but provides no convincing evidence of the need for standardization.
+
 Use this markdown report template exactly:
 
 Verdict: exactly one of { n/a, None, Weak, Adequate, Strong, Excellent }
