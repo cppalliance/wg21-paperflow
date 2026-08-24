@@ -90,6 +90,7 @@ The spec still calls Stage 4 the most important stage and says Stages 2, 4, 5, a
 | `hypotheses.py`                                | Stage 3 catalog and scoring                                 |
 | `nli_thresholds.py`                            | Per-label NLI cutoffs                                       |
 | `seqcls_thresholds.py`                         | Per-label seqcls cutoffs                                    |
+| `artifact_names.py`                            | On-disk artifact basename and data-dir constants            |
 | `learned_aggregate.py`                         | Frozen HGB paper-level head                                 |
 | `provenance.py`                                | Train/serve artifact provenance checks                      |
 | `features.py`                                  | Paper-wide feature vector for HGB                           |
@@ -102,4 +103,4 @@ Routing emits only LEWG, LWG, EWG, and CWG. Study Groups have no labels. This is
 
 Routing scores at most 300 sentences (Hamilton quotas by section, prefix inside each section, APPENDIX excluded) and ignores units shorter than 20 characters. Section tags come from headings; mixed design and wording under one heading still confuses stage 2. The hand fallback still uses a sustained-count gate; production HGB does not use that gate to emit labels. Audience metadata is a weak signal, not an override.
 
-Held-out numbers come from `packages/assay/scripts/eval_route_paper.py`. The train script writes `data/routing/train_report.json` locally. Those reports are generated, not committed. The NLI+HGB default is the Survey binding in [`../assay.md`](../assay.md). The learned path fails at load when committed `provenance.json` does not match runtime sampling, per-label thresholds, feature names, or the locked sklearn version. `provenance.json` is written only at the end of `train_and_freeze`; there is no standalone refresh path.
+Held-out numbers come from `packages/assay/scripts/eval_route_paper.py`. The train script writes `data/routing/train_report.json` locally. Those reports are generated, not committed. The NLI+HGB default is the Survey binding in [`../assay.md`](../assay.md). The learned path fails at load when committed `provenance.json` does not match runtime sampling, per-label thresholds, group thresholds, feature names, or the locked sklearn version. `provenance.json` is written only at the end of `train_and_freeze`; there is no standalone refresh path.

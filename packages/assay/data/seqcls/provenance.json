@@ -1,6 +1,7 @@
 {
   "feature_names_sha256": "5755969073917f734187212e3b5e3ff413758cd16a2c93cb5eb6b36c4e16b447",
   "git_commit": "a89ced604aa706da633ef8ab62eea52037bad978",
+  "group_thresholds_sha256": "5d1c3459c73ad70fed73e32893048a2329d1a31356183785df1beabced9e4ea0",
   "per_label_thresholds_sha256": "18731ed58cf1338c62547293fcf40372cdd581437b3ca5f53c67d9749e91bfcf",
   "sampling_cap": 300,
   "sampling_method": "prefix",

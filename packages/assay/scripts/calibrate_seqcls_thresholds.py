@@ -11,6 +11,7 @@ import json
 from dataclasses import dataclass
 from pathlib import Path
 
+from assay.paper_routing.artifact_names import PER_LABEL_THRESHOLDS_FILE, SEQCLS_FAMILY_DIR
 from eval_common import assay_package_root, repo_root
 
 MIN_SUPPORT_FOR_CALIBRATION = 30
@@ -100,7 +101,7 @@ def calibrate(oof_rows: list[dict[str, object]]) -> dict[str, SweepResult]:
 
 def main() -> int:
     default_oof = repo_root() / "data" / "routing_tagger" / "kfold" / "oof_probs.jsonl"
-    default_out = assay_package_root() / "data" / "seqcls" / "per_label_thresholds.json"
+    default_out = assay_package_root() / SEQCLS_FAMILY_DIR / PER_LABEL_THRESHOLDS_FILE
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--oof", type=Path, default=default_oof)
     parser.add_argument("--out", type=Path, default=default_out)

@@ -13,9 +13,10 @@ import json
 from functools import lru_cache
 from pathlib import Path
 
+from assay.paper_routing.artifact_names import PER_LABEL_THRESHOLDS_FILE, SEQCLS_FAMILY_DIR
+
 _ROUTING_SEQCLS_THRESHOLD_FALLBACK = 0.25
-_SEQCLS_DATA_DIR = Path("data") / "seqcls"
-_THRESHOLDS_REL = _SEQCLS_DATA_DIR / "per_label_thresholds.json"
+_THRESHOLDS_REL = SEQCLS_FAMILY_DIR / PER_LABEL_THRESHOLDS_FILE
 
 
 def _assay_package_root() -> Path:
@@ -37,7 +38,7 @@ def load_seqcls_hypothesis_thresholds() -> dict[str, float]:
     if not path.is_file():
         raise FileNotFoundError(
             f"seqcls per-label thresholds missing at {path}; "
-            "expected packages/assay/data/seqcls/per_label_thresholds.json",
+            f"expected packages/assay/{SEQCLS_FAMILY_DIR / PER_LABEL_THRESHOLDS_FILE}",
         )
     raw = json.loads(path.read_text(encoding="utf-8"))
     if not isinstance(raw, dict):

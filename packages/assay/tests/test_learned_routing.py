@@ -12,6 +12,17 @@ from pathlib import Path
 
 import pytest
 
+from assay.paper_routing.artifact_names import (
+    AGGREGATOR_MODEL_FILE,
+    FEATURE_NAMES_FILE,
+    GROUP_ORDER_FILE,
+    GROUP_THRESHOLDS_FILE,
+    NLI_FAMILY_DIR,
+    PER_LABEL_THRESHOLDS_FILE,
+    PROVENANCE_FILE,
+    ROUTING_METADATA_DIR,
+    SEQCLS_FAMILY_DIR,
+)
 from assay.paper_routing.features import (
     build_feature_names,
     default_catalog_ids,
@@ -83,8 +94,8 @@ def _sentence(text: str, hits: frozenset[str]) -> Sentence:
 
 
 def _write_metadata(data_dir: Path) -> None:
-    (data_dir / "feature_names.json").write_text("[]\n", encoding="utf-8")
-    (data_dir / "group_order.json").write_text(
+    (data_dir / FEATURE_NAMES_FILE).write_text("[]\n", encoding="utf-8")
+    (data_dir / GROUP_ORDER_FILE).write_text(
         json.dumps([g.value for g in ROUTING_GROUP_ORDER], indent=2) + "\n",
         encoding="utf-8",
     )
@@ -96,7 +107,7 @@ def _write_group_thresholds(
 ) -> None:
     if thresholds is None:
         thresholds = {g.value: 0.1 for g in RoutingGroup}
-    (model_dir / "group_thresholds.json").write_text(
+    (model_dir / GROUP_THRESHOLDS_FILE).write_text(
         json.dumps(thresholds, indent=2) + "\n",
         encoding="utf-8",
     )
@@ -114,17 +125,21 @@ def _write_provenance(
 ) -> None:
     if per_label_thresholds is None:
         per_label_thresholds = {"D1": 0.9}
-    thresholds_path = model_dir / "per_label_thresholds.json"
+    thresholds_path = model_dir / PER_LABEL_THRESHOLDS_FILE
     thresholds_path.write_text(
         json.dumps(per_label_thresholds, indent=2, sort_keys=True) + "\n",
         encoding="utf-8",
     )
+    group_thresholds_path = model_dir / GROUP_THRESHOLDS_FILE
+    if not group_thresholds_path.is_file():
+        _write_group_thresholds(model_dir)
     record = build_provenance_record(
         per_label_thresholds_path=thresholds_path,
-        feature_names_path=meta_dir / "feature_names.json",
+        group_thresholds_path=group_thresholds_path,
+        feature_names_path=meta_dir / FEATURE_NAMES_FILE,
         git_commit_id="test",
     )
-    write_provenance_file(model_dir / "provenance.json", record)
+    write_provenance_file(model_dir / PROVENANCE_FILE, record)
 
 
 def test_routing_group_order_matches_enum() -> None:
@@ -198,8 +213,8 @@ def test_route_paper_hgb_requires_regex(monkeypatch: pytest.MonkeyPatch) -> None
 
 
 def test_bundled_learned_artifacts_available() -> None:
-    nli_provenance = _ASSAY_ROOT / "data" / "nli" / "provenance.json"
-    seqcls_provenance = _ASSAY_ROOT / "data" / "seqcls" / "provenance.json"
+    nli_provenance = _ASSAY_ROOT / NLI_FAMILY_DIR / PROVENANCE_FILE
+    seqcls_provenance = _ASSAY_ROOT / SEQCLS_FAMILY_DIR / PROVENANCE_FILE
     _assert_committed_provenance_exists(nli_provenance)
     _assert_committed_provenance_exists(seqcls_provenance)
     assert learned_model_available(_StubSeqcls(model="m"))
@@ -209,7 +224,7 @@ def test_bundled_learned_artifacts_available() -> None:
 def test_predict_learned_groups_raises_when_artifacts_missing(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    meta_dir = tmp_path / "data" / "routing"
+    meta_dir = tmp_path / ROUTING_METADATA_DIR
     meta_dir.mkdir(parents=True)
     _write_metadata(meta_dir)
     monkeypatch.setattr(
@@ -271,17 +286,17 @@ def test_learned_aggregate_roundtrip(
     )
     model.fit(x_rows, y)
 
-    meta_dir = tmp_path / "data" / "routing"
+    meta_dir = tmp_path / ROUTING_METADATA_DIR
     meta_dir.mkdir(parents=True)
-    model_dir = tmp_path / "data" / "seqcls"
+    model_dir = tmp_path / SEQCLS_FAMILY_DIR
     model_dir.mkdir(parents=True)
-    joblib.dump(model, model_dir / "aggregator_hgb.joblib")
+    joblib.dump(model, model_dir / AGGREGATOR_MODEL_FILE)
     _write_group_thresholds(model_dir)
-    (meta_dir / "feature_names.json").write_text(
+    (meta_dir / FEATURE_NAMES_FILE).write_text(
         json.dumps(list(feature_names)) + "\n",
         encoding="utf-8",
     )
-    (meta_dir / "group_order.json").write_text(
+    (meta_dir / GROUP_ORDER_FILE).write_text(
         json.dumps([g.value for g in ROUTING_GROUP_ORDER], indent=2) + "\n",
         encoding="utf-8",
     )
@@ -333,17 +348,17 @@ def test_predict_learned_groups_raises_on_mismatched_group_order(
     )
     model.fit(x_rows, y)
 
-    meta_dir = tmp_path / "data" / "routing"
+    meta_dir = tmp_path / ROUTING_METADATA_DIR
     meta_dir.mkdir(parents=True)
-    model_dir = tmp_path / "data" / "nli"
+    model_dir = tmp_path / NLI_FAMILY_DIR
     model_dir.mkdir(parents=True)
-    joblib.dump(model, model_dir / "aggregator_hgb.joblib")
+    joblib.dump(model, model_dir / AGGREGATOR_MODEL_FILE)
     _write_group_thresholds(model_dir)
-    (meta_dir / "feature_names.json").write_text(
+    (meta_dir / FEATURE_NAMES_FILE).write_text(
         json.dumps(list(feature_names)) + "\n",
         encoding="utf-8",
     )
-    (meta_dir / "group_order.json").write_text(
+    (meta_dir / GROUP_ORDER_FILE).write_text(
         json.dumps(["CWG", "LEWG", "LWG", "EWG"], indent=2) + "\n",
         encoding="utf-8",
     )
@@ -368,8 +383,8 @@ def test_predict_learned_groups_raises_on_mismatched_group_order(
 def test_group_thresholds_load_independently_per_family(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    nli_dir = tmp_path / "data" / "nli"
-    seqcls_dir = tmp_path / "data" / "seqcls"
+    nli_dir = tmp_path / NLI_FAMILY_DIR
+    seqcls_dir = tmp_path / SEQCLS_FAMILY_DIR
     nli_dir.mkdir(parents=True)
     seqcls_dir.mkdir(parents=True)
     _write_group_thresholds(
@@ -406,12 +421,15 @@ def test_file_sha256_normalizes_crlf_to_lf(tmp_path: Path) -> None:
 
 def test_validate_provenance_sklearn_mismatch_raises(tmp_path: Path) -> None:
     pytest.importorskip("sklearn")
-    thresholds_path = tmp_path / "per_label_thresholds.json"
-    feature_names_path = tmp_path / "feature_names.json"
+    thresholds_path = tmp_path / PER_LABEL_THRESHOLDS_FILE
+    group_thresholds_path = tmp_path / GROUP_THRESHOLDS_FILE
+    feature_names_path = tmp_path / FEATURE_NAMES_FILE
     thresholds_path.write_text("{}\n", encoding="utf-8")
+    group_thresholds_path.write_text("{}\n", encoding="utf-8")
     feature_names_path.write_text("[]\n", encoding="utf-8")
     record = build_provenance_record(
         per_label_thresholds_path=thresholds_path,
+        group_thresholds_path=group_thresholds_path,
         feature_names_path=feature_names_path,
         git_commit_id="test",
     )
@@ -419,19 +437,23 @@ def test_validate_provenance_sklearn_mismatch_raises(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="sklearn_version"):
         validate_provenance(
             record,
-            provenance_path=tmp_path / "provenance.json",
+            provenance_path=tmp_path / PROVENANCE_FILE,
             per_label_thresholds_path=thresholds_path,
+            group_thresholds_path=group_thresholds_path,
             feature_names_path=feature_names_path,
         )
 
 
 def test_validate_provenance_sampling_cap_mismatch_raises(tmp_path: Path) -> None:
-    thresholds_path = tmp_path / "per_label_thresholds.json"
-    feature_names_path = tmp_path / "feature_names.json"
+    thresholds_path = tmp_path / PER_LABEL_THRESHOLDS_FILE
+    group_thresholds_path = tmp_path / GROUP_THRESHOLDS_FILE
+    feature_names_path = tmp_path / FEATURE_NAMES_FILE
     thresholds_path.write_text("{}\n", encoding="utf-8")
+    group_thresholds_path.write_text("{}\n", encoding="utf-8")
     feature_names_path.write_text("[]\n", encoding="utf-8")
     record = build_provenance_record(
         per_label_thresholds_path=thresholds_path,
+        group_thresholds_path=group_thresholds_path,
         feature_names_path=feature_names_path,
         git_commit_id="test",
     )
@@ -439,19 +461,23 @@ def test_validate_provenance_sampling_cap_mismatch_raises(tmp_path: Path) -> Non
     with pytest.raises(ValueError, match="sampling_cap"):
         validate_provenance(
             record,
-            provenance_path=tmp_path / "provenance.json",
+            provenance_path=tmp_path / PROVENANCE_FILE,
             per_label_thresholds_path=thresholds_path,
+            group_thresholds_path=group_thresholds_path,
             feature_names_path=feature_names_path,
         )
 
 
 def test_validate_provenance_threshold_hash_mismatch_raises(tmp_path: Path) -> None:
-    thresholds_path = tmp_path / "per_label_thresholds.json"
-    feature_names_path = tmp_path / "feature_names.json"
+    thresholds_path = tmp_path / PER_LABEL_THRESHOLDS_FILE
+    group_thresholds_path = tmp_path / GROUP_THRESHOLDS_FILE
+    feature_names_path = tmp_path / FEATURE_NAMES_FILE
     thresholds_path.write_text("{}\n", encoding="utf-8")
+    group_thresholds_path.write_text("{}\n", encoding="utf-8")
     feature_names_path.write_text("[]\n", encoding="utf-8")
     record = build_provenance_record(
         per_label_thresholds_path=thresholds_path,
+        group_thresholds_path=group_thresholds_path,
         feature_names_path=feature_names_path,
         git_commit_id="test",
     )
@@ -459,18 +485,46 @@ def test_validate_provenance_threshold_hash_mismatch_raises(tmp_path: Path) -> N
     with pytest.raises(ValueError, match="per_label_thresholds_sha256"):
         validate_provenance(
             record,
-            provenance_path=tmp_path / "provenance.json",
+            provenance_path=tmp_path / PROVENANCE_FILE,
             per_label_thresholds_path=thresholds_path,
+            group_thresholds_path=group_thresholds_path,
+            feature_names_path=feature_names_path,
+        )
+
+
+def test_validate_provenance_group_thresholds_hash_mismatch_raises(
+    tmp_path: Path,
+) -> None:
+    thresholds_path = tmp_path / PER_LABEL_THRESHOLDS_FILE
+    group_thresholds_path = tmp_path / GROUP_THRESHOLDS_FILE
+    feature_names_path = tmp_path / FEATURE_NAMES_FILE
+    thresholds_path.write_text("{}\n", encoding="utf-8")
+    group_thresholds_path.write_text("{}\n", encoding="utf-8")
+    feature_names_path.write_text("[]\n", encoding="utf-8")
+    record = build_provenance_record(
+        per_label_thresholds_path=thresholds_path,
+        group_thresholds_path=group_thresholds_path,
+        feature_names_path=feature_names_path,
+        git_commit_id="test",
+    )
+    record["group_thresholds_sha256"] = "deadbeef"
+    with pytest.raises(ValueError, match="group_thresholds_sha256"):
+        validate_provenance(
+            record,
+            provenance_path=tmp_path / PROVENANCE_FILE,
+            per_label_thresholds_path=thresholds_path,
+            group_thresholds_path=group_thresholds_path,
             feature_names_path=feature_names_path,
         )
 
 
 def test_committed_nli_artifacts_provenance_matches_runtime() -> None:
     family_dir = _committed_family_dir("nli")
-    provenance_path = family_dir / "provenance.json"
+    provenance_path = family_dir / PROVENANCE_FILE
     _assert_committed_provenance_exists(provenance_path)
-    thresholds_path = family_dir / "per_label_thresholds.json"
-    feature_names_path = _ASSAY_ROOT / "data" / "routing" / "feature_names.json"
+    thresholds_path = family_dir / PER_LABEL_THRESHOLDS_FILE
+    group_thresholds_path = family_dir / GROUP_THRESHOLDS_FILE
+    feature_names_path = _ASSAY_ROOT / ROUTING_METADATA_DIR / FEATURE_NAMES_FILE
     provenance_text = provenance_path.read_text(encoding="utf-8")
     record = json.loads(provenance_text)
     assert provenance_text == format_provenance_json(record)
@@ -478,20 +532,23 @@ def test_committed_nli_artifacts_provenance_matches_runtime() -> None:
         record,
         provenance_path=provenance_path,
         per_label_thresholds_path=thresholds_path,
+        group_thresholds_path=group_thresholds_path,
         feature_names_path=feature_names_path,
     )
     assert record["sampling_cap"] == SAMPLING_CAP
     assert record["sampling_method"] == SAMPLING_METHOD
     assert record["per_label_thresholds_sha256"] == file_sha256(thresholds_path)
+    assert record["group_thresholds_sha256"] == file_sha256(group_thresholds_path)
     assert record["feature_names_sha256"] == file_sha256(feature_names_path)
 
 
 def test_committed_seqcls_artifacts_provenance_matches_runtime() -> None:
     family_dir = _committed_family_dir("seqcls")
-    provenance_path = family_dir / "provenance.json"
+    provenance_path = family_dir / PROVENANCE_FILE
     _assert_committed_provenance_exists(provenance_path)
-    thresholds_path = family_dir / "per_label_thresholds.json"
-    feature_names_path = _ASSAY_ROOT / "data" / "routing" / "feature_names.json"
+    thresholds_path = family_dir / PER_LABEL_THRESHOLDS_FILE
+    group_thresholds_path = family_dir / GROUP_THRESHOLDS_FILE
+    feature_names_path = _ASSAY_ROOT / ROUTING_METADATA_DIR / FEATURE_NAMES_FILE
     provenance_text = provenance_path.read_text(encoding="utf-8")
     record = json.loads(provenance_text)
     assert provenance_text == format_provenance_json(record)
@@ -499,9 +556,11 @@ def test_committed_seqcls_artifacts_provenance_matches_runtime() -> None:
         record,
         provenance_path=provenance_path,
         per_label_thresholds_path=thresholds_path,
+        group_thresholds_path=group_thresholds_path,
         feature_names_path=feature_names_path,
     )
     assert record["sampling_cap"] == SAMPLING_CAP
     assert record["sampling_method"] == SAMPLING_METHOD
     assert record["per_label_thresholds_sha256"] == file_sha256(thresholds_path)
+    assert record["group_thresholds_sha256"] == file_sha256(group_thresholds_path)
     assert record["feature_names_sha256"] == file_sha256(feature_names_path)

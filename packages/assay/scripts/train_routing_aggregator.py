@@ -25,6 +25,16 @@ from sklearn.ensemble import HistGradientBoostingClassifier
 from sklearn.model_selection import KFold
 from sklearn.multiclass import OneVsRestClassifier
 
+from assay.paper_routing.artifact_names import (
+    AGGREGATOR_MODEL_FILE,
+    FEATURE_NAMES_FILE,
+    GROUP_ORDER_FILE,
+    GROUP_THRESHOLDS_FILE,
+    NLI_FAMILY_DIR,
+    PROVENANCE_FILE,
+    ROUTING_METADATA_DIR,
+    TRAIN_REPORT_FILE,
+)
 from assay.paper_routing.features import (
     build_feature_names,
     default_catalog_ids,
@@ -235,12 +245,12 @@ def train_and_freeze(
 
     model_output_dir.mkdir(parents=True, exist_ok=True)
     metadata_dir.mkdir(parents=True, exist_ok=True)
-    joblib.dump(final_model, model_output_dir / "aggregator_hgb.joblib")
-    (metadata_dir / "feature_names.json").write_text(
+    joblib.dump(final_model, model_output_dir / AGGREGATOR_MODEL_FILE)
+    (metadata_dir / FEATURE_NAMES_FILE).write_text(
         json.dumps(list(feature_names), indent=2) + "\n",
         encoding="utf-8",
     )
-    (model_output_dir / "group_thresholds.json").write_text(
+    (model_output_dir / GROUP_THRESHOLDS_FILE).write_text(
         json.dumps(
             {group.value: thresholds[group] for group in ROUTING_GROUP_ORDER},
             indent=2,
@@ -249,11 +259,11 @@ def train_and_freeze(
         + "\n",
         encoding="utf-8",
     )
-    (metadata_dir / "group_order.json").write_text(
+    (metadata_dir / GROUP_ORDER_FILE).write_text(
         json.dumps([group.value for group in ROUTING_GROUP_ORDER], indent=2) + "\n",
         encoding="utf-8",
     )
-    (metadata_dir / "train_report.json").write_text(
+    (metadata_dir / TRAIN_REPORT_FILE).write_text(
         json.dumps(
             {
                 "n_papers": len(rows),
@@ -288,14 +298,17 @@ def main() -> int:
     parser.add_argument(
         "--model-output",
         type=Path,
-        default=assay_package_root() / "data" / "nli",
-        help="Directory for aggregator_hgb.joblib, group_thresholds.json, and provenance.json",
+        default=assay_package_root() / NLI_FAMILY_DIR,
+        help=(
+            f"Directory for {AGGREGATOR_MODEL_FILE}, {GROUP_THRESHOLDS_FILE}, "
+            f"and {PROVENANCE_FILE}"
+        ),
     )
     parser.add_argument(
         "--metadata-dir",
         type=Path,
-        default=assay_package_root() / "data" / "routing",
-        help="Directory for feature_names.json and group_order.json",
+        default=assay_package_root() / ROUTING_METADATA_DIR,
+        help=f"Directory for {FEATURE_NAMES_FILE} and {GROUP_ORDER_FILE}",
     )
     parser.add_argument("--classifier", default="nli-small")
     parser.add_argument(

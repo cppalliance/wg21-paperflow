@@ -17,6 +17,7 @@ from pipeline import StepContext
 from pipeline.classifier_backends import NliCrossEncoderBackend
 
 from assay.paper_routing import RoutingGroup
+from assay.paper_routing.artifact_names import NLI_FAMILY_DIR, PROVENANCE_FILE
 from assay.paper_routing.learned_aggregate import learned_model_available
 
 from assay.models import PipelineState
@@ -162,7 +163,7 @@ def test_survey_learned_path_runs_with_stub_nli(monkeypatch: pytest.MonkeyPatch)
 
 def test_survey_learned_path_loads_committed_nli_joblib():
     nli_provenance = (
-        Path(__file__).resolve().parents[1] / "data" / "nli" / "provenance.json"
+        Path(__file__).resolve().parents[1] / NLI_FAMILY_DIR / PROVENANCE_FILE
     )
     assert nli_provenance.is_file(), f"committed provenance missing: {nli_provenance}"
     assert learned_model_available(_StubNli())

@@ -23,6 +23,17 @@ from pipeline.classifier_backends import (
     NliCrossEncoderBackend,
 )
 
+from assay.paper_routing.artifact_names import (
+    AGGREGATOR_MODEL_FILE,
+    FEATURE_NAMES_FILE,
+    GROUP_ORDER_FILE,
+    GROUP_THRESHOLDS_FILE,
+    NLI_FAMILY_DIR,
+    PER_LABEL_THRESHOLDS_FILE,
+    PROVENANCE_FILE,
+    ROUTING_METADATA_DIR,
+    SEQCLS_FAMILY_DIR,
+)
 from assay.paper_routing.features import (
     default_catalog_ids,
     extract_paper_features,
@@ -31,15 +42,6 @@ from assay.paper_routing.features import (
 from assay.paper_routing.provenance import validate_provenance
 from assay.paper_routing.types import ROUTING_GROUP_ORDER, RoutingGroup, Sentence
 
-_ROUTING_METADATA_DIR = Path("data") / "routing"
-_NLI_DATA_DIR = Path("data") / "nli"
-_SEQCLS_DATA_DIR = Path("data") / "seqcls"
-_MODEL_FILE = "aggregator_hgb.joblib"
-_FEATURE_NAMES_FILE = "feature_names.json"
-_GROUP_THRESHOLDS_FILE = "group_thresholds.json"
-_GROUP_ORDER_FILE = "group_order.json"
-_PROVENANCE_FILE = "provenance.json"
-_PER_LABEL_THRESHOLDS_FILE = "per_label_thresholds.json"
 _LEARNED_GROUP_THRESHOLD_FALLBACK: float = 0.5
 
 AggregatorFamily = Literal["nli", "seqcls"]
@@ -55,7 +57,7 @@ def _assay_package_root() -> Path:
 
 def routing_metadata_dir() -> Path:
     """Shared routing metadata (feature names, group order)."""
-    return _assay_package_root() / _ROUTING_METADATA_DIR
+    return _assay_package_root() / ROUTING_METADATA_DIR
 
 
 def routing_data_dir() -> Path:
@@ -65,8 +67,8 @@ def routing_data_dir() -> Path:
 
 def _family_data_dir(family: AggregatorFamily) -> Path:
     if family == "nli":
-        return _assay_package_root() / _NLI_DATA_DIR
-    return _assay_package_root() / _SEQCLS_DATA_DIR
+        return _assay_package_root() / NLI_FAMILY_DIR
+    return _assay_package_root() / SEQCLS_FAMILY_DIR
 
 
 def aggregator_model_dir(classifiers: object) -> Path:
@@ -76,17 +78,17 @@ def aggregator_model_dir(classifiers: object) -> Path:
 
 def _metadata_artifacts_present() -> bool:
     root = routing_metadata_dir()
-    return (root / _FEATURE_NAMES_FILE).is_file() and (
-        root / _GROUP_ORDER_FILE
+    return (root / FEATURE_NAMES_FILE).is_file() and (
+        root / GROUP_ORDER_FILE
     ).is_file()
 
 
 def _family_artifacts_present(family: AggregatorFamily) -> bool:
     model_dir = _family_data_dir(family)
     return (
-        (model_dir / _MODEL_FILE).is_file()
-        and (model_dir / _GROUP_THRESHOLDS_FILE).is_file()
-        and (model_dir / _PROVENANCE_FILE).is_file()
+        (model_dir / AGGREGATOR_MODEL_FILE).is_file()
+        and (model_dir / GROUP_THRESHOLDS_FILE).is_file()
+        and (model_dir / PROVENANCE_FILE).is_file()
     )
 
 
@@ -103,7 +105,7 @@ def learned_model_available(classifiers: object | None = None) -> bool:
 
 @lru_cache(maxsize=1)
 def _load_feature_names() -> tuple[str, ...]:
-    path = routing_metadata_dir() / _FEATURE_NAMES_FILE
+    path = routing_metadata_dir() / FEATURE_NAMES_FILE
     raw = json.loads(path.read_text(encoding="utf-8"))
     if not isinstance(raw, list) or not all(isinstance(x, str) for x in raw):
         raise ValueError(f"{path}: expected JSON array of strings")
@@ -112,7 +114,7 @@ def _load_feature_names() -> tuple[str, ...]:
 
 @lru_cache(maxsize=2)
 def _load_group_thresholds(family: AggregatorFamily) -> dict[RoutingGroup, float]:
-    path = _family_data_dir(family) / _GROUP_THRESHOLDS_FILE
+    path = _family_data_dir(family) / GROUP_THRESHOLDS_FILE
     raw = json.loads(path.read_text(encoding="utf-8"))
     if not isinstance(raw, dict):
         raise ValueError(f"{path}: expected JSON object")
@@ -124,7 +126,7 @@ def _load_group_thresholds(family: AggregatorFamily) -> dict[RoutingGroup, float
 
 @lru_cache(maxsize=1)
 def _load_group_order() -> tuple[RoutingGroup, ...]:
-    path = routing_metadata_dir() / _GROUP_ORDER_FILE
+    path = routing_metadata_dir() / GROUP_ORDER_FILE
     raw = json.loads(path.read_text(encoding="utf-8"))
     if not isinstance(raw, list) or not all(isinstance(x, str) for x in raw):
         raise ValueError(f"{path}: expected JSON array of strings")
@@ -133,14 +135,14 @@ def _load_group_order() -> tuple[RoutingGroup, ...]:
         raise ValueError(
             f"{path}: group order {list(g.value for g in order)} does not match "
             f"ROUTING_GROUP_ORDER {list(g.value for g in ROUTING_GROUP_ORDER)}; "
-            "retrain the aggregator or restore the matching group_order.json",
+            f"retrain the aggregator or restore the matching {GROUP_ORDER_FILE}",
         )
     return order
 
 
 @lru_cache(maxsize=2)
 def _load_provenance(family: AggregatorFamily) -> dict[str, object]:
-    path = _family_data_dir(family) / _PROVENANCE_FILE
+    path = _family_data_dir(family) / PROVENANCE_FILE
     raw = json.loads(path.read_text(encoding="utf-8"))
     if not isinstance(raw, dict):
         raise ValueError(f"{path}: expected JSON object")
@@ -152,15 +154,16 @@ def _validate_provenance(family: AggregatorFamily) -> None:
     meta_dir = routing_metadata_dir()
     validate_provenance(
         _load_provenance(family),
-        provenance_path=model_dir / _PROVENANCE_FILE,
-        per_label_thresholds_path=model_dir / _PER_LABEL_THRESHOLDS_FILE,
-        feature_names_path=meta_dir / _FEATURE_NAMES_FILE,
+        provenance_path=model_dir / PROVENANCE_FILE,
+        per_label_thresholds_path=model_dir / PER_LABEL_THRESHOLDS_FILE,
+        group_thresholds_path=model_dir / GROUP_THRESHOLDS_FILE,
+        feature_names_path=meta_dir / FEATURE_NAMES_FILE,
     )
 
 
 @lru_cache(maxsize=2)
 def _load_model(family: AggregatorFamily) -> object:
-    path = _family_data_dir(family) / _MODEL_FILE
+    path = _family_data_dir(family) / AGGREGATOR_MODEL_FILE
     return joblib.load(path)
 
 

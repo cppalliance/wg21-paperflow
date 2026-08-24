@@ -13,9 +13,10 @@ import json
 from functools import lru_cache
 from pathlib import Path
 
+from assay.paper_routing.artifact_names import NLI_FAMILY_DIR, PER_LABEL_THRESHOLDS_FILE
+
 _ROUTING_NLI_THRESHOLD_FALLBACK = 0.9
-_NLI_DATA_DIR = Path("data") / "nli"
-_THRESHOLDS_REL = _NLI_DATA_DIR / "per_label_thresholds.json"
+_THRESHOLDS_REL = NLI_FAMILY_DIR / PER_LABEL_THRESHOLDS_FILE
 
 
 def _assay_package_root() -> Path:
@@ -37,7 +38,7 @@ def load_nli_hypothesis_thresholds() -> dict[str, float]:
     if not path.is_file():
         raise FileNotFoundError(
             f"nli per-label thresholds missing at {path}; "
-            "expected packages/assay/data/nli/per_label_thresholds.json",
+            f"expected packages/assay/{NLI_FAMILY_DIR / PER_LABEL_THRESHOLDS_FILE}",
         )
     raw = json.loads(path.read_text(encoding="utf-8"))
     if not isinstance(raw, dict):

@@ -6,7 +6,7 @@
 
 Reads JSONL rows ``{"probs": {hyp_id: float, ...}, "labels": [hyp_id, ...]}``.
 Labels with fewer than ``--min-support`` gold positives keep 0.9, the routing
-fallback. Writes ``packages/assay/data/nli/per_label_thresholds.json``.
+fallback. Writes ``packages/assay/{NLI_FAMILY_DIR / PER_LABEL_THRESHOLDS_FILE}``.
 """
 
 from __future__ import annotations
@@ -15,6 +15,7 @@ import argparse
 import json
 from pathlib import Path
 
+from assay.paper_routing.artifact_names import NLI_FAMILY_DIR, PER_LABEL_THRESHOLDS_FILE
 from calibrate_seqcls_thresholds import (
     MIN_SUPPORT_FOR_CALIBRATION,
     SweepResult,
@@ -59,7 +60,7 @@ def calibrate(
 
 def main() -> int:
     default_oof = repo_root() / "data" / "nli" / "kfold" / "oof_probs.jsonl"
-    default_out = assay_package_root() / "data" / "nli" / "per_label_thresholds.json"
+    default_out = assay_package_root() / NLI_FAMILY_DIR / PER_LABEL_THRESHOLDS_FILE
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--oof", type=Path, default=default_oof)
     parser.add_argument("--out", type=Path, default=default_out)

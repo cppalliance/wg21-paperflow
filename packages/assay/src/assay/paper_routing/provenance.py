@@ -16,6 +16,12 @@ from pathlib import Path
 
 import sklearn
 
+from assay.paper_routing.artifact_names import (
+    FEATURE_NAMES_FILE,
+    GROUP_THRESHOLDS_FILE,
+    PER_LABEL_THRESHOLDS_FILE,
+    PROVENANCE_FILE,
+)
 from assay.paper_routing.hypotheses import SAMPLING_CAP, SAMPLING_METHOD
 
 
@@ -48,6 +54,7 @@ def _git_commit_id() -> str:
 def build_provenance_record(
     *,
     per_label_thresholds_path: Path,
+    group_thresholds_path: Path,
     feature_names_path: Path,
     git_commit_id: str | None = None,
 ) -> dict[str, object]:
@@ -57,6 +64,7 @@ def build_provenance_record(
         "sampling_cap": SAMPLING_CAP,
         "sampling_method": SAMPLING_METHOD,
         "per_label_thresholds_sha256": file_sha256(per_label_thresholds_path),
+        "group_thresholds_sha256": file_sha256(group_thresholds_path),
         "feature_names_sha256": file_sha256(feature_names_path),
         "git_commit": git_commit_id if git_commit_id is not None else _git_commit_id(),
     }
@@ -67,6 +75,7 @@ def validate_provenance(
     *,
     provenance_path: Path,
     per_label_thresholds_path: Path,
+    group_thresholds_path: Path,
     feature_names_path: Path,
 ) -> None:
     """Raise ``ValueError`` when committed provenance does not match runtime inputs."""
@@ -102,6 +111,14 @@ def validate_provenance(
             f"{per_label_thresholds_path}; recalibrate thresholds or retrain",
         )
 
+    expected_group_thresholds_hash = file_sha256(group_thresholds_path)
+    actual_group_thresholds_hash = record.get("group_thresholds_sha256")
+    if actual_group_thresholds_hash != expected_group_thresholds_hash:
+        raise ValueError(
+            f"{provenance_path}: group_thresholds_sha256 does not match "
+            f"{group_thresholds_path}; recalibrate group thresholds or retrain",
+        )
+
     expected_feature_hash = file_sha256(feature_names_path)
     actual_feature_hash = record.get("feature_names_sha256")
     if actual_feature_hash != expected_feature_hash:
@@ -127,12 +144,14 @@ def write_family_provenance(
     metadata_dir: Path,
 ) -> Path:
     """Build and write ``provenance.json`` for one classifier family."""
-    per_label_thresholds_path = model_output_dir / "per_label_thresholds.json"
-    feature_names_path = metadata_dir / "feature_names.json"
+    per_label_thresholds_path = model_output_dir / PER_LABEL_THRESHOLDS_FILE
+    group_thresholds_path = model_output_dir / GROUP_THRESHOLDS_FILE
+    feature_names_path = metadata_dir / FEATURE_NAMES_FILE
     record = build_provenance_record(
         per_label_thresholds_path=per_label_thresholds_path,
+        group_thresholds_path=group_thresholds_path,
         feature_names_path=feature_names_path,
     )
-    provenance_path = model_output_dir / "provenance.json"
+    provenance_path = model_output_dir / PROVENANCE_FILE
     write_provenance_file(provenance_path, record)
     return provenance_path
