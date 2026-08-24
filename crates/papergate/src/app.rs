@@ -23,6 +23,7 @@ use promptforge_core::model::fetch_model_catalog;
 use promptforge_core::observe::{Observation, Observer};
 use promptforge_core::parser::Prompt;
 use promptforge_core::store::{FileStore, StoreError, StoreRef};
+use promptforge_core::tools::ToolCatalog;
 use promptforge_tool_picker::{Catalog, Config as PickerConfig, ToolPicker};
 
 /// The embedded papergate prompt, vendored from the promptforge prompts.
@@ -155,8 +156,7 @@ pub(crate) async fn run(request: RunRequest<'_>) -> Result<()> {
         execute::run(
             &parsed,
             "",
-            ResolutionContext::new(&picker, &models),
-            &[],
+            ResolutionContext::new(&picker, &models, &ToolCatalog::new(&[])?),
             &store,
             config,
         )
