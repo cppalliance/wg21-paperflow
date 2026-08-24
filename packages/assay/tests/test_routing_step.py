@@ -164,8 +164,7 @@ def test_survey_learned_path_loads_committed_nli_joblib():
     nli_provenance = (
         Path(__file__).resolve().parents[1] / "data" / "nli" / "provenance.json"
     )
-    if not nli_provenance.is_file():
-        pytest.skip("committed nli provenance.json missing; retrain on other machine")
+    assert nli_provenance.is_file(), f"committed provenance missing: {nli_provenance}"
     assert learned_model_available(_StubNli())
     state = _state_from_fixture(
         "n3854.md",

@@ -30,11 +30,13 @@ from assay.paper_routing.learned_aggregate import (
     _load_model,
     _load_provenance,
 )
-from assay.paper_routing.hypotheses import SAMPLING_METHOD, _MAX_SENTENCES_PER_PAPER
+from assay.paper_routing.hypotheses import SAMPLING_CAP, SAMPLING_METHOD
 from assay.paper_routing.provenance import (
     build_provenance_record,
     file_sha256,
+    format_provenance_json,
     validate_provenance,
+    write_provenance_file,
 )
 from assay.paper_routing.routing import route_paper
 from assay.paper_routing.types import (
@@ -100,6 +102,10 @@ def _write_group_thresholds(
     )
 
 
+def _assert_committed_provenance_exists(path: Path) -> None:
+    assert path.is_file(), f"committed provenance missing: {path}"
+
+
 def _write_provenance(
     *,
     model_dir: Path,
@@ -118,10 +124,7 @@ def _write_provenance(
         feature_names_path=meta_dir / "feature_names.json",
         git_commit_id="test",
     )
-    (model_dir / "provenance.json").write_text(
-        json.dumps(record, indent=2, sort_keys=True) + "\n",
-        encoding="utf-8",
-    )
+    write_provenance_file(model_dir / "provenance.json", record)
 
 
 def test_routing_group_order_matches_enum() -> None:
@@ -197,8 +200,8 @@ def test_route_paper_hgb_requires_regex(monkeypatch: pytest.MonkeyPatch) -> None
 def test_bundled_learned_artifacts_available() -> None:
     nli_provenance = _ASSAY_ROOT / "data" / "nli" / "provenance.json"
     seqcls_provenance = _ASSAY_ROOT / "data" / "seqcls" / "provenance.json"
-    if not nli_provenance.is_file() or not seqcls_provenance.is_file():
-        pytest.skip("committed provenance.json missing; retrain on other machine")
+    _assert_committed_provenance_exists(nli_provenance)
+    _assert_committed_provenance_exists(seqcls_provenance)
     assert learned_model_available(_StubSeqcls(model="m"))
     assert learned_model_available(_StubNli(model="m"))
 
@@ -465,18 +468,19 @@ def test_validate_provenance_threshold_hash_mismatch_raises(tmp_path: Path) -> N
 def test_committed_nli_artifacts_provenance_matches_runtime() -> None:
     family_dir = _committed_family_dir("nli")
     provenance_path = family_dir / "provenance.json"
-    if not provenance_path.is_file():
-        pytest.skip("committed nli provenance.json missing; retrain on other machine")
+    _assert_committed_provenance_exists(provenance_path)
     thresholds_path = family_dir / "per_label_thresholds.json"
     feature_names_path = _ASSAY_ROOT / "data" / "routing" / "feature_names.json"
-    record = json.loads(provenance_path.read_text(encoding="utf-8"))
+    provenance_text = provenance_path.read_text(encoding="utf-8")
+    record = json.loads(provenance_text)
+    assert provenance_text == format_provenance_json(record)
     validate_provenance(
         record,
         provenance_path=provenance_path,
         per_label_thresholds_path=thresholds_path,
         feature_names_path=feature_names_path,
     )
-    assert record["sampling_cap"] == _MAX_SENTENCES_PER_PAPER
+    assert record["sampling_cap"] == SAMPLING_CAP
     assert record["sampling_method"] == SAMPLING_METHOD
     assert record["per_label_thresholds_sha256"] == file_sha256(thresholds_path)
     assert record["feature_names_sha256"] == file_sha256(feature_names_path)
@@ -485,18 +489,19 @@ def test_committed_nli_artifacts_provenance_matches_runtime() -> None:
 def test_committed_seqcls_artifacts_provenance_matches_runtime() -> None:
     family_dir = _committed_family_dir("seqcls")
     provenance_path = family_dir / "provenance.json"
-    if not provenance_path.is_file():
-        pytest.skip("committed seqcls provenance.json missing; retrain on other machine")
+    _assert_committed_provenance_exists(provenance_path)
     thresholds_path = family_dir / "per_label_thresholds.json"
     feature_names_path = _ASSAY_ROOT / "data" / "routing" / "feature_names.json"
-    record = json.loads(provenance_path.read_text(encoding="utf-8"))
+    provenance_text = provenance_path.read_text(encoding="utf-8")
+    record = json.loads(provenance_text)
+    assert provenance_text == format_provenance_json(record)
     validate_provenance(
         record,
         provenance_path=provenance_path,
         per_label_thresholds_path=thresholds_path,
         feature_names_path=feature_names_path,
     )
-    assert record["sampling_cap"] == _MAX_SENTENCES_PER_PAPER
+    assert record["sampling_cap"] == SAMPLING_CAP
     assert record["sampling_method"] == SAMPLING_METHOD
     assert record["per_label_thresholds_sha256"] == file_sha256(thresholds_path)
     assert record["feature_names_sha256"] == file_sha256(feature_names_path)

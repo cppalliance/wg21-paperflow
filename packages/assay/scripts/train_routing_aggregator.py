@@ -9,7 +9,8 @@ Features come from regex catalog hits unioned with the chosen classifier
 regex+classifier hypothesis densities.
 
 Retraining writes ``provenance.json`` next to each family joblib so load
-time can fail closed on sampling, threshold, or sklearn skew.
+time can fail closed on sampling, threshold, or sklearn skew. Use
+``--provenance-only`` to rewrite provenance without re-fitting the HGB.
 """
 
 from __future__ import annotations
@@ -32,7 +33,7 @@ from assay.paper_routing.features import (
     vectorize_features,
 )
 from assay.paper_routing.hypotheses import score_hypotheses
-from assay.paper_routing.provenance import build_provenance_record
+from assay.paper_routing.provenance import write_family_provenance
 from assay.paper_routing.types import ROUTING_GROUP_ORDER, RoutingGroup
 from eval_common import (
     assay_package_root,
@@ -269,15 +270,9 @@ def train_and_freeze(
         + "\n",
         encoding="utf-8",
     )
-    per_label_thresholds_path = model_output_dir / "per_label_thresholds.json"
-    feature_names_path = metadata_dir / "feature_names.json"
-    provenance = build_provenance_record(
-        per_label_thresholds_path=per_label_thresholds_path,
-        feature_names_path=feature_names_path,
-    )
-    (model_output_dir / "provenance.json").write_text(
-        json.dumps(provenance, indent=2, sort_keys=True) + "\n",
-        encoding="utf-8",
+    write_family_provenance(
+        model_output_dir=model_output_dir,
+        metadata_dir=metadata_dir,
     )
     return {
         "oof_exact_match": oof_exact,
@@ -303,6 +298,11 @@ def main() -> int:
         default=assay_package_root() / "data" / "routing",
         help="Directory for feature_names.json and group_order.json",
     )
+    parser.add_argument(
+        "--provenance-only",
+        action="store_true",
+        help="Write provenance.json only; skip training and joblib output.",
+    )
     parser.add_argument("--classifier", default="nli-small")
     parser.add_argument(
         "--cache",
@@ -311,6 +311,13 @@ def main() -> int:
         help="Optional JSONL cache of extracted features (read or write).",
     )
     args = parser.parse_args()
+    if args.provenance_only:
+        provenance_path = write_family_provenance(
+            model_output_dir=args.model_output,
+            metadata_dir=args.metadata_dir,
+        )
+        logger.info("wrote provenance: %s", provenance_path)
+        return 0
     paperstore = args.paperstore or default_paperstore_dir()
     rows = build_training_rows(
         paperstore_dir=paperstore,

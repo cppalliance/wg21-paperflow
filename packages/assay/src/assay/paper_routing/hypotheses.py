@@ -33,8 +33,9 @@ from assay.paper_routing.split import RawSentence, split_sentences
 from assay.paper_routing.types import HypothesisAxis, SectionType, Sentence
 
 _MIN_SENTENCE_CHARS = 20
-_MAX_SENTENCES_PER_PAPER = 300
+SAMPLING_CAP = 300
 SAMPLING_METHOD = "prefix"
+_MAX_SENTENCES_PER_PAPER = SAMPLING_CAP
 
 # D1 REFERENCES_LIBRARY_HEADER
 _D1_RE = re.compile(r"<\s*[a-z_][a-z0-9_]*\s*>")

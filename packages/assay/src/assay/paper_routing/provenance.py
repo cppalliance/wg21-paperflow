@@ -10,15 +10,13 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import subprocess
 from pathlib import Path
 
 import sklearn
 
-from assay.paper_routing.hypotheses import (
-    SAMPLING_METHOD,
-    _MAX_SENTENCES_PER_PAPER,
-)
+from assay.paper_routing.hypotheses import SAMPLING_CAP, SAMPLING_METHOD
 
 
 def file_sha256(path: Path) -> str:
@@ -56,7 +54,7 @@ def build_provenance_record(
     """Build a provenance record for a freshly trained family artifact set."""
     return {
         "sklearn_version": sklearn.__version__,
-        "sampling_cap": _MAX_SENTENCES_PER_PAPER,
+        "sampling_cap": SAMPLING_CAP,
         "sampling_method": SAMPLING_METHOD,
         "per_label_thresholds_sha256": file_sha256(per_label_thresholds_path),
         "feature_names_sha256": file_sha256(feature_names_path),
@@ -80,7 +78,7 @@ def validate_provenance(
             f"runtime {expected_sklearn!r}; retrain the aggregator under the locked env",
         )
 
-    expected_cap = _MAX_SENTENCES_PER_PAPER
+    expected_cap = SAMPLING_CAP
     actual_cap = record.get("sampling_cap")
     if actual_cap != expected_cap:
         raise ValueError(
@@ -111,3 +109,30 @@ def validate_provenance(
             f"{provenance_path}: feature_names_sha256 does not match "
             f"{feature_names_path}; retrain the aggregator",
         )
+
+
+def format_provenance_json(record: dict[str, object]) -> str:
+    """Return canonical on-disk JSON for a provenance record."""
+    return json.dumps(record, indent=2, sort_keys=True) + "\n"
+
+
+def write_provenance_file(path: Path, record: dict[str, object]) -> None:
+    """Write ``record`` to ``path`` using the canonical provenance format."""
+    path.write_text(format_provenance_json(record), encoding="utf-8")
+
+
+def write_family_provenance(
+    *,
+    model_output_dir: Path,
+    metadata_dir: Path,
+) -> Path:
+    """Build and write ``provenance.json`` for one classifier family."""
+    per_label_thresholds_path = model_output_dir / "per_label_thresholds.json"
+    feature_names_path = metadata_dir / "feature_names.json"
+    record = build_provenance_record(
+        per_label_thresholds_path=per_label_thresholds_path,
+        feature_names_path=feature_names_path,
+    )
+    provenance_path = model_output_dir / "provenance.json"
+    write_provenance_file(provenance_path, record)
+    return provenance_path
