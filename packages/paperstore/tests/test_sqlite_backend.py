@@ -763,6 +763,86 @@ def test_store_assay_synthesis_skip_metadata_roundtrip(store: SqliteBackend):
     assert row.paper_stats == stats
 
 
+def test_store_assay_findings_round_trip_examiner_damage(store: SqliteBackend):
+    """examiner/damage survive store/get so --rerender can emit both blocks."""
+    store.store_assay_findings("P1", [
+        SimpleNamespace(
+            uid=1, title="F1", lens="Design", severity="significant",
+            quote="q", loc_line=5, explanation="e", test="t",
+            survived=True, major=True, challenge="", reasoning="",
+            from_gap_ids=[], examiner="LEWG reviewer", damage="Breaks ABI.",
+        ),
+        SimpleNamespace(
+            uid=2, title="F2", lens="Design", severity="minor",
+            quote="q", loc_line=6, explanation="e", test="t",
+            survived=True, major=False, challenge="", reasoning="",
+            from_gap_ids=[],
+        ),
+    ])
+    rows = {r.uid: r for r in store.get_assay_findings("P1")}
+    assert rows[1].examiner == "LEWG reviewer"
+    assert rows[1].damage == "Breaks ABI."
+    assert rows[2].examiner == ""
+    assert rows[2].damage == ""
+
+
+def test_store_assay_synthesis_round_trip_wording_lines(store: SqliteBackend):
+    """wording_lines survives store/get for the --rerender ask calibration line."""
+    store.store_assay_synthesis("P1", {"verdict": "Weakened", "wording_lines": 42})
+    store.store_assay_synthesis("P2", {"verdict": "Weakened"})
+    assert store.get_assay_synthesis("P1").wording_lines == 42
+    assert store.get_assay_synthesis("P2").wording_lines == 0
+
+
+def test_migrate_adds_finding_examiner_damage_to_legacy_db(tmp_path: Path):
+    """A database created before examiner/damage existed gains them on reopen.
+
+    ``CREATE TABLE IF NOT EXISTS`` leaves the pre-existing table alone, so the
+    guarded ALTER in ``_migrate`` is the only thing that upgrades it.
+    """
+    conn = sqlite3.connect(str(tmp_path / "paperstore.db"))
+    conn.execute(
+        "CREATE TABLE assay_findings ("
+        "paper_id TEXT NOT NULL, uid INTEGER NOT NULL, title TEXT NOT NULL, "
+        "lens TEXT NOT NULL, severity TEXT NOT NULL, quote TEXT DEFAULT '', "
+        "loc_line INTEGER DEFAULT 0, explanation TEXT DEFAULT '', "
+        "test TEXT DEFAULT '', survived INTEGER DEFAULT 1, "
+        "major INTEGER DEFAULT 0, challenge TEXT DEFAULT '', "
+        "reasoning TEXT DEFAULT '', from_gap_ids TEXT DEFAULT '', "
+        "PRIMARY KEY (paper_id, uid))"
+    )
+    conn.commit()
+    conn.close()
+
+    store = SqliteBackend(tmp_path)
+    cols = {r[1] for r in store._conn.execute(
+        "PRAGMA table_info(assay_findings)"
+    ).fetchall()}
+    assert {"examiner", "damage"} <= cols
+
+
+def test_migrate_adds_synthesis_wording_lines_to_legacy_db(tmp_path: Path):
+    """Same for the assay_synthesis.wording_lines column."""
+    conn = sqlite3.connect(str(tmp_path / "paperstore.db"))
+    conn.execute(
+        "CREATE TABLE assay_synthesis ("
+        "paper_id TEXT PRIMARY KEY, verdict TEXT NOT NULL, "
+        "verdict_confidence TEXT DEFAULT 'Medium', "
+        "thesis_statement TEXT DEFAULT '', thesis_survives INTEGER DEFAULT 0, "
+        "central_thesis TEXT DEFAULT '', dominant_dynamic TEXT DEFAULT '', "
+        "critical_count INTEGER DEFAULT 0, significant_count INTEGER DEFAULT 0, "
+        "skip_reason TEXT DEFAULT '', paper_stats TEXT DEFAULT '{}')"
+    )
+    conn.commit()
+    conn.close()
+
+    store = SqliteBackend(tmp_path)
+    cols = {r[1] for r in store._conn.execute(
+        "PRAGMA table_info(assay_synthesis)"
+    ).fetchall()}
+    assert "wording_lines" in cols
+
+
 def test_clear_downstream_outputs_wipes_assay_rows(store: SqliteBackend):
     """``clear_downstream_outputs`` deletes every ``assay_*`` row for the
     target paper alongside the ``.assay.md`` report file. Stored

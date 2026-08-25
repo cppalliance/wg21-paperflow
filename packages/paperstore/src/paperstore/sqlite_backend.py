@@ -281,6 +281,8 @@ CREATE TABLE IF NOT EXISTS assay_findings (
     challenge   TEXT DEFAULT '',
     reasoning   TEXT DEFAULT '',
     from_gap_ids TEXT DEFAULT '',
+    examiner    TEXT DEFAULT '',
+    damage      TEXT DEFAULT '',
     PRIMARY KEY (paper_id, uid)
 );
 CREATE TABLE IF NOT EXISTS assay_asks (
@@ -350,7 +352,8 @@ CREATE TABLE IF NOT EXISTS assay_synthesis (
     critical_count     INTEGER DEFAULT 0,
     significant_count  INTEGER DEFAULT 0,
     skip_reason        TEXT DEFAULT '',
-    paper_stats        TEXT DEFAULT '{}'
+    paper_stats        TEXT DEFAULT '{}',
+    wording_lines      INTEGER DEFAULT 0
 );
 
 """
@@ -485,6 +488,16 @@ def _migrate(conn: sqlite3.Connection) -> None:
             "ALTER TABLE assay_findings ADD COLUMN from_gap_ids TEXT DEFAULT ''"
         )
 
+    # assay_findings: examiner/damage so --rerender can reproduce the
+    # Examiner and Damage blocks of the report.
+    if finding_cols and "examiner" not in finding_cols:
+        conn.execute(
+            "ALTER TABLE assay_findings ADD COLUMN examiner TEXT DEFAULT ''"
+        )
+        conn.execute(
+            "ALTER TABLE assay_findings ADD COLUMN damage TEXT DEFAULT ''"
+        )
+
     synthesis_cols = {r[1] for r in conn.execute(
         "PRAGMA table_info(assay_synthesis)"
     ).fetchall()}
@@ -495,6 +508,12 @@ def _migrate(conn: sqlite3.Connection) -> None:
     if synthesis_cols and "paper_stats" not in synthesis_cols:
         conn.execute(
             "ALTER TABLE assay_synthesis ADD COLUMN paper_stats TEXT DEFAULT '{}'"
+        )
+    # Survey-derived wording signal, kept on the synthesis row so --rerender
+    # can reproduce the ask calibration parenthetical.
+    if synthesis_cols and "wording_lines" not in synthesis_cols:
+        conn.execute(
+            "ALTER TABLE assay_synthesis ADD COLUMN wording_lines INTEGER DEFAULT 0"
         )
 
     if "citations_extracted_at" not in {
@@ -1645,8 +1664,8 @@ class SqliteBackend(StorageBackend):
         with self._conn:
             self._conn.execute("DELETE FROM assay_findings WHERE paper_id = ?", (paper_id,))
             self._conn.executemany(
-                "INSERT INTO assay_findings (paper_id, uid, title, lens, severity, quote, loc_line, explanation, test, survived, major, challenge, reasoning, from_gap_ids) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                [(paper_id, f.uid, f.title, f.lens, f.severity, f.quote, f.loc_line, f.explanation, f.test, int(f.survived), int(f.major), getattr(f, 'challenge', ''), getattr(f, 'reasoning', ''), _format_id_list(getattr(f, 'from_gap_ids', None))) for f in findings],
+                "INSERT INTO assay_findings (paper_id, uid, title, lens, severity, quote, loc_line, explanation, test, survived, major, challenge, reasoning, from_gap_ids, examiner, damage) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                [(paper_id, f.uid, f.title, f.lens, f.severity, f.quote, f.loc_line, f.explanation, f.test, int(f.survived), int(f.major), getattr(f, 'challenge', ''), getattr(f, 'reasoning', ''), _format_id_list(getattr(f, 'from_gap_ids', None)), getattr(f, 'examiner', ''), getattr(f, 'damage', '')) for f in findings],
             )
 
     def get_assay_claims(self, paper_id: str) -> list:
@@ -1684,10 +1703,10 @@ class SqliteBackend(StorageBackend):
     def get_assay_findings(self, paper_id: str) -> list:
         from paperstore.extract_rows import AssayFindingRow
         rows = self._conn.execute(
-            "SELECT paper_id, uid, title, lens, severity, quote, loc_line, explanation, test, survived, major, challenge, reasoning, from_gap_ids FROM assay_findings WHERE paper_id = ?",
+            "SELECT paper_id, uid, title, lens, severity, quote, loc_line, explanation, test, survived, major, challenge, reasoning, from_gap_ids, examiner, damage FROM assay_findings WHERE paper_id = ?",
             (paper_id,),
         ).fetchall()
-        return [AssayFindingRow(r[0], r[1], r[2], r[3], r[4], r[5], r[6], r[7], r[8], bool(r[9]), bool(r[10]), r[11], r[12], _parse_id_list(r[13])) for r in rows]
+        return [AssayFindingRow(r[0], r[1], r[2], r[3], r[4], r[5], r[6], r[7], r[8], bool(r[9]), bool(r[10]), r[11], r[12], _parse_id_list(r[13]), r[14], r[15]) for r in rows]
 
     def store_assay_asks(self, paper_id: str, asks) -> None:
         with self._conn:
@@ -1790,14 +1809,14 @@ class SqliteBackend(StorageBackend):
     def store_assay_synthesis(self, paper_id: str, synthesis) -> None:
         with self._conn:
             self._conn.execute(
-                "INSERT OR REPLACE INTO assay_synthesis (paper_id, verdict, verdict_confidence, thesis_statement, thesis_survives, central_thesis, dominant_dynamic, critical_count, significant_count, skip_reason, paper_stats) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                (paper_id, synthesis.get("verdict", "Insufficient"), synthesis.get("verdict_confidence", "Medium"), synthesis.get("thesis_statement", ""), int(synthesis.get("thesis_survives", False)), synthesis.get("central_thesis", ""), synthesis.get("dominant_dynamic", "") or "", synthesis.get("critical_count", 0), synthesis.get("significant_count", 0), synthesis.get("skip_reason", ""), synthesis.get("paper_stats", "{}")),
+                "INSERT OR REPLACE INTO assay_synthesis (paper_id, verdict, verdict_confidence, thesis_statement, thesis_survives, central_thesis, dominant_dynamic, critical_count, significant_count, skip_reason, paper_stats, wording_lines) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (paper_id, synthesis.get("verdict", "Insufficient"), synthesis.get("verdict_confidence", "Medium"), synthesis.get("thesis_statement", ""), int(synthesis.get("thesis_survives", False)), synthesis.get("central_thesis", ""), synthesis.get("dominant_dynamic", "") or "", synthesis.get("critical_count", 0), synthesis.get("significant_count", 0), synthesis.get("skip_reason", ""), synthesis.get("paper_stats", "{}"), synthesis.get("wording_lines", 0)),
             )
 
     def get_assay_synthesis(self, paper_id: str):
         from paperstore.extract_rows import AssaySynthesisRow
         row = self._conn.execute(
-            "SELECT paper_id, verdict, verdict_confidence, thesis_statement, thesis_survives, central_thesis, dominant_dynamic, critical_count, significant_count, skip_reason, paper_stats FROM assay_synthesis WHERE paper_id = ?",
+            "SELECT paper_id, verdict, verdict_confidence, thesis_statement, thesis_survives, central_thesis, dominant_dynamic, critical_count, significant_count, skip_reason, paper_stats, wording_lines FROM assay_synthesis WHERE paper_id = ?",
             (paper_id,),
         ).fetchone()
         if not row:
@@ -1808,9 +1827,10 @@ class SqliteBackend(StorageBackend):
         except json.JSONDecodeError:
             paper_stats = {}
         skip_reason = row[9] if len(row) > 9 else ""
+        wording_lines = row[11] if len(row) > 11 else 0
         return AssaySynthesisRow(
             row[0], row[1], row[2], row[3], bool(row[4]), row[5], row[6], row[7], row[8],
-            skip_reason, paper_stats,
+            skip_reason, paper_stats, wording_lines,
         )
 
     def write_assay_md(self, paper_id: str, markdown: str) -> Path:

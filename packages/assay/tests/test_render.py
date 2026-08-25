@@ -28,6 +28,11 @@ from assay.models import (
     StrengthOutput,
     SynthesisOutput,
 )
+from assay.pipeline import (
+    _persist_step_challenge,
+    _persist_step_couple,
+    _persist_step_synthesize,
+)
 from assay.references import RefEntry, UrlEntry
 from assay.render import load_assay_state, prepare_report_data, render_report, render_trace
 
@@ -365,3 +370,100 @@ def test_rerender_load_assay_state_preserves_ask_line(store: SqliteBackend):
     assert state.asks[0].line == 99
     data = prepare_report_data(state)
     assert data.asks[0]["line"] == 99
+
+
+def test_rerender_preserves_major_findings(store: SqliteBackend):
+    """Challenge persists findings before promotion is known, so Synthesize must rewrite them."""
+    store.upsert_year("2026", [{"paper_id": "P1", "title": "Test Paper"}])
+    major = FindingOutput(
+        id=1, title="F1", severity="significant", lens="Design",
+        quote="q1", line=5, explanation="expl1", test="t1",
+    )
+    regular = FindingOutput(
+        id=2, title="F2", severity="minor", lens="Usability",
+        quote="q2", line=6, explanation="expl2", test="t2",
+    )
+    state = PipelineState(paper_id="P1", surviving=[major, regular], killed=[])
+    ctx = SimpleNamespace(backend=store, pid="P1")
+
+    # Step 14. synthesis is still None here, exactly as in a live run.
+    _persist_step_challenge(None, state, ctx)
+
+    # Step 16.
+    state.synthesis = SynthesisOutput(
+        verdict_label="Weakened", verdict_confidence="Medium",
+        thesis_statement="thesis", thesis_survives=True,
+        verdict_statement="stmt", critical_count=0, significant_count=1,
+        major_findings=[major], regular_findings=[regular],
+    )
+    _persist_step_synthesize(None, state, ctx)
+
+    data = prepare_report_data(load_assay_state("P1", store))
+    assert [f.title for f in data.major_findings] == ["F1"]
+    assert [f.title for f in data.regular_findings] == ["F2"]
+
+
+def test_rerender_preserves_finding_id_examiner_damage(store: SqliteBackend):
+    """Finding identity and the Examiner/Damage fields survive the DB round trip."""
+    store.upsert_year("2026", [{"paper_id": "P1", "title": "Test Paper"}])
+    major = FindingOutput(
+        id=7, title="F1", severity="significant", lens="Design",
+        quote="q1", line=5, explanation="expl1", test="t1",
+        examiner="LEWG reviewer", damage="Breaks ABI.", from_gap_ids=[3],
+    )
+    state = PipelineState(
+        paper_id="P1",
+        surviving=[major],
+        killed=[],
+        compounds=[CompoundOutput(
+            name="Comp1", constituents=[7], mechanism="mech", emergent_risk="risk",
+        )],
+        synthesis=SynthesisOutput(
+            verdict_label="Weakened", verdict_confidence="Medium",
+            thesis_statement="thesis", thesis_survives=True,
+            verdict_statement="stmt", dominant_dynamic="Comp1",
+            critical_count=0, significant_count=1,
+            major_findings=[major], regular_findings=[],
+        ),
+    )
+    ctx = SimpleNamespace(backend=store, pid="P1")
+    _persist_step_synthesize(None, state, ctx)
+    _persist_step_couple(None, state, ctx)
+
+    loaded = load_assay_state("P1", store)
+    assert [f.id for f in loaded.surviving] == [7]
+    assert loaded.surviving[0].from_gap_ids == [3]
+    data = prepare_report_data(loaded)
+    assert data.major_findings[0].examiner == "LEWG reviewer"
+    assert data.major_findings[0].damage == "Breaks ABI."
+    # Compound attribution matches on finding id, so a lost id silently
+    # reclassifies the finding as thesis-overlap instead.
+    assert "1 participate in compound dynamics" in data.structural_summary
+
+
+def test_rerender_restores_intent_audience_and_wording_lines(store: SqliteBackend):
+    """intent/audience come from paper meta; wording_lines from the synthesis row."""
+    store.upsert_year("2026", [{
+        "paper_id": "P1", "title": "Test Paper",
+        "intent": "ask", "subgroup": "LEWG, CWG",
+    }])
+    state = PipelineState(
+        paper_id="P1",
+        wording_lines=42,
+        surviving=[],
+        killed=[],
+        synthesis=SynthesisOutput(
+            verdict_label="Weakened", verdict_confidence="Medium",
+            thesis_statement="thesis", thesis_survives=True,
+            verdict_statement="stmt",
+        ),
+    )
+    _persist_step_synthesize(None, state, SimpleNamespace(backend=store, pid="P1"))
+
+    loaded = load_assay_state("P1", store)
+    assert loaded.intent == "ask"
+    assert loaded.audience == ["LEWG, CWG"]
+    data = prepare_report_data(loaded)
+    assert data.intent == "ask"
+    assert data.wording_lines == 42
+    assert data.targets_cwg_lwg is True

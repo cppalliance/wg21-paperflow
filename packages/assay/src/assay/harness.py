@@ -39,6 +39,20 @@ logger = logging.getLogger(__name__)
 
 LENS_ORDER = ["Performance", "Design", "Specification", "Usability", "Ecosystem", "Rationale"]
 
+# Audience labels that put a paper in front of a wording-review body.
+_WORDING_REVIEW_GROUPS = ("CWG", "LWG")
+
+
+def targets_cwg_lwg(audience: list[str]) -> bool:
+    """True when the paper's target group includes a wording-review body.
+
+    Used by Survey (Step 3) on the live path and by ``load_assay_state``
+    on the --rerender path, so both derive the flag the same way.
+    """
+    joined = " ".join(audience).upper()
+    return any(group in joined for group in _WORDING_REVIEW_GROUPS)
+
+
 # -- Embedding / lexical similarity helpers ---------------------------------
 
 # Mid of the SBERT-style 0.60-0.75 "near-paraphrase" band. Above this, gap
