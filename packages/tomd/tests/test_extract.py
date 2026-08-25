@@ -96,6 +96,42 @@ def test_extract_spatial_sorts_across_blocks_in_y_band():
     assert text.index("L") < text.index("R"), f"got text={text!r}"
 
 
+def test_spatial_sorts_by_baseline_for_mixed_font_sizes():
+    """Inline run in a smaller font shares baseline but has lower bbox top;
+    must still sort in left-to-right reading order on the same line."""
+    # Prosed text at 12pt (origin y=100, bbox top y=88) followed by
+    # inline code at 8pt (origin y=100, bbox top y=92).
+    spans = [
+        {
+            "font": "ProseFont",
+            "size": 12.0,
+            "flags": 0,
+            "color": 0,
+            "chars": [
+                {"c": "a", "bbox": (10, 88, 18, 102), "origin": (10, 100)},
+                {"c": " ", "bbox": (18, 88, 22, 102), "origin": (18, 100)},
+            ],
+        },
+        {
+            "font": "CodeFont",
+            "size": 8.0,
+            "flags": 0,
+            "color": 0,
+            "chars": [
+                {"c": "x", "bbox": (22, 92, 28, 102), "origin": (22, 100)},
+            ],
+        },
+    ]
+    page = MagicMock()
+    page.get_text.return_value = {
+        "blocks": [{"type": 0, "lines": [{"spans": spans}]}],
+    }
+    blocks = extract_spatial(page, 0)
+    text = "".join(ln.text for b in blocks for ln in b.lines)
+    assert text == "a x"
+
+
+
 class TestComputeBbox:
     def test_single_box(self):
         assert compute_bbox([(1.0, 2.0, 3.0, 4.0)]) == (1.0, 2.0, 3.0, 4.0)

@@ -328,6 +328,21 @@ def _join_cross_page(blocks: list[Block]) -> list[Block]:
     is merged; further blocks from the same source page are kept
     separate so that ``compare_extractions`` (which groups by
     ``page_num``) still sees them on their original page.
+
+    Gated off when either boundary line is monospace: this heuristic
+    exists for prose sentences cut by a page break, but C++ statements
+    routinely end in ``;`` / ``}`` / ``)`` (none of which are in
+    ``TERMINAL_PUNCTUATION``) and just as routinely start the next line
+    lowercase (``if``, ``else``, ``return``, a variable name), so a code
+    block that happens to cross a page boundary trips this heuristic on
+    prose grounds alone. Joining it would also silently move that
+    block's ``page_num`` to the earlier page (see the bbox comment
+    below), which desyncs ``compare_extractions``'s per-page word
+    comparison between the two extraction paths whenever the other path
+    segments its blocks differently at that same boundary and does not
+    trip the same misfire - the page then reads as a dual-path
+    disagreement (``<!-- tomd:uncertain -->``) even though both paths
+    extracted the same text.
     """
     if len(blocks) < 2:
         return blocks
@@ -344,8 +359,6 @@ def _join_cross_page(blocks: list[Block]) -> list[Block]:
         if cross_page and block.page_num != merged_boundary:
             merged_boundary = None
 
-        prev_mono = prev.lines[0].is_monospace if prev.lines else False
-        cur_mono = block.lines[0].is_monospace if block.lines else False
         fs_diff = (
             abs(prev.font_size - block.font_size)
             if (prev.font_size and block.font_size)
@@ -359,7 +372,8 @@ def _join_cross_page(blocks: list[Block]) -> list[Block]:
                 and not PAGE_NUM_RE.match(prev_text)
                 and prev_text[-1] not in TERMINAL_PUNCTUATION
                 and cur_text[0].islower()
-                and prev_mono == cur_mono
+                and not prev.lines[-1].is_monospace
+                and not block.lines[0].is_monospace
                 and fs_diff <= 1.5):
             prev.lines.extend(block.lines)
             # Keep the original page's bbox: page coordinates are

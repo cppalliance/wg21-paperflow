@@ -246,3 +246,19 @@ class TestJoinCrossPage:
         result = _join_cross_page([block1, block2])
         assert len(result) == 2
 
+    def test_join_cross_page_does_not_merge_monospace_code_blocks(self):
+        """Code block on page 0 does not merge with code block on page 1."""
+        span1 = Span(text="int x = 42;", font_size=10.0, monospace=True)
+        line1 = Line(spans=[span1], page_num=0)
+        block1 = Block(lines=[line1], page_num=0)
+
+        span2 = Span(text="return x;", font_size=10.0, monospace=True)
+        line2 = Line(spans=[span2], page_num=1)
+        block2 = Block(lines=[line2], page_num=1)
+
+        result = _join_cross_page([block1, block2])
+        assert len(result) == 2
+        assert result[0].text == "int x = 42;"
+        assert result[1].text == "return x;"
+
+

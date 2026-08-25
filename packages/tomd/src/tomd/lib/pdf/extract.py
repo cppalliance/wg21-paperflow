@@ -105,7 +105,15 @@ def extract_spatial(page, page_num: int) -> list[Block]:
 
     avg_fs = sum(c[4] for c in chars) / len(chars)
     half_height = max(avg_fs * _SORT_BAND_RATIO, _SORT_BAND_MIN)
-    chars.sort(key=lambda c: (round(c[1][1] / half_height), c[1][0]))
+    # Band on baseline (origin y), not glyph-top (bbox y). An inline run set
+    # in a smaller font (e.g. a monospace term inside a prose sentence)
+    # shares the line's baseline but has a shorter ascent, so its bbox top
+    # sits measurably lower on the page than same-line text in a larger
+    # font. Banding on bbox y can push such a run into the next band,
+    # sorting it after content that comes later in reading order. Baseline
+    # is invariant across font sizes on one line, so it bands correctly
+    # regardless of any inline font-size change.
+    chars.sort(key=lambda c: (round(c[2][1] / half_height), c[1][0]))
 
     blocks: list[Block] = []
     cur_spans: list[Span] = []
