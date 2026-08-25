@@ -223,21 +223,48 @@ class TestList:
 
 
 class TestWording:
-    def test_wording_add_fence(self):
+    """A wording div contributes its content, never a Pandoc fenced div.
+    Its class is still used to decide whether the content's own inline
+    tags are redundant with it.
+    """
+
+    def test_wording_add_emits_no_fence(self):
         soup = parse_html('<div class="wording-add"><p>New text</p></div>')
         md = render_body(soup, "mpark")
-        assert ":::wording-add" in md
-        assert ":::" in md.split(":::wording-add")[1]
+        assert ":::" not in md
+        assert "New text" in md
 
-    def test_wording_remove_fence(self):
+    def test_wording_remove_emits_no_fence(self):
         soup = parse_html('<div class="wording-remove"><p>Old text</p></div>')
         md = render_body(soup, "mpark")
-        assert ":::wording-remove" in md
+        assert ":::" not in md
+        assert "Old text" in md
 
-    def test_wording_mixed_fence(self):
+    def test_wording_neutral_emits_no_fence(self):
         soup = parse_html('<div class="wording"><p>Spec text</p></div>')
         md = render_body(soup, "mpark")
-        assert ":::wording\n" in md
+        assert ":::" not in md
+        assert "Spec text" in md
+
+    def test_uniform_add_div_strips_redundant_ins(self):
+        soup = parse_html(
+            '<div class="wording-add"><p><ins>wholly added clause</ins></p></div>')
+        md = render_body(soup, "mpark")
+        assert "<ins>" not in md
+        assert "wholly added clause" in md
+
+    def test_mixed_add_div_keeps_ins(self):
+        soup = parse_html(
+            '<div class="wording-add"><p>unchanged context here plus '
+            '<ins>a bit</ins></p></div>')
+        md = render_body(soup, "mpark")
+        assert "<ins>a bit</ins>" in md
+
+    def test_neutral_div_never_strips(self):
+        soup = parse_html(
+            '<div class="wording"><p><ins>everything inserted</ins></p></div>')
+        md = render_body(soup, "mpark")
+        assert "<ins>everything inserted</ins>" in md
 
     def test_ins_del_passthrough(self):
         soup = parse_html("<p><ins>added</ins> and <del>removed</del></p>")

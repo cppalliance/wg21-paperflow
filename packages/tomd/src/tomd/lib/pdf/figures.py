@@ -27,6 +27,7 @@ _BOX_GROUP_Y_TOLERANCE = 80.0
 _BOX_GROUP_X_TOLERANCE = 300.0
 _MIN_BOXES_FOR_FIGURE = 2
 _FIGURE_BBOX_MARGIN = 5.0
+_ADJACENT_GROUP_GAP_PT = 20.0
 _BRIDGE_TOLERANCE = 25.0
 _CONNECTOR_THIN_SIDE_MAX = 3.0
 _CONNECTOR_MIN_HORIZ_DX = 5.0
@@ -172,6 +173,54 @@ def _group_bbox(boxes: list[tuple]) -> tuple[float, float, float, float]:
         max(b[2] for b in boxes) + m,
         max(b[3] for b in boxes) + m,
     )
+
+
+def _rect_gap(a: tuple[float, float, float, float],
+              b: tuple[float, float, float, float]) -> float:
+    """Chebyshev gap between two bbox rects; 0 when they touch or overlap."""
+    dx = max(b[0] - a[2], a[0] - b[2], 0.0)
+    dy = max(b[1] - a[3], a[1] - b[3], 0.0)
+    return max(dx, dy)
+
+
+def _absorb_adjacent_groups(groups: list[list[tuple]]) -> list[list[tuple]]:
+    """Fold undersized box groups into a nearby qualified group.
+
+    A diagram's legend/key box is often a single small bordered box
+    sitting just outside ``_BOX_GROUP_X_TOLERANCE`` of the main diagram's
+    box cluster (its own swatches are typically too small to individually
+    qualify as boxes). A group that does not meet
+    ``_MIN_BOXES_FOR_FIGURE`` on its own is folded into an already
+    qualified group when the two are within ``_ADJACENT_GROUP_GAP_PT`` of
+    each other. Two undersized groups never merge with each other, so
+    this cannot manufacture a qualified region out of unrelated clutter.
+    """
+    if len(groups) <= 1:
+        return groups
+
+    bboxes = [_group_bbox(g) for g in groups]
+    parent = list(range(len(groups)))
+
+    def find(i: int) -> int:
+        while parent[i] != i:
+            parent[i] = parent[parent[i]]
+            i = parent[i]
+        return i
+
+    for oi, orphan in enumerate(groups):
+        if len(orphan) >= _MIN_BOXES_FOR_FIGURE:
+            continue
+        for qi, qualified in enumerate(groups):
+            if qi == oi or len(qualified) < _MIN_BOXES_FOR_FIGURE:
+                continue
+            if _rect_gap(bboxes[oi], bboxes[qi]) <= _ADJACENT_GROUP_GAP_PT:
+                parent[find(oi)] = find(qi)
+                break
+
+    merged: dict[int, list[tuple]] = {}
+    for gi, grp in enumerate(groups):
+        merged.setdefault(find(gi), []).extend(grp)
+    return list(merged.values())
 
 
 def _is_arrowhead(path: dict) -> tuple | None:
@@ -653,6 +702,7 @@ def detect_figure_regions(
 
     groups = _group_boxes(bordered_boxes)
     groups = _merge_connected_groups(groups, connectors)
+    groups = _absorb_adjacent_groups(groups)
 
     regions = []
     for group in groups:

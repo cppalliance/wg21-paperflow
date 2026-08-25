@@ -1253,6 +1253,46 @@ def _section_in_figure_region(sec: Section,
     return None
 
 
+_FIGURE_SANDWICH_MAX_WORDS = 6
+
+
+def _absorb_figure_sandwiched_sections(sections: list[Section]) -> None:
+    """Reclassify a short run of non-FIGURE sections wedged between two
+    FIGURE sections on the same page as FIGURE.
+
+    A diagram's box/arrow layout does not always geometrically enclose
+    every one of its own labels (e.g. a row/tier caption sitting just
+    outside the box cluster's bounding region, such as a vertical axis
+    label with no bordered box of its own). Dual-path extraction can
+    also split one such label into more than one section. Such a run is
+    never real body prose in practice: real prose only ever appears
+    before the first figure fragment on a page or after the last, never
+    wedged between two figure fragments. Gated on the run's total word
+    count so a genuine paragraph that ever ended up sandwiched is left
+    alone. Mutates *sections* in place; callers should follow with
+    :func:`_merge_figure_sections` to fold the result into one section.
+    """
+    n = len(sections)
+    i = 1
+    while i < n - 1:
+        if sections[i - 1].kind != SectionKind.FIGURE or sections[i].kind == SectionKind.FIGURE:
+            i += 1
+            continue
+        j = i
+        while j < n and sections[j].kind != SectionKind.FIGURE:
+            j += 1
+        if j == n:
+            break
+        run = sections[i:j]
+        page = sections[i - 1].page_num
+        total_words = sum(len(s.text.split()) for s in run)
+        if (all(s.page_num == page for s in run)
+                and total_words <= _FIGURE_SANDWICH_MAX_WORDS):
+            for s in run:
+                s.kind = SectionKind.FIGURE
+        i = j + 1
+
+
 def _merge_figure_sections(sections: list[Section]) -> list[Section]:
     """Consolidate consecutive FIGURE sections into one per figure."""
     if not sections:
@@ -1302,6 +1342,21 @@ def _structure_body_impl(metadata: dict,
     for idx, sec in enumerate(sections):
         if idx in skip_indices:
             continue
+
+        # A vector-diagram box grid (e.g. a layered architecture figure)
+        # can trip the columnar TABLE heuristic in table.py. Figure-region
+        # overlap takes precedence over that classification: reclassify to
+        # FIGURE so it is dropped at emit time instead of rendered as a
+        # fabricated table.
+        if sec.kind == SectionKind.TABLE and figure_regions:
+            matched_region = _section_in_figure_region(sec, figure_regions)
+            if matched_region is not None:
+                sec.kind = SectionKind.FIGURE
+                sec.confidence = Confidence.HIGH
+                if matched_region.graph is not None:
+                    sec.figure_graph = matched_region.graph
+                structured.append(sec)
+                continue
 
         # IMAGE participates in the y-sort but is opaque to the heading
         # / list / code / wording passes that follow. Short-circuiting
@@ -1543,6 +1598,7 @@ def _structure_body_impl(metadata: dict,
         structured.append(sec)
 
     if figure_regions:
+        _absorb_figure_sandwiched_sections(structured)
         structured = _merge_figure_sections(structured)
     structured = _merge_orphan_heading_numbers(structured)
     structured = _detect_lists_by_position(structured)

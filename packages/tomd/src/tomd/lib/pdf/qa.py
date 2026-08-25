@@ -27,7 +27,7 @@ from paperstore.progress import ProgressCallback
 from tomd.lib.batch import run_parallel_batch
 from tomd.lib.metadata_yaml.format import FRONT_MATTER_ORDER, parse_front_matter
 
-from ..wording_markup import FENCE_MARKER
+from ..wording_markup import WORDING_TAG_RE
 
 __all__ = [
     "QABatchResult",
@@ -44,9 +44,10 @@ _UNCERTAIN_MARKER = "tomd:uncertain"
 _LOSSY_TABLE_MARKER = "tomd:lossy-table"
 _WG21_DOC_NUM_RE = re.compile(r"[DPN]\d{3,5}R?\d*", re.IGNORECASE)
 
-# Detection-only: counts wording-div openings. Built from the shared marker
-# (lib.wording_markup) so it tracks the same syntax the emitters produce.
-_WORDING_DIV_RE = re.compile(rf"^{re.escape(FENCE_MARKER)}wording", re.MULTILINE)
+# Detection-only: a top-level block counts as a wording section when it
+# carries an inline <ins>/<del> tag. tomd emits no wording div, so the
+# inline tags (lib.wording_markup) are the only signal available.
+_WORDING_BLOCK_TYPES = ("paragraph", "block_code", "block_html", "list", "heading")
 
 # Intentionally broader than structure.py's _STRUCTURAL_CODE_RE.
 # qa.py uses it for *detection* (scoring), so false positives just
@@ -145,11 +146,34 @@ def _looks_like_code(node: dict) -> bool:
     if code_children and not text_children:
         return False
     text = _paragraph_plain_text(node)
-    if text.strip().startswith(":::"):
-        return False
     if _STANDARDESE_PREFIX_RE.match(text.strip()):
         return False
     return bool(_STRUCTURAL_CODE_RE.search(text))
+
+
+def _block_raw_text(node: dict) -> str:
+    """Flatten a block token back to text for substring detection.
+
+    mistune keeps inline HTML as ``inline_html`` children and fenced code
+    as a ``raw`` string, so neither a plain ``raw`` read nor a text-only
+    walk sees every ``<ins>`` / ``<del>``. This concatenates both.
+    """
+    parts = [node.get("raw", "")]
+    stack = list(node.get("children", []))
+    while stack:
+        child = stack.pop()
+        parts.append(child.get("raw", ""))
+        stack.extend(child.get("children", []))
+    return "".join(parts)
+
+
+def _count_wording_blocks(tokens: list[dict]) -> int:
+    """Count top-level blocks carrying inline wording markup."""
+    return sum(
+        1 for t in tokens
+        if t.get("type", "") in _WORDING_BLOCK_TYPES
+        and WORDING_TAG_RE.search(_block_raw_text(t))
+    )
 
 
 def _count_unfenced_code(paragraphs: list[dict]) -> int:
@@ -355,7 +379,7 @@ def compute_metrics(md_text: str, file: str = "") -> QAMetrics:
     m.mojibake_count = _count_mojibake(md_text)
     m.heading_level_skips = _heading_level_skips(tokens)
 
-    m.wording_section_count = len(_WORDING_DIV_RE.findall(md_text))
+    m.wording_section_count = _count_wording_blocks(tokens)
     m.table_parse_errors = _count_table_parse_errors(tokens)
 
     m.score, m.issues = _score(m)

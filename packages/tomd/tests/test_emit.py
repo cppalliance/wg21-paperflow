@@ -437,8 +437,10 @@ def test_emit_wording_section():
         lines=[line],
     )
     md = emit_markdown({}, [sec])
-    assert ":::wording-add" in md
-    assert ":::" in md
+    # No fenced div, and the section is uniformly inserted so its
+    # redundant <ins> tag is stripped: just the prose survives.
+    assert ":::" not in md
+    assert "added text" in md
 
 
 def test_emit_wording_remove_section():
@@ -451,7 +453,8 @@ def test_emit_wording_remove_section():
         lines=[line],
     )
     md = emit_markdown({}, [sec])
-    assert ":::wording-remove" in md
+    assert ":::" not in md
+    assert "removed text" in md
 
 
 def _ins(text: str) -> Span:
@@ -559,25 +562,27 @@ def _make_wording_section(kind: SectionKind, lines: list[Line]) -> Section:
 
 
 class TestRenderWordingSection:
-    """Emit-level tests: the PDF wording renderer should preserve all
-    inline ``<ins>`` / ``<del>`` tags verbatim. The redundancy-stripping
-    rule lives in ``lib.wording_cleanup`` and is exercised by
-    ``test_wording_cleanup.py``; this layer only owns code promotion.
+    """Emit-level tests for the PDF wording renderer.
+
+    No Pandoc fenced div is emitted. Which shape a section takes is owned
+    here; whether a uniform section's now-redundant inline tags are
+    stripped is delegated to ``lib.wording_cleanup`` (exercised by
+    ``test_wording_cleanup.py``) and applied before this returns.
     """
 
-    def test_uniform_add_passthrough_ins_tags(self):
+    def test_uniform_add_strips_redundant_ins_tags(self):
         line = Line(spans=[_ins("• added bullet")])
         sec = _make_wording_section(SectionKind.WORDING_ADD, [line])
         out = _render_wording_section(sec)
-        assert "<ins>• added bullet</ins>" in out
-        assert out.startswith(":::wording-add")
+        assert out == "• added bullet"
+        assert ":::" not in out
 
-    def test_uniform_remove_passthrough_del_tags(self):
+    def test_uniform_remove_strips_redundant_del_tags(self):
         line = Line(spans=[_del("doomed paragraph")])
         sec = _make_wording_section(SectionKind.WORDING_REMOVE, [line])
         out = _render_wording_section(sec)
-        assert "<del>doomed paragraph</del>" in out
-        assert out.startswith(":::wording-remove")
+        assert out == "doomed paragraph"
+        assert ":::" not in out
 
     def test_mixed_add_emits_inline_tags(self):
         line = Line(spans=[
@@ -670,28 +675,25 @@ class TestRenderWordingSection:
         # drops inline role tags: the deletion would silently disappear (a
         # fidelity violation). The implicit-role share is well above
         # ``UNIFORM_ROLE_THRESHOLD`` (0.95) but the contrarian-char count
-        # is non-zero, so it falls through to the neutral fenced code diff
+        # is non-zero, so it falls through to the fenced code diff
         # (shape 2), which keeps the ``<del>`` marker verbatim inside the
-        # fence and uses a neutral ``:::wording`` div (never directional).
+        # fence.
         ins_payload = _mono_span("x" * 200, "ins")
         del_payload = _mono_span("noexcept", "del")
         l1 = Line(spans=[ins_payload])
         l2 = Line(spans=[del_payload])
         sec = _make_wording_section(SectionKind.WORDING_ADD, [l1, l2])
         out = _render_wording_section(sec)
-        assert out.splitlines()[0] == ":::wording"
-        assert "wording-add" not in out
-        assert "```cpp" in out
+        assert out.splitlines()[0] == "```cpp"
+        assert ":::" not in out
         assert "<del>noexcept</del>" in out
 
     def test_multiline_mono_mixed_emits_fenced_code_diff(self):
         # Monospace, multi-line, but NOT uniform role: a partial edit
         # inside a code listing. Emit a real ``cpp`` fence (raw angle
         # brackets / ampersands, real newlines: the C++ stays valid and
-        # copy-pasteable, issue #299) in a neutral :::wording div (never
-        # directional, which would paint the unchanged context as removed).
-        # The inline ``<del>`` marker survives inside the fence as literal
-        # text.
+        # copy-pasteable, issue #299) with no surrounding div. The inline
+        # ``<del>`` marker survives inside the fence as literal text.
         l1 = Line(spans=[_mono_span("template<class U>")])
         l2 = Line(spans=[
             _mono_span("  constexpr "),
@@ -700,9 +702,8 @@ class TestRenderWordingSection:
         ])
         sec = _make_wording_section(SectionKind.WORDING_REMOVE, [l1, l2])
         out = _render_wording_section(sec)
-        assert out.splitlines()[0] == ":::wording"
-        assert "wording-remove" not in out
-        assert "```cpp" in out
+        assert out.splitlines()[0] == "```cpp"
+        assert ":::" not in out
         assert "<br>" not in out
         assert "<del>explicit(see below)</del>" in out
         # Code angle brackets / ampersands are raw inside the fence.

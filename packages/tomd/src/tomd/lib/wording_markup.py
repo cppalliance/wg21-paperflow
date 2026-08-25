@@ -9,16 +9,22 @@
 
 """Single source of truth for tomd wording-markup syntax.
 
-Proposed standard-text edits are emitted as Pandoc fenced divs
-(``:::wording-add`` ... ``:::``) and inline ``<ins>``/``<del>`` tags. The
-emitters (``lib.pdf.emit``, ``lib.html.render``), the scoring detector
-(``lib.pdf.qa``), and the content checker (``lib.check_content``) all depend
-on this exact syntax. Defining it once here, and deriving both the emitter
-format helpers and the checker strip rules from the same constants, makes
-them unable to drift apart.
+Proposed standard-text edits are emitted as inline ``<ins>``/``<del>``
+tags and nothing else. The emitters (``lib.pdf.wording_emit``,
+``lib.html.render``), the scoring detector (``lib.pdf.qa``), and the
+content checker (``lib.check_content``) all depend on this exact syntax.
+Defining it once here, and deriving both the emitter format helper and
+the checker strip rules from the same constants, makes them unable to
+drift apart.
 
-New wording emission must go through the helpers here, not a fresh literal:
-a hardcoded ``:::``/``<ins>`` at a new call site is the one drift the
+tomd no longer emits Pandoc fenced wording divs (``:::wording-add`` ...
+``:::``): they duplicated what the inline tags already say and were pure
+noise in the converted Markdown. The fence *recognizer* below survives
+only so ``lib.check_content`` can normalize a ``<pid>.md`` produced by an
+older tomd; nothing emits that syntax any more.
+
+New wording emission must go through the helper here, not a fresh
+literal: a hardcoded ``<ins>`` at a new call site is the one drift the
 round-trip test (``tests/test_wording_markup.py``) cannot see.
 """
 
@@ -26,23 +32,14 @@ from __future__ import annotations
 
 import re
 
-# Fenced-div marker and the wording class names. ``WORDING_CLASSES`` must
-# equal the ``SectionKind`` values ``lib.pdf.emit`` interpolates and the HTML
-# class names ``lib.html.render`` recognizes; ``test_wording_markup`` asserts
-# the enum agreement so the two cannot diverge silently.
-FENCE_MARKER = ":::"
-WORDING_CLASSES = ("wording", "wording-add", "wording-remove")
-
 # Inline edit tags.
 WORDING_TAGS = ("ins", "del")
 
-# Closing fence is the bare marker.
-WORDING_FENCE_CLOSE = FENCE_MARKER
-
-
-def wording_fence_open(div_class: str) -> str:
-    """Opening fence for a wording div, e.g. ``:::wording-add``."""
-    return f"{FENCE_MARKER}{div_class}"
+# Legacy fenced-div syntax, recognized but never emitted. ``WORDING_CLASSES``
+# must equal the wording ``SectionKind`` values; ``test_wording_markup``
+# asserts the enum agreement so the two cannot diverge silently.
+LEGACY_FENCE_MARKER = ":::"
+WORDING_CLASSES = ("wording", "wording-add", "wording-remove")
 
 
 def wording_tag_open(tag: str, inner: str) -> str:
@@ -51,14 +48,13 @@ def wording_tag_open(tag: str, inner: str) -> str:
 
 
 # -- Checker-side strip rules, derived from the SAME definitions --------------
-# A fence line is the marker plus an optional known class name, alone on a
-# line. Anchoring + the closed class alternation keep it from matching code
-# (``a ::: b``) or scope-resolution tokens. Built from WORDING_CLASSES so a new
-# class is covered automatically and a syntax change is caught by the
-# round-trip test, not silently missed.
+# A legacy fence line is the marker plus an optional known class name, alone
+# on a line. Anchoring + the closed class alternation keep it from matching
+# code (``a ::: b``) or scope-resolution tokens. Retained for markdown written
+# by an older tomd; current output never contains a fence.
 _CLASS_ALT = "|".join(re.escape(c) for c in WORDING_CLASSES)
-WORDING_FENCE_RE = re.compile(
-    rf"^[ \t]*{re.escape(FENCE_MARKER)}(?:{_CLASS_ALT})?[ \t]*$",
+LEGACY_WORDING_FENCE_RE = re.compile(
+    rf"^[ \t]*{re.escape(LEGACY_FENCE_MARKER)}(?:{_CLASS_ALT})?[ \t]*$",
     re.MULTILINE,
 )
 WORDING_TAG_RE = re.compile(

@@ -562,7 +562,29 @@ def test_wording_section_markup_survives_glyph():
     sec = Section(kind=SectionKind.WORDING_ADD, text="", lines=[Line(spans=spans)])
     out = _render_wording_section(sec)
     assert out.count("<ins>") == out.count("</ins>")  # balanced, not broken
-    assert out.count("<ins>") >= 1
+    assert UNKNOWN_GLYPH in out
+    # The glyph sits between two ins runs, so it is absorbed into the run
+    # exactly as whitespace would be. That makes the section uniformly
+    # inserted, and its now-redundant tags are stripped; the text and the
+    # placeholder both survive, which is what the glyph pass must not break.
+    assert out == "added " + UNKNOWN_GLYPH + " more"
+
+
+def test_wording_glyph_keeps_tags_when_section_is_mixed():
+    # Companion to the above: with unchanged context in the line the
+    # section is NOT uniformly inserted, so the tags stay and must still
+    # bracket the right text around the injected placeholder.
+    spans = [
+        Span(text="unchanged context here ", font_name="Body",
+             bbox=(10, 100, 90, 112)),
+        Span(text="added", font_name="Body", wording_role="ins",
+             bbox=(90, 100, 130, 112)),
+        _glyph_span(134),
+    ]
+    sec = Section(kind=SectionKind.WORDING_ADD, text="", lines=[Line(spans=spans)])
+    out = _render_wording_section(sec)
+    assert out.count("<ins>") == out.count("</ins>") == 1
+    assert "<ins>added" in out
     assert UNKNOWN_GLYPH in out
 
 
