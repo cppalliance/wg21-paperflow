@@ -147,6 +147,22 @@ _NB_BALLOT_ID_RE = re.compile(
     r"^\[(?:[A-Z]{2}(?:[-\s]\d{2,3})?)\]$|^NB\s+number$"
 )
 
+# WG21 wording-clause data markers ("Returns:", "Effects:", ...). Also used
+# by _detect_spec_tables_by_label (Pass 4b) to split a spec table's header
+# from data spillover.
+_DATA_MARKERS_RE = re.compile(
+    r"^(Returns|Effects|Preconditions|Postconditions|"
+    r"Synchronization|Shall|Same|Requires|Remarks)\b",
+    re.IGNORECASE)
+
+# Bare paragraph/clause number (WG21 numbered wording, e.g. "1", "2a").
+# Paired with _DATA_MARKERS_RE to catch numbered wording clauses: their
+# hanging indent (number in the margin, clause text tabbed further right)
+# geometrically resembles a table column gap to the detectors below, but
+# a cell holding only a clause number next to a clause-label cell is
+# prose, never a real table row.
+_WORDING_CLAUSE_NUM_RE = re.compile(r"^\d{1,2}$")
+
 
 class _MatchResult(NamedTuple):
     """Result of a Pass 1 inner-loop decision branch."""
@@ -2286,9 +2302,12 @@ def _compute_table_signals(rows: list[list[list]]) -> dict:
     col_counts = []
     total_cell_length = 0
     total_spans = 0
+    has_wording_clause_row = False
 
     for row in rows:
         col_counts.append(len(row))
+        row_has_clause_num = False
+        row_has_data_marker = False
         for cell_spans in row:
             total_cells += 1
             total_spans += len(cell_spans)
@@ -2305,6 +2324,14 @@ def _compute_table_signals(rows: list[list[list]]) -> dict:
             text_spans = [s for s in cell_spans if s.text.strip()]
             if text_spans and all(s.monospace for s in text_spans):
                 monospace_cells += 1
+
+            if _WORDING_CLAUSE_NUM_RE.match(cell_text):
+                row_has_clause_num = True
+            if _DATA_MARKERS_RE.match(cell_text):
+                row_has_data_marker = True
+
+        if row_has_clause_num and row_has_data_marker:
+            has_wording_clause_row = True
 
     non_empty = total_cells - empty_cells
     num_cols = max(col_counts) if col_counts else 0
@@ -2333,8 +2360,13 @@ def _compute_table_signals(rows: list[list[list]]) -> dict:
             header_matches_spec = col0_spec and col1_spec
 
     # Bibliography signal: fraction of col-0 cells matching [Label] pattern.
-    # Multi-ID cells (newline-separated) count as a match when every line
-    # individually matches the bracket pattern.
+    # Multi-ID cells count as a match when every constituent label
+    # individually matches the bracket pattern. Splitting on whitespace
+    # (not just "\n") also catches row-banding that concatenates several
+    # bibliography entries' labels into one cell separated by spaces
+    # rather than newlines (e.g. a dense reference list where consecutive
+    # entries share a y-band): "[P1] [P2] [P3]" tokenizes the same as
+    # "[P1]\n[P2]\n[P3]".
     col0_bracket_count = 0
     col0_non_empty = 0
     for row in rows:
@@ -2342,7 +2374,7 @@ def _compute_table_signals(rows: list[list[list]]) -> dict:
             text = "".join(s.text for s in row[0]).strip()
             if text:
                 col0_non_empty += 1
-                sub_lines = [ln.strip() for ln in text.split("\n") if ln.strip()]
+                sub_lines = text.split()
                 if sub_lines and all(
                     _BIBLIOGRAPHY_LABEL_RE.match(sl) for sl in sub_lines
                 ):
@@ -2374,6 +2406,7 @@ def _compute_table_signals(rows: list[list[list]]) -> dict:
         "header_matches_spec": header_matches_spec,
         "col0_bracket_ratio": col0_bracket_ratio,
         "col0_ballot_ratio": col0_ballot_ratio,
+        "has_wording_clause_row": has_wording_clause_row,
     }
 
 
@@ -2386,6 +2419,13 @@ def _classify_table(signals: dict) -> TableKind:
         return TableKind.FALSE_POSITIVE
 
     if not signals["col_count_consistent"]:
+        return TableKind.FALSE_POSITIVE
+
+    # WG21 numbered wording clause (e.g. "1 | *Postconditions*: ..."):
+    # a hanging-indent paragraph, not a real table row. Checked before
+    # the Tony Tables / spec-table signals below, which a clause's mix
+    # of inline code and italic labels can otherwise resemble.
+    if signals.get("has_wording_clause_row"):
         return TableKind.FALSE_POSITIVE
 
     # Tony Tables: few rows, many spans per cell (multi-line code packed
@@ -3088,11 +3128,6 @@ _SPEC_TABLE_Y_BAND = 15.0
 _SPEC_HEADING_NUM_RE = re.compile(r"^\d+(?:\.\d+)*\s")
 
 _SPEC_HEADING_SUBSECTION_RE = re.compile(r"^\d+\.\d+")
-
-_DATA_MARKERS_RE = re.compile(
-    r"^(Returns|Effects|Preconditions|Postconditions|"
-    r"Synchronization|Shall|Same|Requires|Remarks)\b",
-    re.IGNORECASE)
 
 _SPEC_COL_NAMES_RE = re.compile(
     r"\b(expression|return\s+type|assertion|pre/post|"
@@ -4749,10 +4784,21 @@ def detect_tables(
 
             kind_val, strategy_val, rows = _classify_and_annotate(rows)
 
-            # Bibliography: not a real table, return blocks to prose pipeline.
-            if kind_val == TableKind.BIBLIOGRAPHY.value:
-                _log.debug("Pass 1 bibliography bypass: %d blocks on page %d",
-                            len(table_blocks), p1_page)
+            # Bibliography, or a WG21 numbered wording clause (whose hanging
+            # indent geometrically resembles a column gap): return blocks to the
+            # prose pipeline rather than rendering a flattened "skip" text blob.
+            # Flattening removes the blocks from all_mupdf_blocks up front, which
+            # can desync the dual-path word-similarity check for the page (the spatial
+            # side excludes a different region) and push the whole page to an
+            # uncertain block; returning the blocks keeps them in normal per-block
+            # reading order and full paragraph/code formatting.
+            signals = _compute_table_signals(rows)
+            if kind_val == TableKind.BIBLIOGRAPHY.value or (
+                kind_val == TableKind.FALSE_POSITIVE.value
+                and signals.get("has_wording_clause_row")
+            ):
+                _log.debug("Pass 1 non-table bypass (%s): %d blocks on page %d",
+                            kind_val, len(table_blocks), p1_page)
                 for blk in table_blocks:
                     remaining.append(blk)
                 i = j
