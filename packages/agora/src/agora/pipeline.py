@@ -402,6 +402,8 @@ async def _pure_research(state: PipelineState, ctx: StepContext, spec: StepSpec)
         committee_history=reports["committee_history"],
         author_ecosystem=reports["author_ecosystem"],
     )
+    fetched = getattr(ctx.researcher, "fetched_urls", None)
+    state.research_fetched_urls = sorted(fetched) if fetched else []
 
 
 async def _pure_research_disabled(

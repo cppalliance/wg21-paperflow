@@ -514,6 +514,12 @@ def _verified_links(
     ``wg21.link/<id>`` for paper ids the paper's text cites (a paper
     the source document references certainly exists). Nothing else
     may appear in a comment.
+
+    "Actually visited" is enforced, not taken on faith: the research
+    reports' ``sources`` lists are LLM output, so each one is admitted
+    only if it appears in the run's fetch log
+    (``state.research_fetched_urls``). A source the run never fetched
+    is dropped as hallucinated.
     """
     urls: list[str] = []
     seen: set[str] = set()
@@ -533,10 +539,19 @@ def _verified_links(
     _add(state.paper_url)
     _add(f"https://wg21.link/{thread.document.lower()}")
     rs = thread.research_summary
+    fetched = {_normalize_url(u) for u in (state.research_fetched_urls or [])}
     for report in (rs.public_reception, rs.committee_history,
                    rs.author_ecosystem):
         for source in report.sources:
-            _add(source)
+            if not isinstance(source, str):
+                continue
+            if _normalize_url(source) in fetched:
+                _add(source)
+            else:
+                logger.info(
+                    "Dropping research source never fetched this run: %r",
+                    source,
+                )
     for row in state.dissect_external_citations or []:
         for value in row.values():
             _add(value)

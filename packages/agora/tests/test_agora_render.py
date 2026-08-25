@@ -88,9 +88,14 @@ def test_render_trace_includes_research_when_step_2_reached():
         subreddit="r/wg21",
         committee="lwg",
         research_summary=rs,
+        research_fetched_urls=[
+            "https://old.reddit.com/r/cpp/comments/abc123/p3000",
+            "https://lists.isocpp.org/lib/2025/06/12345.php",
+        ],
     )
     out = render_trace(state, stop_step=2)
     assert "## 2. Research" in out
+    assert "fetched_urls: 2 recorded" in out
     assert "public reception" in out
     assert "Nothing notable." in out
 

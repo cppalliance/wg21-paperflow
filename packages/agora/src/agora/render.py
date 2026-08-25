@@ -147,6 +147,8 @@ def render_trace(state: PipelineState, stop_step: int) -> str:
 
     if stop_step >= 2:
         lines.append("## 2. Research\n")
+        fetched = state.research_fetched_urls or []
+        lines.append(f"- fetched_urls: {len(fetched)} recorded\n")
         rs = state.research_summary
         if rs is None:
             lines.append("- (no research summary recorded)\n")

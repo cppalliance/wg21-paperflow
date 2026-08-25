@@ -136,6 +136,7 @@ class WebResearcher:
         )
         self._guard_tag = guard_tag or _random_tag()
         self._failed_fetches: dict[str, FetchResponse] = {}
+        self._fetched_urls: set[str] = set()
         self._closed = False
 
     async def __aenter__(self) -> WebResearcher:
@@ -153,6 +154,19 @@ class WebResearcher:
                     await self._backend.close()
             finally:
                 self._closed = True
+
+    @property
+    def fetched_urls(self) -> frozenset[str]:
+        """Normalized URLs that answered HTTP 200 during this run.
+
+        Recorded whether or not article extraction then succeeded — a
+        200 proves the URL exists and was visited, which is the bar a
+        link inventory needs. The log lets a caller cross-check an LLM
+        agent's *claimed* sources against what was actually fetched; a
+        self-reported URL that never hit the network is hallucination,
+        not research.
+        """
+        return frozenset(self._fetched_urls)
 
     async def search(
         self, query: str, max_results: int = 5
@@ -317,6 +331,7 @@ class WebResearcher:
                 )
 
         assert body is not None
+        self._fetched_urls.add(url)
 
         extractor = (
             self._binary_extractors.get(content_type) if content_type else None

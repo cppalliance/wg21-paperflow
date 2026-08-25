@@ -636,6 +636,11 @@ class PipelineState(BaseModel):
     # -- Step 2 (Research) ---------------------------------------------------
 
     research_summary: Optional[ResearchSummary] = None
+    # URLs the Step 2 run actually fetched (HTTP 200), from the
+    # WebResearcher's log. The verified-link inventory intersects the
+    # sub-agents' self-reported sources with this; a source the run
+    # never fetched is treated as hallucinated and dropped.
+    research_fetched_urls: Optional[list[str]] = None
 
     # -- Step 3 (Calibrate) --------------------------------------------------
 
