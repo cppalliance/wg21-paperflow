@@ -375,6 +375,10 @@ def classify_wording(blocks: list[Block],
                     continue
 
                 if is_green_ins(span.color):
+                    if _span_is_comment(line, span):
+                        # A green `//` or `/* */` comment is a syntax-highlighted
+                        # code comment, not an insertion.
+                        continue
                     candidates.append((span, "ins", block.page_num))
                 elif is_red_del(span.color):
                     if _match_strikethrough(span.bbox, drawings):

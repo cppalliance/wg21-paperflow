@@ -94,6 +94,14 @@ _STABLE_NAME_RE = re.compile(
     r"^\[[\w.]+\]$"
 )
 
+# Guard: C++ declaration lines with prefix keywords (constexpr, inline, template, etc.).
+# When MuPDF splits an indented declaration (e.g. green 'constexpr' at x=55 and
+# black 'float frexp(...);' at x=110), the large x-gap must not trigger table detection.
+_CODE_DECL_PREFIX_RE = re.compile(
+    r"^\s*(?:constexpr|consteval|constinit|inline|template\b|static|virtual|explicit|friend|"
+    r"extern|typedef|using|export|namespace|#define|#include)\b"
+)
+
 
 # ---------------------------------------------------------------------------
 # Table classification (integrated from table_analyzer.py)
@@ -322,6 +330,14 @@ def _block_column_positions(block: Block) -> list[float] | None:
         line1 = block.lines[1]
         if (line1.is_bold
                 and _STABLE_NAME_RE.match(line1.text.strip())):
+            return None
+
+    # Guard: C++ code declarations where line 0 is a keyword (e.g. 'constexpr', 'inline')
+    # and subsequent lines are function/variable signatures or comments.
+    if _CODE_DECL_PREFIX_RE.match(block.lines[0].text):
+        last_text = block.lines[-1].text.strip()
+        if (last_text.endswith((";", "{", "}", ")"))
+                or "//" in last_text or "/*" in last_text):
             return None
 
     x_starts = []

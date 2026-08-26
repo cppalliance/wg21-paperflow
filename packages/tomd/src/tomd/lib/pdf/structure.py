@@ -42,7 +42,7 @@ _HEADING_BODY_SPLIT_DELTA = 2.0
 # them downstream. Real WG21 section titles are 1-8 words.
 _HEADING_MAX_WORDS = 12
 
-# Characters that indicate code, not a heading.  Used to reject
+# Characters that indicate code, not a heading. Used to reject
 # bold-only heading candidates that are really code fragments.
 _CODE_CHARS = frozenset("{}();=<>[]")
 
@@ -96,7 +96,8 @@ _STRUCTURAL_CODE_RE = re.compile(
     r"\w+\s*\([^)]*\)\s*\{|"  # function_name(...) {
     r"\w+\s*\([^)]*\)\s*;|"   # declaration: name(...);
     r"^\s*static_assert\s*\(|" # static_assert(
-    r"^\s*//[^/]",             # C++ line comments (not URLs with //)
+    r"^\s*//[^/]|"             # C++ line comments (not URLs with //)
+    r"^\s*(?:constexpr|consteval|constinit|template\s*<|namespace)\b",
     re.MULTILINE,
 )
 
@@ -1518,9 +1519,9 @@ def _structure_body_impl(metadata: dict,
         # conjunction is what distinguishes a syntactic code line from a
         # legitimate code-styled heading like ``std::assert`` (monospace
         # at a heading font, but no syntax punctuation).
+        is_mono = bool(sec.lines) and sec.lines[0].is_monospace
         first_line_is_mono_code = (
-            bool(sec.lines) and sec.lines[0].is_monospace
-            and bool(_CODE_CHARS & set(first_line))
+            is_mono and bool(_CODE_CHARS & set(first_line))
         )
 
         # A section with no visible text (e.g. a blank elevated-font spacer
@@ -1552,9 +1553,6 @@ def _structure_body_impl(metadata: dict,
             # clamped to at least 3 so bold-only never becomes H2.
             # Reject if the line contains code-like characters or is
             # monospace (avoids misclassifying code fragments as headings).
-            # The monospace+code-syntax case is already filtered by the
-            # outer guard; this is the safety net for bold-only mono with
-            # no syntax punctuation at LOW confidence.
             if level == 0 and is_bold and conf == Confidence.LOW:
                 has_code_chars = bool(_CODE_CHARS & set(first_line))
                 is_mono = bool(sec.lines) and sec.lines[0].is_monospace
@@ -2199,17 +2197,12 @@ def _detect_code_blocks(sections: list[Section]) -> list[Section]:
         pending_label_idx = -1
 
     for i, sec in enumerate(sections):
-        if sec.kind in (SectionKind.PARAGRAPH, SectionKind.LIST):
+        if sec.kind in (SectionKind.PARAGRAPH, SectionKind.LIST, SectionKind.UNCERTAIN):
             if _section_is_all_monospace(sec):
                 mono_run.append(sec)
                 continue
 
             if _section_is_empty(sec) and mono_run:
-                mono_run.append(sec)
-                continue
-
-        if sec.kind == SectionKind.UNCERTAIN and mono_run:
-            if _section_is_all_monospace(sec):
                 mono_run.append(sec)
                 continue
 
@@ -2310,11 +2303,14 @@ _COALESCE_MAX_LINES = 4
 
 _COALESCE_CODE_RE = re.compile(
     r"^\s*[{}]|"               # standalone brace lines
+    r"^\s*namespace\s+\w|"     # namespace declarations
+    r"^\s*\.\.\.|"             # ellipsis lines
     r"#include\s*<|"           # preprocessor includes
     r"#define\s+\w|"           # preprocessor defines
     r"\w+\s*\([^)]*\)\s*\{|"  # function_name(...) {
     r"\w+\s*\([^)]*\)\s*;|"   # declaration: name(...);
     r"^\s*static_assert\s*\(|"
+    r"^\s*constexpr\b|"
     r"^\s*//[^/]",
     re.MULTILINE,
 )
@@ -2340,7 +2336,7 @@ def _coalesce_code_paragraphs(sections: list[Section]) -> list[Section]:
     while i < len(sections):
         sec = sections[i]
         lines = sec.text.splitlines()
-        if (sec.kind != SectionKind.PARAGRAPH
+        if (sec.kind not in (SectionKind.PARAGRAPH, SectionKind.UNCERTAIN)
                 or len(lines) > _COALESCE_MAX_LINES
                 or not _COALESCE_CODE_RE.search(sec.text)):
             result.append(sec)
@@ -2351,7 +2347,7 @@ def _coalesce_code_paragraphs(sections: list[Section]) -> list[Section]:
         while j < len(sections):
             nxt = sections[j]
             nxt_lines = nxt.text.splitlines()
-            if (nxt.kind != SectionKind.PARAGRAPH
+            if (nxt.kind not in (SectionKind.PARAGRAPH, SectionKind.UNCERTAIN)
                     or len(nxt_lines) > _COALESCE_MAX_LINES
                     or not _COALESCE_CODE_RE.search(nxt.text)):
                 break
@@ -2432,7 +2428,7 @@ def _rescue_unfenced_code(sections: list[Section]) -> list[Section]:
 
     Runs AFTER _classify_wording_sections so wording-classified sections
     are skipped. Scans lines within each section (not across sections)
-    because _merge_paragraphs may have merged code lines into a single
+    and refuses to promote when any line terminates a natural-language
     section when they lack terminal punctuation in TERMINAL_PUNCTUATION.
 
     A section is promoted when _RESCUE_MIN_CODE_LINES or more of its
@@ -2448,7 +2444,10 @@ def _rescue_unfenced_code(sections: list[Section]) -> list[Section]:
         code_count = sum(1 for ln in lines if _STRUCTURAL_CODE_RE.search(ln))
         if code_count >= _RESCUE_MIN_CODE_LINES:
             sec.kind = SectionKind.CODE
+            sec.fence_lang = DEFAULT_FENCE_LANG
             sec.confidence = Confidence.MEDIUM
+            _log.info("Rescued unfenced code section (%d lines): %r",
+                      len(lines), text[:40])
     return sections
 
 
@@ -2524,6 +2523,40 @@ def _split_embedded_code(sections: list[Section]) -> list[Section]:
                 result.append(replace(
                     sec, text=seg_text, lines=list(seg_lines),
                 ))
+    return result
+
+
+def _merge_adjacent_code_blocks(sections: list[Section]) -> list[Section]:
+    """Merge consecutive CODE sections into a single CODE section.
+
+    When adjacent blocks are classified as CODE (e.g. across page breaks,
+    or after rescue/splitting passes promote adjacent fragments),
+    they represent one continuous source listing and must be emitted
+    in a single fenced block.
+    """
+    if len(sections) < 2:
+        return sections
+    result: list[Section] = []
+    for sec in sections:
+        if (result
+                and result[-1].kind == SectionKind.CODE
+                and sec.kind == SectionKind.CODE
+                and (sec.fence_lang == result[-1].fence_lang
+                     or not sec.fence_lang
+                     or not result[-1].fence_lang)):
+            prev = result[-1]
+            merged_text = prev.text + "\n" + sec.text
+            merged_lines = prev.lines + sec.lines
+            lang = prev.fence_lang or sec.fence_lang or DEFAULT_FENCE_LANG
+            result[-1] = replace(
+                prev,
+                text=merged_text,
+                lines=merged_lines,
+                fence_lang=lang,
+            )
+            _log.info("Merged adjacent code blocks (%d lines)", len(merged_lines))
+        else:
+            result.append(sec)
     return result
 
 
