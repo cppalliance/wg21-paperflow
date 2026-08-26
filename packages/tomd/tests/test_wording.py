@@ -170,6 +170,16 @@ class TestForeignColorFilter:
         classify_wording([block], {})
         assert green.wording_role == "ins"
 
+    def test_green_comment_not_counted_as_ins(self):
+        """A green comment span is syntax highlighting and must not become ins."""
+        code = Span(text="int x = 42;", color=0, bbox=(10, 50, 100, 60))
+        green_comment = Span(text="// some comment", color=_GREEN, bbox=(110, 50, 200, 60))
+        line = Line(spans=[code, green_comment])
+        block = Block(lines=[line] * 6, page_num=0)
+        classify_wording([block], {})
+        assert green_comment.wording_role is None
+        assert all(s.wording_role is None for ln in block.lines for s in ln.spans)
+
     def test_confirmed_strikethrough_overrides_foreign_filter(self):
         """A struck deletion inside syntax-highlighted code is still detected.
 
