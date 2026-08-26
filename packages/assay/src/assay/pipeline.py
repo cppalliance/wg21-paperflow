@@ -14,24 +14,33 @@ this file.
 
 from __future__ import annotations
 
+import os
+from pathlib import Path
 import asyncio
 import json
 import logging
 from collections import Counter
 
+import tomllib
+
 from paperstore import StorageBackend
 
 from pipeline import (
     AgentBackend,
+    ClassifierBackend,
     PipelinePrompt,
     ProgressCallback,
     StepContext,
     StepHooks,
+    bullet_map,
     build_pipeline,
     dispatch,
+    resolve_classifiers,
     resolve_pipeline_models,
     validate_capabilities,
+    tokens_to_chars,
 )
+from assay.paper_routing import RoutingResult, route_paper
 from pipeline.services import load_embedders, load_services
 
 from assay.harness import (
@@ -86,10 +95,47 @@ from assay.rag import (
 from assay.standard import StandardClient, from_service_config
 from assay.triage import should_analyze
 from assay.heading_classifiers import SURVEY_WORDING_HEADING_RE
-from pipeline import tokens_to_chars
 from assay.render import render_report, render_trace
 
 logger = logging.getLogger(__name__)
+
+_CLASSIFIERS_SECTION = "Classifiers"
+
+
+def _parse_classifier_binding(prompt: PipelinePrompt) -> dict[str, str]:
+    """Read assay.md ``## Classifiers`` and validate it is non-empty.
+
+    ``bullet_map`` returns ``{}`` (never ``None``) for a missing or
+    empty section, so the emptiness check -- not an identity check --
+    is what catches a missing ``## Classifiers`` block or a heading
+    typo (e.g. lowercase ``## classifiers``). Paper routing depends on
+    at least one bound classifier; failing fast here beats silently
+    falling back to ``[classifier_defaults]`` and producing a plausible
+    report from an unintended checkpoint.
+    """
+    binding = bullet_map(prompt.sections.get(_CLASSIFIERS_SECTION, ""))
+    if not binding:
+        raise ValueError(
+            f"assay.md is missing a `## {_CLASSIFIERS_SECTION}` block "
+            f"(or it parsed empty). "
+            f"Add e.g. `- **selector:** nli-small` under `## Classifiers`."
+        )
+    return binding
+
+
+def _classifiers_for_routing(
+    ctx: StepContext,
+) -> tuple[ClassifierBackend, ...] | None:
+    """Deduplicated backend sequence for paper routing (union scoring).
+
+    ``ctx.classifiers`` is the slot-name -> backend dict from
+    :func:`pipeline.resolve_classifiers`. ``route_paper`` expects a
+    sequence of backends, not the slot dict.
+    """
+    if not ctx.classifiers:
+        return None
+    return tuple(dict.fromkeys(ctx.classifiers.values()))
+
 
 CHALLENGE_CHUNK_CHAR_CAP = 8_000
 
@@ -103,13 +149,6 @@ def _load_cpp_mcp_client() -> StandardClient:
     Raises ``ValueError`` if the entry is missing or the API key is
     not set. The C++ standard MCP server is required for assay.
     """
-    import os
-    from pathlib import Path
-
-    try:
-        import tomllib
-    except ModuleNotFoundError:
-        import tomli as tomllib  # type: ignore[no-redef]
 
     toml_path = Path(__file__).resolve().parents[4] / "SERVICES.toml"
     if not toml_path.exists():
@@ -555,6 +594,17 @@ async def _apply_survey_skip(
     stats: dict,
 ) -> None:
     """Mark pipeline skipped after triage."""
+    routing_groups = (
+        {g.value: f"{s:.4f}" for g, s in state.routing.groups.items()}
+        if state.routing is not None
+        else "no-routing"
+    )
+    logger.warning(
+        "assay skipped: %s (%s) routing_groups=%s",
+        paper_type,
+        reason,
+        routing_groups,
+    )
     state.synthesis = SynthesisOutput(
         verdict_label="Skipped",
         verdict_confidence="High",
@@ -574,8 +624,29 @@ async def _apply_survey_skip(
     state.skipped = True
 
 
+def _run_paper_routing(state: PipelineState, ctx: StepContext) -> RoutingResult:
+    """Run Stages 1-6 and store routing on pipeline state.
+
+    Default path is regex+nli+hgb: regex catalog hits, the ``nli-small``
+    slot from assay.md, then the frozen NLI HGB aggregator. HGB was
+    trained on regex+classifier features, so regex stays on.
+    """
+    classifiers = _classifiers_for_routing(ctx)
+    debug_log = ctx.debug_log if ctx.debug else None
+    result = route_paper(
+        state.paper_md,
+        audience=state.audience,
+        classifiers=classifiers,
+        use_regex=True,
+        use_learned_aggregator=True,
+        debug_log=debug_log,
+    )
+    state.routing = result
+    return result
+
+
 async def _custom_survey(state: PipelineState, ctx: StepContext, spec) -> None:
-    """Step 3: chunk paper, wording signal, triage."""
+    """Step 3: chunk paper, wording signal, triage, routing."""
     # Survey is pure-Python but uses the same tokenizer profile as
     # Extract / Scan to size chunks consistently. Grab the 'fast' agent
     # if the pipeline declares one; otherwise fall back to 'default'.
@@ -596,7 +667,9 @@ async def _custom_survey(state: PipelineState, ctx: StepContext, spec) -> None:
         for i, s in enumerate(sections)
     ]
 
-    wording_headings = [s for s in sections if SURVEY_WORDING_HEADING_RE.search(s.heading)]
+    wording_headings = [
+        s for s in sections if SURVEY_WORDING_HEADING_RE.search(s.heading)
+    ]
     state.wording_lines = sum(s.end_line - s.start_line for s in wording_headings)
     audience = " ".join(state.audience).upper()
     state.targets_cwg_lwg = "CWG" in audience or "LWG" in audience
@@ -607,6 +680,8 @@ async def _custom_survey(state: PipelineState, ctx: StepContext, spec) -> None:
     if not triage.analyze:
         await _apply_survey_skip(state, triage.reason, triage.paper_type, triage.stats)
         return
+
+    _run_paper_routing(state, ctx)
 
 
 async def _custom_extract(state: PipelineState, ctx: StepContext, spec) -> None:
@@ -809,7 +884,7 @@ async def _cross_chunk_decide(
             label="decide-cross-chunk",
             debug_log=ctx.debug_log if ctx.debug else None,
         )
-    except Exception as exc:
+    except Exception as exc:  # batch worker firewall: one chunk must not fail Decide
         logger.warning("cross-chunk Decide failed: %s", exc)
         return
 
@@ -1160,7 +1235,9 @@ async def _verify_against_one_companion(
             label=f"verify-{companion.paper_id}",
             debug_log=ctx.debug_log if ctx.debug else None,
         )
-    except Exception as exc:
+    except (
+        Exception
+    ) as exc:  # batch worker firewall: one companion must not fail Verify
         logger.warning("Verify against %s failed: %s", companion.paper_id, exc)
         return None
 
@@ -1354,7 +1431,9 @@ async def _custom_research(state: PipelineState, ctx: StepContext, spec) -> None
                 debug_log=ctx.debug_log if ctx.debug else None,
             )
             research_results[lens] = result
-        except Exception as exc:
+        except (
+            Exception
+        ) as exc:  # batch worker firewall: one lens must not fail Research
             logger.warning("Research for %s failed: %s", lens, exc)
             research_results[lens] = ResearchLensOutput(lens=lens, findings=[])
 
@@ -1980,10 +2059,12 @@ async def assay_paper(
     trace: bool = False,
     stop_after: int | None = None,
     on_progress: ProgressCallback | None = None,
+    provider: str | None = None,
 ) -> str:
     """Run the assay pipeline on a WG21 paper and return the report markdown.
 
     Model selection comes from ``assay.md``'s ``## Services`` block.
+    Classifier binding comes from ``assay.md``'s ``## Classifiers`` block.
     SERVICES.toml is a pure inventory; to change which backend runs
     which step, edit ``assay.md``.
     """
@@ -2011,10 +2092,16 @@ async def assay_paper(
     embedder_name = embedder_defaults.get("default")
     embedder = embedders.get(embedder_name) if embedder_name else None
 
+    classifier_binding = _parse_classifier_binding(prompt)
+    classifiers = resolve_classifiers(
+        classifier_binding,
+        provider_override=provider,
+    )
+
     std_client = _load_cpp_mcp_client()
     await std_client.connect()
 
-    state = PipelineState(std_client=std_client)
+    state = PipelineState(std_client=std_client, classifier_bindings=classifier_binding)
 
     ctx = StepContext(
         prompt=prompt,
@@ -2024,6 +2111,7 @@ async def assay_paper(
         pid=pid,
         default_concurrency=default_concurrency,
         embedder=embedder,
+        classifiers=classifiers,
     )
 
     debug_path = backend.get_debug_md_path(pid, tool="assay")
@@ -2084,7 +2172,9 @@ async def assay_since(
             )
             backend.write_assay_md(pid, report)
             results.append({"paper_id": pid, "status": "ok", "error": None})
-        except Exception as exc:
+        except (
+            Exception
+        ) as exc:  # batch worker firewall: one paper must not fail assay_since
             logger.error("assay failed for %s: %s", pid, exc)
             results.append({"paper_id": pid, "status": "error", "error": str(exc)})
 

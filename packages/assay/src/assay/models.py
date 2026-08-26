@@ -19,6 +19,8 @@ from typing import Annotated, Any, Literal, Optional
 
 from pydantic import BaseModel, BeforeValidator, Field
 
+from assay.paper_routing import RoutingResult
+
 
 def _ensure_int_list(v: Any) -> Any:
     """Coerce legacy ``closed_by`` values (sentinel 0, single int) to ``list[int]``.
@@ -99,7 +101,7 @@ class SynthesisOutput:
 
 @dataclass
 class ProbeResult:
-    """Reference inventory summary from Step 10."""
+    """Reference inventory summary from Step 11."""
 
     total_inventory: int = 0
     stale_refs: list[str] = field(default_factory=list)
@@ -322,7 +324,7 @@ class DeriveOutput(BaseModel, frozen=True):
     ask_calibration: str = Field(default="direction", description="adopt|direction|review|poll|feedback|inform")
 
 
-# -- Step 8: Verify output --------------------------------------------------
+# -- Step 9: Verify output --------------------------------------------------
 
 
 class GapResolution(BaseModel, frozen=True):
@@ -514,6 +516,8 @@ class PipelineState(BaseModel):
     chunk_map: Optional[list[ChunkEntry]] = None
     wording_lines: int = 0
     targets_cwg_lwg: bool = False
+    routing: RoutingResult | None = None
+    classifier_bindings: dict[str, str] = Field(default_factory=dict)
     skipped: bool = False
 
     # Step 4 - Extract

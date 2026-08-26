@@ -33,6 +33,12 @@ flowchart TD
 - **deepseek:** h200x8-deepseek-v4-pro
 - **default:** h200x8-deepseek-v4-pro
 
+## Classifiers
+
+Survey routing is regex + this slot + the frozen NLI HGB aggregator.
+
+- **selector:** nli-small
+
 ## Config
 
 - **concurrency:** 2
@@ -74,6 +80,8 @@ You are analyzing a C++ standards proposal (WG21 paper). Write plain technical E
 1. Section chunking via assay.chunker.chunk_paper with coalescing.
 2. Wording signal: scan headings for "Wording"/"Proposed Changes", check CWG/LWG audience.
 3. Triage: skip wording-dominant or reference documents.
+4. Run paper routing classifier (Stages 1-6); store routing on pipeline state.
+5. Routing labels are advisory only. `is_administrative` is recorded for trace and eval; it does not skip remaining steps.
 
 ## 4. Extract
 

@@ -30,6 +30,7 @@ from jinja2 import Template
 
 from pipeline import extract_code_blocks, load_sections
 
+from assay.paper_routing import RoutingGroup
 from assay.models import (
     AskOutput,
     GapOutput,
@@ -45,6 +46,7 @@ from assay.models import (
     StrengthOutput,
     SynthesisOutput,
 )
+from assay.references import RefEntry, UrlEntry
 
 _EEL_IS_BASE = "https://eel.is/c++draft"
 _LINKIFY_RE = re.compile(r"(?<!\()\[([a-z][a-z0-9.]+)\](?!\()")
@@ -537,7 +539,6 @@ def load_assay_state(pid: str, backend) -> PipelineState:
         for a in ask_rows
     ]
 
-    from assay.references import RefEntry, UrlEntry
     ref_pids = [
         RefEntry(
             paper_id=r.resolved_pid, raw_pid=r.raw_pid, url=r.url,
@@ -725,6 +726,27 @@ def render_trace(state: PipelineState, step: int, *, step_durations: list[float]
                 lines.append("")
             if state.synthesis is not None and state.synthesis.verdict_label == "Skipped":
                 lines.append(f"triage: skipped ({state.synthesis.skip_reason})")
+                lines.append("")
+            if state.classifier_bindings:
+                lines.append("### Classifiers")
+                for slot in sorted(state.classifier_bindings):
+                    lines.append(f"- {slot}: {state.classifier_bindings[slot]}")
+                lines.append("")
+            if state.routing is not None:
+                rt = state.routing
+                lines.append("### Routing")
+                for label in RoutingGroup:
+                    score = rt.quadrant_scores.get(label, 0.0)
+                    sustained = rt.sustained_counts.get(label, 0)
+                    lines.append(f"- {label.value}: score={score:.4f}, sustained={sustained}")
+                if rt.groups:
+                    group_parts = [f"{k.value}={v:.4f}" for k, v in sorted(rt.groups.items())]
+                    lines.append(f"- groups: {', '.join(group_parts)}")
+                else:
+                    lines.append("- groups: (none)")
+                lines.append(f"- is_administrative: {rt.is_administrative}")
+                lines.append(f"- is_performance_focused: {rt.is_performance_focused}")
+                lines.append(f"- sentence_count: {rt.sentence_count}")
                 lines.append("")
 
         elif i == 4:
@@ -982,7 +1004,7 @@ def _render_skipped_report(state: PipelineState, synthesis: SynthesisOutput) -> 
     lines.append("")
     lines.append("## Methodology")
     lines.append("")
-    lines.append(f"- Paper: {pid}, \"{title}\"")
+    lines.append(f'- Paper: {pid}, "{title}"')
     lines.append("- Triage: skipped at Step 3 (Survey)")
     lines.append("")
 

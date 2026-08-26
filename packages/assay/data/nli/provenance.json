@@ -1,0 +1,9 @@
+{
+  "feature_names_sha256": "5755969073917f734187212e3b5e3ff413758cd16a2c93cb5eb6b36c4e16b447",
+  "git_commit": "b50753c952e0a0a1aff274074aef00d3020daf35",
+  "group_thresholds_sha256": "fd84bd70c8bb67b8c090c41b0f135004ea91e62a7489c0280e116ffd70936501",
+  "per_label_thresholds_sha256": "fd21a4223ad4d6929463b2879d4d696431186f89c49d7c4db428bb49bfa21ab5",
+  "sampling_cap": 300,
+  "sampling_method": "prefix",
+  "sklearn_version": "1.8.0"
+}

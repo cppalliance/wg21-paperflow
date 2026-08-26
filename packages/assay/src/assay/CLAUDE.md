@@ -4,7 +4,7 @@ Two-pass structural analysis pipeline for WG21 proposals. Project-wide rules liv
 
 ## Authority
 
-`assay.md` is the upstream authority for pipeline structure. It defines the step sequence, step metadata (model slot, max-output, thinking-budget, tools), and all LLM-facing instructions. Python conforms.
+`assay.md` is the upstream authority for pipeline structure. It defines the step sequence, step metadata (model slot, max-output, thinking-budget, tools), LLM service slots under ``## Services``, and local classifier slots under ``## Classifiers``. Assay parses ``## Classifiers`` itself and passes the binding to ``pipeline.resolve_classifiers``. Survey routing is **regex+nli+hgb**: regex catalog hits, every bound classifier slot (union of hypothesis hits), then the frozen HGB aggregator when the bound set is homogeneous NLI-only or seqcls-only. HGB was trained on regex+classifier features; regex must stay on. Use distinct slot names per inventory entry, not duplicate keys. Today `assay.md` binds a single slot, ``selector: nli-small``. Binding both NLI and the fine-tuned tagger together disables HGB (mixed ensemble keeps the hand aggregate). Python conforms.
 
 ## What this pipeline does
 
@@ -20,6 +20,8 @@ Two-pass architecture: Pass 1 (Steps 0-8) extracts mechanically and derives a th
 - `rag.py` - ephemeral RAG index: build vector index over cited papers, query for evidence injection. No LLM, embedder only.
 - `pipeline.py` - async orchestration: step hooks, dispatch loop, `assay_paper()` / `assay_since()` entry points.
 - `render.py` - renders the assay report and diagnostic trace.
+- `heading_classifiers.py` - WG21 heading classifiers for blanking and survey signals (`is_revision_heading`, `is_reference_heading`, `is_acknowledgment_heading`, `is_appendix_heading_line`, `SURVEY_WORDING_HEADING_RE`). Imports only `HEADING_RE` from generic `pipeline.markdown`.
+- `paper_routing/` - six-stage WG21 review-group routing classifier (`route_paper`, `RoutingResult`, `RoutingGroup`). Self-contained subpackage depending only on generic `pipeline` modules (`classifier_backends`, `nli_batch`, `markdown`). Extractable to a standalone package if a non-assay consumer emerges.
 
 ## Pipeline steps
 
@@ -27,7 +29,7 @@ Two-pass architecture: Pass 1 (Steps 0-8) extracts mechanically and derives a th
  0. Receive        validate path, load metadata                   (pure Python)
  1. References     mechanical ref extraction, cross-check          (pure Python)
  2. Index          build RAG index over cited papers               (pure Python, embedder)
- 3. Survey         blanking, chunking, wording signal, triage      (pure Python)
+ 3. Survey         chunking, wording signal, triage, routing        (pure Python)
  4. Extract        per-chunk item extraction                       (LLM, C calls)
  5. Decide         per-chunk claim support judgment                (LLM, C calls)
  6. Classify       turn unsupported claims into gaps               (LLM, C calls)
