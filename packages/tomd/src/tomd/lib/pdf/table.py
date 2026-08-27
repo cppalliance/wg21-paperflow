@@ -49,7 +49,7 @@ from dataclasses import replace
 from enum import Enum
 from typing import NamedTuple, Optional
 
-from .types import Block, Line, Span, Section, SectionKind, Confidence
+from .types import Block, Line, Span, Section, SectionKind, Confidence, compute_bbox
 
 _log = logging.getLogger(__name__)
 
@@ -4960,7 +4960,7 @@ def detect_tables(
 
 def exclude_table_regions(blocks: list[Block],
                           table_sections: list[Section]) -> list[Block]:
-    """Remove blocks whose vertical midpoint falls within a detected table region.
+    """Remove blocks or lines whose vertical midpoint falls within a detected table region.
 
     For multi-page tables, builds per-page y-ranges from individual
     lines so that content on continuation pages is also excluded.
@@ -4994,26 +4994,39 @@ def exclude_table_regions(blocks: list[Block],
 
     result = []
     for block in blocks:
-        in_table = False
-        by = (block.bbox[1] + block.bbox[3]) / 2.0
-        for pg, y_min, y_max in table_ranges:
-            if (block.page_num == pg
-                    and y_min - _TABLE_Y_OVERLAP_MARGIN <= by
-                    <= y_max + _TABLE_Y_OVERLAP_MARGIN):
-                in_table = True
-                break
-        # Bridge check: a spatial block that fully encloses 2+
-        # disjoint tables is table-spanning content (code/prose
-        # between tables that MuPDF merged into one block).
-        if not in_table:
-            contained = sum(
-                1 for pg, y_min, y_max in table_ranges
-                if block.page_num == pg
-                and block.bbox[1] <= y_min
-                and block.bbox[3] >= y_max
-            )
-            if contained >= 2:
-                in_table = True
-        if not in_table:
-            result.append(block)
+        if not block.lines:
+            by = (block.bbox[1] + block.bbox[3]) / 2.0
+            in_table = False
+            for pg, y_min, y_max in table_ranges:
+                if (block.page_num == pg
+                        and y_min - _TABLE_Y_OVERLAP_MARGIN <= by
+                        <= y_max + _TABLE_Y_OVERLAP_MARGIN):
+                    in_table = True
+                    break
+            if not in_table:
+                result.append(block)
+            continue
+
+        kept_lines = []
+        for ln in block.lines:
+            ly = (ln.bbox[1] + ln.bbox[3]) / 2.0
+            in_table = False
+            for pg, y_min, y_max in table_ranges:
+                if (ln.page_num == pg
+                        and y_min - _TABLE_Y_OVERLAP_MARGIN <= ly
+                        <= y_max + _TABLE_Y_OVERLAP_MARGIN):
+                    in_table = True
+                    break
+            if not in_table:
+                kept_lines.append(ln)
+
+        if kept_lines:
+            if len(kept_lines) == len(block.lines):
+                result.append(block)
+            else:
+                result.append(Block(
+                    lines=kept_lines,
+                    bbox=compute_bbox([ln.bbox for ln in kept_lines]),
+                    page_num=block.page_num,
+                ))
     return result

@@ -344,13 +344,23 @@ def _join_cross_page(blocks: list[Block]) -> list[Block]:
         if cross_page and block.page_num != merged_boundary:
             merged_boundary = None
 
+        prev_mono = prev.lines[0].is_monospace if prev.lines else False
+        cur_mono = block.lines[0].is_monospace if block.lines else False
+        fs_diff = (
+            abs(prev.font_size - block.font_size)
+            if (prev.font_size and block.font_size)
+            else 0.0
+        )
+
         if (cross_page
                 and merged_boundary is None
                 and prev_text
                 and cur_text
                 and not PAGE_NUM_RE.match(prev_text)
                 and prev_text[-1] not in TERMINAL_PUNCTUATION
-                and cur_text[0].islower()):
+                and cur_text[0].islower()
+                and prev_mono == cur_mono
+                and fs_diff <= 1.5):
             prev.lines.extend(block.lines)
             # Keep the original page's bbox: page coordinates are
             # independent per page, so mixing y-values from page N+1
