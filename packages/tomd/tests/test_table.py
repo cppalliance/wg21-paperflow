@@ -284,6 +284,34 @@ class TestExcludeTableRegions:
         result = exclude_table_regions(blocks, [])
         assert len(result) == 2
 
+    def test_line_level_exclusion_preserves_prose_lines(self):
+        """A multi-line block spanning across a table region keeps prose lines outside the table."""
+        table_line = _col_line("header", 50, 200, page_num=0)
+        table_sec = Section(
+            kind=SectionKind.TABLE,
+            text="table",
+            confidence=Confidence.HIGH,
+            lines=[table_line],
+            page_num=0,
+        )
+
+        prose_line1 = _col_line("prose before table", 50, 50, page_num=0)
+        table_overlap_line = _col_line("table row", 50, 202, page_num=0)
+        prose_line2 = _col_line("prose after table", 50, 350, page_num=0)
+
+        block = Block(
+            lines=[prose_line1, table_overlap_line, prose_line2],
+            bbox=(50, 50, 400, 362),
+            page_num=0,
+        )
+
+        result = exclude_table_regions([block], [table_sec])
+        assert len(result) == 1
+        assert len(result[0].lines) == 2
+        assert result[0].lines[0].text == "prose before table"
+        assert result[0].lines[1].text == "prose after table"
+        assert result[0].bbox == (50, 50, 150, 362)
+
 
 # ---- Right-aligned-column matching (Fix B for P4003R1 page 8) -------------
 
