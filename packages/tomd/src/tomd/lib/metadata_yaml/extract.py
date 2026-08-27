@@ -49,6 +49,9 @@ def extract_metadata(sections: list[Section]) -> tuple[dict[str, str | list[str]
             remaining.append(sec)
             continue
 
+        if sec.page_num > 1:
+            metadata_zone = False
+
         if metadata_zone:
             consumed = False
             for line_text in text.split("\n"):
@@ -116,7 +119,7 @@ def extract_metadata(sections: list[Section]) -> tuple[dict[str, str | list[str]
                     for ln in text.split("\n") if ln.strip()
                 )
                 if not is_known:
-                    if text.lower().rstrip(":") not in KNOWN_SECTIONS:
+                    if sec.page_num == 0 and text.lower().rstrip(":") not in KNOWN_SECTIONS:
                         _log.debug("Consumed category label in metadata zone: %r", text)
                         continue
                 if is_known:

@@ -49,7 +49,7 @@ _MONO_KEYWORDS = frozenset({
     "mono", "courier", "code", "consolas", "menlo",
     "inconsolata", "iosevka", "hack",
     "jetbrains", "lmtt", "monaco",
-    "cmtt", "cascadia",
+    "cmtt", "cascadia", "zi4", "txtt", "pxtt",
 })
 
 _CAMEL_SPLIT_RE = re.compile(
@@ -92,9 +92,16 @@ def _font_name_is_monospace(font_name: str) -> bool:
     known monospace family keywords.
     """
     family = _strip_modifiers(font_name)
+    if family.lower() in _MONO_KEYWORDS:
+        return True
     tokens = _split_camel(family)
-    stripped = [_TRAILING_DIGITS_RE.sub("", t) for t in tokens]
-    return bool(_MONO_KEYWORDS & set(t for t in stripped if t))
+    stripped = [_TRAILING_DIGITS_RE.sub("", t) for t in tokens if t]
+    for token in stripped:
+        if token in _MONO_KEYWORDS:
+            return True
+        if token.startswith("inconsolata"):
+            return True
+    return False
 
 
 def _coefficient_of_variation(values: list[float]) -> float:

@@ -25,6 +25,18 @@ def test_keyword_inconsolata():
     assert classify_monospace("Inconsolata-Regular")
 
 
+def test_keyword_inconsolata_zi4():
+    assert classify_monospace("Inconsolatazi4-Regular")
+    assert classify_monospace("Inconsolatazi4-Bold")
+    assert classify_monospace("zi4")
+
+
+def test_keyword_tex_typewriter():
+    assert classify_monospace("txtt")
+    assert classify_monospace("pxtt")
+    assert classify_monospace("CMTT10")
+
+
 def test_keyword_iosevka():
     assert classify_monospace("Iosevka")
 
