@@ -10,10 +10,13 @@ import pytest
 
 from tomd.lib.pdf.types import Span, Line, Block, Section, SectionKind
 from tomd.lib.pdf.table import (
+    _block_column_positions,
+    _build_rows_sequential,
     _columns_count_match,
     _detect_side_by_side_tables,
     detect_tables,
     _gap_asymmetry_reject,
+    _pass1_region_incomplete,
     _try_wrapped_partial_row,
     _try_cross_page_continuation,
     _filter_overlapping_mupdf_tables,
@@ -42,7 +45,11 @@ def _line(text: str, x0: float, y0: float, x1: float, y1: float) -> Line:
 
 def _block_from_lines(lines: list[Line]) -> Block:
     """Create a Block from pre-built lines."""
-    return Block(lines=lines, page_num=0)
+    x0 = min(l.bbox[0] for l in lines) if lines else 0.0
+    y0 = min(l.bbox[1] for l in lines) if lines else 0.0
+    x1 = max(l.bbox[2] for l in lines) if lines else 0.0
+    y1 = max(l.bbox[3] for l in lines) if lines else 0.0
+    return Block(lines=lines, bbox=(x0, y0, x1, y1), page_num=0)
 
 
 class TestGapAsymmetryReject:
@@ -1724,3 +1731,79 @@ class TestPass1FragmentAbsorptionGap:
         assert remaining == []
         joined = " ".join(_cell_text(c) for r in sections[0].columns for c in r)
         assert "b2" in joined and ("Scenario 2" in joined or "Count" in joined)
+
+
+class TestTableBugFixes:
+    """Regression tests for table parsing bugs (issue #369)."""
+
+    def test_block_column_positions_clusters_wrapped_lines(self):
+        # Block with 3 columns where column 1 and column 2 have wrapped lines
+        lines = [
+            _line("Col0", 60.0, 100.0, 100.0, 110.0),
+            _line("Col1 line 1", 150.0, 100.0, 200.0, 110.0),
+            _line("Col1 line 2", 150.0, 112.0, 200.0, 122.0),
+            _line("Col2 line 1", 300.0, 100.0, 400.0, 110.0),
+            _line("Col2 line 2", 300.0, 112.0, 400.0, 122.0),
+        ]
+        blk = _block_from_lines(lines)
+        cols = _block_column_positions(blk)
+        assert cols is not None
+        assert len(cols) == 3
+        assert cols[0] == 60.0
+        assert cols[1] == 150.0
+        assert cols[2] == 300.0
+
+    def test_block_column_positions_wrapped_col0(self):
+        # Col 0 has wrapped lines
+        lines = [
+            _line("Deterministic ST (L=16,", 60.7, 100.0, 150.0, 110.0),
+            _line("8-block unroll)", 60.7, 112.0, 140.0, 122.0),
+            _line("26.5 GB/s", 280.0, 100.0, 320.0, 110.0),
+            _line("+391%", 420.0, 100.0, 460.0, 110.0),
+        ]
+        blk = _block_from_lines(lines)
+        cols = _block_column_positions(blk)
+        assert cols is not None
+        assert len(cols) == 3
+
+    def test_build_rows_sequential_assigns_by_x_coordinate(self):
+        # Row with multiline cell in col 1
+        lines = [
+            _line("Facility A", 60.0, 100.0, 120.0, 110.0),
+            _line("Canonical expression", 150.0, 100.0, 250.0, 110.0),
+            _line("(§4)", 150.0, 112.0, 180.0, 122.0),
+            _line("Fixed", 300.0, 100.0, 350.0, 110.0),
+        ]
+        blk = _block_from_lines(lines)
+        ref_cols = [60.0, 150.0, 300.0]
+        rows, all_lines = _build_rows_sequential([blk], ref_cols, 3, set())
+        assert len(rows) == 1
+        row = rows[0]
+        assert "".join(s.text for s in row[0]).strip() == "Facility A"
+        assert "Canonical expression" in "".join(s.text for s in row[1])
+        assert "(§4)" in "".join(s.text for s in row[1])
+        assert "".join(s.text for s in row[2]).strip() == "Fixed"
+
+    def test_complete_pass1_not_deferred_to_mupdf(self):
+        # 5 blocks covering the region exactly
+        lines_header = [_line("Property", 60.0, 100.0, 100.0, 110.0)]
+        lines_r1 = [_line("Section", 60.0, 120.0, 100.0, 130.0)]
+        lines_r2 = [_line("Grouping", 60.0, 140.0, 100.0, 150.0)]
+        lines_r3 = [_line("Complexity", 60.0, 160.0, 100.0, 170.0)]
+        lines_r4 = [_line("Order", 60.0, 180.0, 100.0, 190.0)]
+        table_blocks = [
+            _block_from_lines(lines_header),
+            _block_from_lines(lines_r1),
+            _block_from_lines(lines_r2),
+            _block_from_lines(lines_r3),
+            _block_from_lines(lines_r4),
+        ]
+        all_blocks = list(table_blocks)
+        region = (55.0, 95.0, 360.0, 195.0)
+        # All blocks in region are claimed -> complete
+        assert not _pass1_region_incomplete(region, 0, table_blocks, all_blocks)
+
+        # An extra block exists in the region that Pass 1 did not claim -> incomplete
+        orphan_block = _block_from_lines([_line("Missed note", 70.0, 150.0, 150.0, 160.0)])
+        all_blocks_with_extra = all_blocks + [orphan_block]
+        assert _pass1_region_incomplete(region, 0, table_blocks, all_blocks_with_extra)
