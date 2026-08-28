@@ -203,3 +203,38 @@ class TestAttachLinks:
         link = {"uri": "https://far.com", "bbox": (500, 500, 600, 510)}
         attach_links([block], [link])
         assert span.link_url is None
+
+
+def test_extract_spatial_does_not_duplicate_explicit_spaces():
+    """When the PDF stream already has space characters, spatial extraction must
+    not inject additional space spans on horizontal gaps around them."""
+    page = _make_page([
+        ("Font", 10.0, [
+            ("A", 10.0, 10.0, 15.0, 20.0),
+            (" ", 15.0, 10.0, 20.0, 20.0),
+            ("B", 25.0, 10.0, 30.0, 20.0),
+        ]),
+    ])
+    blocks = extract_spatial(page, 0)
+    line_text = "".join(s.text for b in blocks for ln in b.lines for s in ln.spans)
+    assert line_text == "A B"
+    assert "  " not in line_text
+
+
+def test_extract_spatial_monospace_does_not_split_narrow_glyphs():
+    """In a monospace font, intra-word gaps around narrow glyphs (*, _) must
+    not trigger word-gap space insertion."""
+    # Courier advance width ~6.0. Glyph '*' bbox is 12..15 (dx=4 to next char at 19)
+    page = _make_page([
+        ("Courier", 10.0, [
+            ("t", 0.0, 10.0, 6.0, 20.0),
+            ("_", 6.0, 10.0, 11.0, 20.0),
+            ("*", 12.0, 10.0, 15.0, 20.0),
+            ("_", 18.0, 10.0, 23.0, 20.0),
+            ("b", 24.0, 10.0, 30.0, 20.0),
+        ]),
+    ])
+    blocks = extract_spatial(page, 0)
+    line_text = "".join(s.text for b in blocks for ln in b.lines for s in ln.spans)
+    assert line_text == "t_*_b"
+

@@ -354,3 +354,40 @@ class TestLineComment:
             normalize_code_line("vector <int> x; // see in <proxy>")
             == "vector<int> x; // see in <proxy>"
         )
+
+
+class TestWildcardIdentifier:
+    def test_wildcard_identifier_middle(self):
+        assert normalize_code_line("try_ * _ back") == "try_*_back"
+        assert normalize_code_line("unchecked_ * _ back") == "unchecked_*_back"
+        assert normalize_code_line("try_ * _ front") == "try_*_front"
+
+    def test_wildcard_identifier_bare(self):
+        assert normalize_code_line("try_ * _") == "try_*_"
+        assert normalize_code_line("_ * _") == "_*_"
+
+
+class TestDoubleUnderscoreIdentifier:
+    def test_double_underscore_single_letter(self):
+        assert normalize_code_line("__ i") == "__i"
+        assert normalize_code_line("__ k") == "__k"
+
+    def test_double_underscore_compound_expression(self):
+        assert (
+            normalize_code_line("for (size_t __ i = 1; __ i < __ k; ++__ i, __ base *= _Rp)")
+            == "for (size_t __i = 1; __i < __k; ++__i, __base *= _Rp)"
+        )
+
+
+class TestSectionTagBracket:
+    def test_section_tag_bracket_spacing(self):
+        assert normalize_code_line("[ vector.overview]") == "[vector.overview]"
+        assert normalize_code_line("[ lex.header]") == "[lex.header]"
+        assert normalize_code_line("[ rand.util.canonical]") == "[rand.util.canonical]"
+
+
+class TestSpaceBeforeDoubleColon:
+    def test_space_before_double_colon(self):
+        assert normalize_code_line("std :: vector<int>") == "std::vector<int>"
+        assert normalize_code_line("std ::vector<int>") == "std::vector<int>"
+
