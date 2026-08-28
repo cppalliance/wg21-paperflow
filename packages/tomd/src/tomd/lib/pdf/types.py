@@ -218,6 +218,7 @@ class PageEdgeItem:
 
 # Spatial rule thresholds (relative to font size)
 WORD_GAP_RATIO = 0.3
+MONO_WORD_GAP_RATIO = 0.6
 LINE_SPACING_RATIO = 1.8
 PARA_SPACING_RATIO = 2.5
 

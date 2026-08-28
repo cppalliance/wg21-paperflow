@@ -215,6 +215,11 @@ def extract_metadata(soup: BeautifulSoup, generator: str) -> dict:
     return metadata
 
 
+def _clean_title_text(tag: Tag) -> str:
+    """Extract tag text without inserting spurious spaces between child elements."""
+    return " ".join(tag.get_text().split())
+
+
 def _extract_mpark_metadata(soup: BeautifulSoup) -> dict:
     """mpark/wg21: metadata in table inside <header id="title-block-header">."""
     metadata: dict = {}
@@ -224,7 +229,7 @@ def _extract_mpark_metadata(soup: BeautifulSoup) -> dict:
 
     title_tag = header.find("h1", class_="title")
     if title_tag:
-        metadata["title"] = title_tag.get_text(" ", strip=True)
+        metadata["title"] = _clean_title_text(title_tag)
 
     table = header.find("table")
     if not table:
@@ -473,7 +478,7 @@ def _extract_handwritten_metadata(soup: BeautifulSoup) -> dict:
 
     h1 = soup.find("h1")
     if h1 and "title" not in metadata:
-        metadata["title"] = h1.get_text(" ", strip=True)
+        metadata["title"] = _clean_title_text(h1)
 
     table = soup.find("table", class_="header")
     if table:
@@ -585,7 +590,7 @@ def _extract_wg21_metadata(soup: BeautifulSoup) -> dict:
     metadata: dict = {}
     h1 = container.find("h1")
     if h1:
-        metadata["title"] = h1.get_text(" ", strip=True)
+        metadata["title"] = _clean_title_text(h1)
     dl = container.find("dl")
     if not dl:
         return metadata
@@ -710,7 +715,7 @@ def _extract_hatemplate_metadata(soup: BeautifulSoup) -> dict:
 
     h1 = soup.find("h1")
     if h1:
-        metadata["title"] = h1.get_text(" ", strip=True)
+        metadata["title"] = _clean_title_text(h1)
 
     info = soup.find("div", class_="paper-info")
     if not info:
@@ -759,7 +764,7 @@ def _extract_generic_metadata(soup: BeautifulSoup) -> dict:
 
     h1 = soup.find("h1")
     if h1:
-        metadata["title"] = h1.get_text(" ", strip=True)
+        metadata["title"] = _clean_title_text(h1)
 
     for table in soup.find_all("table"):
         current_field: str | None = None

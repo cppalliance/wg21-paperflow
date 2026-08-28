@@ -6,7 +6,7 @@ from urllib.parse import urlparse
 from .. import ALLOWED_LINK_SCHEMES
 from .types import (
     Block, Line, Span,
-    WORD_GAP_RATIO, LINE_SPACING_RATIO, PARA_SPACING_RATIO,
+    WORD_GAP_RATIO, MONO_WORD_GAP_RATIO, LINE_SPACING_RATIO, PARA_SPACING_RATIO,
     FALLBACK_FONT_SIZE,
     compute_bbox,
 )
@@ -173,12 +173,17 @@ def extract_spatial(page, page_num: int) -> list[Block]:
         c, bbox, origin, fn, fs, bold, italic, color = ch_data
 
         if prev is not None:
+            prev_c = prev[0]
             prev_bbox = prev[1]
+            prev_fn = prev[3]
             prev_fs = prev[4]
             avg_fs = (prev_fs + fs) / 2.0 if (prev_fs + fs) > 0 else FALLBACK_FONT_SIZE
 
             dy = bbox[1] - prev_bbox[1]
             dx = bbox[0] - prev_bbox[2]
+
+            is_mono = classify_monospace(fn) or classify_monospace(prev_fn)
+            gap_threshold = avg_fs * (MONO_WORD_GAP_RATIO if is_mono else WORD_GAP_RATIO)
 
             if dy > avg_fs * PARA_SPACING_RATIO:
                 _flush_block()
@@ -186,7 +191,7 @@ def extract_spatial(page, page_num: int) -> list[Block]:
                 _flush_line()
             elif dy > avg_fs * WORD_GAP_RATIO:
                 _flush_line()
-            elif dx > avg_fs * WORD_GAP_RATIO:
+            elif dx > gap_threshold and c != " " and prev_c != " ":
                 _flush_word()
                 cur_spans.append(Span(
                     text=" ",

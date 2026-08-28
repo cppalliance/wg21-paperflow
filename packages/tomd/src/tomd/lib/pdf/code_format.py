@@ -80,6 +80,25 @@ _KEYWORDS_BEFORE_PAREN = frozenset(
 # which is exactly what we still want to tighten.
 _KEYWORDS_BEFORE_ANGLE = frozenset({"template", "concept"})
 
+# Keywords that legitimately precede a global-scope `::` (e.g. `namespace ::`).
+_KEYWORDS_BEFORE_DBL_COLON = frozenset(
+    {
+        "namespace",
+        "using",
+        "template",
+        "struct",
+        "class",
+        "case",
+        "return",
+        "sizeof",
+        "alignof",
+        "decltype",
+        "goto",
+        "new",
+        "delete",
+    }
+)
+
 # `ident <` where ident is a template-class-like name. The lookahead
 # rejects `<<` (stream insertion) and whitespace (`a < b` comparison),
 # and requires the next char to begin a template-argument list. A
@@ -106,8 +125,19 @@ _SPACE_BEFORE_CLOSE_ANGLE_RE = re.compile(
 # tightening. Skip-list is consulted at substitution time.
 _IDENT_OPEN_PAREN_RE = re.compile(r"([A-Za-z_]\w*) \(")
 
-# Qualified-name separator with stray space: `L:: lowest` -> `L::lowest`.
+# Qualified-name separator with stray space: `L:: lowest` -> `L::lowest`, `std ::vector` -> `std::vector`.
 _DBL_COLON_SPACE_RE = re.compile(r"::\s+([A-Za-z_])")
+_SPACE_BEFORE_DBL_COLON_RE = re.compile(r"(\b[A-Za-z0-9_]+)\s+::")
+
+# Double-underscore identifier kerning: `__ i` -> `__i`, `__ k` -> `__k`.
+_DBL_UNDERSCORE_SPACE_RE = re.compile(r"(__)\s+([A-Za-z0-9_])")
+
+# Wildcard / operator kerning in identifiers: `try_ * _ back` -> `try_*_back`, `_ * _` -> `_*_`.
+_UNDERSCORE_STAR_RE = re.compile(r"(\w+)\s*_\s*\*\s*_\s*(\w+)")
+_UNDERSCORE_STAR_BARE_RE = re.compile(r"_\s*\*\s*_")
+
+# Section clause tag bracket spacing: `[ vector.overview]` -> `[vector.overview]`.
+_SECTION_TAG_BRACKET_RE = re.compile(r"\[\s+([a-z_][a-z0-9_]*\.[a-z0-9_.]*)\]")
 
 # Attribute brackets: `[[ name ]]` -> `[[name]]`.
 _ATTR_OPEN_RE = re.compile(r"\[\[\s+")
@@ -255,6 +285,18 @@ def _tighten_ident_open_angle(line: str) -> str:
     return _IDENT_OPEN_ANGLE_RE.sub(replace, line)
 
 
+def _tighten_space_before_dbl_colon(line: str) -> str:
+    """Strip space in ``ident ::`` while preserving keywords (e.g. ``namespace ::``)."""
+
+    def replace(match: re.Match[str]) -> str:
+        word = match.group(1)
+        if word in _KEYWORDS_BEFORE_DBL_COLON:
+            return match.group(0)
+        return f"{word}::"
+
+    return _SPACE_BEFORE_DBL_COLON_RE.sub(replace, line)
+
+
 def normalize_code_line(line: str) -> str:
     """Tighten PDF-kerning artifact whitespace on a single code line.
 
@@ -284,6 +326,11 @@ def normalize_code_line(line: str) -> str:
     out = code
     out = _tighten_ident_open_angle(out)
     out = _SPACE_BEFORE_CLOSE_ANGLE_RE.sub(r"\1>", out)
+    out = _UNDERSCORE_STAR_RE.sub(r"\1_*_\2", out)
+    out = _UNDERSCORE_STAR_BARE_RE.sub(r"_*_", out)
+    out = _DBL_UNDERSCORE_SPACE_RE.sub(r"\1\2", out)
+    out = _SECTION_TAG_BRACKET_RE.sub(r"[\1]", out)
+    out = _tighten_space_before_dbl_colon(out)
     out = _DBL_COLON_SPACE_RE.sub(r"::\1", out)
     out = _ATTR_OPEN_RE.sub("[[", out)
     out = _ATTR_CLOSE_RE.sub("]]", out)
