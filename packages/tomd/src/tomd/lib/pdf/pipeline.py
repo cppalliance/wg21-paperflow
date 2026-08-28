@@ -356,7 +356,7 @@ def _detect_column_split(blocks: list, page_width: float) -> float | None:
         return None
     if min(left_count, right_count) / (left_count + right_count) < _COLUMN_MIN_FRACTION:
         return None
-    if best_split < page_width * 0.25 or best_split > page_width * 0.75:
+    if best_split < page_width * 0.35 or best_split > page_width * 0.65:
         return None
     # Validate with left-edge (x0) clustering: in genuine two-column
     # layouts the right column's left edges sit near the page center,
