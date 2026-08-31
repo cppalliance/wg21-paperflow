@@ -16,12 +16,12 @@
     "text": 0.98
   },
   "p0533r9": {
-    "code": 0.38,
+    "code": 0.41,
     "frontmatter": 1.0,
     "heading": 0.34,
     "list": 0.83,
     "table": 0.0,
-    "text": 0.48
+    "text": 0.44
   },
   "p0957r8": {
     "code": 0.8,
@@ -32,12 +32,12 @@
     "text": 0.81
   },
   "p1068r11": {
-    "code": 0.67,
+    "code": 0.7,
     "frontmatter": 1.0,
-    "heading": 0.39,
+    "heading": 0.5,
     "list": 0.84,
     "table": 1.0,
-    "text": 0.77
+    "text": 0.78
   },
   "p1122r3": {
     "code": 0.58,

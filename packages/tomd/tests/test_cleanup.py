@@ -2,9 +2,9 @@
 
 from conftest import make_span, make_line, make_block
 from tomd.lib.pdf.cleanup import (escape_leading_atx, normalize_whitespace,
-                                  cleanup_text)
+                                  cleanup_text, _join_cross_page)
 from tomd.lib import strip_format_chars
-from tomd.lib.pdf.types import is_readable, Line, Block
+from tomd.lib.pdf.types import is_readable, Line, Block, Span
 
 
 def test_strip_format_chars_zwsp():
@@ -200,3 +200,49 @@ class TestEscapeLeadingAtx:
 
     def test_ordinary_prose_is_unchanged(self):
         assert escape_leading_atx("ordinary prose") == "ordinary prose"
+
+
+class TestJoinCrossPage:
+    def test_join_cross_page_merges_matching_paragraphs(self):
+        """Unpunctuated prose ending on page 0 merges with lowercase start on page 1."""
+        span1 = Span(text="This paragraph continues across", font_size=10.0, monospace=False)
+        line1 = Line(spans=[span1], page_num=0)
+        block1 = Block(lines=[line1], page_num=0)
+
+        span2 = Span(text="page boundaries smoothly.", font_size=10.0, monospace=False)
+        line2 = Line(spans=[span2], page_num=1)
+        block2 = Block(lines=[line2], page_num=1)
+
+        result = _join_cross_page([block1, block2])
+        assert len(result) == 1
+        assert len(result[0].lines) == 2
+        assert result[0].text == "This paragraph continues across\npage boundaries smoothly."
+
+    def test_join_cross_page_does_not_merge_prose_with_monospace_code(self):
+        """Prose on page 0 does not merge with monospace code on page 1."""
+        span1 = Span(text="Here is some code", font_size=10.0, monospace=False)
+        line1 = Line(spans=[span1], page_num=0)
+        block1 = Block(lines=[line1], page_num=0)
+
+        span2 = Span(text="template <class T>", font_size=10.0, monospace=True)
+        line2 = Line(spans=[span2], page_num=1)
+        block2 = Block(lines=[line2], page_num=1)
+
+        result = _join_cross_page([block1, block2])
+        assert len(result) == 2
+        assert result[0].text == "Here is some code"
+        assert result[1].text == "template <class T>"
+
+    def test_join_cross_page_does_not_merge_divergent_font_sizes(self):
+        """Footnote (small font) on page 0 does not merge with body text on page 1."""
+        span1 = Span(text="2 footnote text without punctuation", font_size=8.0, monospace=False)
+        line1 = Line(spans=[span1], page_num=0)
+        block1 = Block(lines=[line1], page_num=0)
+
+        span2 = Span(text="and then the next page body continues.", font_size=11.0, monospace=False)
+        line2 = Line(spans=[span2], page_num=1)
+        block2 = Block(lines=[line2], page_num=1)
+
+        result = _join_cross_page([block1, block2])
+        assert len(result) == 2
+
