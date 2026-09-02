@@ -103,6 +103,21 @@ class Block:
             return 0.0
         return Counter(sizes).most_common(1)[0][0]
 
+    def first_content_line(self) -> "Line | None":
+        """First line carrying non-whitespace text, or None if blank."""
+        for line in self.lines:
+            if line.text.strip():
+                return line
+        return None
+
+    def last_content_line(self) -> "Line | None":
+        """Last line carrying non-whitespace text, or None if blank."""
+        for line in reversed(self.lines):
+            if line.text.strip():
+                return line
+        return None
+
+
 
 class SectionKind(Enum):
     """The structural role of a document section."""

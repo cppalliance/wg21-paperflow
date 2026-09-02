@@ -365,6 +365,11 @@ def _join_cross_page(blocks: list[Block]) -> list[Block]:
             else 0.0
         )
 
+        prev_last = prev.last_content_line()
+        cur_first = block.first_content_line()
+        prev_mono = prev_last.is_monospace if prev_last is not None else False
+        cur_mono = cur_first.is_monospace if cur_first is not None else False
+
         if (cross_page
                 and merged_boundary is None
                 and prev_text
@@ -372,8 +377,8 @@ def _join_cross_page(blocks: list[Block]) -> list[Block]:
                 and not PAGE_NUM_RE.match(prev_text)
                 and prev_text[-1] not in TERMINAL_PUNCTUATION
                 and cur_text[0].islower()
-                and not prev.lines[-1].is_monospace
-                and not block.lines[0].is_monospace
+                and not prev_mono
+                and not cur_mono
                 and fs_diff <= 1.5):
             prev.lines.extend(block.lines)
             # Keep the original page's bbox: page coordinates are
