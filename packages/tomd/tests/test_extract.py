@@ -96,6 +96,60 @@ def test_extract_spatial_sorts_across_blocks_in_y_band():
     assert text.index("L") < text.index("R"), f"got text={text!r}"
 
 
+def test_spatial_sorts_by_baseline_for_mixed_font_sizes():
+    """Inline run in a smaller font shares baseline but has lower bbox top;
+    must still sort in reading order before text on the next line."""
+    # Line 1: Prose "a" at 14pt (origin y=100, bbox top y=87, x=10)
+    # followed by inline code "x" at 8pt (origin y=100, bbox top y=94, x=30).
+    # Line 2: Prose "b" at 14pt (origin y=113, bbox top y=99, x=10).
+    #
+    # With bbox-top sorting, "x" (bbox top 94) and "b" (bbox top 99) fall into
+    # the same sort band (band 15), where "b" (x=10) sorts before "x" (x=30),
+    # corrupting reading order to ["a", "b", "x"].
+    # With baseline (origin y) sorting, "a" and "x" share baseline y=100 (band 15)
+    # and sort before "b" (baseline y=113, band 17).
+    spans = [
+        {
+            "font": "ProseFont",
+            "size": 14.0,
+            "flags": 0,
+            "color": 0,
+            "chars": [
+                {"c": "a", "bbox": (10, 87, 18, 102), "origin": (10, 100)},
+            ],
+        },
+        {
+            "font": "CodeFont",
+            "size": 8.0,
+            "flags": 0,
+            "color": 0,
+            "chars": [
+                {"c": "x", "bbox": (30, 94, 36, 102), "origin": (30, 100)},
+            ],
+        },
+        {
+            "font": "ProseFont",
+            "size": 14.0,
+            "flags": 0,
+            "color": 0,
+            "chars": [
+                {"c": "b", "bbox": (10, 99, 18, 115), "origin": (10, 113)},
+            ],
+        },
+    ]
+    page = MagicMock()
+    page.get_text.return_value = {
+        "blocks": [{"type": 0, "lines": [{"spans": spans}]}],
+    }
+    blocks = extract_spatial(page, 0)
+    words = [w for b in blocks for ln in b.lines for w in ln.text.split()]
+    assert words == ["a", "x", "b"]
+
+
+
+
+
+
 class TestComputeBbox:
     def test_single_box(self):
         assert compute_bbox([(1.0, 2.0, 3.0, 4.0)]) == (1.0, 2.0, 3.0, 4.0)
