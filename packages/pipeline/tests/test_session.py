@@ -228,6 +228,48 @@ def test_brave_missing_key_raises():
             BraveBackend()
 
 
+def test_brave_endpoint_defaults_to_brave():
+    from pipeline.backends.brave import BraveBackend
+    with patch.dict("os.environ", {"BRAVE_API_KEY": "k"}, clear=True):
+        backend = BraveBackend()
+    assert backend._endpoint == "https://api.search.brave.com/res/v1/web/search"
+
+
+@pytest.mark.parametrize("base", [
+    "https://pod.example.net/brave/api",
+    "https://pod.example.net/brave/api/",
+    "  https://pod.example.net/brave/api  ",
+])
+def test_brave_endpoint_honors_base_override(base):
+    from pipeline.backends.brave import BraveBackend
+    env = {"BRAVE_API_KEY": "k", "BRAVE_API_BASE": base}
+    with patch.dict("os.environ", env, clear=True):
+        backend = BraveBackend()
+    assert backend._endpoint == "https://pod.example.net/brave/api/web/search"
+
+
+@pytest.mark.parametrize("base", ["", "   "])
+def test_brave_blank_base_falls_back_to_default(base):
+    from pipeline.backends.brave import BraveBackend
+    env = {"BRAVE_API_KEY": "k", "BRAVE_API_BASE": base}
+    with patch.dict("os.environ", env, clear=True):
+        backend = BraveBackend()
+    assert backend._endpoint == "https://api.search.brave.com/res/v1/web/search"
+
+
+@pytest.mark.parametrize("base", [
+    "pod.example.net/brave/api",
+    "ftp://pod.example.net/brave/api",
+    "/brave/api",
+])
+def test_brave_base_without_http_scheme_raises(base):
+    from pipeline.backends.brave import BraveBackend
+    env = {"BRAVE_API_KEY": "k", "BRAVE_API_BASE": base}
+    with patch.dict("os.environ", env, clear=True):
+        with pytest.raises(BackendConfigError, match="BRAVE_API_BASE"):
+            BraveBackend()
+
+
 # ---------------------------------------------------------------------------
 # Binary extractor registry
 # ---------------------------------------------------------------------------

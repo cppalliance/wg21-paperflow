@@ -284,6 +284,9 @@ def _placeholder_api_keys(monkeypatch):
     monkeypatch.setenv("RUNPOD_API_KEY", "placeholder-for-tests")
     monkeypatch.setenv("VLLM_DEEPSEEK_API_KEY", "placeholder-for-tests")
     monkeypatch.setenv("BRAVE_API_KEY", "placeholder-for-tests")
+    # A developer with BRAVE_API_BASE exported would otherwise point the
+    # backend at their proxy during tests.
+    monkeypatch.delenv("BRAVE_API_BASE", raising=False)
 
 
 _CANNED_SKELETON_SLOTS = [

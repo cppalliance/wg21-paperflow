@@ -23,7 +23,15 @@ from pipeline.session import SearchBackend, SearchResponse, SearchResult
 
 logger = logging.getLogger(__name__)
 
-_ENDPOINT = "https://api.search.brave.com/res/v1/web/search"
+# Base URL for Brave's Web Search API. Production talks to Brave directly;
+# local development points this at a shared reverse proxy that authenticates
+# the developer and swaps in the real subscription token upstream (the
+# cppalliance/runpod pod serves one at `/brave/api/`). The `/res/v1` prefix
+# belongs to the base URL, so a proxy rewrites `<pod>/brave/api/web/search`
+# to `.../res/v1/web/search`.
+_BRAVE_API_BASE_DEFAULT = "https://api.search.brave.com/res/v1"
+_BRAVE_SEARCH_PATH = "web/search"
+
 _MAX_BRAVE_COUNT = 20
 _RETRYABLE_STATUS = {500, 502, 503, 504, 429}
 _MAX_RETRIES = 3
@@ -62,7 +70,10 @@ class BraveBackend(SearchBackend):
 
     Reads ``BRAVE_API_KEY`` from the environment. Raises
     :class:`pipeline.errors.BackendConfigError` immediately if the key
-    is missing.
+    is missing. ``BRAVE_API_BASE`` optionally overrides the API base URL
+    (default ``https://api.search.brave.com/res/v1``); it must be an
+    absolute ``http://`` or ``https://`` URL, and the search path
+    ``web/search`` is always appended.
     """
 
     name = "brave"
@@ -75,6 +86,14 @@ class BraveBackend(SearchBackend):
                 "Get a key at https://api-dashboard.search.brave.com/register"
             )
         self._api_key = key
+        base = os.environ.get("BRAVE_API_BASE", "").strip().rstrip("/")
+        if not base:
+            base = _BRAVE_API_BASE_DEFAULT
+        if not base.startswith(("http://", "https://")):
+            raise BackendConfigError(
+                f"BRAVE_API_BASE must start with http:// or https://, got {base!r}"
+            )
+        self._endpoint = f"{base}/{_BRAVE_SEARCH_PATH}"
         self._client = httpx.AsyncClient(timeout=60.0)
         self._limiter = _TokenBucket(rate=50)
 
@@ -88,7 +107,7 @@ class BraveBackend(SearchBackend):
         for attempt in range(_MAX_RETRIES + 1):
             try:
                 resp = await self._client.get(
-                    _ENDPOINT,
+                    self._endpoint,
                     params={"q": query, "count": count},
                     headers={
                         "Accept": "application/json",
