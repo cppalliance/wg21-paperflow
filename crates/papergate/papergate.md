@@ -1,7 +1,7 @@
 ---
 name: papergate
 description: Report on the evidence a WG21 paper provides for its need of standardization
-promptforge: 1
+promptforge: 0
 input:
   path: paper.md
   description: The WG21 paper markdown to analyze
@@ -44,6 +44,7 @@ Identify every H2 section in this paper:
 For each section, record its name and line number range. Do not output any text.
 
 ```lua
+models.loop(messages.new():user(prose))
 local ranges = {}
 for _, s in ipairs(sections) do
     table.insert(ranges, s.start_line .. ":" .. s.end_line)
@@ -72,7 +73,7 @@ For each sentence in the section, write the sentence verbatim including its line
 * describes implementation experience, field experience, deployment experience
 
 ```lua
-store.append("evidence.md", reply)
+store.append("evidence.md", models.infer(prose))
 ```
 
 ## Analyze
@@ -96,6 +97,6 @@ Verdict: exactly one of { n/a, None, Weak, Adequate, Strong, Excellent }
 {up to three bulleted sentences describing the best pieces of evidence}
 
 ```lua
-store.write("report.md", reply)
+store.write("report.md", models.infer(prose))
 return "Done."
 ```
