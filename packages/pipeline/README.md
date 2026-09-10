@@ -34,6 +34,11 @@ agent.tool_plain(researcher.web_fetch)    # extracted markdown
 - `BRAVE_API_KEY` - **Required.** Brave Search API subscription token.
   Get one at https://api-dashboard.search.brave.com/register
   ($5/1000 queries, free tier available).
+- `BRAVE_API_BASE` - **Optional.** Base URL for the Brave Web Search API.
+  Defaults to `https://api.search.brave.com/res/v1`; `web/search` is appended.
+  Point local development at a shared reverse proxy, e.g.
+  `https://<pod>/brave/api`. `BRAVE_API_KEY` is still required in that setup:
+  set it to the token the proxy issued you rather than to a real Brave key.
 
 ## Shared Backend for Parallel Runs
 
