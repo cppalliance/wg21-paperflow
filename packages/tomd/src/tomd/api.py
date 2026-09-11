@@ -306,10 +306,10 @@ def _convert_with_tomd_full(
 
     For PDF sources, routes through :func:`run_pipeline` so the caller
     has access to the extracted image bytes alongside the markdown.
-    For HTML sources with a manifest, runs the HTML renderer with
-    manifest-driven ``<img>`` rewriting and surfaces the ExtractedImage
-    list (bytes already on disk from mailing - they aren't re-persisted
-    by the convert stage).
+    For HTML sources with a manifest, runs the HTML renderer (which
+    never emits image syntax into the markdown, #408) and surfaces the
+    ExtractedImage list (bytes already on disk from mailing - they
+    aren't re-persisted by the convert stage).
 
     ``extract_vector`` and ``whiteout_text`` are PDF-only and forwarded
     to :func:`tomd.lib.pdf.run_pipeline`. They are accepted in the HTML

@@ -181,6 +181,15 @@ class ExtractedImage:
     # default would invite hidden append-mutation. Empty for raster
     # papers and any vector image without a captured sub-caption.
     sub_captions: tuple[tuple[str, str], ...] = ()
+    # True when the pipeline dropped this image's overall body caption
+    # section (the ``_normalize_caption`` equality gate in
+    # ``pipeline._filter_sections_inside_vector_images``). Emit keys on
+    # this: only then is the caption re-emitted as an italic paragraph -
+    # when the gate kept the body (caption merged with trailing prose),
+    # the body still carries the caption and re-emitting would
+    # duplicate it (#408). Always False for HTML images (their body is
+    # never filtered) and for images without alt-text attribution.
+    caption_body_dropped: bool = False
 
 
 @dataclass(frozen=True)

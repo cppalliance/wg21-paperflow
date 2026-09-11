@@ -1044,18 +1044,29 @@ def _filter_sections_inside_vector_images(
     equality gate the relationship weakens to a **subset**: the
     body-drop fires on a subset of the lines ``_caption_for``
     attributes (specifically, those whose body paragraph still
-    equals the alt-text). The direction is safe - the body-drop is
-    strictly more conservative; a caption can never be both
-    attributed as alt-text AND retained in the body - but a future
-    refactor that adds a horizontal multi-column gate must add it to
-    BOTH ``_line_in_caption_band`` and ``images._caption_for`` in
-    the same commit.
+       equals the alt-text). The direction is safe - the body-drop is
+       strictly more conservative; a caption can never be both
+       attributed as alt-text AND retained in the body - but a future
+       refactor that adds a horizontal multi-column gate must add it to
+       BOTH ``_line_in_caption_band`` and ``images._caption_for`` in
+       the same commit. Emit keys on ``caption_body_dropped`` (#408),
+       which extends the invariant to the markdown surface: when the
+       body caption section reaches this filter, the caption appears
+       either in the kept body or as the italic paragraph, never both.
+       (A caption whose body section was already stripped upstream of
+       this filter leaves no markdown trace - the sidecar file and
+       ``suggested_alt`` still carry it.)
 
-    Returns ``(filtered_sections, captures_by_image_id)``. The
-    captures dict maps ``id(image)`` to a list of
-    ``(letter, full_section_text)`` tuples; the caller is responsible
-    for threading these into the matching :class:`ExtractedImage`
-    records (and into each IMAGE section's ``image_ref``).
+    Returns ``(filtered_sections, captures_by_image_id,
+    dropped_caption_ids)``. The captures dict maps ``id(image)`` to a
+    list of ``(letter, full_section_text)`` tuples; the caller is
+    responsible for threading these into the matching
+    :class:`ExtractedImage` records (and into each IMAGE section's
+    ``image_ref``). The third element holds the ``id(image)`` of every
+    image whose overall body caption was dropped by the equality gate;
+    the caller threads it into ``ExtractedImage.caption_body_dropped``
+    so emit re-emits the caption as an italic paragraph exactly when
+    the body copy is actually gone (#408).
     """
     # Index images twice. ``vector_images_by_page`` powers Fix A
     # (CODE/TABLE drop inside the cluster) and the per-line filter -
@@ -1095,9 +1106,10 @@ def _filter_sections_inside_vector_images(
         )
 
     if not caption_eligible_by_page:
-        return sections, {}
+        return sections, {}, set()
 
     captures_by_id: dict[int, list[tuple[str, str]]] = {}
+    dropped_caption_ids: set[int] = set()
     kept: list[Section] = []
 
     for sec in sections:
@@ -1182,12 +1194,17 @@ def _filter_sections_inside_vector_images(
             if (_CAPTION_LABEL_RE.match(first_text)
                     and first_bbox != (0, 0, 0, 0)):
                 sec_norm = _normalize_caption(sec.text)
-                matched = any(
-                    _line_in_caption_band(first_bbox, im.bbox)
-                    and _normalize_caption(im.suggested_alt) == sec_norm
-                    for im in page_caption_eligible
+                matched_im = next(
+                    (im for im in page_caption_eligible
+                     if _line_in_caption_band(first_bbox, im.bbox)
+                     and _normalize_caption(im.suggested_alt) == sec_norm),
+                    None,
                 )
-                if matched:
+                if matched_im is not None:
+                    # Record the drop so emit can re-emit the caption
+                    # as an italic paragraph exactly when the body copy
+                    # is actually gone (#408).
+                    dropped_caption_ids.add(id(matched_im))
                     continue
 
         # 4. PARAGRAPH / UNCERTAIN: per-line filter against unextended bbox.
@@ -1223,7 +1240,7 @@ def _filter_sections_inside_vector_images(
         new_text = "\n".join(line.text for line in kept_lines)
         kept.append(replace(sec, lines=kept_lines, text=new_text))
 
-    return kept, captures_by_id
+    return kept, captures_by_id, dropped_caption_ids
 
 
 def _insert_image_sections(
@@ -1802,14 +1819,17 @@ def run_pipeline(
             result.images, sections
         )
         total_dropped += dropped_b
-        sections, captures_by_id = _filter_sections_inside_vector_images(
-            result.images,
-            sections,
+        sections, captures_by_id, dropped_caption_ids = (
+            _filter_sections_inside_vector_images(
+                result.images,
+                sections,
+            )
         )
-        if captures_by_id:
+        if captures_by_id or dropped_caption_ids:
             from dataclasses import replace as _replace
 
-            # Thread the captures into BOTH ``result.images`` AND every
+            # Thread the captures and caption-drop flags into BOTH
+            # ``result.images`` AND every
             # IMAGE section's ``image_ref``. Both containers share the
             # same ``ExtractedImage`` instances (placed by
             # ``_insert_image_sections``), so ``id()`` lookup is valid
@@ -1854,10 +1874,11 @@ def run_pipeline(
             replaced: dict[int, ExtractedImage] = {
                 id(im): _replace(
                     im,
-                    sub_captions=tuple(sorted(captures_by_id[id(im)])),
+                    sub_captions=tuple(sorted(captures_by_id.get(id(im), ()))),
+                    caption_body_dropped=id(im) in dropped_caption_ids,
                 )
                 for im in result.images
-                if id(im) in captures_by_id
+                if id(im) in captures_by_id or id(im) in dropped_caption_ids
             }
             for sec in sections:
                 if (

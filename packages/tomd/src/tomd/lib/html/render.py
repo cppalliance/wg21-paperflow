@@ -570,7 +570,10 @@ def _render_element(el: Tag, generator: str) -> str | None:
         return _render_table(el)
 
     if tag == "img":
-        return _render_img(el)
+        # Images never reach markdown (#408): the LLM consumer cannot use
+        # pixels. Visible captions (<figcaption>, inline text) render via
+        # the normal DOM walk; the alt attribute is dropped with the tag.
+        return None
 
     if tag == "blockquote":
         return _render_blockquote(el, generator)
@@ -629,36 +632,6 @@ def _render_element(el: Tag, generator: str) -> str | None:
     _render_children(el, parts, generator)
     result = "\n\n".join(p for p in parts if p.strip())
     return result if result else None
-
-
-_ALT_TEXT_ESCAPE_RE = re.compile(r"([\[\]\\])")
-
-
-def _render_img(el: Tag) -> str | None:
-    """Render ``<img>`` as ``![alt](src)``. Skips when ``src`` is absent."""
-    src = (el.get("src") or "").strip()
-    if not src:
-        return None
-    alt = (el.get("alt") or "").strip()
-    alt = _ALT_TEXT_ESCAPE_RE.sub(r"\\\1", alt)
-    return f"![{alt}]({src})"
-
-
-def rewrite_imgs_via_manifest(
-    soup: BeautifulSoup,
-    src_to_entry: dict,
-) -> None:
-    """Mutate each ``<img>`` so its ``src`` and ``alt`` reflect the manifest."""
-    for img in soup.find_all("img"):
-        src = (img.get("src") or "").strip()
-        entry = src_to_entry.get(src)
-        if entry is None:
-            if "src" in img.attrs:
-                del img.attrs["src"]
-            continue
-        img["src"] = entry.stored_filename
-        alt = entry.caption_text or entry.alt_attr or ""
-        img["alt"] = alt
 
 
 _HEADING_SKIP_CLASSES = frozenset({"self-link"})
@@ -1382,6 +1355,13 @@ def _cell_inner_html(cell: Tag) -> str:
             parts.append(_html.escape(str(child)))
         elif isinstance(child, Tag):
             if child.name in _ALLOWED_CELL_TAGS:
+                # An allowed inline wrapper (<span>, <a>, ...) can nest
+                # <img>; str(child) would serialize the raw tag - and a
+                # data: URI - into the cell. Images never reach
+                # markdown (#408). Mutating the tree is safe here:
+                # image extraction runs before rendering.
+                for img in child.find_all("img"):
+                    img.decompose()
                 parts.append(str(child))
             else:
                 parts.append(_html.escape(child.get_text()))
@@ -1671,14 +1651,8 @@ def _inline_text_nodes(nodes, skip_classes: frozenset[str] = frozenset()) -> str
                 continue
 
             if tag == "img":
-                # Inline-context <img> (typical: inside <p>). Routed
-                # through the same _render_img + manifest rewrite the
-                # block-level path uses, so an <img> nested in a
-                # paragraph still becomes ![alt](filename) and inherits
-                # the cap + truncation behaviour.
-                rendered = _render_img(child)
-                if rendered:
-                    parts.append(rendered)
+                # Inline <img> (typical: inside <p>): dropped like the
+                # block path - no image syntax in markdown (#408).
                 continue
 
             if tag == "ins":

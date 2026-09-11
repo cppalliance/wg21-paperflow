@@ -1006,20 +1006,6 @@ def _render_table(sec: Section) -> str:
     return "\n".join(lines)
 
 
-_ALT_TEXT_ESCAPE_RE = re.compile(r"([\[\]\\])")
-
-
-def _escape_alt_text(text: str) -> str:
-    """Escape ``[``, ``]``, and ``\\`` so they survive inside ``![alt](...)``.
-
-    Markdown image alt-text grammar is permissive but it does break on
-    unbalanced brackets and unescaped backslashes. Captions like
-    ``Figure 1 [revised]: ...`` would otherwise truncate the alt at
-    the literal ``]``.
-    """
-    return _ALT_TEXT_ESCAPE_RE.sub(r"\\\1", text)
-
-
 _ITALIC_INLINE_ESCAPE_RE = re.compile(r"([\\*_`])")
 # Leading characters that would otherwise be parsed as a list marker,
 # blockquote, ATX heading, or ordered-list start. The synthesised
@@ -1059,20 +1045,27 @@ def _escape_italic_text(text: str) -> str:
 
 
 def _render_image(sec: Section) -> str:
-    """Render a :class:`SectionKind.IMAGE` section as ``![alt](filename)``.
+    """Render a :class:`SectionKind.IMAGE` section as its caption text.
+
+    No image syntax is ever emitted (#408): the LLM consumer cannot use
+    pixels, and the sidecar file on disk is not a markdown concern. The
+    caption is re-emitted as an italic paragraph (same shape as
+    sub-caption paragraphs) only when the pipeline dropped the body copy
+    (:attr:`ExtractedImage.caption_body_dropped`) - when the equality
+    gate kept the body section (caption merged with trailing prose), the
+    body still carries the caption and re-emitting would duplicate it.
+    An image without a dropped body caption renders as nothing.
 
     Reads the alt text from :attr:`Section.image_ref.suggested_alt`
     (not :attr:`Section.text` - IMAGE sections carry empty text by
-    design, see types.py). The filename is the stable on-disk basename
-    assigned by :func:`finalize_extraction`, kept on
-    :attr:`ExtractedImage.stored_filename` so the markdown reference
-    matches what the CLI will write via
-    :meth:`StorageBackend.write_paper_image`.
+    design, see types.py).
     """
     if sec.image_ref is None:
         return ""
-    alt = _escape_alt_text(sec.image_ref.suggested_alt)
-    return f"![{alt}]({sec.image_ref.stored_filename})"
+    alt = sec.image_ref.suggested_alt
+    if not alt or not sec.image_ref.caption_body_dropped:
+        return ""
+    return "*" + _escape_italic_text(alt) + "*"
 
 
 def _render_section_md(sec: Section) -> str:
