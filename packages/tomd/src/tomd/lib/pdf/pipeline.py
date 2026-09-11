@@ -356,7 +356,7 @@ def _detect_column_split(blocks: list, page_width: float) -> float | None:
         return None
     if min(left_count, right_count) / (left_count + right_count) < _COLUMN_MIN_FRACTION:
         return None
-    if best_split < page_width * 0.35 or best_split > page_width * 0.65:
+    if best_split < page_width * 0.25 or best_split > page_width * 0.75:
         return None
     # Validate with left-edge (x0) clustering: in genuine two-column
     # layouts the right column's left edges sit near the page center,
@@ -1622,16 +1622,24 @@ def run_pipeline(
                         # matrix so Pass 5 can map block/line midpoints into
                         # reading space before cell assignment.
                         rot = page_rotations.get(pg_num)
-                        page_mupdf_tables[pg_num] = [
-                            {"bbox": tuple(t.bbox),
-                             "row_count": t.row_count,
-                             "col_count": t.col_count,
-                             "cells": [tuple(c) if c else None for c in t.cells],
-                             "header_names": t.header.names if t.header else None,
-                             "extract": t.extract(),
-                             "rot": rot}
-                            for t in ft.tables
-                        ]
+                        page_mupdf_tables[pg_num] = []
+                        for t in ft.tables:
+                            cell_heights = [c[3] - c[1] for c in t.cells if c] if t.cells else []
+                            max_ch = max(cell_heights) if cell_heights else 0.0
+                            tbl_h = t.bbox[3] - t.bbox[1]
+                            page_cov = tbl_h / page.rect.height if page.rect.height else 0.0
+                            page_mupdf_tables[pg_num].append({
+                                "bbox": tuple(t.bbox),
+                                "row_count": t.row_count,
+                                "col_count": t.col_count,
+                                "cells": [tuple(c) if c else None for c in t.cells],
+                                "header_names": t.header.names if t.header else None,
+                                "extract": t.extract(),
+                                "rot": rot,
+                                "max_cell_h": max_ch,
+                                "tbl_h": tbl_h,
+                                "page_coverage": page_cov,
+                            })
                 except Exception:
                     _log.debug("find_tables() failed on page %d", pg_num,
                                exc_info=True)
