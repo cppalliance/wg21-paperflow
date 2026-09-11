@@ -169,3 +169,92 @@ def test_unknown_warning_preserved_when_no_metadata(tmp_path):
         "warning should be present when extraction failed"
     )
     assert any("Unrecognized" in p for p in prompts)
+
+
+_IMG_POSITIONS_HTML = """<!DOCTYPE html><html><head></head><body>
+<header id="title-block-header">
+<h1 class="title">Img Paper</h1>
+<table><tr><td>Document #:</td><td>P9R0</td></tr></table>
+</header>
+<p>Before.</p>
+<img src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42nNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==" alt="block level alt">
+<p>Inline <img src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42nNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==" alt="inline alt"> shot.</p>
+<figure><img src="https://example.com/fig.png" alt="figure alt"><figcaption>Figure 1: visible caption</figcaption></figure>
+</body></html>"""
+
+
+def test_convert_html_never_emits_image_syntax(tmp_path):
+    """#408: <img> never reaches markdown - no data: URI, no remote URL,
+    no image syntax, no alt text - in block, inline, and figure positions.
+    Visible caption text (<figcaption>) survives as normal text."""
+    path = _write(tmp_path, "img_positions.html", _IMG_POSITIONS_HTML)
+    md, _ = convert_html(path)
+    assert "![" not in md
+    assert "data:image" not in md
+    assert "example.com/fig.png" not in md
+    assert "block level alt" not in md
+    assert "inline alt" not in md
+    assert "figure alt" not in md
+    assert "Before." in md
+    assert "Inline" in md and "shot." in md
+    assert "Figure 1: visible caption" in md
+
+
+def test_convert_html_with_manifest_still_emits_no_image_syntax(tmp_path):
+    """#408: even with a mailing manifest present, markdown carries no
+    image reference - the manifest only feeds sidecar accounting and the
+    truncation marker. A real entry with a stored filename and alt text
+    must leak neither into the markdown; the truncation marker fires
+    when the result says the source was capped."""
+    from tomd.lib.html.images import HtmlImagesResult
+    from tomd.lib.pdf.images import ExtractedImage
+
+    path = _write(tmp_path, "img_manifest.html", _IMG_POSITIONS_HTML)
+    result = HtmlImagesResult(
+        images=[
+            ExtractedImage(
+                page=0, index_on_page=1, ext="png", bytes=b"",
+                bbox=(0.0, 0.0, 0.0, 0.0),
+                suggested_alt="manifest alt text",
+                stored_filename="p9999r0-fig0-1.png",
+                xref=0,
+            ),
+        ],
+        source_image_count=3,
+        images_truncated=True,
+    )
+    md, _ = convert_html(path, html_images_result=result)
+    assert "![" not in md
+    assert "data:image" not in md
+    assert "example.com/fig.png" not in md
+    assert "p9999r0-fig0-1.png" not in md
+    assert "manifest alt text" not in md
+    assert "Figure 1: visible caption" in md
+    # The truncation marker discloses on-disk accounting without any
+    # image syntax.
+    assert "tomd:images-truncated" in md
+    assert "kept 1 of 3" in md
+
+
+def test_mixed_code_table_drops_img_nested_in_allowed_wrapper(tmp_path):
+    """#408: the mixed-code-table path serializes allowed inline tags
+    (<span>, <a>, ...) as raw HTML. An <img> nested inside such a
+    wrapper must not ride along - str(child) would otherwise leak the
+    raw tag and a data: URI into the cell."""
+    html = (
+        "<html><head><title>T</title></head><body>"
+        "<table><tr>"
+        "<td><pre><code>int x;</code></pre></td>"
+        '<td>note <span class="k"><img src="data:image/png;base64,QUJD"'
+        ' alt="cell alt"></span> end</td>'
+        "</tr></table>"
+        "</body></html>"
+    )
+    path = _write(tmp_path, "table_img.html", html)
+    md, _ = convert_html(path)
+    assert "int x;" in md
+    assert "note" in md and "end" in md
+    assert "![" not in md
+    assert "data:image" not in md
+    assert "<img" not in md
+    assert "cell alt" not in md

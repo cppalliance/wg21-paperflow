@@ -119,6 +119,7 @@ def _image_section(
     alt: str = "",
     stored_filename: str = "p1-fig1-1.png",
     xref: int = 1,
+    caption_body_dropped: bool = False,
 ) -> Section:
     """Construct an IMAGE Section identical to what pipeline._make_image_section produces."""
     img = ExtractedImage(
@@ -130,6 +131,7 @@ def _image_section(
         suggested_alt=alt,
         stored_filename=stored_filename,
         xref=xref,
+        caption_body_dropped=caption_body_dropped,
     )
     return Section(
         kind=SectionKind.IMAGE,
@@ -535,27 +537,37 @@ def test_structure_pass_image_not_classified_as_list_item():
 
 
 def test_emit_renders_image_with_caption():
+    """#408: no image syntax in markdown. The harvested caption survives
+    as an italic paragraph because the pipeline dropped its body copy
+    when attributing it as alt text."""
     img_sec = _image_section(alt="Figure 1: Hello World!",
-                              stored_filename="p3556r0-fig3-1.png")
+                              stored_filename="p3556r0-fig3-1.png",
+                              caption_body_dropped=True)
     md = emit_markdown({"title": "Test"}, [img_sec])
-    assert "![Figure 1: Hello World!](p3556r0-fig3-1.png)" in md
+    assert "![" not in md
+    assert "p3556r0-fig3-1.png" not in md
+    assert "*Figure 1: Hello World!*" in md
 
 
 def test_emit_renders_image_with_empty_alt():
+    """#408: no recognized caption -> the image leaves no trace."""
     img_sec = _image_section(alt="", stored_filename="p1-fig0-1.png")
     md = emit_markdown({"title": "Test"}, [img_sec])
-    assert "![](p1-fig0-1.png)" in md
+    assert "![" not in md
+    assert "p1-fig0-1.png" not in md
 
 
-def test_emit_escapes_brackets_in_alt():
-    """Alt text containing ``]`` would otherwise truncate the markdown image
-    syntax (e.g. ``![Figure 1 [revised]: ...](...)``)."""
+def test_emit_caption_with_brackets_survives_as_text():
+    """#408: a caption containing ``]`` renders as plain italic text -
+    no image syntax left for the bracket to break."""
     img_sec = _image_section(
         alt="Figure 1 [revised]: caption",
         stored_filename="p1-fig0-1.png",
+        caption_body_dropped=True,
     )
     md = emit_markdown({"title": "Test"}, [img_sec])
-    assert r"![Figure 1 \[revised\]: caption](p1-fig0-1.png)" in md
+    assert "![" not in md
+    assert "*Figure 1 [revised]: caption*" in md
 
 
 def test_emit_appends_truncation_marker_when_capped():
@@ -2817,7 +2829,7 @@ class TestFilterSectionsInsideVectorImages:
                 ((100, 420, 500, 435), "handle() set_environment(env)"),
             ],
         )
-        kept, captures = _filter_sections_inside_vector_images([img], [para])
+        kept, captures, dropped = _filter_sections_inside_vector_images([img], [para])
         # All lines dropped - whole section gone.
         assert len(kept) == 0
         assert captures == {}
@@ -2839,7 +2851,7 @@ class TestFilterSectionsInsideVectorImages:
                 ((100, 490, 500, 505), "run performs executor hopping"),
             ],
         )
-        kept, captures = _filter_sections_inside_vector_images([img], [para])
+        kept, captures, dropped = _filter_sections_inside_vector_images([img], [para])
         assert len(kept) == 1
         kept_text = kept[0].text
         assert "I/O operation" not in kept_text
@@ -2861,7 +2873,7 @@ class TestFilterSectionsInsideVectorImages:
             lines=[Line(spans=[Span(text="cell", bbox=(200, 250, 400, 350))],
                         bbox=(200, 250, 400, 350))],
         )
-        kept, captures = _filter_sections_inside_vector_images([img], [table])
+        kept, captures, dropped = _filter_sections_inside_vector_images([img], [table])
         assert kept == []
         assert captures == {}
 
@@ -2875,7 +2887,7 @@ class TestFilterSectionsInsideVectorImages:
             lines=[Line(spans=[Span(text="x", bbox=(200, 250, 400, 350))],
                         bbox=(200, 250, 400, 350))],
         )
-        kept, captures = _filter_sections_inside_vector_images([img], [code])
+        kept, captures, dropped = _filter_sections_inside_vector_images([img], [code])
         assert kept == []
         assert captures == {}
 
@@ -2893,7 +2905,7 @@ class TestFilterSectionsInsideVectorImages:
             lines=[Line(spans=[Span(text="auto", bbox=(60, 320, 200, 400))],
                         bbox=(60, 320, 200, 400))],
         )
-        kept, captures = _filter_sections_inside_vector_images([img], [code])
+        kept, captures, dropped = _filter_sections_inside_vector_images([img], [code])
         assert kept == [code]
         assert captures == {}
 
@@ -2909,7 +2921,7 @@ class TestFilterSectionsInsideVectorImages:
             lines=[Line(spans=[Span(text="x", bbox=(90, 0, 180, 100))],
                         bbox=(90, 0, 180, 100))],
         )
-        kept, captures = _filter_sections_inside_vector_images([img], [code])
+        kept, captures, dropped = _filter_sections_inside_vector_images([img], [code])
         assert kept == [code]
         assert captures == {}
 
@@ -2922,7 +2934,7 @@ class TestFilterSectionsInsideVectorImages:
             confidence=Confidence.HIGH, page_num=11,
             lines=[],
         )
-        kept, captures = _filter_sections_inside_vector_images([img], [code])
+        kept, captures, dropped = _filter_sections_inside_vector_images([img], [code])
         assert kept == [code]
         assert captures == {}
 
@@ -2934,7 +2946,7 @@ class TestFilterSectionsInsideVectorImages:
             confidence=Confidence.MEDIUM, page_num=12,
             image_ref=another_img,
         )
-        kept, captures = _filter_sections_inside_vector_images([img], [img_section])
+        kept, captures, dropped = _filter_sections_inside_vector_images([img], [img_section])
         # IMAGE sections aren't filtered by this pass (Filter 1 handles
         # vector-vs-vector dedup separately).
         assert kept == [img_section]
@@ -2949,7 +2961,7 @@ class TestFilterSectionsInsideVectorImages:
                 ((100, 200, 500, 215), "this text lives at page 13 y=200"),
             ],
         )
-        kept, captures = _filter_sections_inside_vector_images([img], [para])
+        kept, captures, dropped = _filter_sections_inside_vector_images([img], [para])
         assert kept == [para]
         assert captures == {}
 
@@ -2960,7 +2972,7 @@ class TestFilterSectionsInsideVectorImages:
             page_num=12,
             line_bboxes_and_text=[((100, 200, 400, 215), "text")],
         )
-        kept, captures = _filter_sections_inside_vector_images([], [para])
+        kept, captures, dropped = _filter_sections_inside_vector_images([], [para])
         assert kept == [para]
         assert captures == {}
 
@@ -2975,7 +2987,7 @@ class TestFilterSectionsInsideVectorImages:
             confidence=Confidence.HIGH, page_num=12,
             lines=[line],
         )
-        kept, captures = _filter_sections_inside_vector_images([img], [para])
+        kept, captures, dropped = _filter_sections_inside_vector_images([img], [para])
         assert len(kept) == 1
         assert len(kept[0].lines) == 1
         assert captures == {}
@@ -3002,9 +3014,12 @@ class TestFilterSectionsInsideVectorImages:
                 bbox=(86, 345, 506, 355),
             )],
         )
-        kept, captures = _filter_sections_inside_vector_images([img], [caption])
+        kept, captures, dropped = _filter_sections_inside_vector_images([img], [caption])
         assert kept == []
         assert captures == {}
+        # The drop is recorded so emit re-emits the caption as an
+        # italic paragraph (#408).
+        assert dropped == {id(img)}
 
     def test_overall_caption_heading_in_band_dropped(self):
         """A bold ``Figure N:`` caption that trips the heading
@@ -3025,9 +3040,10 @@ class TestFilterSectionsInsideVectorImages:
                 bbox=(86, 345, 506, 355),
             )],
         )
-        kept, captures = _filter_sections_inside_vector_images([img], [caption_h])
+        kept, captures, dropped = _filter_sections_inside_vector_images([img], [caption_h])
         assert kept == []
         assert captures == {}
+        assert dropped == {id(img)}
 
     def test_body_paragraph_in_band_kept(self):
         """A body paragraph whose first line sits in the caption band
@@ -3046,7 +3062,7 @@ class TestFilterSectionsInsideVectorImages:
                 bbox=(86, 340, 506, 352),
             )],
         )
-        kept, captures = _filter_sections_inside_vector_images([img], [body])
+        kept, captures, dropped = _filter_sections_inside_vector_images([img], [body])
         assert kept == [body]
         assert captures == {}
 
@@ -3075,7 +3091,7 @@ class TestFilterSectionsInsideVectorImages:
                 bbox=(86, 390, 506, 402),
             )],
         )
-        kept, captures = _filter_sections_inside_vector_images([img], [caption])
+        kept, captures, dropped = _filter_sections_inside_vector_images([img], [caption])
         assert kept == []
 
     def test_overall_caption_outside_band_kept(self):
@@ -3095,7 +3111,7 @@ class TestFilterSectionsInsideVectorImages:
                 bbox=(86, 450, 506, 462),
             )],
         )
-        kept, captures = _filter_sections_inside_vector_images([img], [caption])
+        kept, captures, dropped = _filter_sections_inside_vector_images([img], [caption])
         assert kept == [caption]
 
     def test_empty_alt_caption_kept(self):
@@ -3119,9 +3135,10 @@ class TestFilterSectionsInsideVectorImages:
                 bbox=(86, 345, 506, 357),
             )],
         )
-        kept, captures = _filter_sections_inside_vector_images([img], [caption])
+        kept, captures, dropped = _filter_sections_inside_vector_images([img], [caption])
         assert kept == [caption]
         assert captures == {}
+        assert dropped == set()
 
     def test_different_caption_text_kept(self):
         """A ``Figure N:`` paragraph in the caption band is KEPT when
@@ -3145,9 +3162,10 @@ class TestFilterSectionsInsideVectorImages:
                 bbox=(86, 345, 506, 357),
             )],
         )
-        kept, captures = _filter_sections_inside_vector_images([img], [caption])
+        kept, captures, dropped = _filter_sections_inside_vector_images([img], [caption])
         assert kept == [caption]
         assert captures == {}
+        assert dropped == set()
 
     def test_sub_caption_single_line_captured_and_dropped(self):
         img = _ext_img(page=6, bbox=(86, 0, 506, 284))
@@ -3161,7 +3179,7 @@ class TestFilterSectionsInsideVectorImages:
                 bbox=(86, 290, 506, 302),
             )],
         )
-        kept, captures = _filter_sections_inside_vector_images([img], [sub])
+        kept, captures, dropped = _filter_sections_inside_vector_images([img], [sub])
         assert kept == []
         assert captures == {
             id(img): [("b", "(b) A directed graph representing followers.")]
@@ -3197,7 +3215,7 @@ class TestFilterSectionsInsideVectorImages:
                      bbox=(86, 332, 506, 344)),
             ],
         )
-        kept, captures = _filter_sections_inside_vector_images([img], [sub])
+        kept, captures, dropped = _filter_sections_inside_vector_images([img], [sub])
         assert kept == []
         # The whole section text is captured, not just the first line.
         assert captures == {id(img): [("b", full)]}
@@ -3218,7 +3236,7 @@ class TestFilterSectionsInsideVectorImages:
                 bbox=(86, 500, 506, 512),
             )],
         )
-        kept, captures = _filter_sections_inside_vector_images([img], [sub])
+        kept, captures, dropped = _filter_sections_inside_vector_images([img], [sub])
         assert kept == [sub]
         assert captures == {}
 
@@ -3242,7 +3260,7 @@ class TestFilterSectionsInsideVectorImages:
                 bbox=(86, 151, 506, 182),
             )],
         )
-        kept, captures = _filter_sections_inside_vector_images([img], [sub_a])
+        kept, captures, dropped = _filter_sections_inside_vector_images([img], [sub_a])
         assert kept == []
         assert captures == {
             id(img): [("a", "(a) An undirected graph representing airline routes.")]
@@ -3271,7 +3289,7 @@ class TestFilterSectionsInsideVectorImages:
                 bbox=(86, 291, 506, 322),
             )],
         )
-        kept, captures = _filter_sections_inside_vector_images(
+        kept, captures, dropped = _filter_sections_inside_vector_images(
             [img], [sub_a, sub_b],
         )
         assert kept == []
@@ -3305,7 +3323,7 @@ class TestFilterSectionsInsideVectorImages:
                 bbox=(86, 140, 506, 152),
             )],
         )
-        kept, captures = _filter_sections_inside_vector_images(
+        kept, captures, dropped = _filter_sections_inside_vector_images(
             [upper, lower], [sub])
         assert kept == []
         # Captured against the upper figure only.
@@ -3336,7 +3354,7 @@ class TestFilterSectionsInsideVectorImages:
                 bbox=(46, 320, 566, 332),
             )],
         )
-        kept, captures = _filter_sections_inside_vector_images([img], [caption])
+        kept, captures, dropped = _filter_sections_inside_vector_images([img], [caption])
         assert kept == []
 
     # ---------------------------------------------------------------
@@ -3368,7 +3386,7 @@ class TestFilterSectionsInsideVectorImages:
                 bbox=(86, 220, 506, 232),
             )],
         )
-        kept, captures = _filter_sections_inside_vector_images([img], [caption])
+        kept, captures, dropped = _filter_sections_inside_vector_images([img], [caption])
         assert kept == []
         assert captures == {}
 
@@ -3387,7 +3405,7 @@ class TestFilterSectionsInsideVectorImages:
                 bbox=(86, 220, 506, 232),
             )],
         )
-        kept, captures = _filter_sections_inside_vector_images([img], [sub])
+        kept, captures, dropped = _filter_sections_inside_vector_images([img], [sub])
         assert kept == []
         assert captures == {id(img): [("a", "(a) the left panel")]}
 
@@ -3417,7 +3435,7 @@ class TestFilterSectionsInsideVectorImages:
                 bbox=(86, 300, 506, 312),
             )],
         )
-        kept, captures = _filter_sections_inside_vector_images([img], [prose])
+        kept, captures, dropped = _filter_sections_inside_vector_images([img], [prose])
         assert kept == [prose]
         assert captures == {}
 
@@ -3441,7 +3459,7 @@ class TestFilterSectionsInsideVectorImages:
                 bbox=(86, 300, 506, 312),
             )],
         )
-        kept, captures = _filter_sections_inside_vector_images([img], [sub])
+        kept, captures, dropped = _filter_sections_inside_vector_images([img], [sub])
         assert kept == []
         assert captures == {id(img): [("a", "(a) the upper sub-figure")]}
 
@@ -3469,7 +3487,7 @@ class TestFilterSectionsInsideVectorImages:
                 bbox=(86, 220, 506, 232),
             )],
         )
-        kept, captures = _filter_sections_inside_vector_images(
+        kept, captures, dropped = _filter_sections_inside_vector_images(
             [raster, vector], [sub])
         assert kept == []
         assert captures == {
@@ -3496,7 +3514,7 @@ class TestFilterSectionsInsideVectorImages:
                 bbox=(150, 150, 450, 170),
             )],
         )
-        kept, _ = _filter_sections_inside_vector_images([raster], [code])
+        kept, _, dropped = _filter_sections_inside_vector_images([raster], [code])
         assert kept == [code]
 
     def test_raster_bbox_not_used_for_per_line_filter(self):
@@ -3517,7 +3535,7 @@ class TestFilterSectionsInsideVectorImages:
                 bbox=(150, 150, 450, 170),
             )],
         )
-        kept, _ = _filter_sections_inside_vector_images([raster], [body])
+        kept, _, dropped = _filter_sections_inside_vector_images([raster], [body])
         assert kept == [body]
 
     def test_html_image_zero_bbox_skipped(self):
@@ -3538,7 +3556,7 @@ class TestFilterSectionsInsideVectorImages:
                 bbox=(0.0, 0.0, 0.0, 0.0),
             )],
         )
-        kept, captures = _filter_sections_inside_vector_images(
+        kept, captures, dropped = _filter_sections_inside_vector_images(
             [html_img], [caption])
         assert kept == [caption]
         assert captures == {}
@@ -3560,7 +3578,7 @@ class TestFilterSectionsInsideVectorImages:
                 bbox=(86, 350, 506, 362),
             )],
         )
-        kept, _ = _filter_sections_inside_vector_images([raster], [caption])
+        kept, _, dropped = _filter_sections_inside_vector_images([raster], [caption])
         assert kept == [caption]
 
     def test_raster_caption_heading_dropped(self):
@@ -3579,7 +3597,7 @@ class TestFilterSectionsInsideVectorImages:
                 bbox=(86, 220, 506, 232),
             )],
         )
-        kept, _ = _filter_sections_inside_vector_images([raster], [heading])
+        kept, _, dropped = _filter_sections_inside_vector_images([raster], [heading])
         assert kept == []
 
     def test_mixed_page_raster_caption_under_vector_flag_path(self):
@@ -3607,7 +3625,7 @@ class TestFilterSectionsInsideVectorImages:
                 bbox=(86, 220, 506, 232),
             )],
         )
-        kept, _ = _filter_sections_inside_vector_images(
+        kept, _, dropped = _filter_sections_inside_vector_images(
             [raster, vector], [caption])
         assert kept == []
 
@@ -3635,7 +3653,7 @@ class TestFilterSectionsInsideVectorImages:
                 bbox=(86, 220, 506, 232),
             )],
         )
-        kept, _ = _filter_sections_inside_vector_images([raster], [merged])
+        kept, _, dropped = _filter_sections_inside_vector_images([raster], [merged])
         assert kept == []  # WILL FAIL - known limitation
 
     def test_caption_with_trailing_continuation_kept_by_equality_gate(self):
@@ -3667,13 +3685,17 @@ class TestFilterSectionsInsideVectorImages:
                 bbox=(86, 220, 506, 232),
             )],
         )
-        kept, captures = _filter_sections_inside_vector_images(
+        kept, captures, dropped = _filter_sections_inside_vector_images(
             [raster], [para])
         # Section preserved verbatim (not even partial-line filtered;
         # the per-line filter is vector-only).
         assert kept == [para]
         # No sub-caption captured against the image either.
         assert captures == {}
+        # The body keeps the caption, so the drop flag must NOT fire -
+        # emit would otherwise re-emit the caption as an italic
+        # paragraph and produce a visible double (#408, P0957R8 Fig 1).
+        assert dropped == set()
         # The returned section text is unchanged (no normalization
         # leaks into the output).
         assert kept[0].text == merged_text
@@ -3696,8 +3718,11 @@ class TestFilterSectionsInsideVectorImages:
                 bbox=(86, 220, 506, 232),
             )],
         )
-        kept, _ = _filter_sections_inside_vector_images([raster], [caption])
+        kept, _, dropped = _filter_sections_inside_vector_images([raster], [caption])
         assert kept == []
+        # Drop recorded: emit re-emits the caption as the italic
+        # paragraph (#408 canonical P3556R0 shape).
+        assert dropped == {id(raster)}
 
     def test_whitespace_drift_normalized_and_dropped(self):
         """The gate's normalization. Body carries extra whitespace
@@ -3718,7 +3743,7 @@ class TestFilterSectionsInsideVectorImages:
                 bbox=(86, 220, 506, 232),
             )],
         )
-        kept, _ = _filter_sections_inside_vector_images([raster], [caption])
+        kept, _, dropped = _filter_sections_inside_vector_images([raster], [caption])
         assert kept == []
 
     def test_list_kind_sub_caption_captured_and_dropped(self):
@@ -3737,7 +3762,7 @@ class TestFilterSectionsInsideVectorImages:
                 bbox=(86, 290, 506, 302),
             )],
         )
-        kept, captures = _filter_sections_inside_vector_images([img], [sub])
+        kept, captures, dropped = _filter_sections_inside_vector_images([img], [sub])
         assert kept == []
         assert captures == {id(img): [("a", "(a) Upper sub-figure")]}
 
@@ -3757,7 +3782,7 @@ class TestFilterSectionsInsideVectorImages:
                 bbox=(86, 500, 506, 512),
             )],
         )
-        kept, captures = _filter_sections_inside_vector_images([img], [sub])
+        kept, captures, dropped = _filter_sections_inside_vector_images([img], [sub])
         assert kept == [sub]
         assert captures == {}
 
@@ -3783,7 +3808,7 @@ class TestFilterSectionsInsideVectorImages:
                 ),
             ],
         )
-        kept, captures = _filter_sections_inside_vector_images([img], [sub])
+        kept, captures, dropped = _filter_sections_inside_vector_images([img], [sub])
         assert kept == [sub], "multi-line LIST must not be captured as sub-caption"
         assert captures == {}
 
@@ -3857,7 +3882,7 @@ class TestLineInCaptionBandPredicateEquality:
 
 
 def _apply_threading_and_insertion(
-    images, sections, captures_by_id,
+    images, sections, captures_by_id, dropped_caption_ids=frozenset(),
 ):
     """Mirror the caller-side threading pass in pipeline.py.
 
@@ -3895,10 +3920,12 @@ def _apply_threading_and_insertion(
 
     replaced = {
         id(im): _replace(
-            im, sub_captions=tuple(sorted(captures_by_id[id(im)])),
+            im,
+            sub_captions=tuple(sorted(captures_by_id.get(id(im), ()))),
+            caption_body_dropped=id(im) in dropped_caption_ids,
         )
         for im in images
-        if id(im) in captures_by_id
+        if id(im) in captures_by_id or id(im) in dropped_caption_ids
     }
     for sec in new_sections:
         if (sec.kind == SectionKind.IMAGE

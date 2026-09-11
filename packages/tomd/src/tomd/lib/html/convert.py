@@ -34,11 +34,12 @@ def convert_html(
     list of self-contained LLM reconcile prompts (one per flagged HTML
     conversion issue) or ``None`` when conversion was fully clean.
 
-    When ``html_images_result`` is provided, ``<img>`` tags in the
-    source HTML are rewritten to point at the on-disk stored filenames
-    recorded by the mailing fetcher. Without it, ``<img>`` tags are
-    suppressed - we never emit a raw ``data:`` URI or an unresolvable
-    remote URL into markdown.
+    ``<img>`` tags never reach the markdown (#408): the LLM consumer
+    cannot use pixels, so no image syntax, raw ``data:`` URI, or
+    unresolvable remote URL is emitted, with or without a manifest.
+    ``html_images_result`` is still accepted so the caller can persist
+    the sidecar files and so the truncation marker can disclose on-disk
+    image counts.
     """
     path = Path(path)
     text = path.read_text(encoding="utf-8", errors="replace")
@@ -60,12 +61,6 @@ def convert_html(
     # metadata - the generic extractor handled it well enough.
     if generator == "unknown" and metadata:
         problems = [p for p in problems if "Unrecognized" not in p]
-
-    if html_images_result is not None:
-        _render.rewrite_imgs_via_manifest(
-            soup,
-            html_images_result.src_to_entry,
-        )
 
     body_md = _render.render_body(soup, generator)
 

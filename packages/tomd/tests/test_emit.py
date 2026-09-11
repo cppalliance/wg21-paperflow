@@ -828,7 +828,8 @@ def test_render_paragraph_spans_uses_lines_when_present():
 def test_emit_markdown_renders_inserted_sub_caption_paragraph():
     """End-to-end: an IMAGE section followed by a synthesised
     sub-caption PARAGRAPH (lines=[], text=*...*) renders as the
-    image reference + a blank line + the italic paragraph."""
+    italic caption paragraph + a blank line + the italic sub-caption.
+    No image syntax is emitted (#408)."""
     from tomd.lib.pdf.images import ExtractedImage
     img = ExtractedImage(
         page=6, index_on_page=1, ext="png", bytes=b"",
@@ -837,6 +838,7 @@ def test_emit_markdown_renders_inserted_sub_caption_paragraph():
         stored_filename="p3127r1-fig6-1.png",
         xref=0, source="vector",
         sub_captions=(("a", "(a) An undirected graph."),),
+        caption_body_dropped=True,
     )
     image_section = Section(
         kind=SectionKind.IMAGE, text="",
@@ -851,10 +853,41 @@ def test_emit_markdown_renders_inserted_sub_caption_paragraph():
         lines=[],
     )
     md = emit_markdown({}, [image_section, sub_section])
-    assert "![Figure 1: ...](p3127r1-fig6-1.png)" in md
+    assert "![" not in md
+    assert "p3127r1-fig6-1.png" not in md
+    assert "*Figure 1: ...*" in md
     assert "*(a) An undirected graph.*" in md
-    # The italic caption should appear AFTER the image reference.
-    assert md.index("](p3127r1-fig6-1.png)") < md.index("*(a)")
+    # The caption paragraph appears BEFORE the sub-caption.
+    assert md.index("*Figure 1: ...*") < md.index("*(a)")
+
+
+def test_emit_markdown_image_caption_not_reemitted_when_body_kept():
+    """#408 regression (P0957R8 Fig 1 shape): when the equality gate
+    KEPT the body caption section (caption merged with trailing prose),
+    the IMAGE section must render as nothing - re-emitting the alt as
+    italic would duplicate the caption that is still visible in the
+    body."""
+    from tomd.lib.pdf.images import ExtractedImage
+    img = ExtractedImage(
+        page=4, index_on_page=1, ext="png", bytes=b"",
+        bbox=(86, 0, 506, 284),
+        suggested_alt="Figure 1: Expected memory layout",
+        stored_filename="p0957r8-fig4-1.png",
+        xref=0, source="raster",
+    )
+    assert img.caption_body_dropped is False
+    image_section = Section(
+        kind=SectionKind.IMAGE, text="",
+        confidence=Confidence.MEDIUM, page_num=3,
+        image_ref=img,
+    )
+    body_caption = make_section("Figure 1: Expected memory layout")
+    md = emit_markdown({}, [image_section, body_caption])
+    assert "![" not in md
+    assert "p0957r8-fig4-1.png" not in md
+    # The caption appears exactly once, from the kept body section.
+    assert md.count("Figure 1: Expected memory layout") == 1
+    assert "*Figure 1: Expected memory layout*" not in md
 
 
 # -- _escape_italic_text: markdown-escape correctness ---------------

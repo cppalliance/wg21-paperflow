@@ -8,7 +8,7 @@ This fixture tests that two vertically-stacked vector clusters separated by a su
 
 The pipeline must produce exactly one vector image spanning both panels, with (a) and (b) sub-captions as italic paragraphs below.
 
-![Figure 1: Multi-panel sub-figures](synth_sub_figure_merge-fig1-1.png)
+*Figure 1: Multi-panel sub-figures*
 
 *(a) Upper sub-figure*
 
