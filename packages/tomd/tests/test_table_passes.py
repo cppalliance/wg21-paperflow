@@ -12,10 +12,12 @@ from tomd.lib.pdf.types import Span, Line, Block, Section, SectionKind
 from tomd.lib.pdf.table import (
     _block_column_positions,
     _build_rows_sequential,
+    _build_rows_ybanded,
     _columns_count_match,
     _detect_side_by_side_tables,
     detect_tables,
     _gap_asymmetry_reject,
+    _is_column_aligned_orphan,
     _pass1_region_incomplete,
     _try_wrapped_partial_row,
     _try_cross_page_continuation,
@@ -1807,3 +1809,55 @@ class TestTableBugFixes:
         orphan_block = _block_from_lines([_line("Missed note", 70.0, 150.0, 150.0, 160.0)])
         all_blocks_with_extra = all_blocks + [orphan_block]
         assert _pass1_region_incomplete(region, 0, table_blocks, all_blocks_with_extra)
+
+    def test_is_column_aligned_orphan_multiline_narrow_col0(self):
+        # Multiline block at col 0 (x0=60.7, x1=98.0) width=37.3 <= 200
+        lines = [
+            _line("PyTorch /", 60.7, 225.8, 90.9, 233.2),
+            _line("TensorFlow", 60.7, 235.0, 98.0, 242.4),
+        ]
+        blk = _block_from_lines(lines)
+        col_xs = frozenset({60.7, 134.9, 209.0, 397.0})
+        assert _is_column_aligned_orphan(blk, col_xs)
+
+    def test_build_rows_ybanded_vertically_staggered_cells(self):
+        # Header block (all 4 cols)
+        header_lines = [
+            _line("Library", 60.7, 150.2, 86.4, 157.7),
+            _line("Feature", 134.9, 150.2, 162.1, 157.7),
+            _line("Mechanism", 209.0, 150.2, 302.0, 157.7),
+            _line("Scope", 397.0, 150.2, 450.1, 157.7),
+        ]
+        b_hdr = _block_from_lines(header_lines)
+
+        # Row 1: Col 1 starts at y=163.0 (4 lines), Col 0 starts at y=176.8, Cols 2-3 at y=172.2
+        b_col1 = _block_from_lines([
+            _line("Conditional", 134.9, 163.0, 171.9, 170.3),
+            _line("Numerical", 134.9, 172.2, 168.7, 179.6),
+            _line("Reproducibility", 134.9, 181.4, 184.2, 188.8),
+            _line("(CNR)", 134.9, 190.6, 155.0, 198.0),
+        ])
+        b_col0 = _block_from_lines([
+            _line("Intel oneMKL", 60.7, 176.8, 104.7, 184.2),
+        ])
+        b_col23 = _block_from_lines([
+            _line("Constrains execution paths", 209.0, 176.8, 367.0, 184.2),
+            _line("Reproducibility across specified CPU", 397.0, 172.2, 516.0, 179.6),
+            _line("configurations", 397.0, 181.4, 443.3, 188.8),
+        ])
+
+        ref_cols = [60.7, 134.9, 209.0, 397.0]
+        tbl_blocks = [b_hdr, b_col1, b_col0, b_col23]
+        rows, all_lines = _build_rows_ybanded(tbl_blocks, ref_cols, 4)
+
+        assert len(rows) == 2
+        # Header row
+        assert "".join(s.text for s in rows[0][0]).strip() == "Library"
+        assert "".join(s.text for s in rows[0][1]).strip() == "Feature"
+        assert "".join(s.text for s in rows[0][2]).strip() == "Mechanism"
+        assert "".join(s.text for s in rows[0][3]).strip() == "Scope"
+        # Data row 1
+        assert "".join(s.text for s in rows[1][0]).strip() == "Intel oneMKL"
+        assert "Conditional" in "".join(s.text for s in rows[1][1])
+        assert "Constrains execution paths" in "".join(s.text for s in rows[1][2])
+        assert "Reproducibility across specified CPU" in "".join(s.text for s in rows[1][3])
