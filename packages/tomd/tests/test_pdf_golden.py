@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 from tomd.lib.pdf import run_pipeline
+from tomd.lib.pdf.types import SectionKind
 
 _GOLDEN = Path(__file__).resolve().parent / "fixtures" / "golden"
 
@@ -101,10 +102,28 @@ _GOLDEN_STEMS = (
     # that wrapped onto the prose tail now heads its class body in the fence,
     # consistent with the Circle/Point bodies below it.
     "p3181r1",
+    # Shattered-table guard (#380): P4096R0 is a Google-Docs export whose
+    # tables arrive as one block per wrapped line. §5.1 and §5.4 are claimed
+    # by the side-by-side pre-scanner (atomized header over a shattered
+    # body), the two §5.2 tables stay with Pass 1 (row blocks with col-1+
+    # wrapped tails merged backward, a trailing continuation absorbed
+    # in-loop so the partial third row still joins). The golden pins all
+    # four tables plus the prose and headings around them; the family pins
+    # below guard the routing itself.
+    "p4096r0",
 )
 
 # Issue-180 reported symptom: this sentence is P4024R0's final paragraph.
 _P4024R0_CLOSING = "By embracing these practices"
+
+# #380 family pins for P4096R0: (page_num, rows incl. header, cols,
+# table_kind, table_source) for the four tables of §5.1, §5.2 (x2), §5.4.
+_P4096R0_TABLE_PINS = {
+    (9, 5, 4, "prose_table", "side_by_side_prepass"),
+    (10, 4, 3, "prose_table", "horizontal_rows"),
+    (10, 4, 3, "clean_matrix", "horizontal_rows"),
+    (11, 5, 4, "clean_matrix", "side_by_side_prepass"),
+}
 
 
 def _normalize_newlines(text: str) -> str:
@@ -179,3 +198,21 @@ def test_p4024r0_closing_paragraph_present():
         pytest.skip(f"missing PDF fixture: {pdf_path}")
     md = run_pipeline(pdf_path).md
     assert _P4024R0_CLOSING in md
+
+
+def test_p4096r0_table_family_pins():
+    """#380 focused guard: each of the four shattered tables is routed to
+    the intended family with the intended shape. Independent of the full
+    golden so a re-bless can never silently move a table to another pass.
+    """
+    pdf_path = _GOLDEN / "p4096r0.pdf"
+    if not pdf_path.is_file():
+        pytest.skip(f"missing PDF fixture: {pdf_path}")
+    sections = run_pipeline(pdf_path).sections
+    got = {
+        (s.page_num, len(s.columns), len(s.columns[0]),
+         s.table_kind, s.table_source)
+        for s in sections
+        if s.kind == SectionKind.TABLE and s.page_num in (9, 10, 11)
+    }
+    assert got == _P4096R0_TABLE_PINS

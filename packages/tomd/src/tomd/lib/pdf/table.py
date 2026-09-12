@@ -18,10 +18,21 @@ Table Family (6 kinds, corpus-validated against 768 tables from 124 WG21 PDFs):
                   backward-merged into the previous row via partial_absorbed.
   FALSE_POSITIVE  >50% empty cells or ragged columns.  Skipped.
 
-Five detection passes (run in order, each consumes matched blocks):
+Detection passes (run in order, each consumes matched blocks):
 
+  Pre-pass (atomized side-by-side): Pass 2's detector with
+    atomized_only=True, run before Pass 1 so tables whose cells arrive as
+    one block per wrapped line (Google Docs exports) are not taken line by
+    line as Pass 1 rows.  Entry via an atomized header (line blocks over
+    more x-positions than the seed has columns) or a regular header row
+    block over a shattered body (_body_is_atomized).  Dense-table and
+    mid-table-seed gates bound it.  table_source="side_by_side_prepass".
   Pass 1 (inline-column): blocks with 2+ lines whose x-starts have gaps
-    > _COLUMN_GAP_THRESHOLD.  Orphan absorption for wrapped cell first-lines.
+    > _COLUMN_GAP_THRESHOLD.  Orphan absorption for wrapped cell first-lines
+    (forward, col 0) and wrapped tails (backward, col 1+, any column count);
+    a trailing continuation without a confirming row is absorbed in-loop
+    (Branch 4c) so a following partial row still joins.  Fragment
+    absorption reaches at most _PARTIAL_ROW_MAX_Y_GAP below the last row.
   Pass 2 (side-by-side blocks): each cell is a separate MuPDF block at a
     different x-position (Tony Tables with multi-line code cells).
   Pass 3 (horizontal-row): narrow poll/vote grids with small column gaps.
@@ -31,6 +42,10 @@ Five detection passes (run in order, each consumes matched blocks):
     caption.  Collects all blocks (including monospace expression cells) in
     the spatial region below the label.  Cross-page continuation supported.
   Pass 5 (MuPDF native): fallback using MuPDF find_tables() on remaining blocks.
+  Post-passes (pass-agnostic): header cluster absorption (free blocks
+    directly above a table whose lines sit on its columns become the header
+    row, _collect_header_cluster) and separator-row removal (a body row of
+    dash-only cells is a rendered markdown separator, _drop_separator_rows).
 
 Classification flow:
   detect_tables() -> _compute_table_signals() -> _classify_table()
@@ -79,6 +94,27 @@ _ATOMIZED_HDR_MAX_HEIGHT = 60.0  # max header region height for recovery
 _ATOMIZED_HDR_MAX_LINE_GAP = 10.0  # y-gap ending the header block set
 _ATOMIZED_HDR_MAX_CONSEC_SINGLE = 3  # stop after N consecutive 1-col rows
 _ATOMIZED_PREPASS_MIN_ROWS = 5  # min body rows for the atomized-only pre-pass
+# Dense shattered tables (Google-Docs exports: one block per wrapped line,
+# every row populating all or all-but-one column) are accepted by the
+# pre-pass at a lower row count, so Pass 1 cannot steal their fused
+# col-0/col-1 blocks first. Both conditions must hold.
+_ATOMIZED_PREPASS_MIN_ROWS_DENSE = 4
+_ATOMIZED_PREPASS_DENSE_MIN_COLS = 3
+# Mid-table seed guard: a genuine atomized header has prose or a heading
+# (left margin) above it. A cell aligned to column 1+ within this many
+# points above the seed means the seed is a data row of a table whose
+# real header sits higher up or on the previous page.
+_ATOMIZED_SEED_ABOVE_GAP = 40.0
+# Atomized body under a regular header row block: the pre-pass claims it
+# when at least this fraction of the grouped rows is built from 2+
+# blocks and at least this fraction of the body blocks is single-line
+# (one block per wrapped line). Pass 1 would take each such line as a
+# row of its own.
+_ATOMIZED_BODY_MIN_SINGLE_FRAC = 0.6
+# A table cell that is only a run of ASCII/en/em dashes, optionally with
+# the markdown alignment colons: a rendered separator, not data (see
+# _drop_separator_rows).
+_SEPARATOR_CELL_RE = re.compile(r"^:?[-\u2013\u2014]+:?$")
 
 # Guard: bare section number on line 0 of a 2-line block.
 # Prevents misclassifying heading blocks (large bold number + right-aligned
@@ -478,6 +514,85 @@ def _pass1_region_incomplete(
             return True
     return False
 
+
+def _seed_is_mid_table(
+    blocks: list[Block],
+    seed_idx: int,
+    col_xs: list[float],
+    used: set[int],
+) -> bool:
+    """True when the atomized-header seed is really a data-row fragment.
+
+    Two signatures, either one disqualifies the seed:
+
+    - A block sits to the left of the seed in the same y-band. A header
+      row starts at column 0, so a seed with a left neighbour is the
+      right-hand fragment of a data row (p4047r0: "2021 // Confirmed"
+      beside "T1 // P2300 unlikely ...").
+    - A column-1+ aligned block sits within _ATOMIZED_SEED_ABOVE_GAP above
+      the seed: the wrapped cells of the previous row, or of a row
+      continued from the previous page. Prose and headings above a genuine
+      header start at the left margin and never trip this.
+
+    Blocks already consumed by an earlier table in this scan are ignored
+    so stacked tables still seed independently.
+    """
+    seed = blocks[seed_idx]
+    sx0, sy0, _, sy1 = seed.bbox
+
+    def _in_band(pb: Block) -> bool:
+        return (pb.bbox[3] > sy0 + _TABLE_Y_OVERLAP_MARGIN
+                and pb.bbox[1] < sy1 - _TABLE_Y_OVERLAP_MARGIN)
+
+    # Left neighbour in the same band: look both ways, since y-mid
+    # sorting can place a taller seed before a shorter left neighbour.
+    for k in range(seed_idx + 1, len(blocks)):
+        pb = blocks[k]
+        if pb.page_num != seed.page_num or pb.bbox[1] >= sy1:
+            break
+        if (k not in used and _in_band(pb)
+                and pb.bbox[0] < sx0 - _COLUMN_X_TOLERANCE):
+            return True
+
+    for k in range(seed_idx - 1, -1, -1):
+        if k in used:
+            continue
+        pb = blocks[k]
+        if pb.page_num != seed.page_num:
+            break
+        if _in_band(pb) and pb.bbox[0] < sx0 - _COLUMN_X_TOLERANCE:
+            return True
+        gap = sy0 - pb.bbox[3]
+        if gap < 0:
+            continue  # same band as the seed (a taller sibling header cell)
+        if gap > _ATOMIZED_SEED_ABOVE_GAP:
+            break
+        ci = _nearest_column(pb.bbox[0], col_xs)
+        if ci >= 1 and abs(pb.bbox[0] - col_xs[ci]) <= _COLUMN_X_TOLERANCE:
+            return True
+    return False
+
+
+def _body_is_atomized(rows: list[list[tuple[int, Block]]]) -> bool:
+    """True when the grouped body is shattered into one block per line.
+
+    Row-block tables (Pass 1's family) group as one multi-line block per
+    row; a shattered table groups as several mostly single-line blocks per
+    row. Both conditions are required so a row-block table with a few
+    fused right-hand fragments stays with Pass 1. "Most" rather than
+    "all" rows, because the body scan may run on into a following
+    table whose header block forms a one-block row.
+    """
+    if not rows:
+        return False
+    multi = sum(1 for row in rows if len(row) >= 2)
+    if multi / len(rows) < _ATOMIZED_BODY_MIN_SINGLE_FRAC:
+        return False
+    body = [b for row in rows for _, b in row]
+    single = sum(1 for b in body if len(b.lines) == 1)
+    return single / len(body) >= _ATOMIZED_BODY_MIN_SINGLE_FRAC
+
+
 def _detect_side_by_side_tables(
     blocks: list[Block],
     *,
@@ -590,6 +705,9 @@ def _detect_side_by_side_tables(
         atomized_hdr: set[int] | None = None
         if len(col_xs) > len(cols):
             hdr_y0 = header.bbox[1]
+            if _seed_is_mid_table(blocks, i, col_xs, used):
+                i += 1
+                continue
             hdr_block_set: set[int] = {i}
             max_collected_y1 = header.bbox[3]
             for k in range(i + 1, j):
@@ -602,19 +720,24 @@ def _detect_side_by_side_tables(
                     break
                 hdr_block_set.add(k)
                 max_collected_y1 = max(max_collected_y1, nb.bbox[3])
+            # Cluster line x0s, not block x0s: a fused two-line header
+            # block ("P2300R10[8] (2026)" / "Coroutine executor") holds
+            # two column headings but only one block x0.
             ext_xs = _cluster_x_positions(
-                [blocks[k].bbox[0] for k in sorted(hdr_block_set)])
+                [ln.bbox[0] for k in sorted(hdr_block_set)
+                 for ln in blocks[k].lines])
             if len(ext_xs) >= len(col_xs):
                 atomized_hdr = hdr_block_set
                 _log.debug("Atomized header recovery: %d blocks, "
-                           "%d cols on page %d", len(hdr_block_set),
-                           len(ext_xs), page)
+                           "%d cols on page %d, seed %r",
+                           len(hdr_block_set), len(ext_xs), page,
+                           header.text[:40])
             else:
                 i += 1
                 continue
-        elif atomized_only:
-            i += 1
-            continue
+        # A regular header row block is not skipped here in the pre-pass:
+        # the body may still be shattered (p4094r0 §Assertion table). The
+        # decision is taken after row grouping, see _body_is_atomized.
 
         # When we recovered an atomized header, exclude header blocks
         # from body_candidates and reset h_bottom.
@@ -631,27 +754,31 @@ def _detect_side_by_side_tables(
                 continue
             h_bottom = effective_h_bottom
 
-        # Fix ordering: _column_aware_sort may place a non-col-0 block
-        # slightly before a col-0 block that starts the next row (when
-        # the non-col-0 block has marginally lower y).  Swap adjacent
-        # pairs so col-0 blocks come first within the same y-band.
+        # Fix ordering: _column_aware_sort may place non-col-0 blocks
+        # before the col-0 block that starts the same row (marginally
+        # lower y, or an exact y tie kept in extraction order).  Walk
+        # each col-0 block back over every consecutive preceding
+        # non-col-0 block within the band so the row starts at col 0.
+        # p4096r0 page 11: two cells at y0 478.58 precede "Generic
+        # composition" at y0 478.58.
         _SBS_COL0_SWAP_BAND = 10.0
         body_sorted = list(body_candidates)
-        si = 0
-        while si < len(body_sorted) - 1:
-            _, b_cur = body_sorted[si]
-            _, b_nxt = body_sorted[si + 1]
-            c_cur = _nearest_column(b_cur.bbox[0], col_xs)
-            c_nxt = _nearest_column(b_nxt.bbox[0], col_xs)
-            if (c_cur != 0 and c_nxt == 0
-                    and b_cur.page_num == b_nxt.page_num
-                    and 0 < b_nxt.bbox[1] - b_cur.bbox[1]
-                            < _SBS_COL0_SWAP_BAND):
-                body_sorted[si], body_sorted[si + 1] = (
-                    body_sorted[si + 1], body_sorted[si])
-                si += 2
-            else:
-                si += 1
+        for si in range(1, len(body_sorted)):
+            _, b_c0 = body_sorted[si]
+            if _nearest_column(b_c0.bbox[0], col_xs) != 0:
+                continue
+            k = si
+            while k > 0:
+                _, b_prev = body_sorted[k - 1]
+                if (_nearest_column(b_prev.bbox[0], col_xs) != 0
+                        and b_prev.page_num == b_c0.page_num
+                        and 0 <= b_c0.bbox[1] - b_prev.bbox[1]
+                                < _SBS_COL0_SWAP_BAND):
+                    k -= 1
+                else:
+                    break
+            if k < si:
+                body_sorted.insert(k, body_sorted.pop(si))
 
         # Group candidates into rows.
         # A new row starts when a col-0 block appears and the
@@ -727,6 +854,7 @@ def _detect_side_by_side_tables(
         # x-positions (not just block x0) because single-block rows can
         # contain multiple internal columns (Phase 15 per-line logic).
         valid_rows: list[list[tuple[int, Block]]] = []
+        valid_row_col_counts: list[int] = []
         consec_single = 0
         scanned_rows: list[tuple[list[tuple[int, Block]], bool]] = []
         for row in rows:
@@ -736,6 +864,7 @@ def _detect_side_by_side_tables(
                     row_cols.add(_nearest_column(ln.bbox[0], col_xs))
             if len(row_cols) >= 2:
                 valid_rows.append(row)
+                valid_row_col_counts.append(len(row_cols))
                 scanned_rows.append((row, True))
                 consec_single = 0
             else:
@@ -763,8 +892,20 @@ def _detect_side_by_side_tables(
         ]
 
         min_rows = _MIN_TABLE_ROWS
-        if atomized_only and atomized_hdr is not None:
-            min_rows = max(min_rows, _ATOMIZED_PREPASS_MIN_ROWS)
+        if atomized_only:
+            # Regular header over a body of row blocks: Pass 1 territory.
+            if atomized_hdr is None and not _body_is_atomized(valid_rows):
+                i += 1
+                continue
+            dense = (
+                len(col_xs) >= _ATOMIZED_PREPASS_DENSE_MIN_COLS
+                and bool(valid_row_col_counts)
+                and all(n >= len(col_xs) - 1 for n in valid_row_col_counts)
+            )
+            min_rows = max(
+                min_rows,
+                _ATOMIZED_PREPASS_MIN_ROWS_DENSE if dense
+                else _ATOMIZED_PREPASS_MIN_ROWS)
         if len(valid_rows) < min_rows:
             i += 1
             continue
@@ -893,6 +1034,8 @@ def _detect_side_by_side_tables(
             columns=all_rows_data,
             table_kind=kind_val,
             table_strategy=strategy_val,
+            table_source=("side_by_side_prepass" if atomized_only
+                          else "side_by_side"),
         ))
         _log.debug("Side-by-side table: %d rows x %d cols on page %d",
                     len(all_rows_data), num_cols, page)
@@ -1949,6 +2092,10 @@ _HORIZONTAL_ROW_MAX_GAP_RATIO = 4.0
 _SPANNING_HEADER_X_TOLERANCE = 40.0
 _SPANNING_HEADER_Y_GAP_MAX = 30.0
 _SPANNING_HEADER_MIN_COLS = 2
+# A header label wrapped onto stacked lines in one column ("Feed" /
+# "Rate" / "(msg/s)") is short; a prose paragraph at column 0 is not.
+# Stacked lines longer than this end the cluster as non-header.
+_SPANNING_HEADER_STACKED_MAX_LEN = 30
 
 # Trailing horizontal-row split: blocks where MuPDF merged a table
 # header into the preceding paragraph (happens when data cells are
@@ -2054,34 +2201,101 @@ def _gap_asymmetry_reject(lines: list) -> bool:
     return False
 
 
-def _block_horizontal_row_relaxed(
-    block: Block, min_cells: int,
-) -> list[float] | None:
-    """Like _block_horizontal_row but with a caller-supplied min_cells.
+def _collect_header_cluster(
+    remaining: list[Block],
+    absorbed: set[int],
+    page_num: int,
+    table_top: float,
+    col_xs: list[float],
+) -> tuple[list[int], list[list[Span]]] | None:
+    """Gather the remaining blocks that form a shattered header above a table.
 
-    Used for spanning-header detection where the header may have only
-    2 lines (below the default _HORIZONTAL_ROW_MIN_CELLS=3).
+    Walks upward from *table_top*: the first block must end within
+    _SPANNING_HEADER_Y_GAP_MAX, every further block within
+    _ATOMIZED_HDR_MAX_LINE_GAP of the cluster's current top (a larger gap
+    is the whitespace before a title or prose, which ends the header).
+    Whitespace-only blocks (header/footer stripping leaves them behind)
+    are skipped without joining or moving the top. A block joins only
+    when every non-empty line sits on a table column and none spills
+    past the next column (prose spanning columns), and only when the
+    cluster stays well-formed with it: lines stacked in one column are a
+    wrapped label and join into one cell, top to bottom, but only when
+    each is short (prose at column 0 is long); two lines at the same
+    height in one column are not a header. The first block that fails
+    ends the cluster; what was gathered below it stands.
+
+    Returns (indices into *remaining*, header row) or None when fewer than
+    _SPANNING_HEADER_MIN_COLS columns are covered.
     """
-    if len(block.lines) < min_cells:
-        return None
-    y_centers = [(ln.bbox[1] + ln.bbox[3]) / 2 for ln in block.lines]
-    if max(y_centers) - min(y_centers) <= _HORIZONTAL_ROW_Y_TOLERANCE:
-        if _gap_asymmetry_reject(block.lines):
-            return None
-        return [ln.bbox[0] for ln in block.lines]
-    y_spread = max(y_centers) - min(y_centers)
-    if y_spread <= _HORIZONTAL_ROW_Y_TOLERANCE_WIDE:
-        by_x = sorted(block.lines, key=lambda ln: ln.bbox[0])
-        non_overlapping = True
-        for k in range(len(by_x) - 1):
-            if by_x[k + 1].bbox[0] < by_x[k].bbox[2]:
-                non_overlapping = False
+    ncols = len(col_xs)
+    cands = sorted(
+        (bi for bi, b in enumerate(remaining)
+         if bi not in absorbed and b.page_num == page_num
+         and b.bbox[3] <= table_top),
+        key=lambda bi: -remaining[bi].bbox[3])
+    chosen: list[int] = []
+    per_col: dict[int, list[tuple[float, float, Line]]] = {}  # (y_mid, x0, line)
+    region_top = table_top
+    max_gap = _SPANNING_HEADER_Y_GAP_MAX
+    for bi in cands:
+        blk = remaining[bi]
+        if region_top - blk.bbox[3] > max_gap:
+            break
+        lines = [ln for ln in blk.lines if ln.spans and ln.text.strip()]
+        if not lines:
+            continue
+        blk_tagged: list[tuple[int, tuple[float, float, Line]]] = []
+        for ln in lines:
+            x0 = ln.bbox[0]
+            ci = min(range(ncols), key=lambda c: abs(x0 - col_xs[c]))
+            if abs(x0 - col_xs[ci]) >= _SPANNING_HEADER_X_TOLERANCE:
+                blk_tagged = None
                 break
-        if non_overlapping:
-            if _gap_asymmetry_reject(by_x):
-                return None
-            return [ln.bbox[0] for ln in by_x]
-    return None
+            if (ci + 1 < ncols
+                    and ln.bbox[2] > col_xs[ci + 1] + _COLUMN_X_TOLERANCE):
+                blk_tagged = None
+                break
+            blk_tagged.append((ci, ((ln.bbox[1] + ln.bbox[3]) / 2, x0, ln)))
+        if blk_tagged is None:
+            break
+        trial = {ci: list(ls) for ci, ls in per_col.items()}
+        for ci, t in blk_tagged:
+            trial.setdefault(ci, []).append(t)
+        if not _header_cluster_well_formed(trial):
+            break
+        per_col = trial
+        chosen.append(bi)
+        region_top = min(region_top, blk.bbox[1])
+        max_gap = _ATOMIZED_HDR_MAX_LINE_GAP
+
+    if len(per_col) < _SPANNING_HEADER_MIN_COLS:
+        return None
+    header_row: list[list[Span]] = [[] for _ in range(ncols)]
+    for ci, lines in per_col.items():
+        for t in sorted(lines, key=lambda t: (t[0], t[1])):
+            if header_row[ci]:
+                header_row[ci].append(Span(text=" "))
+            header_row[ci].extend(t[2].spans)
+    return chosen, header_row
+
+
+def _header_cluster_well_formed(
+    per_col: dict[int, list[tuple[float, float, Line]]],
+) -> bool:
+    """Per-column constraints of a header cluster (see
+    _collect_header_cluster): no two lines on one baseline, and stacked
+    lines all short."""
+    for lines in per_col.values():
+        if len(lines) < 2:
+            continue
+        ordered = sorted(lines, key=lambda t: (t[0], t[1]))
+        for a, b in zip(ordered, ordered[1:]):
+            if b[0] - a[0] <= _HORIZONTAL_ROW_Y_TOLERANCE:
+                return False
+        if any(len(t[2].text.strip()) > _SPANNING_HEADER_STACKED_MAX_LEN
+               for t in ordered):
+            return False
+    return True
 
 
 def _line_y_center(line: Line) -> float:
@@ -3961,6 +4175,20 @@ def _try_relaxed_match(
     return None
 
 
+def _within_fragment_gap(block: Block, table_blocks: list[Block]) -> bool:
+    """True when *block* starts close enough below the table's last block
+    to be a fragment of its current row or the next one.
+
+    Branches 3 and 4 claim "this block is a piece of the table being
+    built". Beyond _PARTIAL_ROW_MAX_Y_GAP of whitespace that claim cannot
+    hold: a column-aligned heading or a shorter header block sitting
+    there opens the *next* table, and absorbing it chains two stacked
+    tables into one (p4125r1 benchmark pages). A negative gap is a
+    same-band right-hand fragment and passes.
+    """
+    return block.bbox[1] - table_blocks[-1].bbox[3] <= _PARTIAL_ROW_MAX_Y_GAP
+
+
 def _try_subset_columns_absorb(
     blocks: list[Block],
     j: int,
@@ -3973,7 +4201,8 @@ def _try_subset_columns_absorb(
             and _is_subset_columns(next_cols, ref_cols)
             and not _block_is_monospace(blocks[j])
             and not _block_is_monospace(table_blocks[0])
-            and blocks[j].page_num == table_blocks[-1].page_num):
+            and blocks[j].page_num == table_blocks[-1].page_num
+            and _within_fragment_gap(blocks[j], table_blocks)):
         return _MatchResult(
             advance_to=j + 1,
             absorbed_ids=frozenset({id(blocks[j])}),
@@ -4056,8 +4285,15 @@ def _try_single_orphan(
             and blocks[j + 1].page_num == blocks[j].page_num
             and _columns_match(ref_cols, peek_cols)):
         return None
+    # A non-monospace orphan aligned to column 1+ is the wrapped tail of
+    # the previous row's cell (top-aligned cells put a row's first line
+    # on the col-0 line, so it cannot be the next row's first line).
+    # Marking it partial routes it through the from_partial path of
+    # _build_rows_sequential, which maps it by nearest column and merges
+    # it backward. Without the mark the line lands in column 0 as a row
+    # of its own and Pass B glues it forward (p4096r0 §5.2 "Age" row).
     absorbed = set()
-    if len(ref_cols) == 2 and blocks[j].lines:
+    if blocks[j].lines:
         orphan_x0 = blocks[j].lines[0].bbox[0]
         orphan_spans = [
             s for s in blocks[j].lines[0].spans
@@ -4202,7 +4438,8 @@ def _try_orphan_lookahead(
     """Branch 4: single-line block aligned to a column, lookahead to confirm."""
     if not (_is_column_aligned_orphan(blocks[j], column_xs)
             and j + 1 < len(blocks)
-            and blocks[j].page_num == table_blocks[-1].page_num):
+            and blocks[j].page_num == table_blocks[-1].page_num
+            and _within_fragment_gap(blocks[j], table_blocks)):
         return None
 
     # 4a: Single-orphan case
@@ -4501,6 +4738,25 @@ def _build_rows_sequential(
     return rows, all_lines
 
 
+def _drop_separator_rows(ts: Section) -> None:
+    """Remove body rows whose every cell is a run of dashes.
+
+    Markdown-authored papers rendered to PDF carry the ``|---|---|``
+    separator as a table row of "-" cells (p1068r11 poll tables). Once
+    the header cluster above the drawn table is absorbed, that row is
+    a body row holding no data. The table's line list keeps the dash
+    lines so they stay excluded from prose."""
+    body = ts.columns[1:]
+    kept = [
+        row for row in body
+        if not (row and all(
+            _SEPARATOR_CELL_RE.match("".join(s.text for s in c).strip())
+            for c in row))]
+    if len(kept) != len(body):
+        ts.columns[1:] = kept
+        ts.text = _render_table_text(ts.columns)
+
+
 def detect_tables(
     blocks: list[Block],
     *,
@@ -4621,6 +4877,23 @@ def detect_tables(
                 j = result.advance_to
                 continue
 
+            # Branch 4c: trailing continuation.  A single-line block at
+            # column 1+ directly under the last row whose lookahead found
+            # no full row (the next row is itself partial, or the table
+            # ends here).  Absorbing it in the loop keeps the scan alive
+            # so Branch 5 can still take a following partial row
+            # (p4096r0 §5.2 noexcept row 3).  Guard: only tables that are
+            # already established, to avoid grabbing code-comparison
+            # content.
+            if (len(table_blocks) >= _MIN_TABLE_ROWS
+                    and _is_trailing_continuation(
+                        blocks[j], ref_cols, table_blocks[-1].bbox[3],
+                        blocks[j].page_num == table_blocks[-1].page_num)):
+                partial_absorbed.add(id(blocks[j]))
+                table_blocks.append(blocks[j])
+                j += 1
+                continue
+
             # Branch 4 failure falls through here. Today this is safe because
             # _is_column_aligned_orphan and _is_partial_row are mutually exclusive
             # (orphan blocks are single-line; partial row rejects single-line).
@@ -4650,22 +4923,6 @@ def detect_tables(
 
             # No branch matched: end table
             break
-
-        # Absorb trailing continuations of the last row's non-first
-        # columns.  These are single-line blocks whose x0 matches
-        # column 1+ but have no following full-column row to trigger
-        # the lookahead-based orphan absorption above.
-        # Guard: only extend tables that are already well-established
-        # (header + data rows) to avoid grabbing code-comparison content.
-        if len(table_blocks) >= _MIN_TABLE_ROWS:
-            while (j < len(blocks)
-                   and _is_trailing_continuation(
-                       blocks[j], ref_cols,
-                       table_blocks[-1].bbox[3],
-                       blocks[j].page_num == table_blocks[-1].page_num)):
-                partial_absorbed.add(id(blocks[j]))
-                table_blocks.append(blocks[j])
-                j += 1
 
         if len(table_blocks) >= _MIN_TABLE_ROWS:
             num_cols = len(ref_cols)
@@ -4832,6 +5089,7 @@ def detect_tables(
                 columns=rows,
                 table_kind=kind_val,
                 table_strategy=strategy_val,
+                table_source="horizontal_rows",
             ))
             _log.debug("Table detected: %d rows x %d cols on page %d",
                         len(rows), num_cols, p1_page)
@@ -4951,50 +5209,30 @@ def detect_tables(
         if all(x >= 999 for x in col_xs):
             continue
 
-        for bi, blk in enumerate(remaining):
-            if bi in absorbed:
-                continue
-            if blk.page_num != ts.page_num:
-                continue
-            y_gap = ts_y_top - blk.bbox[3]
-            if not (0 <= y_gap <= _SPANNING_HEADER_Y_GAP_MAX):
-                continue
-            blk_cols = _block_horizontal_row_relaxed(
-                blk, _SPANNING_HEADER_MIN_COLS)
-            if blk_cols is None or len(blk_cols) > ncols:
-                continue
-            # Map each header col to its nearest table col.
-            mapping = [
-                min(range(ncols),
-                    key=lambda ci, hx=hx: abs(hx - col_xs[ci]))
-                for hx in blk_cols
-            ]
-            dists = [
-                min(abs(hx - col_xs[ci]) for ci in range(ncols))
-                for hx in blk_cols
-            ]
-            if (len(set(mapping)) != len(mapping)
-                    or not all(d < _SPANNING_HEADER_X_TOLERANCE
-                               for d in dists)):
-                continue
-            # Absorb: prepend header row to table.
-            header_row: list[list] = [[] for _ in range(ncols)]
-            for li, ln in enumerate(blk.lines):
-                if li < len(mapping):
-                    header_row[mapping[li]] = list(ln.spans)
+        cluster = _collect_header_cluster(
+            remaining, absorbed, ts.page_num, ts_y_top, col_xs)
+        if cluster is None:
+            continue
+        cluster_idxs, header_row = cluster
+        # Absorb: prepend header row to table.
+        for bi in cluster_idxs:
+            for ln in remaining[bi].lines:
                 ts.lines.insert(0, ln)
-            ts.columns.insert(0, header_row)
-            ts.text = _render_table_text(ts.columns)
-            absorbed.add(bi)
-            _log.debug(
-                "Spanning header absorbed: page %d, "
-                "%d-col header over %d-col table",
-                blk.page_num, len(blk_cols), ncols)
-            break  # one header per table
+        ts.columns.insert(0, header_row)
+        ts.text = _render_table_text(ts.columns)
+        absorbed.update(cluster_idxs)
+        _log.debug(
+            "Spanning header absorbed: page %d, %d block(s) covering "
+            "%d of %d cols",
+            ts.page_num, len(cluster_idxs),
+            sum(1 for c in header_row if c), ncols)
 
     if absorbed:
         remaining = [b for bi, b in enumerate(remaining)
                      if bi not in absorbed]
+
+    for ts in table_sections:
+        _drop_separator_rows(ts)
 
     if table_sections:
         kinds = {}
