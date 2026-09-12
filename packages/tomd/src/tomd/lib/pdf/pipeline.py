@@ -117,6 +117,20 @@ _COLUMN_GAP_MIN = 20.0
 # a false column split against 20+ body blocks on the other side.
 _COLUMN_MIN_FRACTION = 0.20
 
+# Guard G1 – gutter-crossing fraction.  Among left-side blocks whose
+# y-midpoint lies within the right column's vertical span, the fraction
+# whose x1 extends past the right column's left edge (plus tolerance)
+# must not exceed this threshold.  Shattered table pages have cells
+# that straddle the "gutter" while genuine two-column pages do not.
+_COLUMN_CROSSING_MAX_FRAC = 0.15
+_COLUMN_CROSSING_X_TOL = 5.0  # pt of slack for the crossing check
+
+# Guard G2 – row-alignment fraction.  When right-side blocks have a
+# left-side counterpart within this y-tolerance, the page is likely a
+# table (cells align into rows), not two text columns.
+_COLUMN_ROW_ALIGN_TOL = 1.5     # pt: y0-proximity to count as row-aligned
+_COLUMN_ROW_ALIGN_MAX_FRAC = 0.5  # reject when fraction >= this
+
 
 def _toc_structural_hints(sections) -> list[bool]:
     """Mark sections that structurally resemble TOC entries.
@@ -356,6 +370,46 @@ def _detect_column_split(blocks: list, page_width: float) -> float | None:
         min_right_x0 = min(right_x0s)
         if min_right_x0 - max_left_x0 < _COLUMN_GAP_MIN:
             return None
+
+    # --- Guard G1: gutter-crossing fraction (interleaved blocks only) ---
+    # Among left-side blocks vertically interleaved with the right column,
+    # count those whose x1 extends past the right column's left edge.
+    # Table pages have cells that straddle the split; genuine columns do not.
+    right_blocks = [b for b in blocks
+                    if (b.bbox[0] + b.bbox[2]) / 2 >= best_split]
+    left_blocks = [b for b in blocks
+                   if (b.bbox[0] + b.bbox[2]) / 2 < best_split]
+    if right_blocks and left_blocks:
+        right_y0 = min(b.bbox[1] for b in right_blocks)
+        right_y1 = max(b.bbox[3] for b in right_blocks)
+        min_right_x0_val = min(b.bbox[0] for b in right_blocks)
+        interleaved = [b for b in left_blocks
+                       if (b.bbox[1] + b.bbox[3]) / 2 >= right_y0
+                       and (b.bbox[1] + b.bbox[3]) / 2 <= right_y1]
+        if interleaved:
+            crossing = sum(
+                1 for b in interleaved
+                if b.bbox[2] > min_right_x0_val + _COLUMN_CROSSING_X_TOL)
+            frac = crossing / len(interleaved)
+            if frac > _COLUMN_CROSSING_MAX_FRAC:
+                return None
+
+    # --- Guard G2: row-alignment fraction ---
+    # When most right-side blocks have a left-side block starting at the
+    # same y0 (within tolerance), the page is a row-aligned table, not
+    # two independent text columns.
+    if right_blocks and left_blocks:
+        left_y0s = [b.bbox[1] for b in left_blocks]
+        aligned = 0
+        for rb in right_blocks:
+            ry0 = rb.bbox[1]
+            if any(abs(ry0 - ly0) <= _COLUMN_ROW_ALIGN_TOL
+                   for ly0 in left_y0s):
+                aligned += 1
+        frac = aligned / len(right_blocks)
+        if frac >= _COLUMN_ROW_ALIGN_MAX_FRAC:
+            return None
+
     return best_split
 
 

@@ -8,6 +8,7 @@ from types import SimpleNamespace
 
 from tomd.lib.pdf.types import Span, Line, Block, Section, SectionKind
 from tomd.lib.pdf.table import (
+    _columns_count_match,
     _gap_asymmetry_reject,
     _block_horizontal_row_relaxed,
     _try_wrapped_partial_row,
@@ -17,7 +18,11 @@ from tomd.lib.pdf.table import (
     _detect_mupdf_native_tables,
     _detect_banded_rotated_tables,
 )
-from tomd.lib.pdf.pipeline import _column_aware_sort, _detect_drawing_grids
+from tomd.lib.pdf.pipeline import (
+    _column_aware_sort,
+    _detect_column_split,
+    _detect_drawing_grids,
+)
 
 # Page height of a 595x842 portrait page (P3100R6 geometry), shared by
 # the drawing-grid tests and the rotation fixtures below.
@@ -984,3 +989,120 @@ class TestMergeCrossPageFragments:
         a = self._fragment([["a1", "x"], ["a2", "y"]], 0, 120.0, 300.0)
         b = self._fragment([["b1", "z"]], 1, 400.0, 500.0)
         assert len(_merge_cross_page_fragments([a, b])) == 2
+
+
+# ── _detect_column_split G1/G2 guard tests ──────────────────────────
+
+def _split_block(x0: float, y0: float, x1: float, y1: float) -> Block:
+    """Minimal block for column-split testing (bbox only)."""
+    ln = _line("x", x0, y0, x1, y1)
+    return Block(lines=[ln], bbox=(x0, y0, x1, y1), page_num=0)
+
+
+class TestColumnSplitGuards:
+    """_detect_column_split G1 (gutter-crossing) and G2 (row-alignment)."""
+
+    @staticmethod
+    def _page_width():
+        return 612.0
+
+    def test_genuine_two_column_p3977r0_p5_accepted(self):
+        """p3977r0 page 5: genuine two-column text. G1=0.0, G2 low."""
+        # Left column blocks at x0~72, right at x0~310; no crossing,
+        # y0s do not align across columns.
+        blocks = [
+            _split_block(72, 100, 280, 112),
+            _split_block(72, 120, 280, 132),
+            _split_block(72, 140, 280, 152),
+            _split_block(72, 160, 280, 172),
+            _split_block(72, 180, 280, 192),
+            _split_block(310, 105, 540, 117),
+            _split_block(310, 125, 540, 137),
+            _split_block(310, 145, 540, 157),
+            _split_block(310, 165, 540, 177),
+            _split_block(310, 185, 540, 197),
+        ]
+        result = _detect_column_split(blocks, self._page_width())
+        assert result is not None, "genuine two-column must be accepted"
+
+    def test_genuine_two_column_p0533r9_p4_accepted(self):
+        """p0533r9 page 4: mixed page (two-column top, full-width below).
+        Must keep today's two-column detection."""
+        # Left column at x0~57, right at x0~310; no gutter crossing.
+        # y0s do not align (left lines at 100,115,130; right at 103,118,133).
+        blocks = [
+            _split_block(57, 100, 280, 112),
+            _split_block(57, 115, 280, 127),
+            _split_block(57, 130, 280, 142),
+            _split_block(310, 103, 540, 115),
+            _split_block(310, 118, 540, 130),
+            _split_block(310, 133, 540, 145),
+        ]
+        result = _detect_column_split(blocks, self._page_width())
+        assert result is not None, "genuine two-column must be accepted"
+
+    def test_p4096r0_p9_rejected_by_g2(self):
+        """p4096r0 page 9: shattered table cells form row-aligned left/right
+        blocks. G2 (row-alignment fraction >= 0.5) must reject."""
+        # Simulated: left blocks at x0~67-171, right at x0~301.
+        # y0s align between left and right (table rows).
+        blocks = [
+            _split_block(67, 300, 170, 315),   # left cell
+            _split_block(301, 300, 434, 315),  # right cell, same y0
+            _split_block(67, 340, 170, 355),
+            _split_block(301, 340, 434, 355),
+            _split_block(67, 380, 170, 395),
+            _split_block(301, 380, 434, 395),
+            _split_block(67, 420, 170, 435),
+            _split_block(301, 420, 434, 435),
+            _split_block(67, 460, 170, 475),
+            _split_block(171, 460, 300, 475),  # extra left block
+        ]
+        result = _detect_column_split(blocks, self._page_width())
+        assert result is None, "shattered table (G2) must be rejected"
+
+    def test_p4096r0_p10_rejected_by_g1(self):
+        """p4096r0 page 10: left blocks whose x1 crosses into the right
+        column's x-range. G1 (gutter-crossing fraction > 0.15) must reject."""
+        # Simulated: left blocks crossing into right zone (x1 > 301+tol).
+        blocks = [
+            _split_block(67, 100, 310, 115),   # x1=310 crosses right x0=301
+            _split_block(67, 130, 310, 145),
+            _split_block(67, 160, 310, 175),
+            _split_block(67, 190, 310, 205),
+            _split_block(67, 220, 310, 235),
+            _split_block(301, 100, 434, 115),
+            _split_block(301, 130, 434, 145),
+            _split_block(301, 160, 434, 175),
+        ]
+        result = _detect_column_split(blocks, self._page_width())
+        assert result is None, "gutter-crossing page (G1) must be rejected"
+
+
+# ── _columns_count_match y-overlap guard tests ──────────────────────
+
+class TestColumnsCountMatchOverlap:
+    """_columns_count_match must reject same-row y-overlapping blocks."""
+
+    def test_y_overlapping_pair_rejected(self):
+        """Two blocks at the same y (table header halves) must not match."""
+        cols = [67.0, 244.0]
+        # block_a bottom = 200, block_b top = 190: b starts above a's bottom
+        assert not _columns_count_match(cols, cols, 200.0, 190.0, True)
+
+    def test_stacked_pair_with_small_gap_accepted(self):
+        """Blocks stacked with a small y-gap (< 40) must be accepted."""
+        cols = [67.0, 244.0]
+        # block_a bottom = 200, block_b top = 215: gap = 15
+        assert _columns_count_match(cols, cols, 200.0, 215.0, True)
+
+    def test_stacked_pair_with_large_gap_rejected(self):
+        """Blocks separated by > _RELAXED_MATCH_MAX_Y_GAP (40) rejected."""
+        cols = [67.0, 244.0]
+        # block_a bottom = 200, block_b top = 250: gap = 50 > 40
+        assert not _columns_count_match(cols, cols, 200.0, 250.0, True)
+
+    def test_different_page_rejected(self):
+        """Cross-page pairs must always be rejected."""
+        cols = [67.0, 244.0]
+        assert not _columns_count_match(cols, cols, 200.0, 215.0, False)

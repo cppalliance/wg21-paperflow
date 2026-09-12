@@ -76,7 +76,9 @@ _SBS_MAX_SCAN_GAP_ALIGNED = 50.0  # larger tolerance for column-aligned blocks
 _SBS_COL_ALIGN_TOL = 25.0  # max x-distance to count as column-aligned
 _SBS_ROW_Y_BAND = 10.0    # max y-gap between col-0 blocks in the same row
 _ATOMIZED_HDR_MAX_HEIGHT = 60.0  # max header region height for recovery
+_ATOMIZED_HDR_MAX_LINE_GAP = 10.0  # y-gap ending the header block set
 _ATOMIZED_HDR_MAX_CONSEC_SINGLE = 3  # stop after N consecutive 1-col rows
+_ATOMIZED_PREPASS_MIN_ROWS = 5  # min body rows for the atomized-only pre-pass
 
 # Guard: bare section number on line 0 of a 2-line block.
 # Prevents misclassifying heading blocks (large bold number + right-aligned
@@ -418,6 +420,11 @@ def _columns_count_match(cols_a: list[float], cols_b: list[float],
         return False
     if len(cols_a) < 2:
         return False
+    # Reject blocks that vertically overlap: block_b starts above block_a's
+    # bottom edge (within tolerance).  Same-row table halves from shattered
+    # Google-Docs cells should not be glued as sequential rows.
+    if block_b_top < block_a_bottom - _TABLE_Y_OVERLAP_MARGIN:
+        return False
     if block_b_top - block_a_bottom > _RELAXED_MATCH_MAX_Y_GAP:
         return False
     return True
@@ -584,13 +591,17 @@ def _detect_side_by_side_tables(
         if len(col_xs) > len(cols):
             hdr_y0 = header.bbox[1]
             hdr_block_set: set[int] = {i}
+            max_collected_y1 = header.bbox[3]
             for k in range(i + 1, j):
                 nb = blocks[k]
                 if nb.page_num != page:
                     break
                 if nb.bbox[1] - hdr_y0 > _ATOMIZED_HDR_MAX_HEIGHT:
                     break
+                if nb.bbox[1] - max_collected_y1 > _ATOMIZED_HDR_MAX_LINE_GAP:
+                    break
                 hdr_block_set.add(k)
+                max_collected_y1 = max(max_collected_y1, nb.bbox[3])
             ext_xs = _cluster_x_positions(
                 [blocks[k].bbox[0] for k in sorted(hdr_block_set)])
             if len(ext_xs) >= len(col_xs):
@@ -657,6 +668,35 @@ def _detect_side_by_side_tables(
 
         for idx, blk in body_sorted:
             col = _nearest_column(blk.bbox[0], col_xs)
+
+            # Stop at a numbered section heading (e.g. "5.2 The Symmetry
+            # Test") sitting in col-0: the heading is prose, not a cell.
+            if col == 0:
+                blk_text = "".join(
+                    s.text for ln in blk.lines for s in ln.spans).strip()
+                if (_SPEC_HEADING_NUM_RE.match(blk_text)
+                        and len(blk_text.split()) <= _HEADING_NUM_MAX_WORDS):
+                    if current_row:
+                        rows.append(current_row)
+                    break
+
+            # Stop when a line spills clearly into the next column:
+            # a line starting in column c whose x1 extends past the
+            # next column's x-position (plus tolerance) is prose that
+            # spans multiple table columns, not a valid cell.  Wide
+            # table cells that end just before the column boundary pass.
+            spills = False
+            for ln in blk.lines:
+                lc = _nearest_column(ln.bbox[0], col_xs)
+                if lc + 1 < len(col_xs):
+                    if ln.bbox[2] > col_xs[lc + 1] + _COLUMN_X_TOLERANCE:
+                        spills = True
+                        break
+            if spills:
+                if current_row:
+                    rows.append(current_row)
+                break
+
             gap = blk.bbox[1] - last_bottom
             if gap > _SBS_MAX_SCAN_GAP:
                 col_dist = abs(blk.bbox[0] - col_xs[col])
@@ -724,7 +764,7 @@ def _detect_side_by_side_tables(
 
         min_rows = _MIN_TABLE_ROWS
         if atomized_only and atomized_hdr is not None:
-            min_rows = max(min_rows, 5)
+            min_rows = max(min_rows, _ATOMIZED_PREPASS_MIN_ROWS)
         if len(valid_rows) < min_rows:
             i += 1
             continue
@@ -737,8 +777,15 @@ def _detect_side_by_side_tables(
             all_lines: list = []
             for k in sorted(atomized_hdr):
                 blk_k = blocks[k]
-                ci = _nearest_column(blk_k.bbox[0], col_xs)
-                for ln in blk_k.lines:
+                # Per-line column assignment (mirrors body builder's
+                # multi_col logic): fused two-line header blocks like
+                # "Criterion"/"P2464R0[1]" assign each line separately.
+                line_cols = [_nearest_column(ln.bbox[0], col_xs)
+                             for ln in blk_k.lines]
+                multi_col = len(set(line_cols)) > 1
+                blk_ci = _nearest_column(blk_k.bbox[0], col_xs)
+                for ln, lc in zip(blk_k.lines, line_cols):
+                    ci = lc if multi_col else blk_ci
                     if header_cells[ci]:
                         header_cells[ci].append(Span(text="\n"))
                     header_cells[ci].extend(ln.spans)
