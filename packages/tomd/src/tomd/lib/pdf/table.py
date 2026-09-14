@@ -2264,7 +2264,8 @@ def _collect_header_cluster(
         lines = [ln for ln in blk.lines if ln.spans and ln.text.strip()]
         if not lines:
             continue
-        blk_tagged: list[tuple[int, tuple[float, float, Line]]] = []
+        # None once a line of this block falls outside the column grid.
+        blk_tagged: list[tuple[int, tuple[float, float, Line]]] | None = []
         for ln in lines:
             x0 = ln.bbox[0]
             ci = min(range(ncols), key=lambda c: abs(x0 - col_xs[c]))
@@ -4859,7 +4860,9 @@ def detect_tables(
             result = _try_relaxed_match(blocks, j, ref_cols, table_blocks)
             if result is not None:
                 table_blocks.append(blocks[j])
-                ref_cols = result.new_ref_cols
+                # The relaxed match always carries new columns; the `or`
+                # only tells the type checker so (new_ref_cols is Optional).
+                ref_cols = result.new_ref_cols or ref_cols
                 j = result.advance_to
                 continue
 
@@ -4937,7 +4940,7 @@ def detect_tables(
                 blocks, j, ref_cols, table_blocks)
             if result is not None:
                 table_blocks.append(blocks[result.advance_to - 1])
-                ref_cols = result.new_ref_cols
+                ref_cols = result.new_ref_cols or ref_cols  # always set; typing only
                 j = result.advance_to
                 continue
 
