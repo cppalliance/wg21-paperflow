@@ -618,6 +618,9 @@ def _detect_side_by_side_tables(
     while i < len(blocks):
         cols = _block_column_positions(blocks[i])
         if cols is None or len(cols) < 2:
+            _log.debug("SBS reject: seed %d has %s columns (need 2+), page %d",
+                        i, "no" if cols is None else str(len(cols)),
+                        blocks[i].page_num)
             i += 1
             continue
 
@@ -637,6 +640,8 @@ def _detect_side_by_side_tables(
             j += 1
 
         if not body_candidates:
+            _log.debug("SBS reject: seed %d on page %d has no body candidates",
+                        i, page)
             i += 1
             continue
 
@@ -645,6 +650,8 @@ def _detect_side_by_side_tables(
         col_xs = _cluster_x_positions(body_xs)
 
         if len(col_xs) < 2:
+            _log.debug("SBS reject: seed %d on page %d, body has %d x-cluster(s) (need 2+)",
+                        i, page, len(col_xs))
             i += 1
             continue
 
@@ -706,6 +713,8 @@ def _detect_side_by_side_tables(
         if len(col_xs) > len(cols):
             hdr_y0 = header.bbox[1]
             if _seed_is_mid_table(blocks, i, col_xs, used):
+                _log.debug("SBS reject: seed %d on page %d is mid-table (already consumed)",
+                            i, page)
                 i += 1
                 continue
             hdr_block_set: set[int] = {i}
@@ -733,6 +742,9 @@ def _detect_side_by_side_tables(
                            len(hdr_block_set), len(ext_xs), page,
                            header.text[:40])
             else:
+                _log.debug("SBS reject: seed %d on page %d, atomized header recovery "
+                            "failed (ext_xs %d < col_xs %d)",
+                            i, page, len(ext_xs), len(col_xs))
                 i += 1
                 continue
         # A regular header row block is not skipped here in the pre-pass:
@@ -750,6 +762,8 @@ def _detect_side_by_side_tables(
                 and b.bbox[1] >= effective_h_bottom - _TABLE_Y_OVERLAP_MARGIN
             ]
             if not body_candidates:
+                _log.debug("SBS reject: seed %d on page %d, no body candidates "
+                            "after atomized header exclusion", i, page)
                 i += 1
                 continue
             h_bottom = effective_h_bottom
@@ -895,6 +909,8 @@ def _detect_side_by_side_tables(
         if atomized_only:
             # Regular header over a body of row blocks: Pass 1 territory.
             if atomized_hdr is None and not _body_is_atomized(valid_rows):
+                _log.debug("SBS reject: prepass seed %d on page %d, not atomized "
+                            "(regular header, body not atomized)", i, page)
                 i += 1
                 continue
             dense = (
@@ -907,6 +923,8 @@ def _detect_side_by_side_tables(
                 _ATOMIZED_PREPASS_MIN_ROWS_DENSE if dense
                 else _ATOMIZED_PREPASS_MIN_ROWS)
         if len(valid_rows) < min_rows:
+            _log.debug("SBS reject: seed %d on page %d, too few valid rows "
+                        "(%d < %d)", i, page, len(valid_rows), min_rows)
             i += 1
             continue
 
@@ -4922,6 +4940,8 @@ def detect_tables(
                 continue
 
             # No branch matched: end table
+            _log.debug("Pass 1: no branch matched for block %d on page %d, ending table scan",
+                        j, blocks[j].page_num)
             break
 
         if len(table_blocks) >= _MIN_TABLE_ROWS:
@@ -5095,6 +5115,9 @@ def detect_tables(
                         len(rows), num_cols, p1_page)
             i = j
         else:
+            _log.debug("Pass 1 reject: seed %d on page %d, too few table blocks "
+                        "(%d < %d)", i, blocks[i].page_num,
+                        len(table_blocks), _MIN_TABLE_ROWS)
             remaining.append(blocks[i])
             i += 1
 
