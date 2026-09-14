@@ -618,9 +618,11 @@ def _detect_side_by_side_tables(
     while i < len(blocks):
         cols = _block_column_positions(blocks[i])
         if cols is None or len(cols) < 2:
-            _log.debug("SBS reject: seed %d has %s columns (need 2+), page %d",
-                        i, "no" if cols is None else str(len(cols)),
-                        blocks[i].page_num)
+            # cols is None is ordinary prose (no column gaps), not a seed;
+            # only a block that had positions but too few is worth a line.
+            if cols is not None:
+                _log.debug("SBS reject: seed %d has %d column(s) (need 2+), page %d",
+                            i, len(cols), blocks[i].page_num)
             i += 1
             continue
 
