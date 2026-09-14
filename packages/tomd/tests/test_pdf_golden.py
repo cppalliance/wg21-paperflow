@@ -143,10 +143,16 @@ _P0957R8_TABLE_PINS = {
 # grids whose uneven rows fail Pass 3's asymmetry gate; Pass 3 completes
 # its run with the rows the find_tables() grid still holds
 # (_grid_rows_left_behind). Pass 3 sections carry no table_source.
+# N.14 Summary (page 54, printed 55) is a Property | Guarantee grid whose
+# "Determinism" row arrives as a col-0 label block plus a separate
+# multi-line cell block (Pass 1 branch 4d, _try_split_row) and whose
+# "Practicality" cell wraps onto a line that starts slightly above the
+# row bottom (_is_trailing_continuation tolerates the negative y gap).
 _P4016R0_TABLE_PINS = {
     (27, 7, 5, "clean_matrix", "horizontal_rows"),
     (34, 5, 3, "clean_matrix", None),
     (51, 5, 4, "clean_matrix", None),
+    (54, 5, 2, "key_value", "horizontal_rows"),
 }
 
 
@@ -261,9 +267,10 @@ def test_p0957r8_table_family_pins():
 
 
 def test_p4016r0_table_family_pins():
-    """Focused guard for the P4016R0 tables on tomd pages 27, 34 and 51.
-    Independent of the full golden so a re-bless can never silently
-    hand D.3 or N.6 back to Pass 3 with their header or last row missing.
+    """Focused guard for the P4016R0 tables on tomd pages 27, 34, 51 and
+    54. Independent of the full golden so a re-bless can never silently
+    hand D.3 or N.6 back to Pass 3 with their header or last row missing,
+    or let N.14 explode into headings again.
     """
     pdf_path = _GOLDEN / "p4016r0.pdf"
     if not pdf_path.is_file():
@@ -273,6 +280,6 @@ def test_p4016r0_table_family_pins():
         (s.page_num, len(s.columns), len(s.columns[0]),
          s.table_kind, s.table_source)
         for s in sections
-        if s.kind == SectionKind.TABLE and s.page_num in (27, 34, 51)
+        if s.kind == SectionKind.TABLE and s.page_num in (27, 34, 51, 54)
     }
     assert got == _P4016R0_TABLE_PINS

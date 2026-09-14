@@ -352,8 +352,11 @@ def _is_trailing_continuation(block: Block, ref_cols: list[float],
         return False
     if not same_page:
         return False
+    # A vertically centred col-0 label reaches below the first line of a
+    # taller col-1 cell, so the cell's tail can start slightly above the
+    # row block's bottom (p4016r0 N.14 "Practicality", -2.8pt).
     y_gap = block.bbox[1] - prev_bottom
-    if y_gap > _PARTIAL_ROW_MAX_Y_GAP or y_gap < 0:
+    if y_gap > _PARTIAL_ROW_MAX_Y_GAP or y_gap < -_TABLE_Y_OVERLAP_MARGIN:
         return False
     x0 = block.lines[0].bbox[0]
     return any(abs(x0 - ref_cols[ci]) <= _COLUMN_X_TOLERANCE
@@ -4649,6 +4652,69 @@ def _try_orphan_lookahead(
         table_blocks, partial_absorbed)
 
 
+def _block_on_one_column(block: Block, ref_cols: list[float]) -> Optional[int]:
+    """Index of the reference column every line of `block` starts on, or None."""
+    if not block.lines:
+        return None
+    ci = _nearest_column(block.lines[0].bbox[0], ref_cols)
+    if any(abs(ln.bbox[0] - ref_cols[ci]) > _COLUMN_X_TOLERANCE
+           for ln in block.lines):
+        return None
+    return ci
+
+
+def _try_split_row(
+    blocks: list[Block],
+    j: int,
+    ref_cols: list[float],
+    table_blocks: list[Block],
+) -> Optional[_MatchResult]:
+    """Branch 4d: one row delivered as two blocks, label and cell.
+
+    In a two-column table, a single-line block on column 0 beside a
+    multi-line block whose lines all start on column 1, with the label
+    vertically inside the cell's band (the label is centred on the
+    taller cell), is one row (p4016r0 N.14 "Determinism" beside its
+    three-line guarantee). Neither block is columnar on its own and the
+    cell block is too wide for the orphan branches. The label block owns
+    the row; the cell block is returned in ``absorbed_ids`` so the
+    from_partial path of _build_rows_sequential merges it into that row
+    by nearest column. The caller appends the label block first.
+
+    The guards (two columns, multi-line cell, label inside the cell's
+    band) are load-bearing: with single-line cells or wider tables the
+    pair is a fragment, and a Pass 1 claim on a fragment hides the
+    find_tables() grid from Pass 5 (p4007r0 §7, p4098r1 §2.6, p2583r0
+    §6 all shattered when the guards were missing).
+
+    Precondition: j + 1 < len(blocks).
+    """
+    if len(ref_cols) != 2:
+        return None
+    a, b = blocks[j], blocks[j + 1]
+    if a.page_num != b.page_num or a.page_num != table_blocks[-1].page_num:
+        return None
+    if not _within_fragment_gap(a, table_blocks):
+        return None
+    for label, cell in ((a, b), (b, a)):
+        if len(label.lines) != 1 or not label.lines[0].text.strip():
+            continue
+        if len(cell.lines) < 2 or not any(ln.text.strip() for ln in cell.lines):
+            continue
+        if abs(label.lines[0].bbox[0] - ref_cols[0]) > _COLUMN_X_TOLERANCE:
+            continue
+        if _block_on_one_column(cell, ref_cols) != 1:
+            continue
+        if (cell.bbox[1] > label.bbox[1] + _TABLE_Y_OVERLAP_MARGIN
+                or cell.bbox[3] < label.bbox[3] - _TABLE_Y_OVERLAP_MARGIN):
+            continue  # label not inside the cell's row band
+        return _MatchResult(
+            advance_to=j + 2,
+            absorbed_ids=frozenset({id(cell)}),
+        )
+    return None
+
+
 def _try_partial_row(
     blocks: list[Block],
     j: int,
@@ -5059,6 +5125,23 @@ def detect_tables(
                     multi_orphan_used = True
                 j = result.advance_to
                 continue
+
+            # Branch 4d: split row, label block beside its cell block.
+            # The label owns the row and comes first; the cell block is
+            # partial-marked and merges into it. Not on two-column pages:
+            # there a left-column heading beside a right-column paragraph
+            # has exactly this geometry.
+            if (j + 1 < len(blocks)
+                    and blocks[j].page_num not in two_column_pages):
+                result = _try_split_row(blocks, j, ref_cols, table_blocks)
+                if result is not None:
+                    if id(blocks[j]) in result.absorbed_ids:
+                        table_blocks.extend((blocks[j + 1], blocks[j]))
+                    else:
+                        table_blocks.extend((blocks[j], blocks[j + 1]))
+                    partial_absorbed.update(result.absorbed_ids)
+                    j = result.advance_to
+                    continue
 
             # Branch 4c: trailing continuation.  A single-line block at
             # column 1+ directly under the last row whose lookahead found

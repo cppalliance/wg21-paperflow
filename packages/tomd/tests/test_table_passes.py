@@ -18,11 +18,14 @@ from tomd.lib.pdf.table import (
     _detect_side_by_side_tables,
     detect_tables,
     _block_horizontal_row,
+    _block_on_one_column,
     _gap_asymmetry_reject,
     _grid_rows_left_behind,
     _is_column_aligned_orphan,
+    _is_trailing_continuation,
     _pass1_region_incomplete,
     _try_orphan_lookahead,
+    _try_split_row,
     _try_wrapped_partial_row,
     _try_cross_page_continuation,
     _filter_overlapping_mupdf_tables,
@@ -2062,3 +2065,175 @@ class TestPass3CompletesGridRun:
             run, self._COLS, blocks + [far], region)
         assert far not in got
         assert len(got) == 3
+
+
+def _p4016_page54_blocks() -> list[Block]:
+    """p4016r0 page_num 54 (N.14 Summary) as MuPDF delivers it.
+
+    Header and three body rows are fused two-column blocks. The
+    "Determinism" row arrives as a col-0 label block plus a separate
+    three-line cell block on column 1 that overlaps the label in y
+    (label is vertically centred). The "Practicality" cell wraps onto a
+    trailing block whose top (431.6) is 2.8pt above the row block's
+    bottom (434.4). Prose above and below stays out of the table.
+    """
+    return [
+        _geo_block(54, ("The multi-threaded stack ordered state merge "
+                        "algorithm achieves:", 57.0, 321.6, 329.6, 331.0)),
+        _geo_block(54, ("Property", 60.7, 342.8, 91.4, 350.2),
+                   ("Guarantee", 288.4, 342.8, 325.6, 350.2)),
+        _geo_block(54, ("Determinism", 60.7, 365.2, 106.9, 372.7)),
+        _geo_block(54, ("Expression-identical to the single-threaded canonical "
+                        "expression for any T", 288.4, 356.1, 527.0, 363.5),
+                   ("under the specified partition/merge scheme; bitwise "
+                    "identity additionally", 288.4, 365.3, 523.0, 372.7),
+                   ("requires a matching floating-point evaluation model (§6)",
+                    288.4, 374.5, 469.7, 381.9)),
+        _geo_block(54, ("Correctness", 60.7, 391.8, 103.2, 399.2),
+                   ("Equivalent to the canonical pairwise tree (argument "
+                    "outlined in Appendix", 288.4, 387.2, 525.2, 394.6),
+                   ("N)", 288.4, 396.4, 296.4, 403.8)),
+        _geo_block(54, ("Efficiency", 60.7, 409.6, 95.5, 417.1),
+                   ("O(N) work, O(N/T + T log N) span",
+                    288.4, 409.7, 398.4, 417.1)),
+        _geo_block(54, ("Practicality", 60.7, 426.9, 101.5, 434.4),
+                   ("Demonstrated competitive with, and in some configurations "
+                    "faster than,", 288.4, 422.4, 522.2, 429.8)),
+        _geo_block(54, ("std::reduce with SIMD on the tested platforms/harness",
+                        288.4, 431.6, 467.4, 439.0)),
+        _geo_block(54, ("The key insights enabling this approach are:",
+                        57.0, 449.6, 239.3, 459.0)),
+    ]
+
+
+class TestPass1SplitRow:
+    """Branch 4d: a row delivered as a col-0 label block beside a cell
+    block on one non-first column (p4016r0 N.14 "Determinism"), and the
+    trailing-continuation tolerance for a wrapped cell whose tail starts
+    slightly above the row bottom ("Practicality")."""
+
+    _COLS = [60.7, 288.4]
+
+    def test_block_on_one_column(self):
+        blocks = _p4016_page54_blocks()
+        assert _block_on_one_column(blocks[3], self._COLS) == 1  # cell block
+        assert _block_on_one_column(blocks[2], self._COLS) == 0  # label
+        assert _block_on_one_column(blocks[4], self._COLS) is None  # 2-col row
+        off = _geo_block(54, ("x", 150.0, 356.1, 200.0, 363.5))
+        assert _block_on_one_column(off, self._COLS) is None
+
+    def test_split_row_label_first(self):
+        blocks = _p4016_page54_blocks()
+        got = _try_split_row(blocks, 2, self._COLS, [blocks[1]])
+        assert got is not None
+        assert got.advance_to == 4
+        assert got.absorbed_ids == frozenset({id(blocks[3])})
+
+    def test_split_row_cell_first(self):
+        blocks = _p4016_page54_blocks()
+        blocks[2], blocks[3] = blocks[3], blocks[2]
+        got = _try_split_row(blocks, 2, self._COLS, [blocks[1]])
+        assert got is not None
+        assert got.advance_to == 4
+        assert got.absorbed_ids == frozenset({id(blocks[2])})
+
+    def test_split_row_rejects_disjoint_y_bands(self):
+        blocks = _p4016_page54_blocks()
+        # Label moved below the cell block: two different rows, not one.
+        blocks[2] = _geo_block(54, ("Determinism", 60.7, 385.0, 106.9, 392.5))
+        assert _try_split_row(blocks, 2, self._COLS, [blocks[1]]) is None
+
+    def test_split_row_rejects_col0_cell(self):
+        blocks = _p4016_page54_blocks()
+        # A multi-line block on column 0 beside a label is prose, not a cell.
+        blocks[3] = _geo_block(54, ("a", 60.7, 356.1, 200.0, 363.5),
+                               ("b", 60.7, 365.3, 200.0, 372.7))
+        assert _try_split_row(blocks, 2, self._COLS, [blocks[1]]) is None
+
+    def test_split_row_rejects_single_line_cell(self):
+        # p4007r0 §7: "set_error on" beside "Partial results destroyed",
+        # both single-line. A fragment; claiming it hides the
+        # find_tables() grid from Pass 5.
+        blocks = _p4016_page54_blocks()
+        blocks[3] = _geo_block(54, ("Partial results destroyed",
+                                    288.4, 365.2, 420.0, 372.7))
+        assert _try_split_row(blocks, 2, self._COLS, [blocks[1]]) is None
+
+    def test_split_row_rejects_wider_table(self):
+        # p4098r1 §2.6: four columns; a label plus one cell block is not
+        # a row.
+        blocks = _p4016_page54_blocks()
+        cols = [60.7, 200.0, 288.4, 400.0]
+        assert _try_split_row(blocks, 2, cols, [blocks[1]]) is None
+
+    def test_split_row_rejects_label_below_cell_band(self):
+        # Label overlaps the cell's last line only: two rows, not one
+        # centred label.
+        blocks = _p4016_page54_blocks()
+        blocks[2] = _geo_block(54, ("Determinism", 60.7, 378.0, 106.9, 385.5))
+        assert _try_split_row(blocks, 2, self._COLS, [blocks[1]]) is None
+
+    def test_split_row_rejects_other_page(self):
+        blocks = _p4016_page54_blocks()
+        blocks[3].page_num = 55
+        assert _try_split_row(blocks, 2, self._COLS, [blocks[1]]) is None
+
+    def test_trailing_continuation_tolerates_small_negative_gap(self):
+        blocks = _p4016_page54_blocks()
+        tail, row = blocks[7], blocks[6]
+        assert tail.bbox[1] - row.bbox[3] == pytest.approx(-2.8)
+        assert _is_trailing_continuation(tail, self._COLS, row.bbox[3], True)
+
+    def test_trailing_continuation_rejects_large_overlap(self):
+        blocks = _p4016_page54_blocks()
+        tail, row = blocks[7], blocks[6]
+        assert not _is_trailing_continuation(
+            tail, self._COLS, row.bbox[3] + 10.0, True)
+
+    def test_n14_summary_is_one_table(self):
+        blocks = _p4016_page54_blocks()
+        sections, remaining = detect_tables(blocks)
+        assert len(sections) == 1
+        sec = sections[0]
+        assert sec.table_source == "horizontal_rows"
+        assert len(sec.columns) == 5  # rows
+        assert all(len(r) == 2 for r in sec.columns)
+        assert [_cell_text(r[0]) for r in sec.columns] == [
+            "Property", "Determinism", "Correctness", "Efficiency",
+            "Practicality"]
+        assert _cell_text(sec.columns[1][1]).startswith(
+            "Expression-identical to the single-threaded")
+        assert _cell_text(sec.columns[1][1]).endswith(
+            "evaluation model (§6)")
+        assert _cell_text(sec.columns[4][1]) == (
+            "Demonstrated competitive with, and in some configurations "
+            "faster than, std::reduce with SIMD on the tested "
+            "platforms/harness")
+        assert [b.lines[0].text for b in remaining] == [
+            "The multi-threaded stack ordered state merge algorithm achieves:",
+            "The key insights enabling this approach are:"]
+
+    def test_n14_summary_cell_block_first(self):
+        # MuPDF may deliver the cell block before its label; the label
+        # must still own the row (otherwise the partial-marked cell
+        # merges backward into the header row).
+        blocks = _p4016_page54_blocks()
+        blocks[2], blocks[3] = blocks[3], blocks[2]
+        sections, _ = detect_tables(blocks)
+        assert len(sections) == 1
+        sec = sections[0]
+        assert [_cell_text(r[0]) for r in sec.columns] == [
+            "Property", "Determinism", "Correctness", "Efficiency",
+            "Practicality"]
+        assert _cell_text(sec.columns[0][1]) == "Guarantee"
+        assert _cell_text(sec.columns[1][1]).startswith(
+            "Expression-identical to the single-threaded")
+
+    def test_split_row_stands_down_on_two_column_pages(self):
+        # A left-column heading beside a right-column paragraph has the
+        # same geometry; Pass 1 must not build a row out of it there.
+        blocks = _p4016_page54_blocks()
+        sections, _ = detect_tables(blocks, two_column_pages=frozenset({54}))
+        assert not any(
+            _cell_text(r[0]) == "Determinism"
+            for s in sections for r in s.columns)
