@@ -4364,23 +4364,23 @@ def _try_single_orphan(
             and blocks[j + 1].page_num == blocks[j].page_num
             and _columns_match(ref_cols, peek_cols)):
         return None
-    # A non-monospace orphan aligned to column 1+ is the wrapped tail of
-    # the previous row's cell (top-aligned cells put a row's first line
-    # on the col-0 line, so it cannot be the next row's first line).
-    # Marking it partial routes it through the from_partial path of
+    # An orphan aligned to column 1+ is the wrapped tail of the previous
+    # row's cell (top-aligned cells put a row's first line on the col-0
+    # line, so it cannot be the next row's first line). Marking it
+    # partial routes it through the from_partial path of
     # _build_rows_sequential, which maps it by nearest column and merges
     # it backward. Without the mark the line lands in column 0 as a row
     # of its own and Pass B glues it forward (p4096r0 §5.2 "Age" row).
+    # The font does not matter: a monospace tail is still a cell tail
+    # (p0957r8 p.28 `HasNothrowDestructor`, p4016r0 p.27 header
+    # `Proposed canonical_reduce`); the column position is the signal.
     absorbed = set()
     if blocks[j].lines:
         orphan_x0 = blocks[j].lines[0].bbox[0]
         orphan_spans = [
             s for s in blocks[j].lines[0].spans
             if s.text.strip()]
-        is_mono = (orphan_spans
-                   and all(s.monospace for s in orphan_spans))
         if (orphan_spans
-                and not is_mono
                 and any(abs(orphan_x0 - ref_cols[ci])
                         <= _COLUMN_X_TOLERANCE
                         for ci in range(1, len(ref_cols)))):
@@ -4509,8 +4509,6 @@ def _try_orphan_lookahead(
     partial_absorbed: set[int],
 ) -> Optional[_MatchResult]:
     """Branch 4: single-line block aligned to a column, lookahead to confirm."""
-    if len(ref_cols) == 2 and _block_is_monospace(table_blocks[0]):
-        return None
     eff_col_xs = frozenset(column_xs | set(ref_cols))
     if not (_is_column_aligned_orphan(blocks[j], eff_col_xs)
             and j + 1 < len(blocks)

@@ -19,6 +19,7 @@ from tomd.lib.pdf.table import (
     _gap_asymmetry_reject,
     _is_column_aligned_orphan,
     _pass1_region_incomplete,
+    _try_orphan_lookahead,
     _try_wrapped_partial_row,
     _try_cross_page_continuation,
     _filter_overlapping_mupdf_tables,
@@ -212,6 +213,65 @@ class TestWrappedPartialRow:
         blocks = self._established_table() + [frag]
         assert _try_wrapped_partial_row(
             blocks, 2, self.REF_COLS, self.COLUMN_XS, blocks[:2]) is None
+
+
+class TestOrphanLookaheadMonospaceTwoColumn:
+    """Tests for _try_orphan_lookahead (Pass 1 Branch 4) on a 2-column
+    monospace table.
+
+    Models P0957R8 p.28 (tomd page 27): a bordered 2x2 table of type-trait
+    expressions set in a monospace font, whose cell (1, 2) wraps onto a
+    second physical line ("HasNothrowDestructor"). MuPDF emits that wrapped
+    tail as its own single-line block aligned to column 2. Branch 4a must
+    take it (the next block is a full 2-column row) so the table keeps
+    scanning; a former guard that returned None for any 2-column monospace
+    table ended the scan there and the whole table fell back to a cpp fence.
+    """
+
+    REF_COLS = [100.0, 300.0]
+    COLUMN_XS = frozenset(REF_COLS)
+
+    def _header(self) -> Block:
+        return _bbox_block([
+            _line("HasNothrowMoveAssignment", 100.0, 100.0, 240.0, 112.0),
+            _line("HasNothrowMoveConstructor &&", 300.0, 100.0, 470.0, 112.0),
+        ], monospace=True)
+
+    def _wrapped_tail(self) -> Block:
+        return _bbox_block([
+            _line("HasNothrowDestructor", 300.0, 114.0, 420.0, 126.0),
+        ], monospace=True)
+
+    def _second_row(self) -> Block:
+        return _bbox_block([
+            _line("HasMoveAssignment", 100.0, 130.0, 210.0, 142.0),
+            _line("HasMoveConstructor && HasDestructor", 300.0, 130.0, 500.0, 142.0),
+        ], monospace=True)
+
+    def test_wrapped_monospace_tail_absorbed_before_full_row(self):
+        blocks = [self._header(), self._wrapped_tail(), self._second_row()]
+        result = _try_orphan_lookahead(
+            blocks, 1, self.REF_COLS, self.COLUMN_XS, blocks[:1], set())
+        assert result is not None
+        assert result.advance_to == 2
+        # Column-1 tails are marked partial regardless of font (see
+        # _try_single_orphan), so the tail merges back into cell (1, 2).
+        assert result.absorbed_ids == frozenset({id(blocks[1])})
+
+    def test_tail_without_confirming_row_rejected(self):
+        """The lookahead needs a following block; a lone tail is not a row."""
+        blocks = [self._header(), self._wrapped_tail()]
+        assert _try_orphan_lookahead(
+            blocks, 1, self.REF_COLS, self.COLUMN_XS, blocks[:1], set()) is None
+
+    def test_unaligned_monospace_line_rejected(self):
+        """A monospace line off both columns is code, not a wrapped cell."""
+        stray = _bbox_block([
+            _line("return 0;", 180.0, 114.0, 240.0, 126.0),
+        ], monospace=True)
+        blocks = [self._header(), stray, self._second_row()]
+        assert _try_orphan_lookahead(
+            blocks, 1, self.REF_COLS, self.COLUMN_XS, blocks[:1], set()) is None
 
 
 class _FakePage:
