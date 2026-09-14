@@ -248,7 +248,8 @@ def _cmd_review(args: argparse.Namespace) -> int:
 
 def _cmd_render(args: argparse.Namespace) -> int:
     golden, pid = args.golden_dir, args.paper_id
-    src = find_source(pid, golden)
+    # Flat-layout goldens (<stem>.pdf beside <stem>.golden.md) have no sources/ entry.
+    src = find_source(pid, golden) or _resolve_pdf(pid, golden)
     if src is None:
         print(f"render: no staged source for {pid}", file=sys.stderr)
         return 1
