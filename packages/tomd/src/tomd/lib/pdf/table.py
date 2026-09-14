@@ -2482,9 +2482,91 @@ def _split_trailing_horizontal_rows(
     return table_sections, result_blocks
 
 
+def _block_sits_on_columns(block: Block, cols: list[float]) -> bool:
+    """True when `block` is one row on exactly the x-starts in `cols`."""
+    if len(block.lines) != len(cols):
+        return False
+    y_centers = [(ln.bbox[1] + ln.bbox[3]) / 2 for ln in block.lines]
+    if max(y_centers) - min(y_centers) > _HORIZONTAL_ROW_Y_TOLERANCE_WIDE:
+        return False
+    xs = sorted(ln.bbox[0] for ln in block.lines)
+    return all(abs(x - c) <= _COLUMN_X_TOLERANCE
+               for x, c in zip(xs, sorted(cols)))
+
+
+def _grid_rows_left_behind(
+    run_blocks: list[Block],
+    cols: list[float],
+    all_blocks: list[Block],
+    page_mupdf_tables: dict[int, list[dict]] | None,
+) -> list[Block]:
+    """Rows of the run's bordered grid that the run did not claim.
+
+    Pass 1's "partial view" rule, narrowed to Pass 3's family: an upright
+    find_tables() region overlaps the run, reports more rows than the run
+    has, and still contains unclaimed blocks that are themselves rows on
+    the run's columns (same cell count, same x-starts, one y-band). Such a
+    block failed _gap_asymmetry_reject (uneven cell texts inside a grid),
+    so it belongs to the table. Instead of standing down and relying on a
+    later pass to take the grid (which may never happen: Pass 4 can claim
+    a subset and the overlap filter then hides the region from Pass 5),
+    Pass 3 completes its own run with these rows.
+
+    Only rows chained to the run within _PARTIAL_ROW_MAX_Y_GAP are
+    returned, so two complete stacked grids sharing columns inside one
+    over-reaching box stay two tables. A rows=0 box spanning a page of
+    poll grids (p1068r11) fails the row-count test, and prose inside such
+    a box never sits on the columns.
+    """
+    if not page_mupdf_tables or not run_blocks:
+        return []
+    page_num = run_blocks[0].page_num
+    rx0 = min(b.bbox[0] for b in run_blocks)
+    ry0 = min(b.bbox[1] for b in run_blocks)
+    rx1 = max(b.bbox[2] for b in run_blocks)
+    ry1 = max(b.bbox[3] for b in run_blocks)
+    claimed = {id(b) for b in run_blocks}
+    m = _MUPDF_REGION_MARGIN
+    for tbl in page_mupdf_tables.get(page_num, []):
+        if tbl.get("rot") is not None:
+            continue
+        if tbl.get("row_count", 0) <= len(run_blocks):
+            continue
+        tx0, ty0, tx1, ty1 = tbl["bbox"]
+        if min(rx1, tx1) <= max(rx0, tx0) or min(ry1, ty1) <= max(ry0, ty0):
+            continue
+        candidates = [
+            blk for blk in all_blocks
+            if blk.page_num == page_num and id(blk) not in claimed
+            and blk.bbox[0] >= tx0 - m and blk.bbox[2] <= tx1 + m
+            and blk.bbox[1] >= ty0 - m and blk.bbox[3] <= ty1 + m
+            and _block_sits_on_columns(blk, cols)]
+        if not candidates:
+            continue
+        # Chain outward from the run: a candidate joins when it sits
+        # within one fragment gap above or below the rows taken so far.
+        taken: list[Block] = []
+        lo, hi = ry0, ry1
+        grew = True
+        while grew:
+            grew = False
+            for blk in candidates:
+                if any(blk is t for t in taken):
+                    continue
+                gap = max(blk.bbox[1] - hi, lo - blk.bbox[3], 0.0)
+                if gap <= _PARTIAL_ROW_MAX_Y_GAP:
+                    taken.append(blk)
+                    lo, hi = min(lo, blk.bbox[1]), max(hi, blk.bbox[3])
+                    grew = True
+        if taken:
+            return taken
+    return []
+
+
 def _detect_horizontal_row_tables(
     blocks: list[Block],
     rotated_pages: frozenset[int],
+    page_mupdf_tables: dict[int, list[dict]] | None = None,
 ) -> tuple[list[Section], set[int]]:
     """Detect tables formed by consecutive horizontal-row blocks.
 
@@ -2494,13 +2576,20 @@ def _detect_horizontal_row_tables(
     *rotated_pages* are skipped: the y-level geometry assumes upright
     text and produces garbage rows there; Pass 5 handles those pages
     rotation-aware.
+
+    A run that is a partial view of a find_tables() grid is completed
+    with the grid's other rows (see _grid_rows_left_behind): rows whose
+    cell texts are uneven fail _gap_asymmetry_reject and would otherwise
+    be left out (p4016r0 D.3 header and "Evaluation Order" row, N.6 last
+    row). Completed rows are ordered by y, so a recovered header lands
+    on top.
     """
     table_sections: list[Section] = []
     used: set[int] = set()
     i = 0
 
     while i < len(blocks):
-        if blocks[i].page_num in rotated_pages:
+        if blocks[i].page_num in rotated_pages or i in used:
             i += 1
             continue
         cols = _block_horizontal_row(blocks[i])
@@ -2540,6 +2629,16 @@ def _detect_horizontal_row_tables(
                 break
 
         if len(run) >= _MIN_TABLE_ROWS:
+            left_behind = _grid_rows_left_behind(
+                [blocks[idx] for idx in run], cols, blocks, page_mupdf_tables)
+            if left_behind:
+                idx_of = {id(b): k for k, b in enumerate(blocks)}
+                run.extend(idx_of[id(b)] for b in left_behind)
+                run.sort(key=lambda k: blocks[k].bbox[1])
+                _log.debug(
+                    "Pass 3 completed run from find_tables grid: page %d, "
+                    "+%d row(s), %d total",
+                    blocks[i].page_num, len(left_behind), len(run))
             rows: list[list[list]] = []
             all_lines = []
             for idx in run:
@@ -5246,7 +5345,8 @@ def detect_tables(
 
     # Pass 3: narrow horizontal-row tables (e.g. vote/poll grids)
     hr_tables, hr_used = _detect_horizontal_row_tables(
-        remaining, rotated_pages=rotated_pages)
+        remaining, rotated_pages=rotated_pages,
+        page_mupdf_tables=filtered_mupdf_tables)
     if hr_tables:
         table_sections.extend(hr_tables)
         remaining = [b for idx, b in enumerate(remaining)

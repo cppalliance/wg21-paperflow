@@ -136,6 +136,19 @@ _P0957R8_TABLE_PINS = {
     (27, 2, 2, "clean_matrix", "horizontal_rows"),
 }
 
+# Family pins for P4016R0 (#369): §7 Property comparison (tomd page 27,
+# printed 28, Pass 1 with the wrapped `canonical_reduce` header tail
+# merged), D.3 Sequential vs. Parallel (page 34, printed 35) and N.6
+# Partition Strategy (page 51, printed 52). The last two are bordered
+# grids whose uneven rows fail Pass 3's asymmetry gate; Pass 3 completes
+# its run with the rows the find_tables() grid still holds
+# (_grid_rows_left_behind). Pass 3 sections carry no table_source.
+_P4016R0_TABLE_PINS = {
+    (27, 7, 5, "clean_matrix", "horizontal_rows"),
+    (34, 5, 3, "clean_matrix", None),
+    (51, 5, 4, "clean_matrix", None),
+}
+
 
 def _normalize_newlines(text: str) -> str:
     return text.replace("\r\n", "\n").replace("\r", "\n")
@@ -245,3 +258,21 @@ def test_p0957r8_table_family_pins():
         if s.kind == SectionKind.TABLE and s.page_num in (26, 27)
     }
     assert got == _P0957R8_TABLE_PINS
+
+
+def test_p4016r0_table_family_pins():
+    """Focused guard for the P4016R0 tables on tomd pages 27, 34 and 51.
+    Independent of the full golden so a re-bless can never silently
+    hand D.3 or N.6 back to Pass 3 with their header or last row missing.
+    """
+    pdf_path = _GOLDEN / "p4016r0.pdf"
+    if not pdf_path.is_file():
+        pytest.skip(f"missing PDF fixture: {pdf_path}")
+    sections = run_pipeline(pdf_path).sections
+    got = {
+        (s.page_num, len(s.columns), len(s.columns[0]),
+         s.table_kind, s.table_source)
+        for s in sections
+        if s.kind == SectionKind.TABLE and s.page_num in (27, 34, 51)
+    }
+    assert got == _P4016R0_TABLE_PINS

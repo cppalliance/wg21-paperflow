@@ -14,9 +14,12 @@ from tomd.lib.pdf.table import (
     _build_rows_sequential,
     _build_rows_ybanded,
     _columns_count_match,
+    _detect_horizontal_row_tables,
     _detect_side_by_side_tables,
     detect_tables,
+    _block_horizontal_row,
     _gap_asymmetry_reject,
+    _grid_rows_left_behind,
     _is_column_aligned_orphan,
     _pass1_region_incomplete,
     _try_orphan_lookahead,
@@ -1921,3 +1924,141 @@ class TestTableBugFixes:
         assert "Conditional" in "".join(s.text for s in rows[1][1])
         assert "Constrains execution paths" in "".join(s.text for s in rows[1][2])
         assert "Reproducibility across specified CPU" in "".join(s.text for s in rows[1][3])
+
+
+def _grid_row(page: int, y0: float, cells: list[tuple[str, float, float]]) -> Block:
+    """One row of a bordered grid: (text, x0, x1) per cell, 7.4pt tall."""
+    y1 = y0 + 7.4
+    lines = [
+        Line(spans=[Span(text=text, font_size=8.0)],
+             bbox=(x0, y0, x1, y1), page_num=page)
+        for text, x0, x1 in cells
+    ]
+    return Block(lines=lines,
+                 bbox=(cells[0][1], y0, max(c[2] for c in cells), y1),
+                 page_num=page)
+
+
+class TestPass3CompletesGridRun:
+    """Pass 3 completes a run that is a partial view of a find_tables()
+    grid (p4016r0 D.3 and N.6): rows whose cell texts are uneven fail
+    _gap_asymmetry_reject, but they sit on the run's columns inside the
+    bordered region MuPDF reports, so they are rows of the same table.
+    Pass 3 takes them itself, ordered by y, instead of emitting the rows
+    it happened to accept (header as a heading, last row as prose).
+    """
+
+    _PAGE = 34
+    _COLS = [60.7, 123.2, 248.9]
+    _REGION = {34: [
+        {"bbox": (57.2, 708.6, 352.4, 773.3), "row_count": 5, "col_count": 3,
+         "cells": []}]}
+
+    def _d3_blocks(self) -> list[Block]:
+        # p4016r0 tomd page 34 geometry. "Property" (gaps 31.8 / 6.8pt),
+        # "Standard Section" (6.8 / 48.4) and "Evaluation Order" (7.1 /
+        # 78.9) fail the asymmetry gate; "Grouping" and "Complexity" pass
+        # it and form Pass 3's run.
+        return [
+            _grid_row(self._PAGE, 711.7, [
+                ("Property", 60.7, 91.4),
+                ("Sequential (accumulate/fold_left)", 123.2, 242.1),
+                ("Parallel (reduce)", 248.9, 308.7)]),
+            _grid_row(self._PAGE, 725.1, [
+                ("Standard Section", 60.7, 116.4),
+                ("[accumulate] / [alg.fold]", 123.2, 200.5),
+                ("[reduce]", 248.9, 276.0)]),
+            _grid_row(self._PAGE, 737.7, [
+                ("Grouping", 60.7, 90.9),
+                ("Mandated: Left-to-right", 123.2, 199.1),
+                ("Generalized Sum (Unspecified)", 248.9, 349.0)]),
+            _grid_row(self._PAGE, 750.4, [
+                ("Complexity", 60.7, 96.9),
+                ("O(N) operations", 123.2, 175.0),
+                ("O(N) operations", 248.9, 300.7)]),
+            _grid_row(self._PAGE, 763.7, [
+                ("Evaluation Order", 60.7, 116.1),
+                ("Fully specified", 123.2, 170.0),
+                ("Not specified", 248.9, 291.4)]),
+        ]
+
+    @staticmethod
+    def _col0(section: Section) -> list[str]:
+        return ["".join(s.text for s in row[0]).strip()
+                for row in section.columns]
+
+    def test_fixture_is_faithful(self):
+        blocks = self._d3_blocks()
+        assert _block_horizontal_row(blocks[0]) is None
+        assert _block_horizontal_row(blocks[1]) is None
+        assert _block_horizontal_row(blocks[2]) is not None
+        assert _block_horizontal_row(blocks[3]) is not None
+        assert _block_horizontal_row(blocks[4]) is None
+
+    def test_left_behind_rows_are_found(self):
+        blocks = self._d3_blocks()
+        run = [blocks[2], blocks[3]]
+        got = _grid_rows_left_behind(run, self._COLS, blocks, self._REGION)
+        assert [b.lines[0].spans[0].text for b in got] == [
+            "Property", "Standard Section", "Evaluation Order"]
+
+    def test_run_is_completed_in_y_order(self):
+        blocks = self._d3_blocks()
+        tables, used = _detect_horizontal_row_tables(
+            blocks, rotated_pages=frozenset(),
+            page_mupdf_tables=self._REGION)
+        assert len(tables) == 1
+        assert used == {0, 1, 2, 3, 4}
+        assert self._col0(tables[0]) == [
+            "Property", "Standard Section", "Grouping", "Complexity",
+            "Evaluation Order"]
+        assert all(len(row) == 3 for row in tables[0].columns)
+
+    def test_without_mupdf_region_pass3_keeps_its_partial_run(self):
+        blocks = self._d3_blocks()
+        tables, used = _detect_horizontal_row_tables(
+            blocks, rotated_pages=frozenset())
+        assert len(tables) == 1
+        assert used == {2, 3}
+        assert self._col0(tables[0]) == ["Grouping", "Complexity"]
+
+    def test_region_reporting_no_more_rows_than_run_is_ignored(self):
+        # A rows=0 box spanning stacked poll grids (p1068r11 page 7) is
+        # not a view of any one run; Pass 3 keeps its own rows only.
+        blocks = self._d3_blocks()
+        region = {34: [{"bbox": (57.2, 708.6, 352.4, 773.3), "row_count": 0,
+                        "col_count": 0, "cells": []}]}
+        tables, used = _detect_horizontal_row_tables(
+            blocks, rotated_pages=frozenset(), page_mupdf_tables=region)
+        assert len(tables) == 1
+        assert used == {2, 3}
+
+    def test_block_off_the_columns_inside_region_does_not_qualify(self):
+        # A 3-line block inside the box whose x-starts are not the run's
+        # columns (a wrapped prose paragraph MuPDF split into lines at
+        # the left margin) is not a row of the grid.
+        blocks = self._d3_blocks()
+        stray = Block(
+            lines=[
+                Line(spans=[Span(text=f"prose {k}", font_size=8.0)],
+                     bbox=(57.5, 763.7, 340.0, 771.1), page_num=34)
+                for k in range(3)],
+            bbox=(57.5, 763.7, 340.0, 771.1), page_num=34)
+        run = [blocks[2], blocks[3]]
+        got = _grid_rows_left_behind(
+            run, self._COLS, run + [stray], self._REGION)
+        assert got == []
+
+    def test_rows_beyond_the_fragment_gap_stay_out(self):
+        # Two complete grids sharing columns inside one over-reaching box:
+        # the far grid's rows are not chained to this run.
+        blocks = self._d3_blocks()
+        far = _grid_row(34, 763.7 + 60.0, [
+            ("Far", 60.7, 80.0), ("x", 123.2, 130.0), ("y", 248.9, 260.0)])
+        region = {34: [{"bbox": (57.2, 708.6, 352.4, 840.0), "row_count": 6,
+                        "col_count": 3, "cells": []}]}
+        run = [blocks[2], blocks[3]]
+        got = _grid_rows_left_behind(
+            run, self._COLS, blocks + [far], region)
+        assert far not in got
+        assert len(got) == 3
