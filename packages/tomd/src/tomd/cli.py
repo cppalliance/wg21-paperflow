@@ -15,6 +15,7 @@ persists. All scoring, blessing, rendering, and gap logic lives in
 parses arguments, calls those functions, and reports. Verbs operate on the
 golden fixtures directory, never the paperstore workspace:
 
+    tomd tables <pdf|pid> [--page N] [--trace]  table diagnostic (page, shape, kind, source)
     tomd add <paper_id> [source]   download (or copy) a source; render pages if PDF
     tomd generate <paper_id>       seed a candidate ideal from tomd's own conversion (no LLM)
     tomd review <paper_id>         LLM punch-list of structural divergences vs source (optional)
@@ -35,6 +36,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
 import os
 import subprocess
 import sys
@@ -131,6 +133,59 @@ def _format_comprehension_panel(c: dict) -> str:
             if not ch["passed"]:
                 lines.append(f"  FAIL  {ch.get('detail') or ''}")
     return "\n".join(lines) if len(lines) > 1 else ""
+
+
+def _resolve_pdf(target: str, golden_dir: Path) -> Path | None:
+    """Resolve *target* to a PDF path: a direct file path or a golden PID."""
+    as_path = Path(target)
+    if as_path.suffix.lower() == ".pdf" and as_path.is_file():
+        return as_path
+    stem = target.lower()
+    for loc in (golden_dir / "sources" / f"{stem}.pdf",
+                golden_dir / f"{stem}.pdf"):
+        if loc.is_file():
+            return loc
+    return None
+
+
+def _cmd_tables(args: argparse.Namespace) -> int:
+    from tomd.lib.pdf import run_pipeline
+    from tomd.lib.pdf.types import SectionKind
+
+    pdf = _resolve_pdf(args.target, args.golden_dir)
+    if pdf is None:
+        print(f"tables: cannot resolve '{args.target}' to a PDF", file=sys.stderr)
+        return 1
+
+    if args.trace:
+        logging.basicConfig(level=logging.DEBUG, format="%(name)s %(message)s")
+        logging.getLogger("tomd.lib.pdf.table").setLevel(logging.DEBUG)
+
+    result = run_pipeline(pdf)
+
+    tables = [s for s in result.sections if s.kind == SectionKind.TABLE]
+    if args.page is not None:
+        tables = [t for t in tables if t.page_num == args.page]
+
+    if not tables:
+        page_msg = f" on page {args.page}" if args.page is not None else ""
+        print(f"no tables{page_msg} in {pdf.name}")
+        return 0
+
+    for t in tables:
+        hdr = ""
+        if t.columns:
+            hdr = " | ".join(
+                " ".join("".join(sp.text for sp in cell).split()).strip()[:25]
+                for cell in t.columns[0]
+            )
+        rows = len(t.columns)
+        cols = len(t.columns[0]) if t.columns else 0
+        kind = t.table_kind or "-"
+        source = t.table_source or "-"
+        print(f"  p{t.page_num}  {rows}x{cols}  {kind}/{source}  {hdr}")
+
+    return 0
 
 
 def _cmd_add(args: argparse.Namespace) -> int:
@@ -421,6 +476,16 @@ def main(argv: list[str] | None = None) -> int:
         "--golden-dir", type=Path, default=_DEFAULT_GOLDEN,
         help="Fixtures dir (sources, snapshots, ideals, baselines.json).")
     sub = parser.add_subparsers(dest="action", required=True)
+
+    p = sub.add_parser(
+        "tables",
+        help="Table diagnostic: page, shape, kind, source, header for every table.")
+    p.add_argument("target", help="PDF file path or paper_id (resolved from golden dir).")
+    p.add_argument("--page", type=int, default=None,
+                   help="Filter to a single page number (1-based, as printed by the PDF viewer).")
+    p.add_argument("--trace", action="store_true",
+                   help="Set table detection to DEBUG; prints pre-scanner decisions.")
+    p.set_defaults(func=_cmd_tables)
 
     p = sub.add_parser(
         "add", help="Stage a source (download from wg21.link if no path given and not "
