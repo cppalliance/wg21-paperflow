@@ -438,6 +438,7 @@ Pass 2 (`strip_pre_content_paragraphs` in [`metadata_yaml/strip.py`](lib/metadat
   - Separator headings (lines of `=`, `-`, `~`, `*`).
   - WG21 category labels (`Programming Language C++`, `ISO/IEC JTC1`, `WG21 PROPOSAL`).
   - Title echo headings: word-stem overlap >= 50% with the front-matter title.
+  - Title tail headings: a heading directly after a stripped title echo whose stems (>= 2) are all title stems. A title that wraps onto a second line arrives as two heading blocks and the tail alone misses the 50% ratio (P4016R0 `Structure for Run-To-Run Consistency`).
   - Author-list headings: 3+ comma-separated items where >= 80% look like person names (1-4 words, uppercase initial).
   - Single-author headings: 1-4 word names (possibly italic/bold) that match reply-to tokens from metadata (>= 50% token overlap).
 - Pass 2 (post-boundary) applies the same patterns to page-0 headings **after** the first content heading. Title-echo matching in pass 2 is suppressed once a body paragraph (PARAGRAPH or LIST) has been seen, preventing legitimate sub-headings from being stripped when they share words with the title (e.g. P3373R4 "Operation States and Stack Frames" under title "Of Operation States and Their Lifetimes").

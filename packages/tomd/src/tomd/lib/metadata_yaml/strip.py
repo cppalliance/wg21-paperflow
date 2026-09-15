@@ -125,6 +125,12 @@ _BARE_DATE_HEADING_RE = re.compile(
 _CONTENT_HEADING_NUM_RE = re.compile(r"^\d{1,2}(?:\.\d+)*\.?\s")
 
 
+# Max relative font-size deviation between a title echo and the heading
+# block that continues it. Same population as structure._TITLE_CONT_FONT_TOL:
+# real wrapped titles deviate 0-6%, sub-headings 20%+.
+_TITLE_TAIL_FONT_TOL = 0.10
+
+
 def _title_stem_words(s: str) -> set[str]:
     """Return 6-char stems of alphabetic words (length >= 3) for fuzzy title matching."""
     s = re.sub(r"[^a-zA-Z\s]", " ", s.lower())
@@ -193,6 +199,12 @@ def strip_metadata_headings(sections: list[Section],
             break
 
     to_remove: set[int] = set()
+    # Index of the last heading stripped as a title echo. A title that
+    # wraps onto a second line arrives as two heading blocks; the tail
+    # ("Structure for Run-To-Run Consistency", P4016R0) shares too few
+    # stems with the whole title to pass the overlap ratio on its own, so
+    # it is matched as the continuation of the echo directly above it.
+    title_echo_idx: int | None = None
     for i in range(boundary):
         sec = sections[i]
         if sec.kind != SectionKind.HEADING:
@@ -205,6 +217,21 @@ def strip_metadata_headings(sections: list[Section],
         if not first_line:
             to_remove.add(i)
             continue
+
+        # Title tail: heading right after a title echo, set in the title's
+        # font, every stem in the title. The font gate keeps a real
+        # unnumbered sub-heading built from title words ("Operation States"
+        # under "Of Operation States and Their Lifetimes") in place: it is
+        # smaller than the title line it follows.
+        if title_val and title_echo_idx is not None and title_echo_idx == i - 1:
+            echo_fs = sections[title_echo_idx].font_size
+            same_font = (echo_fs > 0 and sec.font_size > 0
+                         and abs(sec.font_size - echo_fs) / echo_fs <= _TITLE_TAIL_FONT_TOL)
+            hw = _title_stem_words(first_line)
+            if same_font and len(hw) >= 2 and hw <= _title_stem_words(title_val):
+                to_remove.add(i)
+                title_echo_idx = i
+                continue
 
         # Document number heading (Doc. no.: PXXXXRN).
         if doc_num and _META_DOC_HEADING_RE.match(first_line):
@@ -249,6 +276,7 @@ def strip_metadata_headings(sections: list[Section],
             if (hw and tw and len(overlap) >= 2
                     and len(overlap) / max(len(hw), len(tw)) >= 0.5):
                 to_remove.add(i)
+                title_echo_idx = i
                 continue
 
         # WG21 metadata field label heading (Target:, Audience:, etc.).

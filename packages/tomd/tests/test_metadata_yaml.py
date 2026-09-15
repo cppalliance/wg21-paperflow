@@ -101,6 +101,61 @@ class TestStripMetadataHeadings:
         n = strip_metadata_headings(sections, {})
         assert n == 0
 
+    _WRAPPED_TITLE = ("Canonical Parallel Reduction: A Fixed Expression "
+                      "Structure for Run-To-Run Consistency")
+
+    def test_removes_wrapped_title_tail(self):
+        """P4016R0 (#413): the title wraps onto a second heading block whose
+        stems are too few for the overlap ratio; it follows the echo."""
+        metadata = {"document": "P4016R0", "title": self._WRAPPED_TITLE}
+        sections = [
+            make_section("P4016R0 - Canonical Parallel Reduction: A Fixed Expression",
+                         kind=SectionKind.HEADING, page_num=0),
+            make_section("Structure for Run-To-Run Consistency",
+                         kind=SectionKind.HEADING, page_num=0),
+            make_section("Abstract", kind=SectionKind.HEADING, page_num=0),
+            make_section("Body text."),
+        ]
+        n = strip_metadata_headings(sections, metadata)
+        assert n == 2
+        assert [s.text for s in sections] == ["Abstract", "Body text."]
+
+    def test_title_tail_needs_preceding_echo(self):
+        """The same tail without an echo directly above it is a heading."""
+        metadata = {"document": "P4016R0", "title": self._WRAPPED_TITLE}
+        sections = [
+            make_section("Structure for Run-To-Run Consistency",
+                         kind=SectionKind.HEADING, page_num=0),
+            make_section("Abstract", kind=SectionKind.HEADING, page_num=0),
+        ]
+        assert strip_metadata_headings(sections, metadata) == 0
+
+    def test_title_tail_must_share_the_title_font(self):
+        """A smaller heading made of title words is a real sub-heading."""
+        metadata = {"title": "Of Operation States and Their Lifetimes"}
+        sections = [
+            make_section("Of Operation States and Their Lifetimes",
+                         kind=SectionKind.HEADING, page_num=0, font_size=18.0),
+            make_section("Operation States",
+                         kind=SectionKind.HEADING, page_num=0, font_size=12.0),
+            make_section("Abstract", kind=SectionKind.HEADING, page_num=0),
+        ]
+        assert strip_metadata_headings(sections, metadata) == 1
+        assert sections[0].text == "Operation States"
+
+    def test_title_tail_rejects_foreign_words(self):
+        """A heading after the echo with a stem the title lacks stays."""
+        metadata = {"document": "P4016R0", "title": self._WRAPPED_TITLE}
+        sections = [
+            make_section("Canonical Parallel Reduction: A Fixed Expression",
+                         kind=SectionKind.HEADING, page_num=0),
+            make_section("Structure of this Proposal",
+                         kind=SectionKind.HEADING, page_num=0),
+            make_section("Abstract", kind=SectionKind.HEADING, page_num=0),
+        ]
+        assert strip_metadata_headings(sections, metadata) == 1
+        assert sections[0].text == "Structure of this Proposal"
+
 
 class TestStripPreHeadingFragments:
 
