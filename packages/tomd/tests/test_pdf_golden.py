@@ -150,7 +150,9 @@ _P0957R8_TABLE_PINS = {
 # row bottom (_is_trailing_continuation tolerates the negative y gap).
 _P4016R0_TABLE_PINS = {
     (27, 7, 5, "clean_matrix", "horizontal_rows"),
+    (30, 3, 3, "clean_matrix", None),
     (34, 5, 3, "clean_matrix", None),
+    (44, 9, 5, "prose_table", None),
     (51, 5, 4, "clean_matrix", None),
     (54, 5, 2, "key_value", "horizontal_rows"),
 }
@@ -267,10 +269,12 @@ def test_p0957r8_table_family_pins():
 
 
 def test_p4016r0_table_family_pins():
-    """Focused guard for the P4016R0 tables on tomd pages 27, 34, 51 and
-    54. Independent of the full golden so a re-bless can never silently
-    hand D.3 or N.6 back to Pass 3 with their header or last row missing,
-    or let N.14 explode into headings again.
+    """Focused guard for the P4016R0 tables on tomd pages 27, 30, 34, 44,
+    51 and 54. Independent of the full golden so a re-bless can never
+    silently hand D.3 or N.6 back to Pass 3 with their header or last row
+    missing, let N.14 explode into headings again, lose B.1 (drawn grid
+    under a find_tables() phantom, 39pt tall) or leave K.1 at Pass 1's
+    two rows with the other seven leaking as prose.
     """
     pdf_path = _GOLDEN / "p4016r0.pdf"
     if not pdf_path.is_file():
@@ -280,6 +284,7 @@ def test_p4016r0_table_family_pins():
         (s.page_num, len(s.columns), len(s.columns[0]),
          s.table_kind, s.table_source)
         for s in sections
-        if s.kind == SectionKind.TABLE and s.page_num in (27, 34, 51, 54)
+        if s.kind == SectionKind.TABLE
+        and s.page_num in (27, 30, 34, 44, 51, 54)
     }
     assert got == _P4016R0_TABLE_PINS

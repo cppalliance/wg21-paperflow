@@ -281,18 +281,29 @@ class TestOrphanLookaheadMonospaceTwoColumn:
 
 
 class _FakePage:
-    """Stub page exposing get_drawings()/get_text() with synthetic items."""
+    """Stub page exposing get_drawings()/get_text() with synthetic items.
 
-    def __init__(self, lines, text_lines=None):
+    `lines` become "l" items, `rects` become "re" items (filled
+    rectangles, the border primitive of HTML-to-PDF engines).
+    """
+
+    def __init__(self, lines, text_lines=None, rects=None):
         self._lines = lines
         self._text_lines = text_lines or []
+        self._rects = rects or []
 
     def get_drawings(self):
-        return [
+        drawings = [
             {"items": [("l", SimpleNamespace(x=x0, y=y0),
                         SimpleNamespace(x=x1, y=y1))]}
             for x0, y0, x1, y1 in self._lines
         ]
+        drawings.extend(
+            {"items": [("re", SimpleNamespace(
+                x0=x0, y0=y0, x1=x1, y1=y1, width=x1 - x0, height=y1 - y0))]}
+            for x0, y0, x1, y1 in self._rects
+        )
+        return drawings
 
     def get_text(self, kind, flags=0):
         return {
@@ -334,10 +345,14 @@ class TestDetectDrawingGrids:
         assert len(grids) == 1
         bbox = grids[0]["bbox"]
         assert bbox[0] == 190.0 and bbox[2] == 405.0
-        # Synthetic entry must carry the full find_tables shape with
-        # row_count=0 so Pass 5 skips it.
-        assert grids[0]["row_count"] == 0
-        assert grids[0]["cells"] == []
+        # Synthetic entry carries the find_tables shape: the 8 rules
+        # dedupe to 6 (578.9/581.3 and 637.1/637.5 merge), giving 5 rows
+        # between two outer verticals, one cell per row.
+        assert grids[0]["source"] == "drawing_grid"
+        assert grids[0]["row_count"] == 5
+        assert grids[0]["col_count"] == 1
+        assert len(grids[0]["cells"]) == 5
+        assert grids[0]["cells"][0][1] == 565.0 and grids[0]["cells"][-1][3] == 637.1
 
     def test_full_page_margin_rules_rejected(self):
         """Full-page-height rules (wording margins) must not become grids."""
@@ -395,6 +410,226 @@ class TestDetectDrawingGrids:
         ]
         page = _FakePage(_grid_lines(190.0, 405.0, ys), text)
         assert _detect_drawing_grids(page, self.PAGE_H, []) == []
+
+
+def _cell_edge_rects(row_ys, col_xs, thickness=0.6):
+    """Borders as one thin filled rectangle per cell edge (P4016R0 style).
+
+    Every interior rule is drawn twice (bottom of one cell, top of the
+    next), every vertical once per row band.
+    """
+    rects = []
+    for r in range(len(row_ys) - 1):
+        y0, y1 = row_ys[r], row_ys[r + 1]
+        for c in range(len(col_xs) - 1):
+            x0, x1 = col_xs[c], col_xs[c + 1]
+            rects.append((x0, y0, x1, y0 + thickness))
+            rects.append((x0, y1, x1, y1 + thickness))
+            rects.append((x0, y0, x0 + thickness, y1 + thickness))
+            rects.append((x1, y0, x1 + thickness, y1 + thickness))
+    return rects
+
+
+class TestDrawingGridsFromRectangles:
+    """P4016R0 draws every table border as a 0.6pt filled rectangle and
+    never as a line item; find_tables() returns a full-page phantom on
+    those pages. The fallback reads thin rectangles as rules, merges the
+    per-cell edge pieces, and separates the table from the other
+    full-width rules on the page by the vertical rules that bridge them.
+    """
+
+    PAGE_H = 842.0
+    # B.1 (tomd page 30): 3 rows, 3 columns.
+    ROW_YS = [738.4, 751.7, 764.4, 777.6]
+    COL_XS = [57.0, 103.7, 202.3, 254.7]
+
+    def _b1_text(self):
+        cells = []
+        for y in (740.5, 753.8, 766.5):
+            cells.append((60.7, y, 100.0, y + 9.0))
+            cells.append((107.4, y, 190.0, y + 9.0))
+            cells.append((206.0, y, 250.0, y + 9.0))
+        return cells
+
+    def _b1_page(self, extra_rects=()):
+        rects = _cell_edge_rects(self.ROW_YS, self.COL_XS)
+        # Header cell fills: wide and 13pt tall, not rules.
+        for c in range(3):
+            rects.append((self.COL_XS[c], 738.4, self.COL_XS[c + 1], 751.7))
+        # Page background box (what find_tables() turns into a phantom).
+        rects.append((57.0, 57.0, 537.2, 779.4))
+        rects.extend(extra_rects)
+        return _FakePage([], self._b1_text(), rects=rects)
+
+    def test_thin_rectangles_form_one_grid(self):
+        grids = _detect_drawing_grids(self._b1_page(), self.PAGE_H, [])
+        assert len(grids) == 1
+        g = grids[0]
+        assert g["source"] == "drawing_grid"
+        assert (g["row_count"], g["col_count"]) == (3, 3)
+        assert len(g["cells"]) == 9
+        assert g["bbox"][1] == pytest.approx(738.7, abs=0.1)
+        assert g["bbox"][3] == pytest.approx(777.9, abs=0.1)
+        # Cell (row 1, col 1) is bounded by the drawn rules.
+        x0, y0, x1, y1 = g["cells"][4]
+        assert (x0, x1) == pytest.approx((104.0, 202.6), abs=0.1)
+        assert (y0, y1) == pytest.approx((752.0, 765.0), abs=0.5)
+
+    def test_separators_and_note_box_stay_out_of_the_grid(self):
+        # A full-width section rule (no verticals) and a two-rule note
+        # box with its own side borders share the 57-537 span with a
+        # table; the chain split keeps only the table's rules.
+        wide_rows = [400.0, 413.0, 426.0, 439.0]
+        wide_cols = [57.0, 200.0, 537.0]
+        rects = _cell_edge_rects(wide_rows, wide_cols)
+        rects.append((57.0, 615.6, 537.2, 616.2))  # section separator
+        rects.extend([(57.0, 57.0, 537.2, 57.6), (57.0, 136.6, 537.2, 137.1),
+                      (57.0, 57.0, 57.6, 137.1), (536.7, 57.0, 537.2, 137.1)])
+        text = []
+        for y in (402.0, 415.0, 428.0):
+            text.append((60.0, y, 150.0, y + 9.0))
+            text.append((204.0, y, 400.0, y + 9.0))
+        text.append((60.0, 70.0, 500.0, 79.0))  # note box prose
+        page = _FakePage([], text, rects=rects)
+        grids = _detect_drawing_grids(page, self.PAGE_H, [])
+        assert len(grids) == 1
+        assert grids[0]["bbox"][1] == pytest.approx(400.3, abs=0.1)
+        assert grids[0]["bbox"][3] == pytest.approx(439.3, abs=0.1)
+        assert grids[0]["row_count"] == 3
+
+    def test_tall_centred_cells_counted_per_rule_band(self):
+        # K.1 pattern: the Notes cell wraps to six lines while Platform
+        # is one line. Per rule band both columns have text, so the row
+        # is multi-cell even though five text-y levels hold one line.
+        rows = [100.0, 200.0, 300.0]
+        cols = [57.0, 300.0, 537.0]
+        rects = _cell_edge_rects(rows, cols)
+        text = []
+        for band_top in (100.0, 200.0):
+            text.append((60.0, band_top + 45.0, 200.0, band_top + 54.0))
+            for k in range(6):
+                y = band_top + 10.0 + k * 13.0
+                text.append((304.0, y, 530.0, y + 9.0))
+        page = _FakePage([], text, rects=rects)
+        grids = _detect_drawing_grids(page, self.PAGE_H, [])
+        assert len(grids) == 1
+        assert (grids[0]["row_count"], grids[0]["col_count"]) == (2, 2)
+
+    def test_phantom_free_coverage_skips_the_grid(self):
+        # The caller hands over phantom-filtered find_tables() entries; a
+        # tight region over the same table still counts as coverage.
+        tight = [{"bbox": (57.2, 738.6, 254.9, 777.8)}]
+        assert _detect_drawing_grids(self._b1_page(), self.PAGE_H, tight) == []
+
+
+def _drawing_grid_entry(row_ys, col_xs, page_h=842.0, drawn=True):
+    """A page_mupdf_tables entry in the shape _detect_drawing_grids emits."""
+    cells = [(col_xs[c], row_ys[r], col_xs[c + 1], row_ys[r + 1])
+             for r in range(len(row_ys) - 1) for c in range(len(col_xs) - 1)]
+    entry = {
+        "bbox": (col_xs[0], row_ys[0], col_xs[-1], row_ys[-1]),
+        "row_count": len(row_ys) - 1,
+        "col_count": len(col_xs) - 1,
+        "cells": cells,
+        "header_names": None,
+        "extract": [],
+        "rot": None,
+        "max_cell_h": max(b - a for a, b in zip(row_ys, row_ys[1:])),
+        "tbl_h": row_ys[-1] - row_ys[0],
+        "page_coverage": (row_ys[-1] - row_ys[0]) / page_h,
+    }
+    if drawn:
+        entry["source"] = "drawing_grid"
+    return entry
+
+
+class TestDrawingGridConsumers:
+    """table.py treats a drawing-grid entry as verified geometry: Pass 1
+    stands down for it only on a partial view, Pass 5 drops the
+    find_tables()-specific guards (min size, label transposition).
+    """
+
+    ROW_YS = [100.0, 115.0, 130.0, 145.0, 160.0, 175.0]
+    COL_XS = [57.0, 290.0, 537.0]
+
+    def _rows(self, n, first_y=102.0, step=15.0):
+        labels = ["Alpha", "Beta", "Gamma", "Delta", "Epsilon", "Zeta"]
+        blocks = []
+        for k in range(n):
+            y = first_y + k * step
+            blocks.append(_bbox_block([
+                _line(labels[k], 60.0, y, 120.0, y + 9.0),
+                _line(f"value {k}", 294.0, y, 380.0, y + 9.0)]))
+        return blocks
+
+    def test_pass1_keeps_a_complete_table_over_a_drawn_grid(self):
+        blocks = self._rows(5)
+        grid = {0: [_drawing_grid_entry(self.ROW_YS, self.COL_XS)]}
+        tables, remaining = detect_tables(blocks, page_mupdf_tables=grid)
+        assert len(tables) == 1 and remaining == []
+        assert tables[0].table_source == "horizontal_rows"
+        assert len(tables[0].columns) == 5
+
+    def test_find_tables_region_with_five_rows_still_defers(self):
+        # Control: the same region as a find_tables() guess keeps the
+        # old rule (5+ rows overlapping Pass 1 -> Pass 5 assembles).
+        blocks = self._rows(5)
+        grid = {0: [_drawing_grid_entry(self.ROW_YS, self.COL_XS, drawn=False)]}
+        tables, _ = detect_tables(blocks, page_mupdf_tables=grid)
+        assert len(tables) == 1
+        assert tables[0].table_source is None
+
+    def test_pass1_defers_when_the_drawn_grid_holds_unclaimed_rows(self):
+        # K.1 pattern: Pass 1 assembles some rows, the grid contains
+        # more blocks it cannot take (a one-line row). Pass 5 builds the
+        # whole grid, including the leftover.
+        blocks = self._rows(5)
+        y = 102.0 + 5 * 15.0
+        blocks.append(_bbox_block([_line("Zeta", 60.0, y, 120.0, y + 9.0)]))
+        row_ys = self.ROW_YS + [190.0]
+        grid = {0: [_drawing_grid_entry(row_ys, self.COL_XS)]}
+        tables, remaining = detect_tables(blocks, page_mupdf_tables=grid)
+        assert len(tables) == 1 and remaining == []
+        assert tables[0].table_source is None
+        col0 = ["".join(s.text for s in row[0]).strip()
+                for row in tables[0].columns]
+        assert col0 == ["Alpha", "Beta", "Gamma", "Delta", "Epsilon", "Zeta"]
+
+    def test_pass5_accepts_a_short_drawn_grid(self):
+        # B.1 is 39pt tall; the find_tables() min-size guard would drop it.
+        row_ys = [738.7, 752.0, 764.7, 777.9]
+        col_xs = [57.3, 104.0, 202.6, 255.0]
+        blocks = []
+        for k, y in enumerate((740.5, 753.8, 766.5)):
+            blocks.append(_bbox_block([
+                _line(f"a{k}", 60.7, y, 100.0, y + 9.0),
+                _line(f"b{k}", 107.4, y, 190.0, y + 9.0),
+                _line(f"c{k}", 206.0, y, 250.0, y + 9.0)]))
+        drawn = {0: [_drawing_grid_entry(row_ys, col_xs)]}
+        tables, used = _detect_mupdf_native_tables(blocks, drawn)
+        assert len(tables) == 1 and used == {0, 1, 2}
+        assert len(tables[0].columns) == 3
+        assert all(len(row) == 3 for row in tables[0].columns)
+        guessed = {0: [_drawing_grid_entry(row_ys, col_xs, drawn=False)]}
+        assert _detect_mupdf_native_tables(blocks, guessed) == ([], set())
+
+    def test_pass5_never_transposes_a_drawn_two_column_grid(self):
+        row_ys = [100.0, 160.0, 220.0, 280.0]
+        col_xs = [57.0, 200.0, 537.0]
+        blocks = []
+        for k, y in enumerate((110.0, 170.0, 230.0)):
+            blocks.append(_bbox_block([
+                _line(["Before", "After", "Later"][k], 60.0, y, 120.0, y + 9.0),
+                _line(f"description {k}", 204.0, y, 400.0, y + 9.0)]))
+        drawn = {0: [_drawing_grid_entry(row_ys, col_xs)]}
+        tables, _ = _detect_mupdf_native_tables(blocks, drawn)
+        assert len(tables) == 1
+        assert len(tables[0].columns) == 3
+        assert all(len(row) == 2 for row in tables[0].columns)
+        guessed = {0: [_drawing_grid_entry(row_ys, col_xs, drawn=False)]}
+        tables, _ = _detect_mupdf_native_tables(blocks, guessed)
+        assert len(tables) == 1
+        assert len(tables[0].columns[0]) == 3  # labels became the header
 
 
 # 90-degree rotation matrix of a 595x842 portrait page (P3100R6 appendix

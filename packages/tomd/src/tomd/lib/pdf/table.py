@@ -529,6 +529,16 @@ def _nearest_column(x: float, col_xs: list[float]) -> int:
 _SBS_MUPDF_DEFER_MIN_ROWS = 5
 _MUPDF_REGION_MARGIN = 4.0  # pt of slack when testing block containment
 
+# page_mupdf_tables entries synthesized by the pipeline's drawing-grid
+# fallback carry this source. Their cells are rule intersections of a
+# validated bordered grid, so the guards written against find_tables()
+# guesses (phantom height, min size, label transposition) stand down.
+_DRAWING_GRID_SOURCE = "drawing_grid"
+
+
+def _is_drawing_grid(tbl_info: dict) -> bool:
+    return tbl_info.get("source") == _DRAWING_GRID_SOURCE
+
 
 def _pass1_region_incomplete(
     region: tuple[float, float, float, float],
@@ -1837,7 +1847,11 @@ def _detect_mupdf_native_tables(
                 continue
             w = bbox[2] - bbox[0]
             h = bbox[3] - bbox[1]
-            if w < _MUPDF_TABLE_MIN_BBOX_SIZE or h < _MUPDF_TABLE_MIN_BBOX_SIZE:
+            # A drawn grid validated its own geometry; a 3-row table of
+            # 13pt rows is 39pt tall and real (P4016R0 B.1).
+            drawn = _is_drawing_grid(tbl_info)
+            if not drawn and (w < _MUPDF_TABLE_MIN_BBOX_SIZE
+                              or h < _MUPDF_TABLE_MIN_BBOX_SIZE):
                 continue
 
             # Phantom-table guard: reject find_tables() results that
@@ -2011,7 +2025,9 @@ def _detect_mupdf_native_tables(
             # short labels (e.g. "Before", "After") and column 1+ has
             # longer content, restructure so the labels become column
             # headers and corresponding data fills the columns below.
-            non_empty_rows = _maybe_transpose_label_table(non_empty_rows)
+            # Never for a drawn grid: its rows are the drawn rows.
+            if not drawn:
+                non_empty_rows = _maybe_transpose_label_table(non_empty_rows)
 
             text = _render_table_text(non_empty_rows)
 
@@ -5306,19 +5322,32 @@ def detect_tables(
                                 p1_deferred = True
                                 break
                             continue
-                        if (tbl.get("row_count", 0)
-                                < _SBS_MUPDF_DEFER_MIN_ROWS
-                                and not _pass1_region_incomplete(
-                                    tb, p1_page, table_blocks, blocks)):
-                            continue
-                        # Phantom guard: if MuPDF's table is much
-                        # taller than what Pass 1 detected, MuPDF has
-                        # merged prose with the real table. Keep the
-                        # Pass 1 detection.
-                        mupdf_h = tb[3] - tb[1]
-                        p1_h = max(ry1 - ry0, 1.0)
-                        if mupdf_h > p1_h * 3.0:
-                            continue
+                        incomplete = _pass1_region_incomplete(
+                            tb, p1_page, table_blocks, blocks)
+                        if _is_drawing_grid(tbl):
+                            # A drawn grid is verified geometry, not a
+                            # find_tables() guess: it never merges prose
+                            # into the table, so the 5-row rule and the
+                            # phantom height guard below do not apply.
+                            # Pass 1 stands down only when the grid holds
+                            # blocks it did not claim (P4016R0 K.1: 2 of
+                            # 9 rows); a complete Pass 1 table keeps its
+                            # own assembly.
+                            if not incomplete:
+                                continue
+                        else:
+                            if (tbl.get("row_count", 0)
+                                    < _SBS_MUPDF_DEFER_MIN_ROWS
+                                    and not incomplete):
+                                continue
+                            # Phantom guard: if MuPDF's table is much
+                            # taller than what Pass 1 detected, MuPDF has
+                            # merged prose with the real table. Keep the
+                            # Pass 1 detection.
+                            mupdf_h = tb[3] - tb[1]
+                            p1_h = max(ry1 - ry0, 1.0)
+                            if mupdf_h > p1_h * 3.0:
+                                continue
                         if ov_x > 0 and ov_y > 0:
                             p1_area = max(
                                 (rx1 - rx0) * (ry1 - ry0), 1)
