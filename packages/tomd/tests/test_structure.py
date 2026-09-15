@@ -22,8 +22,62 @@ from tomd.lib.pdf.structure import (
     _classify_code_line, _is_narrative_continuation, _trim_narrative_from_code,
     _absorb_trailing_label_into_code, _is_tail_prose,
     _peel_trailing_prose_from_code,
-    _weak_heading_qualifies,
+    _weak_heading_qualifies, _merge_paragraphs,
 )
+
+
+class TestMergeParagraphsDehyphenation:
+    """#413: a block boundary after a hyphen runs T9's pair rule, so the
+    merged paragraph never reads ``floating- point``."""
+
+    @staticmethod
+    def _para(text):
+        return make_section(text, lines=[make_line([text])])
+
+    def test_compound_boundary_keeps_hyphen_and_pulls_word_up(self):
+        evidence = self._para("All floating-point types.")
+        prev = self._para("uses a floating-")
+        cur = self._para("point value.")
+        merged = _merge_paragraphs([evidence, prev, cur])
+        assert len(merged) == 2
+        assert merged[1].text == "uses a floating-point value."
+        assert [ln.text for ln in merged[1].lines] == [
+            "uses a floating-point", "value."]
+
+    def test_syllable_boundary_glues(self):
+        prev = self._para("the imple-")
+        cur = self._para("mentation follows.")
+        merged = _merge_paragraphs([prev, cur])
+        assert len(merged) == 1
+        assert merged[0].text == "the implementation follows."
+        assert [ln.text for ln in merged[0].lines] == [
+            "the implementation", "follows."]
+
+    def test_fully_consumed_first_line_is_dropped(self):
+        prev = self._para("the imple-")
+        cur = make_section("mentation\nfollows.", lines=[
+            make_line(["mentation"]), make_line(["follows."])])
+        merged = _merge_paragraphs([prev, cur])
+        assert merged[0].text == "the implementation\nfollows."
+        assert [ln.text for ln in merged[0].lines] == [
+            "the implementation", "follows."]
+
+    def test_plain_merge_unchanged(self):
+        prev = self._para("a sentence that")
+        cur = self._para("continues here.")
+        merged = _merge_paragraphs([prev, cur])
+        assert merged[0].text == "a sentence that continues here."
+
+    def test_text_lines_mismatch_falls_back_to_plain_merge(self):
+        """Section text that does not carry the boundary tokens of its
+        lines keeps text and lines in step: neither is dehyphenated."""
+        prev = make_section("the imple-", lines=[make_line(["the imple-"])])
+        cur = make_section("mentation follows.",
+                           lines=[make_line(["[fn] mentation follows."])])
+        merged = _merge_paragraphs([prev, cur])
+        assert merged[0].text == "the imple- mentation follows."
+        assert [ln.text for ln in merged[0].lines] == [
+            "the imple-", "[fn] mentation follows."]
 
 
 class TestHeadingConfidence:

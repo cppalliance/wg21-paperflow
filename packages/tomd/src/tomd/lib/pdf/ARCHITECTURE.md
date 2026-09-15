@@ -145,9 +145,11 @@ Enums:
 - Collapses multi-space (except in monospace spans)
 
 **T9. Dehyphenation**
-- `cleanup.py:cleanup_text` (span-level, active in pipeline)
-- Line ends with `-`, next line starts lowercase, prefix not in compound set (self, non, well, cross, etc.)
-- Modifies spans: removes hyphen from current line's last span, moves first word from next line
+- `cleanup.py:cleanup_text` (span-level, active in pipeline) via `collect_hyphen_evidence` + `dehyphenate_pair`
+- Line ends with `-` (no space before it), next line starts lowercase, same monospace-ness on both sides
+- Keep-or-glue decided per pair, document evidence first: compound seen hyphenated mid-line -> keep; glued word seen whole -> glue; prefix in `COMPOUND_PREFIXES` -> keep; acronym / digit-led prefix -> keep; both halves standalone words -> keep; tail ends another compound -> keep; else glue. Wrap fragments never count as evidence. Monospace pairs and hyphens after a non-alphanumeric (`convertible_-`) use the compound-seen rule only.
+- Both outcomes pull the next line's first word up onto the hyphen line, so a flattened paragraph never reads `non- associative`
+- `structure.py:_merge_paragraphs` runs `dehyphenate_pair` on a text-merge boundary (MuPDF opens a new block after a hyphen at normal line spacing), same evidence built from all section lines
 
 **T10. Cross-page paragraph joining**
 - `cleanup.py:_join_cross_page`

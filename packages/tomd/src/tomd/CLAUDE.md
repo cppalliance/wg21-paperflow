@@ -231,7 +231,7 @@ Before dual extraction, scan all pages for repeating content at page edges.
 
 ## Text Cleanup Rules
 
-- **Dehyphenation**: line ends with `-`, next line starts lowercase -> join word, remove hyphen. Skip known compound prefixes (`self-`, `non-`, `well-`, `cross-`).
+- **Dehyphenation**: line ends with `-`, next line starts lowercase in the same font class -> pull the next word up. Keep the hyphen when the document attests the compound (seen hyphenated mid-line, or both halves are standalone words, or the tail ends another compound), when the prefix is a known compound prefix (`self-`, `non-`, `well-`, `cross-`), an acronym or digit-led; glue when the glued word is attested or nothing else applies. Applies inside blocks (`cleanup_text`) and at block boundaries (`_merge_paragraphs`).
 - **Cross-page join**: last block on page N has no terminal punctuation, first block on page N+1 starts lowercase -> same paragraph, join.
 - **Link extraction**: collected during Phase 2 via `page.get_links()`, matched to text by bounding rect -> `[text](url)`. Only http/https/mailto.
 - **Whitespace**: collapse runs, replace non-breaking spaces, strip trailing.

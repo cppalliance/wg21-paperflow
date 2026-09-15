@@ -14,6 +14,7 @@ from .. import (
 # `drop_leaked_toc_entries` reuses toc.py's TOC-recognition helpers so the
 # two "what is a TOC" definitions stay a single source of truth (see #122).
 from ..toc import MIN_TOC_RUN, is_toc_label, normalize_toc_entry
+from .cleanup import collect_hyphen_evidence, dehyphenate_pair
 from .glyphs import GLYPH_FONT_SENTINEL, UNKNOWN_GLYPH
 from .wording import is_foreign_chromatic
 from .types import (
@@ -1991,11 +1992,19 @@ def _merge_paragraphs(sections: list[Section]) -> list[Section]:
     x-indented relative to the list item, indicating it is a
     continuation of the same list entry (e.g. a second sentence under
     a numbered item that MuPDF placed in a separate block).
+
+    A text merge whose boundary is a hyphen-terminated line (MuPDF opens
+    a new block after ``floating-`` at ordinary line spacing) runs T9's
+    :func:`dehyphenate_pair` on the boundary pair, so the joined
+    paragraph reads ``floating-point`` / ``implementation-defined`` and
+    never ``floating- point``. The block-internal wraps were handled in
+    ``cleanup_text``; this is the same rule for the wraps it cannot see.
     """
     if len(sections) < 2:
         return sections
 
     mergeable = frozenset({SectionKind.PARAGRAPH, SectionKind.LIST})
+    evidence = collect_hyphen_evidence([ln for s in sections for ln in s.lines])
 
     result = [replace(sections[0], lines=list(sections[0].lines))]
     for sec in sections[1:]:
@@ -2025,6 +2034,28 @@ def _merge_paragraphs(sections: list[Section]) -> list[Section]:
                         and 0 <= y_gap <= max_gap
                         and first_char not in _BULLET_LIKE):
                     indent_merge = True
+
+            pair = None
+            if text_merge and not indent_merge and prev.lines and sec.lines:
+                pair = dehyphenate_pair(prev.lines[-1], sec.lines[0], evidence)
+                # text and lines must move together; if the section text
+                # does not carry the same boundary tokens as its lines,
+                # fall through to the plain merge rather than desync them.
+                if pair is not None and not (
+                        prev.text.rstrip().endswith(pair.prefix_token)
+                        and sec.text.lstrip().startswith(pair.first_word)):
+                    pair = None
+
+            if pair is not None:
+                prev_text = prev.text.rstrip()
+                cur_text = sec.text.lstrip()
+                prev.text = (prev_text[:-len(pair.prefix_token)] + pair.joined
+                             + cur_text[len(pair.first_word):])
+                prev.lines[-1] = pair.last_line
+                tail_lines = [] if pair.next_line is None else [pair.next_line]
+                prev.lines.extend(tail_lines + list(sec.lines[1:]))
+                prev.font_size = prev.lines[0].font_size
+                continue
 
             if text_merge or indent_merge:
                 joiner = "\n" if indent_merge else " "
