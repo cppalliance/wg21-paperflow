@@ -365,6 +365,7 @@ Tightening similarity without prompts; loosening TOC detection; aggressive parag
 **Paragraph merge**
 
 - Merge consecutive paragraphs when the first lacks **terminal punctuation** and the second starts **lowercase** ([`_merge_paragraphs`](lib/pdf/structure.py)).
+- Also merge when the second starts with `(`, a bracketed reference the sentence runs on from (`[numerics.defns]. ...`) or an inline code span on a prose line and the geometry proves a wrap: exactly one wrap pitch below (baseline to baseline, the document's own line pitch measured on its known wraps), same page and font, aligned at the left edge, and the second block's first word would not have fit before the document's text margin (the line end at least three body lines share). MuPDF splits a block where the glyph run changes mid-sentence; these starts are not lowercase, so the geometry decides. A paragraph break adds paragraph spacing to the pitch; a short last line or a bibliography label (`[GB-SEQ] = ...`) is a deliberate break and stays one.
 
 **Code**
 

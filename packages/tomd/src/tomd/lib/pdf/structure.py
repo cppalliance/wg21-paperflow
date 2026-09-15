@@ -3,6 +3,7 @@
 import logging
 import math
 import re
+import statistics
 import unicodedata
 from collections import Counter
 from dataclasses import replace
@@ -1978,6 +1979,212 @@ def _set_run_depths(run: list[Section]) -> None:
 
 _LIST_CONTINUATION_INDENT = 10.0  # min extra x-offset (pt) for indent merge
 _BULLET_LIKE = BULLET_CHARS | frozenset("\u25cb\u25b8\u25ba\u25c6\u2013\u2014")
+# A block that continues the sentence of the block above sits exactly one
+# line pitch below it: baseline to baseline, in font sizes, the same value
+# for every wrapped line of a document (P4016R0 1.500 over 979 samples,
+# P0957R8 1.566 +-0.04, P4100R1/P4182R0/P4094R0 1.850) and independent of
+# the ascender/descender boxes, which overlap under tight leading and
+# grow on lines with inline code. A paragraph break adds the paragraph
+# spacing: +0.5 at the smallest common setting (Word, 6pt after 12pt
+# text; LaTeX parskip 0.5 baselineskip is +0.6). Bibliographies and
+# definition lists set at line pitch are told apart lexically and by the
+# wrap proof below.
+_WRAP_PITCH_TOL = 0.15  # font sizes
+_WRAP_PITCH_MIN = 0.5  # font sizes; closer baselines are the same line
+_PARAGRAPH_CONTINUATION_FONT_TOL = 0.5  # pt; a wrapped line keeps its size
+# The wrapped line starts at the paragraph's left edge: never right of the
+# line above (that is a column or an indented item), at most a first-line
+# indent left of it, and only when the line above is the paragraph's
+# first line (any later line already sits at the edge).
+_CONTINUATION_LEFT_TOL = 2.0  # pt
+_CONTINUATION_INDENT_MAX = 2.0  # font sizes
+# Average glyph advance of proportional body text, in font sizes. Used to
+# estimate whether the next block's first word would have fit on the
+# previous line.
+# shortcut: one flat glyph width; switch to the first word's span bbox if
+# wraps before short code tokens (`+`, `L),`) turn out to be missed.
+_AVG_CHAR_WIDTH = 0.5
+# A layout measure (text margin, wrap pitch) needs at least this many
+# witnesses. One long URL or a lone short list in an otherwise empty
+# document establishes neither.
+_LAYOUT_WITNESS_MIN = 3
+# The text margin is the largest line end that enough paragraph or list
+# lines share within this tolerance.
+_MARGIN_WITNESS_TOL = 6.0  # pt
+# Quotes, emphasis and closing brackets that may follow a sentence's
+# final punctuation (`"unified interface."`, `**bold.**`).
+_CLOSING_MARKS = "*`\"'\u2019\u201d)]"
+# `(1)`, `(iii)`, `a)`: an enumeration label opens an item, never a
+# continuation, whatever the geometry says.
+_ENUM_LABEL_RE = re.compile(r"^\(?(?:\d+|[ivxlc]+|[a-z])\)\s", re.IGNORECASE)
+# A bracketed start continues a sentence when the closing bracket is
+# followed by punctuation or a lowercase word (`[numerics.defns]. GEN...`,
+# `[algorithms.parallel.exec], `, `[4] and [5]`). Followed by anything
+# else it labels a bibliography entry (`[GB-SEQ] = https://...`,
+# `[N4950] Working Draft`) or opens a note (`[Note: ...`).
+_BRACKET_CONTINUATION_RE = re.compile(r"^\[[^\]]+\](?:[.,;:)]|\s+[a-z])")
+
+
+def _starts_inline_continuation(sec: Section) -> bool:
+    """A paragraph whose first token cannot open a sentence of its own.
+
+    An opening parenthesis (``(lane count L), the expression``), a
+    bracketed reference the sentence runs on from (``[numerics.defns].
+    GENERALIZED_SUM ...``, see :data:`_BRACKET_CONTINUATION_RE`) or an
+    inline code span on a mixed prose line (``GENERALIZED_SUM, operand
+    reordering);``) continues the sentence above; MuPDF starts a new
+    block there because the glyph run changes. A line that is all
+    monospace is code, and a bullet, list number or enumeration label
+    opens an item, so none of those qualifies.
+    """
+    text = sec.text.lstrip()
+    if (not text or BULLET_RE.match(text) or NUMBERED_LIST_RE.match(text)
+            or _ENUM_LABEL_RE.match(text)):
+        return False
+    first = next((ln for ln in sec.lines if ln.text.strip()), None)
+    if first is None or first.is_monospace:
+        return False
+    if text[0] == "(":
+        return True
+    if text[0] == "[":
+        return bool(_BRACKET_CONTINUATION_RE.match(text))
+    spans = [s for s in first.spans if s.text.strip()]
+    return bool(spans) and spans[0].monospace
+
+
+def _continues_lowercase(prev: Section, sec: Section) -> bool:
+    """The lowercase rule: ``prev`` ends without terminal punctuation and
+    ``sec`` starts with a lowercase letter, so the line wrapped."""
+    prev_text = prev.text.rstrip()
+    cur_text = sec.text.lstrip()
+    return (bool(prev_text) and bool(cur_text)
+            and prev_text[-1] not in TERMINAL_PUNCTUATION
+            and cur_text[0].islower())
+
+
+def _baseline(line: Line) -> float:
+    """Baseline y of a line: the first content span's origin, or the box
+    bottom when the extractor supplied no origin (synthetic lines)."""
+    for span in line.spans:
+        if span.text.strip() and span.origin[1]:
+            return span.origin[1]
+    return line.bbox[3]
+
+
+def _content_lines(sec: Section) -> list[Line]:
+    return [ln for ln in sec.lines if ln.text.strip()]
+
+
+def _pitch_ratio(upper: Line, lower: Line) -> float | None:
+    """Baseline distance from ``upper`` to ``lower`` in font sizes, or
+    None when the lines are on different pages, without a font size, or
+    too close to be separate lines."""
+    fs = upper.font_size
+    if upper.page_num != lower.page_num or not fs:
+        return None
+    ratio = (_baseline(lower) - _baseline(upper)) / fs
+    return ratio if ratio >= _WRAP_PITCH_MIN else None
+
+
+def _wrap_pitch(sections: list[Section],
+                kinds: frozenset[SectionKind]) -> float | None:
+    """The document's line pitch for wrapped prose, in font sizes.
+
+    Median over the pairs known to be wraps: consecutive prose lines
+    inside one section, and section boundaries the lowercase rule merges
+    (:func:`_continues_lowercase`). Some producers give MuPDF one block
+    per line, so a document may have no multi-line section at all and
+    the boundary sample carries it. Code lines are excluded: listings are
+    still paragraphs here and often set at a different pitch. None below
+    :data:`_LAYOUT_WITNESS_MIN` samples.
+    """
+    samples: list[float] = []
+    for sec in sections:
+        if sec.kind not in kinds:
+            continue
+        lines = [ln for ln in _content_lines(sec) if not ln.is_monospace]
+        for upper, lower in zip(lines, lines[1:]):
+            ratio = _pitch_ratio(upper, lower)
+            if ratio is not None:
+                samples.append(ratio)
+    for prev, sec in zip(sections, sections[1:]):
+        if (prev.kind not in kinds or sec.kind not in kinds
+                or not _continues_lowercase(prev, sec)):
+            continue
+        prev_lines, sec_lines = _content_lines(prev), _content_lines(sec)
+        if not prev_lines or not sec_lines:
+            continue
+        upper, lower = prev_lines[-1], sec_lines[0]
+        if upper.is_monospace or lower.is_monospace:
+            continue
+        ratio = _pitch_ratio(upper, lower)
+        if ratio is not None:
+            samples.append(ratio)
+    if len(samples) < _LAYOUT_WITNESS_MIN:
+        return None
+    return statistics.median(samples)
+
+
+def _text_margin(sections: list[Section],
+                 kinds: frozenset[SectionKind]) -> float | None:
+    """The document's right text margin, or None when nothing establishes one.
+
+    The margin is the largest line end shared by at least
+    :data:`_LAYOUT_WITNESS_MIN` lines of the given kinds anywhere in the
+    document; body pages share one measure, and a ragged-right paper with
+    sparse pages (P4182R0, tables on most pages) still reaches the margin
+    a few times over the whole document. Code listings are still
+    paragraphs at this stage and a wide one inflates the value, as does
+    the right column of a two-column layout; both only disable the inline
+    merge (fail closed). A document with fewer than three lines reaching
+    its true margin gets a smaller one; the pitch gate still stands.
+    """
+    xs = sorted((ln.bbox[2] for s in sections if s.kind in kinds
+                 for ln in s.lines if ln.text.strip()), reverse=True)
+    for i, edge in enumerate(xs):
+        witnesses = sum(1 for x in xs[i:] if x >= edge - _MARGIN_WITNESS_TOL)
+        if witnesses >= _LAYOUT_WITNESS_MIN:
+            return edge
+    return None
+
+
+def _is_wrapped_continuation(prev: Section, sec: Section,
+                             right_edge: float | None,
+                             pitch: float | None) -> bool:
+    """Geometry says ``sec`` continues the line ``prev`` broke mid-sentence.
+
+    Same page and font size; ``sec``'s first line sits exactly one wrap
+    pitch (:func:`_wrap_pitch`, baseline to baseline) below ``prev``'s
+    last line, starting at that line's left edge (or a first-line indent
+    to its left when that line is the paragraph's only line); and
+    ``sec``'s first word would not have fit on that last line before
+    ``right_edge`` (the text margin, see :func:`_text_margin`). A line
+    wraps only when the next word does not fit, so a short last line
+    (list item, definition entry, bibliography URL followed by a short
+    label) never qualifies, and a document without an established margin
+    or pitch never merges.
+    """
+    if not right_edge or pitch is None:
+        return False
+    fs = prev.font_size
+    if not fs or abs(sec.font_size - fs) > _PARAGRAPH_CONTINUATION_FONT_TOL:
+        return False
+    prev_lines = _content_lines(prev)
+    last = prev_lines[-1] if prev_lines else None
+    first = next(iter(_content_lines(sec)), None)
+    if last is None or first is None:
+        return False
+    ratio = _pitch_ratio(last, first)
+    if ratio is None or abs(ratio - pitch) > _WRAP_PITCH_TOL:
+        return False
+    dx = first.bbox[0] - last.bbox[0]
+    indent = (_CONTINUATION_INDENT_MAX * fs if len(prev_lines) == 1
+              else _CONTINUATION_LEFT_TOL)
+    if not (-indent <= dx <= _CONTINUATION_LEFT_TOL):
+        return False
+    first_word = sec.text.split()[0]
+    needed = (len(first_word) + 1) * _AVG_CHAR_WIDTH * fs  # word + space
+    return last.bbox[2] + needed > right_edge
 
 
 def _merge_paragraphs(sections: list[Section]) -> list[Section]:
@@ -1999,12 +2206,24 @@ def _merge_paragraphs(sections: list[Section]) -> list[Section]:
     paragraph reads ``floating-point`` / ``implementation-defined`` and
     never ``floating- point``. The block-internal wraps were handled in
     ``cleanup_text``; this is the same rule for the wraps it cannot see.
+
+    The same block split also lands before an opening bracket or an
+    inline code span (``... topology coordinate`` / ``(lane count L), the
+    expression ...``). Those starts are not lowercase, so they merge only
+    when the geometry proves a wrap (:func:`_is_wrapped_continuation`):
+    same page and font, the next block one wrap pitch below and at the
+    same left edge, and its first word too wide for the room left before
+    the text margin.
     """
     if len(sections) < 2:
         return sections
 
     mergeable = frozenset({SectionKind.PARAGRAPH, SectionKind.LIST})
     evidence = collect_hyphen_evidence([ln for s in sections for ln in s.lines])
+    # A wrapped line is one whose successor word would have crossed the
+    # text margin, sitting one wrap pitch below.
+    margin = _text_margin(sections, mergeable)
+    pitch = _wrap_pitch(sections, mergeable)
 
     result = [replace(sections[0], lines=list(sections[0].lines))]
     for sec in sections[1:]:
@@ -2013,11 +2232,7 @@ def _merge_paragraphs(sections: list[Section]) -> list[Section]:
                 and sec.kind == SectionKind.PARAGRAPH
                 and prev.text.rstrip()
                 and sec.text.lstrip()):
-            prev_end = prev.text.rstrip()[-1]
-            cur_start = sec.text.lstrip()[0]
-
-            text_merge = (prev_end not in TERMINAL_PUNCTUATION
-                          and cur_start.islower())
+            text_merge = _continues_lowercase(prev, sec)
 
             indent_merge = False
             if (prev.kind == SectionKind.LIST
@@ -2034,6 +2249,19 @@ def _merge_paragraphs(sections: list[Section]) -> list[Section]:
                         and 0 <= y_gap <= max_gap
                         and first_char not in _BULLET_LIKE):
                     indent_merge = True
+
+            inline_merge = False
+            if not text_merge and not indent_merge:
+                # `"unified interface."` ends a sentence although its last
+                # character is a quote; a trailing hyphen needs T9, which
+                # only the lowercase path runs.
+                bare_end = prev.text.rstrip().rstrip(_CLOSING_MARKS)[-1:]
+                inline_merge = (
+                    bool(bare_end)
+                    and bare_end not in TERMINAL_PUNCTUATION
+                    and bare_end != "-"
+                    and _starts_inline_continuation(sec)
+                    and _is_wrapped_continuation(prev, sec, margin, pitch))
 
             pair = None
             if text_merge and not indent_merge and prev.lines and sec.lines:
@@ -2057,7 +2285,7 @@ def _merge_paragraphs(sections: list[Section]) -> list[Section]:
                 prev.font_size = prev.lines[0].font_size
                 continue
 
-            if text_merge or indent_merge:
+            if text_merge or indent_merge or inline_merge:
                 joiner = "\n" if indent_merge else " "
                 prev.text = prev.text.rstrip() + joiner + sec.text.lstrip()
                 prev.lines.extend(sec.lines)
