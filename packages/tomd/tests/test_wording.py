@@ -238,6 +238,95 @@ class TestForeignColorFilter:
         assert all(s.wording_role is None for ln in block.lines for s in ln.spans)
 
 
+# Pygments ``friendly`` palette: keyword, number and type each in a
+# different shade, none of them a foreign (purple/orange/cyan) hue.
+_PYG_KEYWORD_GREEN = _color(0, 112, 32)
+_PYG_NUMBER_GREEN = _color(64, 160, 112)
+_PYG_TYPE_RED = _color(144, 32, 0)
+
+
+def _highlighted_line(colors, monospace=True):
+    """One code line whose tokens alternate through ``colors``."""
+    spans = [Span(text="tok", color=0, bbox=(10, 50, 30, 60), monospace=monospace)]
+    x = 30
+    for c in colors:
+        spans.append(Span(text="tok", color=c, bbox=(x, 50, x + 30, 60),
+                          monospace=monospace))
+        x += 30
+    return Line(spans=spans)
+
+
+class TestHighlighterPalette:
+    def test_two_greens_disqualify_block(self):
+        """Keyword green plus number green (no foreign hue) is code, not ins."""
+        line = _highlighted_line([_PYG_KEYWORD_GREEN, _PYG_NUMBER_GREEN])
+        block = Block(lines=[line] * 6, page_num=0)
+        classify_wording([block], {})
+        assert all(s.wording_role is None for ln in block.lines for s in ln.spans)
+
+    def test_two_reds_disqualify_block(self):
+        """Two red shades in one block are a highlighter, not two deletions."""
+        line = _highlighted_line([_RED, _PYG_TYPE_RED])
+        block = Block(lines=[line] * 6, page_num=0)
+        classify_wording([block], {})
+        assert all(s.wording_role is None for ln in block.lines for s in ln.spans)
+
+    def test_one_green_one_red_still_classified(self):
+        """A diff framework's single green + single red pair stays wording."""
+        line = _highlighted_line([_GREEN, _RED])
+        block = Block(lines=[line] * 6, page_num=0)
+        classify_wording([block], {})
+        assert all(s.wording_role == "ins" for ln in block.lines
+                   for s in ln.spans if s.color == _GREEN)
+
+    def test_prose_spans_do_not_vote(self):
+        """Two greens in proportional text are not a highlighter.
+
+        A wrapped cross-reference in a wording paragraph can leave a
+        second green shade on a span without ``link_url``; prose spans
+        never carry Pygments colors, so only monospace spans count.
+        """
+        line = _highlighted_line([_GREEN, _PYG_NUMBER_GREEN], monospace=False)
+        block = Block(lines=[line] * 6, page_num=0)
+        classify_wording([block], {})
+        assert all(s.wording_role == "ins" for ln in block.lines
+                   for s in ln.spans if s.color == _GREEN)
+
+    def test_green_link_shade_does_not_count(self):
+        """A hyperlink in a second green shade is not palette evidence."""
+        green = Span(text="added text added", color=_GREEN,
+                     bbox=(10, 50, 200, 60), monospace=True)
+        link = Span(text="[alg.reduce]", color=_PYG_NUMBER_GREEN,
+                    bbox=(200, 50, 300, 60), monospace=True,
+                    link_url="https://eel.is/c++draft/alg.reduce")
+        line = Line(spans=[green, link])
+        block = Block(lines=[line] * 6, page_num=0)
+        classify_wording([block], {})
+        assert green.wording_role == "ins"
+
+    def test_confirmed_strikethrough_overrides_palette(self):
+        """A struck red token inside a two-green block is still a deletion.
+
+        Mirrors the foreign-color exemption: once the strike readmits the
+        block, the line's other green spans are classified by the existing
+        line rules (the palette is not re-applied per span).
+        """
+        kw = Span(text="using", color=_PYG_KEYWORD_GREEN, bbox=(10, 50, 50, 60),
+                  monospace=True)
+        num = Span(text="2", color=_PYG_NUMBER_GREEN, bbox=(50, 50, 60, 60),
+                   monospace=True)
+        red = Span(text="native_simd", color=_RED, bbox=(60, 50, 160, 60),
+                   monospace=True)
+        green = Span(text="simd::vec", color=_GREEN, bbox=(160, 50, 240, 60),
+                     monospace=True)
+        line = Line(spans=[kw, num, red, green])
+        block = Block(lines=[line], page_num=0)
+        strike = {0: [(55, 60, 160, (0.8, 0, 0))]}
+        classify_wording([block], strike)
+        assert red.wording_role == "del"
+        assert green.wording_role == "ins"
+
+
 class TestThreshold:
     def test_below_min_spans_no_classification(self):
         """Fewer than _MIN_WORDING_SPANS ins/del spans → nothing classified."""

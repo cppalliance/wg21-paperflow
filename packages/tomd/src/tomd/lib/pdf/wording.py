@@ -3,7 +3,10 @@
 Detects ins/del markup in WG21 PDF papers by combining three signals:
   1. Block-level color contamination filter - blocks containing non-wording
      chromatic colors (purple, orange, cyan) are syntax-highlighted code
-     and are skipped entirely.
+     and are skipped entirely. So are blocks whose palette has two or
+     more distinct shades inside one wording band (two greens: a Pygments
+     keyword and a number), since a diff framework paints ins in exactly
+     one color and del in exactly one color.
   2. Line-level wording detection - lines where the majority of non-link
      characters are green/red, or where green/red spans appear on an
      otherwise-black line (partial-line wording pattern).
@@ -205,6 +208,41 @@ def _block_has_foreign_colors(block: Block) -> bool:
     return False
 
 
+def _block_has_highlighter_palette(block: Block) -> bool:
+    """True if one wording band holds two or more distinct colors in the block.
+
+    A WG21 diff framework paints insertions in exactly one green and
+    deletions in exactly one red (see the module docstring). A syntax
+    highlighter paints keywords, numbers and builtins in *different*
+    greens (Pygments ``friendly``: ``#007020``, ``#40a070``, ``#008000``)
+    and types in a red-brown (``#902000``), so a second shade inside the
+    green band or the red band is the highlighter's signature, even when
+    the block carries no foreign (purple/orange/cyan) color at all.
+
+    Only monospace spans vote: a highlighter paints code, and a prose
+    wording block whose cross-reference wraps into a second green span
+    (``attach_links`` marks one span per annotation) must not lose its
+    insertions to this check. Hyperlink spans are excluded.
+
+    shortcut: a highlighter block whose palette is exactly one green and
+    one red (a listing with keywords and a type but no literal) is not
+    caught here and relies on the ``_MIN_WORDING_SPANS`` floor; the
+    upgrade path is to propagate the palette detected here to every
+    monospace block of the document that uses only those colors.
+    """
+    greens: set[int] = set()
+    reds: set[int] = set()
+    for line in block.lines:
+        for span in line.spans:
+            if span.link_url or not span.monospace or not span.text.strip():
+                continue
+            if is_green_ins(span.color):
+                greens.add(span.color)
+            elif is_red_del(span.color):
+                reds.add(span.color)
+    return len(greens) >= 2 or len(reds) >= 2
+
+
 def _comment_start_offset(text: str) -> int | None:
     """Char offset of the first ``//`` or ``/*`` in a line, or None.
 
@@ -337,8 +375,9 @@ def classify_wording(blocks: list[Block],
     """Classify spans as ins/del/context using multi-signal analysis.
 
     Three-layer filter:
-      1. Blocks with foreign chromatic colors (not green/red/blue) are
-         skipped — they are syntax-highlighted code, not wording markup.
+      1. Blocks with foreign chromatic colors (not green/red/blue), or with
+         two or more distinct shades inside one wording band, are skipped:
+         they are syntax-highlighted code, not wording markup.
       2. Lines qualify if either the majority (>50%) of non-link characters
          are green/red, or if any green/red spans appear with the remaining
          text being black (partial-line wording pattern).
@@ -354,7 +393,8 @@ def classify_wording(blocks: list[Block],
     for block in blocks:
         drawings = page_drawings.get(block.page_num, [])
 
-        if (_block_has_foreign_colors(block)
+        if ((_block_has_foreign_colors(block)
+                or _block_has_highlighter_palette(block))
                 and not _block_has_confirmed_strikethrough(block, drawings)):
             continue
 

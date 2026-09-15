@@ -201,6 +201,7 @@ Enums:
 - Saturation gate: S < 0.15 -> achromatic (not a chromatic signal). Non-black achromatic text with lightness 0.25-0.65 classified as "context" (existing spec text).
 - Hue neighborhoods: green [90-180] = ins candidate, red [0-30 or 330-360] = del candidate, blue [210-270] = link (skipped)
 - Document-relative: body color identified from character-count histogram, only non-body chromatic text is classified
+- Block skip (`_block_has_foreign_colors`, `_block_has_highlighter_palette`): a block with a foreign chromatic hue (purple/orange/cyan), or with two or more distinct shades inside the green band or inside the red band (Pygments keyword + number green), is syntax-highlighted code and is skipped unless a red span carries a confirmed strikethrough (#413)
 
 **T18. Drawing decoration correlation**
 - `wording.py:_match_underline`, `_match_strikethrough`

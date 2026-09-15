@@ -291,3 +291,30 @@ def test_p4016r0_table_family_pins():
         and s.page_num in (27, 30, 34, 38, 44, 51, 54)
     }
     assert got == _P4016R0_TABLE_PINS
+
+
+@pytest.mark.parametrize(
+    ("rel", "absent", "present"),
+    [
+        ("p4016r0.pdf", ("<ins>", "<del>"), ()),
+        ("sources/p1068r11.pdf", (), ("<ins>__gen</ins>",)),
+        ("sources/p3556r0.pdf", (), ("<del>input</del><ins>source</ins>",)),
+    ],
+)
+def test_highlighter_palette_keeps_genuine_wording(rel, absent, present):
+    """#413 focused guard for the highlighter-palette skip in wording.py.
+
+    P4016R0's Pygments listings (two greens: keyword and number) must
+    carry no ins/del at all, while the one-green-one-red diff markup of
+    P1068R11 (inside monospace code) and P3556R0 (prose) must survive.
+    Independent of the full goldens so a re-bless can never silently
+    trade one for the other.
+    """
+    pdf_path = _GOLDEN / rel
+    if not pdf_path.is_file():
+        pytest.skip(f"missing PDF fixture: {pdf_path}")
+    md = run_pipeline(pdf_path).md
+    for needle in absent:
+        assert needle not in md, f"{rel}: unexpected {needle!r}"
+    for needle in present:
+        assert needle in md, f"{rel}: missing {needle!r}"
