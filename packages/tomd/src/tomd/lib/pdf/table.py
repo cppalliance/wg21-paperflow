@@ -58,6 +58,7 @@ Optional Docling enrichment (ml_tables=True):
 
 import logging
 import re
+from bisect import bisect_right
 from collections import Counter, defaultdict
 from collections.abc import Set as AbstractSet
 from dataclasses import replace
@@ -538,6 +539,76 @@ _DRAWING_GRID_SOURCE = "drawing_grid"
 
 def _is_drawing_grid(tbl_info: dict) -> bool:
     return tbl_info.get("source") == _DRAWING_GRID_SOURCE
+
+
+def _rows_from_drawn_grid(
+    table_blocks: list[Block],
+    grid: dict,
+    page_num: int,
+    num_cols: int,
+) -> tuple[list[list[list]], list[Line]] | None:
+    """Re-cut Pass 1's blocks into the cells of a drawn grid.
+
+    Pass 1 assigns lines to rows by MuPDF block. When one cell is much
+    taller than its neighbours (a seven-line Rationale beside one-line
+    cells, P4016R0 F.1) MuPDF splits that cell's lines over the blocks
+    of the adjacent rows, and Pass 1 writes them into the wrong rows.
+    The drawn grid knows the row bands: a line's row is the band that
+    holds its y-midpoint, its column the drawn column its left edge
+    starts in (a line spanning merged columns stays in the leftmost,
+    as Pass 1 would place it). Lines of one cell are joined by "\\n" in
+    y order: a drawn cell's line break is a real break.
+
+    Returns (rows, all_lines), or None when the grid does not describe
+    these blocks and Pass 1 keeps its rows: a block from another page
+    (the grid's cells are in `page_num` coordinates), a column count
+    that differs from Pass 1's, a line outside every cell.
+    """
+    n_rows = grid.get("row_count", 0)
+    n_cols = grid.get("col_count", 0)
+    cells = grid.get("cells") or []
+    if (n_rows < 2 or n_cols != num_cols
+            or len(cells) != n_rows * n_cols):
+        return None
+    if any(blk.page_num != page_num for blk in table_blocks):
+        return None
+    # Cells are the row-major cartesian product of the rule positions
+    # (pipeline._grid_from_rule_chain), so the boundaries are the first
+    # row's x-edges and the first column's y-edges.
+    col_xs = [cells[c][0] for c in range(n_cols)] + [cells[n_cols - 1][2]]
+    row_ys = [cells[r * n_cols][1] for r in range(n_rows)] + [cells[-1][3]]
+    margin = _MUPDF_REGION_MARGIN
+    cell_lines: list[list[list[tuple[float, Line]]]] = [
+        [[] for _ in range(n_cols)] for _ in range(n_rows)]
+    all_lines: list[Line] = []
+    for blk in table_blocks:
+        for ln in blk.lines:
+            all_lines.append(ln)
+            lx = ln.bbox[0]
+            my = (ln.bbox[1] + ln.bbox[3]) / 2.0
+            if not (col_xs[0] - margin <= lx <= col_xs[-1] + margin
+                    and row_ys[0] - margin <= my <= row_ys[-1] + margin):
+                return None
+            # bisect with the margin folded in: a left edge a hair left
+            # of its rule (glyph side bearing) still lands right of it.
+            ci = min(max(bisect_right(col_xs, lx + margin) - 1, 0), n_cols - 1)
+            ri = min(max(bisect_right(row_ys, my) - 1, 0), n_rows - 1)
+            cell_lines[ri][ci].append((ln.bbox[1], ln))
+    rows: list[list[list]] = []
+    for band in cell_lines:
+        row: list[list] = []
+        for entries in band:
+            cell: list = []
+            for _, ln in sorted(entries, key=lambda e: e[0]):
+                if cell and ln.spans:
+                    cell.append(Span(text="\n"))
+                cell.extend(ln.spans)
+            row.append(cell)
+        if any(row):
+            rows.append(row)
+    if len(rows) < 2:
+        return None
+    return rows, all_lines
 
 
 def _pass1_region_incomplete(
@@ -5274,6 +5345,7 @@ def detect_tables(
             # comparisons) where Pass 1 produces better results.
             p1_page = table_blocks[0].page_num
             p1_deferred = False
+            p1_grid: dict | None = None  # drawn grid that re-cuts the rows
             if filtered_mupdf_tables:
                 mono_spans = 0
                 total_spans = 0
@@ -5322,8 +5394,6 @@ def detect_tables(
                                 p1_deferred = True
                                 break
                             continue
-                        incomplete = _pass1_region_incomplete(
-                            tb, p1_page, table_blocks, blocks)
                         if _is_drawing_grid(tbl):
                             # A drawn grid is verified geometry, not a
                             # find_tables() guess: it never merges prose
@@ -5331,14 +5401,29 @@ def detect_tables(
                             # phantom height guard below do not apply.
                             # Pass 1 stands down only when the grid holds
                             # blocks it did not claim (P4016R0 K.1: 2 of
-                            # 9 rows); a complete Pass 1 table keeps its
-                            # own assembly.
-                            if not incomplete:
+                            # 9 rows). A complete Pass 1 table keeps the
+                            # blocks but re-cuts its rows along the drawn
+                            # cells: Pass 1 assigns lines to rows by
+                            # MuPDF block, and a cell taller than its
+                            # neighbours arrives split over the adjacent
+                            # rows' blocks (P4016R0 F.1 Rationale).
+                            # Standing down instead is not an option:
+                            # Pass 2 (column-aligned) claims the blocks
+                            # before Pass 5 sees the grid.
+                            if not _pass1_region_incomplete(
+                                    tb, p1_page, table_blocks, blocks):
+                                if (ov_x > 0 and ov_y > 0
+                                        and p1_grid is None):
+                                    p1_area = max(
+                                        (rx1 - rx0) * (ry1 - ry0), 1)
+                                    if (ov_x * ov_y) / p1_area > 0.30:
+                                        p1_grid = tbl
                                 continue
                         else:
                             if (tbl.get("row_count", 0)
                                     < _SBS_MUPDF_DEFER_MIN_ROWS
-                                    and not incomplete):
+                                    and not _pass1_region_incomplete(
+                                        tb, p1_page, table_blocks, blocks)):
                                 continue
                             # Phantom guard: if MuPDF's table is much
                             # taller than what Pass 1 detected, MuPDF has
@@ -5363,6 +5448,20 @@ def detect_tables(
                     remaining.append(blk)
                 i = j
                 continue
+
+            if p1_grid is not None:
+                recut = _rows_from_drawn_grid(
+                    table_blocks, p1_grid, p1_page, num_cols)
+                if recut is not None:
+                    rows, all_lines = recut
+                    # The header block above the grid is not in
+                    # table_blocks; keep it in front as before.
+                    if header_row is not None:
+                        rows.insert(0, header_row)
+                    _log.debug(
+                        "Pass 1 rows re-cut along drawn grid: page %d, "
+                        "%d rows x %d cols",
+                        p1_page, len(rows), p1_grid.get("col_count", 0))
 
             kind_val, strategy_val, rows = _classify_and_annotate(rows)
 

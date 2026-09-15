@@ -30,6 +30,7 @@ from tomd.lib.pdf.table import (
     _try_cross_page_continuation,
     _filter_overlapping_mupdf_tables,
     _rot_midpoint,
+    _rows_from_drawn_grid,
     _detect_mupdf_native_tables,
     _detect_banded_rotated_tables,
 )
@@ -612,6 +613,128 @@ class TestDrawingGridConsumers:
         assert all(len(row) == 3 for row in tables[0].columns)
         guessed = {0: [_drawing_grid_entry(row_ys, col_xs, drawn=False)]}
         assert _detect_mupdf_native_tables(blocks, guessed) == ([], set())
+
+    # F.1 pattern (P4016R0 page 38): the Rationale cell of the middle
+    # row is three lines tall; MuPDF puts its first line into the block
+    # of the row above and its last line into the block of the row
+    # below. Grid rows 95-115 (header), 115-130, 130-190, 190-215.
+    _F1_ROW_YS = [95.0, 115.0, 130.0, 190.0, 215.0]
+
+    def _f1_blocks(self):
+        return [
+            _bbox_block([_line("Decision", 60.0, 100.0, 110.0, 109.0),
+                         _line("Rationale", 294.0, 100.0, 350.0, 109.0)]),
+            _bbox_block([_line("Topology", 60.0, 118.0, 110.0, 127.0),
+                         _line("O(log N) depth", 294.0, 118.0, 380.0, 127.0),
+                         _line("Algebraic clarity;", 294.0, 133.0, 400.0, 142.0)]),
+            _bbox_block([_line("Init placement", 60.0, 155.0, 140.0, 164.0),
+                         _line("compatible with the", 294.0, 148.0, 420.0, 157.0),
+                         _line("reduce-family API", 294.0, 163.0, 400.0, 172.0)]),
+            _bbox_block([_line("Split rule", 60.0, 198.0, 120.0, 207.0),
+                         _line("([reduce]).", 294.0, 178.0, 360.0, 187.0),
+                         _line("Unique grouping", 294.0, 198.0, 400.0, 207.0)]),
+        ]
+
+    @staticmethod
+    def _cell_texts(section: Section) -> list[list[str]]:
+        return [["".join(s.text for s in cell).strip() for cell in row]
+                for row in section.columns]
+
+    def test_pass1_recuts_rows_along_a_complete_drawn_grid(self):
+        blocks = self._f1_blocks()
+        grid = {0: [_drawing_grid_entry(self._F1_ROW_YS, self.COL_XS)]}
+        tables, remaining = detect_tables(blocks, page_mupdf_tables=grid)
+        assert len(tables) == 1 and remaining == []
+        assert tables[0].table_source == "horizontal_rows"
+        assert self._cell_texts(tables[0]) == [
+            ["Decision", "Rationale"],
+            ["Topology", "O(log N) depth"],
+            ["Init placement",
+             "Algebraic clarity;\ncompatible with the\nreduce-family API\n"
+             "([reduce])."],
+            ["Split rule", "Unique grouping"],
+        ]
+
+    def test_pass1_block_rows_without_the_grid_show_the_defect(self):
+        # Control: by block, the tall cell's lines land in the rows above
+        # and below (what the golden showed before the fix).
+        blocks = self._f1_blocks()
+        tables, _ = detect_tables(blocks)
+        assert len(tables) == 1
+        cells = self._cell_texts(tables[0])
+        assert cells[1][1] == "O(log N) depth\nAlgebraic clarity;"
+        assert cells[3][1] == "([reduce]).\nUnique grouping"
+
+    def test_recut_keeps_pass1_rows_when_a_line_fits_no_cell(self):
+        blocks = self._f1_blocks()
+        # Grid that stops above the last row: "Split rule" fits no cell.
+        grid = _drawing_grid_entry(self._F1_ROW_YS[:-1], self.COL_XS)
+        assert _rows_from_drawn_grid(blocks, grid, 0, 2) is None
+        tables, _ = detect_tables(blocks, page_mupdf_tables={0: [grid]})
+        assert len(tables) == 1
+        assert len(tables[0].columns) == 4  # Pass 1's own rows kept
+
+    def test_recut_needs_the_full_cell_list(self):
+        grid = _drawing_grid_entry(self._F1_ROW_YS, self.COL_XS)
+        grid["cells"] = grid["cells"][:-1]
+        assert _rows_from_drawn_grid(self._f1_blocks(), grid, 0, 2) is None
+        grid = _drawing_grid_entry(self._F1_ROW_YS, self.COL_XS)
+        grid["row_count"] = 1
+        assert _rows_from_drawn_grid(self._f1_blocks(), grid, 0, 2) is None
+
+    def test_recut_refuses_blocks_from_another_page(self):
+        # A cross-page Pass 1 table: the grid's cells are page-0
+        # coordinates, the page-1 block's lines would land in the top
+        # rows. Pass 1 keeps its own rows instead.
+        blocks = self._f1_blocks()
+        blocks.append(Block(
+            lines=[_line("Next page", 60.0, 100.0, 120.0, 109.0),
+                   _line("continued", 294.0, 100.0, 350.0, 109.0)],
+            bbox=(60.0, 100.0, 350.0, 109.0), page_num=1))
+        grid = _drawing_grid_entry(self._F1_ROW_YS, self.COL_XS)
+        assert _rows_from_drawn_grid(blocks, grid, 0, 2) is None
+
+    def test_recut_refuses_a_grid_with_other_column_count(self):
+        # Three drawn columns against Pass 1's two: merged cells or a
+        # grid that is not this table. No re-cut.
+        grid = _drawing_grid_entry(
+            self._F1_ROW_YS, [57.0, 200.0, 290.0, 537.0])
+        assert _rows_from_drawn_grid(self._f1_blocks(), grid, 0, 2) is None
+
+    def test_recut_places_by_left_edge_and_sorts_lines_by_y(self):
+        # Block order puts the lower fragment first; the cell text must
+        # still read top to bottom. A line whose left edge starts in
+        # column 0 but whose midpoint would fall into column 1 (long
+        # merged-cell line) stays in column 0.
+        blocks = [
+            _bbox_block([_line("Decision", 60.0, 100.0, 110.0, 109.0),
+                         _line("Rationale", 294.0, 100.0, 350.0, 109.0)]),
+            _bbox_block([_line("Topology", 60.0, 118.0, 110.0, 127.0),
+                         _line("second line", 294.0, 133.0, 400.0, 142.0)]),
+            _bbox_block([_line("first line", 294.0, 118.0, 400.0, 127.0),
+                         _line("A wide note across both columns",
+                               60.0, 198.0, 500.0, 207.0)]),
+        ]
+        grid = _drawing_grid_entry([95.0, 115.0, 190.0, 215.0], self.COL_XS)
+        recut = _rows_from_drawn_grid(blocks, grid, 0, 2)
+        assert recut is not None
+        rows, _ = recut
+        texts = [["".join(s.text for s in c) for c in r] for r in rows]
+        assert texts == [
+            ["Decision", "Rationale"],
+            ["Topology", "first line\nsecond line"],
+            ["A wide note across both columns", ""],
+        ]
+
+    def test_recut_drops_drawn_rows_without_text(self):
+        # An extra empty drawn row band (rule doubled) yields no row.
+        rows_ys = self._F1_ROW_YS[:-1] + [212.0, 215.0]
+        grid = _drawing_grid_entry(rows_ys, self.COL_XS)
+        recut = _rows_from_drawn_grid(self._f1_blocks(), grid, 0, 2)
+        assert recut is not None
+        rows, all_lines = recut
+        assert len(rows) == 4
+        assert len(all_lines) == 11
 
     def test_pass5_never_transposes_a_drawn_two_column_grid(self):
         row_ys = [100.0, 160.0, 220.0, 280.0]
