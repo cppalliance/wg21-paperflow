@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 from tomd.lib.pdf import run_pipeline
+from tomd.lib.pdf.types import SectionKind
 
 _GOLDEN = Path(__file__).resolve().parent / "fixtures" / "golden"
 
@@ -101,10 +102,61 @@ _GOLDEN_STEMS = (
     # that wrapped onto the prose tail now heads its class body in the fence,
     # consistent with the Circle/Point bodies below it.
     "p3181r1",
+    # Shattered-table guard (#380): P4096R0 is a Google-Docs export whose
+    # tables arrive as one block per wrapped line. §5.1 and §5.4 are claimed
+    # by the side-by-side pre-scanner (atomized header over a shattered
+    # body), the two §5.2 tables stay with Pass 1 (row blocks with col-1+
+    # wrapped tails merged backward, a trailing continuation absorbed
+    # in-loop so the partial third row still joins). The golden pins all
+    # four tables plus the prose and headings around them; the family pins
+    # below guard the routing itself.
+    "p4096r0",
 )
 
 # Issue-180 reported symptom: this sentence is P4024R0's final paragraph.
 _P4024R0_CLOSING = "By embracing these practices"
+
+# #380 family pins for P4096R0: (page_num, rows incl. header, cols,
+# table_kind, table_source) for the four tables of §5.1, §5.2 (x2), §5.4.
+_P4096R0_TABLE_PINS = {
+    (9, 5, 4, "prose_table", "side_by_side_prepass"),
+    (10, 4, 3, "prose_table", "horizontal_rows"),
+    (10, 4, 3, "clean_matrix", "horizontal_rows"),
+    (11, 5, 4, "clean_matrix", "side_by_side_prepass"),
+}
+
+# Family pins for P0957R8: the §5.4.2.1 Name/Value comparison (p.27
+# printed, tomd page 26, side-by-side pre-scanner) and the 2-column
+# monospace type-trait table on the next page (tomd page 27, Pass 1).
+# The latter regressed to a cpp fence when a 2-column monospace guard
+# in _try_orphan_lookahead rejected its wrapped cell tail; the pin keeps
+# it a table with the tail merged back into its cell (2 rows).
+_P0957R8_TABLE_PINS = {
+    (26, 14, 2, "code_comparison", "side_by_side_prepass"),
+    (27, 2, 2, "clean_matrix", "horizontal_rows"),
+}
+
+# Family pins for P4016R0 (#369): §7 Property comparison (tomd page 27,
+# printed 28, Pass 1 with the wrapped `canonical_reduce` header tail
+# merged), D.3 Sequential vs. Parallel (page 34, printed 35) and N.6
+# Partition Strategy (page 51, printed 52). The last two are bordered
+# grids whose uneven rows fail Pass 3's asymmetry gate; Pass 3 completes
+# its run with the rows the find_tables() grid still holds
+# (_grid_rows_left_behind). Pass 3 sections carry no table_source.
+# N.14 Summary (page 54, printed 55) is a Property | Guarantee grid whose
+# "Determinism" row arrives as a col-0 label block plus a separate
+# multi-line cell block (Pass 1 branch 4d, _try_split_row) and whose
+# "Practicality" cell wraps onto a line that starts slightly above the
+# row bottom (_is_trailing_continuation tolerates the negative y gap).
+_P4016R0_TABLE_PINS = {
+    (27, 7, 5, "clean_matrix", "horizontal_rows"),
+    (30, 3, 3, "clean_matrix", None),
+    (34, 5, 3, "clean_matrix", None),
+    (38, 5, 4, "prose_table", "horizontal_rows"),
+    (44, 9, 5, "prose_table", None),
+    (51, 5, 4, "clean_matrix", None),
+    (54, 5, 2, "key_value", "horizontal_rows"),
+}
 
 
 def _normalize_newlines(text: str) -> str:
@@ -179,3 +231,63 @@ def test_p4024r0_closing_paragraph_present():
         pytest.skip(f"missing PDF fixture: {pdf_path}")
     md = run_pipeline(pdf_path).md
     assert _P4024R0_CLOSING in md
+
+
+def test_p4096r0_table_family_pins():
+    """#380 focused guard: each of the four shattered tables is routed to
+    the intended family with the intended shape. Independent of the full
+    golden so a re-bless can never silently move a table to another pass.
+    """
+    pdf_path = _GOLDEN / "p4096r0.pdf"
+    if not pdf_path.is_file():
+        pytest.skip(f"missing PDF fixture: {pdf_path}")
+    sections = run_pipeline(pdf_path).sections
+    got = {
+        (s.page_num, len(s.columns), len(s.columns[0]),
+         s.table_kind, s.table_source)
+        for s in sections
+        if s.kind == SectionKind.TABLE and s.page_num in (9, 10, 11)
+    }
+    assert got == _P4096R0_TABLE_PINS
+
+
+def test_p0957r8_table_family_pins():
+    """Focused guard for the two P0957R8 tables on tomd pages 26 and 27.
+    Independent of the full golden so a re-bless can never silently drop
+    the type-trait table back into a code fence.
+    """
+    pdf_path = _GOLDEN / "sources" / "p0957r8.pdf"
+    if not pdf_path.is_file():
+        pytest.skip(f"missing PDF fixture: {pdf_path}")
+    sections = run_pipeline(pdf_path).sections
+    got = {
+        (s.page_num, len(s.columns), len(s.columns[0]),
+         s.table_kind, s.table_source)
+        for s in sections
+        if s.kind == SectionKind.TABLE and s.page_num in (26, 27)
+    }
+    assert got == _P0957R8_TABLE_PINS
+
+
+def test_p4016r0_table_family_pins():
+    """Focused guard for the P4016R0 tables on tomd pages 27, 30, 34, 38,
+    44, 51 and 54. Independent of the full golden so a re-bless can never
+    silently hand D.3 or N.6 back to Pass 3 with their header or last row
+    missing, let N.14 explode into headings again, lose B.1 (drawn grid
+    under a find_tables() phantom, 39pt tall), leave K.1 at Pass 1's two
+    rows with the other seven leaking as prose, or let F.1 fall to Pass 2
+    as a two-row column-aligned table (its shape only is pinned here;
+    the Rationale cell contents are the golden's job).
+    """
+    pdf_path = _GOLDEN / "p4016r0.pdf"
+    if not pdf_path.is_file():
+        pytest.skip(f"missing PDF fixture: {pdf_path}")
+    sections = run_pipeline(pdf_path).sections
+    got = {
+        (s.page_num, len(s.columns), len(s.columns[0]),
+         s.table_kind, s.table_source)
+        for s in sections
+        if s.kind == SectionKind.TABLE
+        and s.page_num in (27, 30, 34, 38, 44, 51, 54)
+    }
+    assert got == _P4016R0_TABLE_PINS

@@ -6,18 +6,39 @@
 
 from types import SimpleNamespace
 
+import pytest
+
 from tomd.lib.pdf.types import Span, Line, Block, Section, SectionKind
 from tomd.lib.pdf.table import (
+    _block_column_positions,
+    _build_rows_sequential,
+    _build_rows_ybanded,
+    _columns_count_match,
+    _detect_horizontal_row_tables,
+    _detect_side_by_side_tables,
+    detect_tables,
+    _block_horizontal_row,
+    _block_on_one_column,
     _gap_asymmetry_reject,
-    _block_horizontal_row_relaxed,
+    _grid_rows_left_behind,
+    _is_column_aligned_orphan,
+    _is_trailing_continuation,
+    _pass1_region_incomplete,
+    _try_orphan_lookahead,
+    _try_split_row,
     _try_wrapped_partial_row,
     _try_cross_page_continuation,
     _filter_overlapping_mupdf_tables,
     _rot_midpoint,
+    _rows_from_drawn_grid,
     _detect_mupdf_native_tables,
     _detect_banded_rotated_tables,
 )
-from tomd.lib.pdf.pipeline import _column_aware_sort, _detect_drawing_grids
+from tomd.lib.pdf.pipeline import (
+    _column_aware_sort,
+    _detect_column_split,
+    _detect_drawing_grids,
+)
 
 # Page height of a 595x842 portrait page (P3100R6 geometry), shared by
 # the drawing-grid tests and the rotation fixtures below.
@@ -34,7 +55,11 @@ def _line(text: str, x0: float, y0: float, x1: float, y1: float) -> Line:
 
 def _block_from_lines(lines: list[Line]) -> Block:
     """Create a Block from pre-built lines."""
-    return Block(lines=lines, page_num=0)
+    x0 = min(l.bbox[0] for l in lines) if lines else 0.0
+    y0 = min(l.bbox[1] for l in lines) if lines else 0.0
+    x1 = max(l.bbox[2] for l in lines) if lines else 0.0
+    y1 = max(l.bbox[3] for l in lines) if lines else 0.0
+    return Block(lines=lines, bbox=(x0, y0, x1, y1), page_num=0)
 
 
 class TestGapAsymmetryReject:
@@ -96,60 +121,6 @@ class TestGapAsymmetryReject:
             _line("C", 120, 100, 170, 110),
         ]
         assert not _gap_asymmetry_reject(lines)
-
-
-class TestBlockHorizontalRowRelaxed:
-    """Tests for _block_horizontal_row_relaxed: relaxed row detection."""
-
-    def test_returns_none_below_min_cells(self):
-        block = _block_from_lines([
-            _line("Only one", 10, 100, 100, 110),
-        ])
-        assert _block_horizontal_row_relaxed(block, min_cells=2) is None
-
-    def test_horizontal_row_detected(self):
-        """Two cells on the same y-band should be detected."""
-        block = _block_from_lines([
-            _line("Col1", 10, 100, 60, 110),
-            _line("Col2", 100, 100, 160, 110),
-        ])
-        result = _block_horizontal_row_relaxed(block, min_cells=2)
-        assert result is not None
-        assert len(result) == 2
-
-    def test_vertical_stack_rejected(self):
-        """Lines stacked vertically (different y) should be rejected."""
-        block = _block_from_lines([
-            _line("Line1", 10, 100, 100, 110),
-            _line("Line2", 10, 150, 100, 160),
-        ])
-        assert _block_horizontal_row_relaxed(block, min_cells=2) is None
-
-    def test_gap_asymmetry_rejects_heading_pattern(self):
-        """Section heading pattern should be rejected by gap asymmetry guard."""
-        block = _block_from_lines([
-            _line("4", 72, 100, 82, 110),
-            _line("General", 120, 100, 180, 110),
-            _line("[general]", 400, 100, 470, 110),
-        ])
-        assert _block_horizontal_row_relaxed(block, min_cells=2) is None
-
-    def test_wide_tolerance_non_overlapping(self):
-        """Lines within wide Y tolerance, non-overlapping in x."""
-        block = _block_from_lines([
-            _line("Col1", 10, 100, 60, 110),
-            _line("Col2", 100, 105, 160, 115),
-        ])
-        result = _block_horizontal_row_relaxed(block, min_cells=2)
-        assert result is not None
-
-    def test_overlapping_x_rejected(self):
-        """Lines within wide Y tolerance but overlapping in x should be rejected."""
-        block = _block_from_lines([
-            _line("Overlap1", 10, 100, 120, 110),
-            _line("Overlap2", 100, 105, 200, 115),
-        ])
-        assert _block_horizontal_row_relaxed(block, min_cells=2) is None
 
 
 def _bbox_block(lines: list[Line], monospace: bool = False) -> Block:
@@ -251,19 +222,89 @@ class TestWrappedPartialRow:
             blocks, 2, self.REF_COLS, self.COLUMN_XS, blocks[:2]) is None
 
 
-class _FakePage:
-    """Stub page exposing get_drawings()/get_text() with synthetic items."""
+class TestOrphanLookaheadMonospaceTwoColumn:
+    """Tests for _try_orphan_lookahead (Pass 1 Branch 4) on a 2-column
+    monospace table.
 
-    def __init__(self, lines, text_lines=None):
+    Models P0957R8 p.28 (tomd page 27): a bordered 2x2 table of type-trait
+    expressions set in a monospace font, whose cell (1, 2) wraps onto a
+    second physical line ("HasNothrowDestructor"). MuPDF emits that wrapped
+    tail as its own single-line block aligned to column 2. Branch 4a must
+    take it (the next block is a full 2-column row) so the table keeps
+    scanning; a former guard that returned None for any 2-column monospace
+    table ended the scan there and the whole table fell back to a cpp fence.
+    """
+
+    REF_COLS = [100.0, 300.0]
+    COLUMN_XS = frozenset(REF_COLS)
+
+    def _header(self) -> Block:
+        return _bbox_block([
+            _line("HasNothrowMoveAssignment", 100.0, 100.0, 240.0, 112.0),
+            _line("HasNothrowMoveConstructor &&", 300.0, 100.0, 470.0, 112.0),
+        ], monospace=True)
+
+    def _wrapped_tail(self) -> Block:
+        return _bbox_block([
+            _line("HasNothrowDestructor", 300.0, 114.0, 420.0, 126.0),
+        ], monospace=True)
+
+    def _second_row(self) -> Block:
+        return _bbox_block([
+            _line("HasMoveAssignment", 100.0, 130.0, 210.0, 142.0),
+            _line("HasMoveConstructor && HasDestructor", 300.0, 130.0, 500.0, 142.0),
+        ], monospace=True)
+
+    def test_wrapped_monospace_tail_absorbed_before_full_row(self):
+        blocks = [self._header(), self._wrapped_tail(), self._second_row()]
+        result = _try_orphan_lookahead(
+            blocks, 1, self.REF_COLS, self.COLUMN_XS, blocks[:1], set())
+        assert result is not None
+        assert result.advance_to == 2
+        # Column-1 tails are marked partial regardless of font (see
+        # _try_single_orphan), so the tail merges back into cell (1, 2).
+        assert result.absorbed_ids == frozenset({id(blocks[1])})
+
+    def test_tail_without_confirming_row_rejected(self):
+        """The lookahead needs a following block; a lone tail is not a row."""
+        blocks = [self._header(), self._wrapped_tail()]
+        assert _try_orphan_lookahead(
+            blocks, 1, self.REF_COLS, self.COLUMN_XS, blocks[:1], set()) is None
+
+    def test_unaligned_monospace_line_rejected(self):
+        """A monospace line off both columns is code, not a wrapped cell."""
+        stray = _bbox_block([
+            _line("return 0;", 180.0, 114.0, 240.0, 126.0),
+        ], monospace=True)
+        blocks = [self._header(), stray, self._second_row()]
+        assert _try_orphan_lookahead(
+            blocks, 1, self.REF_COLS, self.COLUMN_XS, blocks[:1], set()) is None
+
+
+class _FakePage:
+    """Stub page exposing get_drawings()/get_text() with synthetic items.
+
+    `lines` become "l" items, `rects` become "re" items (filled
+    rectangles, the border primitive of HTML-to-PDF engines).
+    """
+
+    def __init__(self, lines, text_lines=None, rects=None):
         self._lines = lines
         self._text_lines = text_lines or []
+        self._rects = rects or []
 
     def get_drawings(self):
-        return [
+        drawings = [
             {"items": [("l", SimpleNamespace(x=x0, y=y0),
                         SimpleNamespace(x=x1, y=y1))]}
             for x0, y0, x1, y1 in self._lines
         ]
+        drawings.extend(
+            {"items": [("re", SimpleNamespace(
+                x0=x0, y0=y0, x1=x1, y1=y1, width=x1 - x0, height=y1 - y0))]}
+            for x0, y0, x1, y1 in self._rects
+        )
+        return drawings
 
     def get_text(self, kind, flags=0):
         return {
@@ -305,10 +346,14 @@ class TestDetectDrawingGrids:
         assert len(grids) == 1
         bbox = grids[0]["bbox"]
         assert bbox[0] == 190.0 and bbox[2] == 405.0
-        # Synthetic entry must carry the full find_tables shape with
-        # row_count=0 so Pass 5 skips it.
-        assert grids[0]["row_count"] == 0
-        assert grids[0]["cells"] == []
+        # Synthetic entry carries the find_tables shape: the 8 rules
+        # dedupe to 6 (578.9/581.3 and 637.1/637.5 merge), giving 5 rows
+        # between two outer verticals, one cell per row.
+        assert grids[0]["source"] == "drawing_grid"
+        assert grids[0]["row_count"] == 5
+        assert grids[0]["col_count"] == 1
+        assert len(grids[0]["cells"]) == 5
+        assert grids[0]["cells"][0][1] == 565.0 and grids[0]["cells"][-1][3] == 637.1
 
     def test_full_page_margin_rules_rejected(self):
         """Full-page-height rules (wording margins) must not become grids."""
@@ -366,6 +411,348 @@ class TestDetectDrawingGrids:
         ]
         page = _FakePage(_grid_lines(190.0, 405.0, ys), text)
         assert _detect_drawing_grids(page, self.PAGE_H, []) == []
+
+
+def _cell_edge_rects(row_ys, col_xs, thickness=0.6):
+    """Borders as one thin filled rectangle per cell edge (P4016R0 style).
+
+    Every interior rule is drawn twice (bottom of one cell, top of the
+    next), every vertical once per row band.
+    """
+    rects = []
+    for r in range(len(row_ys) - 1):
+        y0, y1 = row_ys[r], row_ys[r + 1]
+        for c in range(len(col_xs) - 1):
+            x0, x1 = col_xs[c], col_xs[c + 1]
+            rects.append((x0, y0, x1, y0 + thickness))
+            rects.append((x0, y1, x1, y1 + thickness))
+            rects.append((x0, y0, x0 + thickness, y1 + thickness))
+            rects.append((x1, y0, x1 + thickness, y1 + thickness))
+    return rects
+
+
+class TestDrawingGridsFromRectangles:
+    """P4016R0 draws every table border as a 0.6pt filled rectangle and
+    never as a line item; find_tables() returns a full-page phantom on
+    those pages. The fallback reads thin rectangles as rules, merges the
+    per-cell edge pieces, and separates the table from the other
+    full-width rules on the page by the vertical rules that bridge them.
+    """
+
+    PAGE_H = 842.0
+    # B.1 (tomd page 30): 3 rows, 3 columns.
+    ROW_YS = [738.4, 751.7, 764.4, 777.6]
+    COL_XS = [57.0, 103.7, 202.3, 254.7]
+
+    def _b1_text(self):
+        cells = []
+        for y in (740.5, 753.8, 766.5):
+            cells.append((60.7, y, 100.0, y + 9.0))
+            cells.append((107.4, y, 190.0, y + 9.0))
+            cells.append((206.0, y, 250.0, y + 9.0))
+        return cells
+
+    def _b1_page(self, extra_rects=()):
+        rects = _cell_edge_rects(self.ROW_YS, self.COL_XS)
+        # Header cell fills: wide and 13pt tall, not rules.
+        for c in range(3):
+            rects.append((self.COL_XS[c], 738.4, self.COL_XS[c + 1], 751.7))
+        # Page background box (what find_tables() turns into a phantom).
+        rects.append((57.0, 57.0, 537.2, 779.4))
+        rects.extend(extra_rects)
+        return _FakePage([], self._b1_text(), rects=rects)
+
+    def test_thin_rectangles_form_one_grid(self):
+        grids = _detect_drawing_grids(self._b1_page(), self.PAGE_H, [])
+        assert len(grids) == 1
+        g = grids[0]
+        assert g["source"] == "drawing_grid"
+        assert (g["row_count"], g["col_count"]) == (3, 3)
+        assert len(g["cells"]) == 9
+        assert g["bbox"][1] == pytest.approx(738.7, abs=0.1)
+        assert g["bbox"][3] == pytest.approx(777.9, abs=0.1)
+        # Cell (row 1, col 1) is bounded by the drawn rules.
+        x0, y0, x1, y1 = g["cells"][4]
+        assert (x0, x1) == pytest.approx((104.0, 202.6), abs=0.1)
+        assert (y0, y1) == pytest.approx((752.0, 765.0), abs=0.5)
+
+    def test_separators_and_note_box_stay_out_of_the_grid(self):
+        # A full-width section rule (no verticals) and a two-rule note
+        # box with its own side borders share the 57-537 span with a
+        # table; the chain split keeps only the table's rules.
+        wide_rows = [400.0, 413.0, 426.0, 439.0]
+        wide_cols = [57.0, 200.0, 537.0]
+        rects = _cell_edge_rects(wide_rows, wide_cols)
+        rects.append((57.0, 615.6, 537.2, 616.2))  # section separator
+        rects.extend([(57.0, 57.0, 537.2, 57.6), (57.0, 136.6, 537.2, 137.1),
+                      (57.0, 57.0, 57.6, 137.1), (536.7, 57.0, 537.2, 137.1)])
+        text = []
+        for y in (402.0, 415.0, 428.0):
+            text.append((60.0, y, 150.0, y + 9.0))
+            text.append((204.0, y, 400.0, y + 9.0))
+        text.append((60.0, 70.0, 500.0, 79.0))  # note box prose
+        page = _FakePage([], text, rects=rects)
+        grids = _detect_drawing_grids(page, self.PAGE_H, [])
+        assert len(grids) == 1
+        assert grids[0]["bbox"][1] == pytest.approx(400.3, abs=0.1)
+        assert grids[0]["bbox"][3] == pytest.approx(439.3, abs=0.1)
+        assert grids[0]["row_count"] == 3
+
+    def test_tall_centred_cells_counted_per_rule_band(self):
+        # K.1 pattern: the Notes cell wraps to six lines while Platform
+        # is one line. Per rule band both columns have text, so the row
+        # is multi-cell even though five text-y levels hold one line.
+        rows = [100.0, 200.0, 300.0]
+        cols = [57.0, 300.0, 537.0]
+        rects = _cell_edge_rects(rows, cols)
+        text = []
+        for band_top in (100.0, 200.0):
+            text.append((60.0, band_top + 45.0, 200.0, band_top + 54.0))
+            for k in range(6):
+                y = band_top + 10.0 + k * 13.0
+                text.append((304.0, y, 530.0, y + 9.0))
+        page = _FakePage([], text, rects=rects)
+        grids = _detect_drawing_grids(page, self.PAGE_H, [])
+        assert len(grids) == 1
+        assert (grids[0]["row_count"], grids[0]["col_count"]) == (2, 2)
+
+    def test_phantom_free_coverage_skips_the_grid(self):
+        # The caller hands over phantom-filtered find_tables() entries; a
+        # tight region over the same table still counts as coverage.
+        tight = [{"bbox": (57.2, 738.6, 254.9, 777.8)}]
+        assert _detect_drawing_grids(self._b1_page(), self.PAGE_H, tight) == []
+
+
+def _drawing_grid_entry(row_ys, col_xs, page_h=842.0, drawn=True):
+    """A page_mupdf_tables entry in the shape _detect_drawing_grids emits."""
+    cells = [(col_xs[c], row_ys[r], col_xs[c + 1], row_ys[r + 1])
+             for r in range(len(row_ys) - 1) for c in range(len(col_xs) - 1)]
+    entry = {
+        "bbox": (col_xs[0], row_ys[0], col_xs[-1], row_ys[-1]),
+        "row_count": len(row_ys) - 1,
+        "col_count": len(col_xs) - 1,
+        "cells": cells,
+        "header_names": None,
+        "extract": [],
+        "rot": None,
+        "max_cell_h": max(b - a for a, b in zip(row_ys, row_ys[1:])),
+        "tbl_h": row_ys[-1] - row_ys[0],
+        "page_coverage": (row_ys[-1] - row_ys[0]) / page_h,
+    }
+    if drawn:
+        entry["source"] = "drawing_grid"
+    return entry
+
+
+class TestDrawingGridConsumers:
+    """table.py treats a drawing-grid entry as verified geometry: Pass 1
+    stands down for it only on a partial view, Pass 5 drops the
+    find_tables()-specific guards (min size, label transposition).
+    """
+
+    ROW_YS = [100.0, 115.0, 130.0, 145.0, 160.0, 175.0]
+    COL_XS = [57.0, 290.0, 537.0]
+
+    def _rows(self, n, first_y=102.0, step=15.0):
+        labels = ["Alpha", "Beta", "Gamma", "Delta", "Epsilon", "Zeta"]
+        blocks = []
+        for k in range(n):
+            y = first_y + k * step
+            blocks.append(_bbox_block([
+                _line(labels[k], 60.0, y, 120.0, y + 9.0),
+                _line(f"value {k}", 294.0, y, 380.0, y + 9.0)]))
+        return blocks
+
+    def test_pass1_keeps_a_complete_table_over_a_drawn_grid(self):
+        blocks = self._rows(5)
+        grid = {0: [_drawing_grid_entry(self.ROW_YS, self.COL_XS)]}
+        tables, remaining = detect_tables(blocks, page_mupdf_tables=grid)
+        assert len(tables) == 1 and remaining == []
+        assert tables[0].table_source == "horizontal_rows"
+        assert len(tables[0].columns) == 5
+
+    def test_find_tables_region_with_five_rows_still_defers(self):
+        # Control: the same region as a find_tables() guess keeps the
+        # old rule (5+ rows overlapping Pass 1 -> Pass 5 assembles).
+        blocks = self._rows(5)
+        grid = {0: [_drawing_grid_entry(self.ROW_YS, self.COL_XS, drawn=False)]}
+        tables, _ = detect_tables(blocks, page_mupdf_tables=grid)
+        assert len(tables) == 1
+        assert tables[0].table_source is None
+
+    def test_pass1_defers_when_the_drawn_grid_holds_unclaimed_rows(self):
+        # K.1 pattern: Pass 1 assembles some rows, the grid contains
+        # more blocks it cannot take (a one-line row). Pass 5 builds the
+        # whole grid, including the leftover.
+        blocks = self._rows(5)
+        y = 102.0 + 5 * 15.0
+        blocks.append(_bbox_block([_line("Zeta", 60.0, y, 120.0, y + 9.0)]))
+        row_ys = self.ROW_YS + [190.0]
+        grid = {0: [_drawing_grid_entry(row_ys, self.COL_XS)]}
+        tables, remaining = detect_tables(blocks, page_mupdf_tables=grid)
+        assert len(tables) == 1 and remaining == []
+        assert tables[0].table_source is None
+        col0 = ["".join(s.text for s in row[0]).strip()
+                for row in tables[0].columns]
+        assert col0 == ["Alpha", "Beta", "Gamma", "Delta", "Epsilon", "Zeta"]
+
+    def test_pass5_accepts_a_short_drawn_grid(self):
+        # B.1 is 39pt tall; the find_tables() min-size guard would drop it.
+        row_ys = [738.7, 752.0, 764.7, 777.9]
+        col_xs = [57.3, 104.0, 202.6, 255.0]
+        blocks = []
+        for k, y in enumerate((740.5, 753.8, 766.5)):
+            blocks.append(_bbox_block([
+                _line(f"a{k}", 60.7, y, 100.0, y + 9.0),
+                _line(f"b{k}", 107.4, y, 190.0, y + 9.0),
+                _line(f"c{k}", 206.0, y, 250.0, y + 9.0)]))
+        drawn = {0: [_drawing_grid_entry(row_ys, col_xs)]}
+        tables, used = _detect_mupdf_native_tables(blocks, drawn)
+        assert len(tables) == 1 and used == {0, 1, 2}
+        assert len(tables[0].columns) == 3
+        assert all(len(row) == 3 for row in tables[0].columns)
+        guessed = {0: [_drawing_grid_entry(row_ys, col_xs, drawn=False)]}
+        assert _detect_mupdf_native_tables(blocks, guessed) == ([], set())
+
+    # F.1 pattern (P4016R0 page 38): the Rationale cell of the middle
+    # row is three lines tall; MuPDF puts its first line into the block
+    # of the row above and its last line into the block of the row
+    # below. Grid rows 95-115 (header), 115-130, 130-190, 190-215.
+    _F1_ROW_YS = [95.0, 115.0, 130.0, 190.0, 215.0]
+
+    def _f1_blocks(self):
+        return [
+            _bbox_block([_line("Decision", 60.0, 100.0, 110.0, 109.0),
+                         _line("Rationale", 294.0, 100.0, 350.0, 109.0)]),
+            _bbox_block([_line("Topology", 60.0, 118.0, 110.0, 127.0),
+                         _line("O(log N) depth", 294.0, 118.0, 380.0, 127.0),
+                         _line("Algebraic clarity;", 294.0, 133.0, 400.0, 142.0)]),
+            _bbox_block([_line("Init placement", 60.0, 155.0, 140.0, 164.0),
+                         _line("compatible with the", 294.0, 148.0, 420.0, 157.0),
+                         _line("reduce-family API", 294.0, 163.0, 400.0, 172.0)]),
+            _bbox_block([_line("Split rule", 60.0, 198.0, 120.0, 207.0),
+                         _line("([reduce]).", 294.0, 178.0, 360.0, 187.0),
+                         _line("Unique grouping", 294.0, 198.0, 400.0, 207.0)]),
+        ]
+
+    @staticmethod
+    def _cell_texts(section: Section) -> list[list[str]]:
+        return [["".join(s.text for s in cell).strip() for cell in row]
+                for row in section.columns]
+
+    def test_pass1_recuts_rows_along_a_complete_drawn_grid(self):
+        blocks = self._f1_blocks()
+        grid = {0: [_drawing_grid_entry(self._F1_ROW_YS, self.COL_XS)]}
+        tables, remaining = detect_tables(blocks, page_mupdf_tables=grid)
+        assert len(tables) == 1 and remaining == []
+        assert tables[0].table_source == "horizontal_rows"
+        assert self._cell_texts(tables[0]) == [
+            ["Decision", "Rationale"],
+            ["Topology", "O(log N) depth"],
+            ["Init placement",
+             "Algebraic clarity;\ncompatible with the\nreduce-family API\n"
+             "([reduce])."],
+            ["Split rule", "Unique grouping"],
+        ]
+
+    def test_pass1_block_rows_without_the_grid_show_the_defect(self):
+        # Control: by block, the tall cell's lines land in the rows above
+        # and below (what the golden showed before the fix).
+        blocks = self._f1_blocks()
+        tables, _ = detect_tables(blocks)
+        assert len(tables) == 1
+        cells = self._cell_texts(tables[0])
+        assert cells[1][1] == "O(log N) depth\nAlgebraic clarity;"
+        assert cells[3][1] == "([reduce]).\nUnique grouping"
+
+    def test_recut_keeps_pass1_rows_when_a_line_fits_no_cell(self):
+        blocks = self._f1_blocks()
+        # Grid that stops above the last row: "Split rule" fits no cell.
+        grid = _drawing_grid_entry(self._F1_ROW_YS[:-1], self.COL_XS)
+        assert _rows_from_drawn_grid(blocks, grid, 0, 2) is None
+        tables, _ = detect_tables(blocks, page_mupdf_tables={0: [grid]})
+        assert len(tables) == 1
+        assert len(tables[0].columns) == 4  # Pass 1's own rows kept
+
+    def test_recut_needs_the_full_cell_list(self):
+        grid = _drawing_grid_entry(self._F1_ROW_YS, self.COL_XS)
+        grid["cells"] = grid["cells"][:-1]
+        assert _rows_from_drawn_grid(self._f1_blocks(), grid, 0, 2) is None
+        grid = _drawing_grid_entry(self._F1_ROW_YS, self.COL_XS)
+        grid["row_count"] = 1
+        assert _rows_from_drawn_grid(self._f1_blocks(), grid, 0, 2) is None
+
+    def test_recut_refuses_blocks_from_another_page(self):
+        # A cross-page Pass 1 table: the grid's cells are page-0
+        # coordinates, the page-1 block's lines would land in the top
+        # rows. Pass 1 keeps its own rows instead.
+        blocks = self._f1_blocks()
+        blocks.append(Block(
+            lines=[_line("Next page", 60.0, 100.0, 120.0, 109.0),
+                   _line("continued", 294.0, 100.0, 350.0, 109.0)],
+            bbox=(60.0, 100.0, 350.0, 109.0), page_num=1))
+        grid = _drawing_grid_entry(self._F1_ROW_YS, self.COL_XS)
+        assert _rows_from_drawn_grid(blocks, grid, 0, 2) is None
+
+    def test_recut_refuses_a_grid_with_other_column_count(self):
+        # Three drawn columns against Pass 1's two: merged cells or a
+        # grid that is not this table. No re-cut.
+        grid = _drawing_grid_entry(
+            self._F1_ROW_YS, [57.0, 200.0, 290.0, 537.0])
+        assert _rows_from_drawn_grid(self._f1_blocks(), grid, 0, 2) is None
+
+    def test_recut_places_by_left_edge_and_sorts_lines_by_y(self):
+        # Block order puts the lower fragment first; the cell text must
+        # still read top to bottom. A line whose left edge starts in
+        # column 0 but whose midpoint would fall into column 1 (long
+        # merged-cell line) stays in column 0.
+        blocks = [
+            _bbox_block([_line("Decision", 60.0, 100.0, 110.0, 109.0),
+                         _line("Rationale", 294.0, 100.0, 350.0, 109.0)]),
+            _bbox_block([_line("Topology", 60.0, 118.0, 110.0, 127.0),
+                         _line("second line", 294.0, 133.0, 400.0, 142.0)]),
+            _bbox_block([_line("first line", 294.0, 118.0, 400.0, 127.0),
+                         _line("A wide note across both columns",
+                               60.0, 198.0, 500.0, 207.0)]),
+        ]
+        grid = _drawing_grid_entry([95.0, 115.0, 190.0, 215.0], self.COL_XS)
+        recut = _rows_from_drawn_grid(blocks, grid, 0, 2)
+        assert recut is not None
+        rows, _ = recut
+        texts = [["".join(s.text for s in c) for c in r] for r in rows]
+        assert texts == [
+            ["Decision", "Rationale"],
+            ["Topology", "first line\nsecond line"],
+            ["A wide note across both columns", ""],
+        ]
+
+    def test_recut_drops_drawn_rows_without_text(self):
+        # An extra empty drawn row band (rule doubled) yields no row.
+        rows_ys = self._F1_ROW_YS[:-1] + [212.0, 215.0]
+        grid = _drawing_grid_entry(rows_ys, self.COL_XS)
+        recut = _rows_from_drawn_grid(self._f1_blocks(), grid, 0, 2)
+        assert recut is not None
+        rows, all_lines = recut
+        assert len(rows) == 4
+        assert len(all_lines) == 11
+
+    def test_pass5_never_transposes_a_drawn_two_column_grid(self):
+        row_ys = [100.0, 160.0, 220.0, 280.0]
+        col_xs = [57.0, 200.0, 537.0]
+        blocks = []
+        for k, y in enumerate((110.0, 170.0, 230.0)):
+            blocks.append(_bbox_block([
+                _line(["Before", "After", "Later"][k], 60.0, y, 120.0, y + 9.0),
+                _line(f"description {k}", 204.0, y, 400.0, y + 9.0)]))
+        drawn = {0: [_drawing_grid_entry(row_ys, col_xs)]}
+        tables, _ = _detect_mupdf_native_tables(blocks, drawn)
+        assert len(tables) == 1
+        assert len(tables[0].columns) == 3
+        assert all(len(row) == 2 for row in tables[0].columns)
+        guessed = {0: [_drawing_grid_entry(row_ys, col_xs, drawn=False)]}
+        tables, _ = _detect_mupdf_native_tables(blocks, guessed)
+        assert len(tables) == 1
+        assert len(tables[0].columns[0]) == 3  # labels became the header
 
 
 # 90-degree rotation matrix of a 595x842 portrait page (P3100R6 appendix
@@ -984,3 +1371,1227 @@ class TestMergeCrossPageFragments:
         a = self._fragment([["a1", "x"], ["a2", "y"]], 0, 120.0, 300.0)
         b = self._fragment([["b1", "z"]], 1, 400.0, 500.0)
         assert len(_merge_cross_page_fragments([a, b])) == 2
+
+
+# ── _detect_column_split G1/G2 guard tests ──────────────────────────
+
+def _split_block(x0: float, y0: float, x1: float, y1: float) -> Block:
+    """Minimal block for column-split testing (bbox only)."""
+    ln = _line("x", x0, y0, x1, y1)
+    return Block(lines=[ln], bbox=(x0, y0, x1, y1), page_num=0)
+
+
+class TestColumnSplitGuards:
+    """_detect_column_split G1 (gutter-crossing) and G2 (row-alignment)."""
+
+    @staticmethod
+    def _page_width():
+        return 612.0
+
+    def test_genuine_two_column_p3977r0_p5_accepted(self):
+        """p3977r0 page 5: genuine two-column text. G1=0.0, G2 low."""
+        # Left column blocks at x0~72, right at x0~310; no crossing,
+        # y0s do not align across columns.
+        blocks = [
+            _split_block(72, 100, 280, 112),
+            _split_block(72, 120, 280, 132),
+            _split_block(72, 140, 280, 152),
+            _split_block(72, 160, 280, 172),
+            _split_block(72, 180, 280, 192),
+            _split_block(310, 105, 540, 117),
+            _split_block(310, 125, 540, 137),
+            _split_block(310, 145, 540, 157),
+            _split_block(310, 165, 540, 177),
+            _split_block(310, 185, 540, 197),
+        ]
+        result = _detect_column_split(blocks, self._page_width())
+        assert result is not None, "genuine two-column must be accepted"
+
+    def test_genuine_two_column_p0533r9_p4_accepted(self):
+        """p0533r9 page 4: mixed page (two-column top, full-width below).
+        Must keep today's two-column detection."""
+        # Left column at x0~57, right at x0~310; no gutter crossing.
+        # y0s do not align (left lines at 100,115,130; right at 103,118,133).
+        blocks = [
+            _split_block(57, 100, 280, 112),
+            _split_block(57, 115, 280, 127),
+            _split_block(57, 130, 280, 142),
+            _split_block(310, 103, 540, 115),
+            _split_block(310, 118, 540, 130),
+            _split_block(310, 133, 540, 145),
+        ]
+        result = _detect_column_split(blocks, self._page_width())
+        assert result is not None, "genuine two-column must be accepted"
+
+    def test_p4096r0_p9_rejected_by_g2(self):
+        """p4096r0 page 9: shattered table cells form row-aligned left/right
+        blocks. G2 (row-alignment fraction >= 0.5) must reject."""
+        # Simulated: left blocks at x0~67-171, right at x0~301.
+        # y0s align between left and right (table rows).
+        blocks = [
+            _split_block(67, 300, 170, 315),   # left cell
+            _split_block(301, 300, 434, 315),  # right cell, same y0
+            _split_block(67, 340, 170, 355),
+            _split_block(301, 340, 434, 355),
+            _split_block(67, 380, 170, 395),
+            _split_block(301, 380, 434, 395),
+            _split_block(67, 420, 170, 435),
+            _split_block(301, 420, 434, 435),
+            _split_block(67, 460, 170, 475),
+            _split_block(171, 460, 300, 475),  # extra left block
+        ]
+        result = _detect_column_split(blocks, self._page_width())
+        assert result is None, "shattered table (G2) must be rejected"
+
+    def test_p4096r0_p10_rejected_by_g1(self):
+        """p4096r0 page 10: left blocks whose x1 crosses into the right
+        column's x-range. G1 (gutter-crossing fraction > 0.15) must reject."""
+        # Simulated: left blocks crossing into right zone (x1 > 301+tol).
+        blocks = [
+            _split_block(67, 100, 310, 115),   # x1=310 crosses right x0=301
+            _split_block(67, 130, 310, 145),
+            _split_block(67, 160, 310, 175),
+            _split_block(67, 190, 310, 205),
+            _split_block(67, 220, 310, 235),
+            _split_block(301, 100, 434, 115),
+            _split_block(301, 130, 434, 145),
+            _split_block(301, 160, 434, 175),
+        ]
+        result = _detect_column_split(blocks, self._page_width())
+        assert result is None, "gutter-crossing page (G1) must be rejected"
+
+
+# ── _columns_count_match y-overlap guard tests ──────────────────────
+
+class TestColumnsCountMatchOverlap:
+    """_columns_count_match must reject same-row y-overlapping blocks."""
+
+    def test_y_overlapping_pair_rejected(self):
+        """Two blocks at the same y (table header halves) must not match."""
+        cols = [67.0, 244.0]
+        # block_a bottom = 200, block_b top = 190: b starts above a's bottom
+        assert not _columns_count_match(cols, cols, 200.0, 190.0, True)
+
+    def test_stacked_pair_with_small_gap_accepted(self):
+        """Blocks stacked with a small y-gap (< 40) must be accepted."""
+        cols = [67.0, 244.0]
+        # block_a bottom = 200, block_b top = 215: gap = 15
+        assert _columns_count_match(cols, cols, 200.0, 215.0, True)
+
+    def test_stacked_pair_with_large_gap_rejected(self):
+        """Blocks separated by > _RELAXED_MATCH_MAX_Y_GAP (40) rejected."""
+        cols = [67.0, 244.0]
+        # block_a bottom = 200, block_b top = 250: gap = 50 > 40
+        assert not _columns_count_match(cols, cols, 200.0, 250.0, True)
+
+    def test_different_page_rejected(self):
+        """Cross-page pairs must always be rejected."""
+        cols = [67.0, 244.0]
+        assert not _columns_count_match(cols, cols, 200.0, 215.0, False)
+
+
+# ── SBS atomized pre-pass: dense shattered tables (p4096r0 §5.4) ────
+
+def _geo_block(page: int, *lines: tuple[str, float, float, float, float]
+               ) -> Block:
+    """Block with explicit line bboxes; block bbox is the union.
+
+    Spans carry the line bbox too, as MuPDF spans do: the spanning-header
+    post-pass reads column x-positions from the first row's spans."""
+    lns = [Line(spans=[Span(text=t, font_size=10.0, bbox=(x0, y0, x1, y1))],
+                bbox=(x0, y0, x1, y1))
+           for t, x0, y0, x1, y1 in lines]
+    return Block(
+        lines=lns,
+        bbox=(min(l.bbox[0] for l in lns), min(l.bbox[1] for l in lns),
+              max(l.bbox[2] for l in lns), max(l.bbox[3] for l in lns)),
+        page_num=page,
+    )
+
+
+def _cell_text(cell: list) -> str:
+    return " ".join("".join(s.text for s in cell).split())
+
+
+def _p4096_page11_blocks(*, drop_rows: set[str] = frozenset(),
+                         ragged: bool = False,
+                         cells_before_col0: float | None = None,
+                         ) -> list[Block]:
+    """p4096r0 page_num 11 (§5.4 Summary) as MuPDF delivers it.
+
+    Header: fused "Criterion // P2464R0[1]" block, "(2021)", fused
+    "P2300R10[8] (2026) // Coroutine executor" block. Every body row:
+    fused col-0/col-1 block, "has none" continuation, col-2 and col-3
+    single-line blocks. *drop_rows* removes whole rows by criterion;
+    *ragged* drops the col-2 and col-3 blocks of two rows so those rows
+    span only 2 of 4 columns. *cells_before_col0* reproduces the real
+    extraction order of the "Generic composition" row: its col-2 and
+    col-3 blocks start that many points above the col-0 block (0.0 is
+    the exact tie on the page) and precede it in the list.
+    """
+    P = 11
+    GC = "Generic composition"
+    blocks = [
+        _geo_block(P, ("5.4 Summary", 56.7, 282.1, 116.9, 297.8)),
+        _geo_block(P, ("Criterion", 66.7, 316.2, 112.0, 329.8),
+                   ("P2464R0[1]", 171.5, 319.1, 214.8, 332.7)),
+        _geo_block(P, ("P2300R10[8] (2026)", 244.4, 316.2, 340.0, 332.7),
+                   ("Coroutine executor", 433.6, 319.1, 510.3, 332.7)),
+        _geo_block(P, ("(2021)", 171.5, 337.6, 196.8, 351.2)),
+    ]
+    rows = [
+        ("Error channel", 366.1, "set_error exists; does not handle",
+         "Not needed; result",
+         [("compound I/O results without information", 384.6),
+          ("loss (P2430R0[11])", 400.2)],
+         [("delivered to", 384.6), ("continuation on resume", 403.1)]),
+        ("Lifecycle", 431.6, "Structured lifecycle exists; task converts",
+         "Ownership contract:",
+         [("routine errors to exceptions (P3552R3[14])", 447.2)],
+         [("resume or destroy", 450.1)]),
+        ("Generic composition", 478.6,
+         "Sender algorithms exist; deployed for GPU",
+         "co_await replaces state",
+         [("dispatch, thread pools, infrastructure", 497.1)],
+         [("machines", 497.1)]),
+        ("Deployed networking", 525.6, "None published", "New.", [], []),
+    ]
+    for ri, (crit, y0, c2, c3, c2_more, c3_more) in enumerate(rows):
+        if crit in drop_rows:
+            continue
+        blocks.append(_geo_block(
+            P, (crit, 66.7, y0, 160.0, y0 + 13.6),
+            ('execute(F&&)' if crit != "Deployed networking"
+             else '"I don\'t', 171.5, y0, 220.7, y0 + 13.6)))
+        blocks.append(_geo_block(
+            P, ("has none" if crit != "Deployed networking" else 'know"',
+                171.5, y0 + 18.5, 206.7, y0 + 32.1)))
+        if ragged and ri in (1, 2):
+            continue
+        dy = cells_before_col0 if (
+            cells_before_col0 is not None and crit == GC) else 0.0
+        blocks.append(_geo_block(P, (c2, 244.4, y0 - dy, 400.0, y0 + 13.6)))
+        for t, yy in c2_more:
+            blocks.append(_geo_block(P, (t, 244.4, yy, 408.4, yy + 13.6)))
+        blocks.append(_geo_block(P, (c3, 433.6, y0 - dy, 520.0, y0 + 13.6)))
+        for t, yy in c3_more:
+            blocks.append(_geo_block(P, (t, 433.6, yy, 525.6, yy + 13.6)))
+    blocks.append(_geo_block(
+        P, ("The question that P2464R0[1] asked in 2021 - whether",
+            56.7, 578.7, 536.8, 595.2)))
+    blocks.sort(key=lambda b: ((b.bbox[1] + b.bbox[3]) / 2, b.bbox[0]))
+    if cells_before_col0 is not None and GC not in drop_rows:
+        # Real order: the two right-hand cells come out ahead of col 0.
+        gc = next(i for i, b in enumerate(blocks)
+                  if b.lines[0].text == GC)
+        y0 = blocks[gc].bbox[1]
+        pre = [i for i, b in enumerate(blocks)
+               if b.bbox[0] >= 244.0
+               and abs(b.bbox[1] - (y0 - cells_before_col0)) < 0.01]
+        assert len(pre) == 2
+        moved = [blocks[i] for i in pre]
+        for i in sorted(pre, reverse=True):
+            del blocks[i]
+        gc = next(i for i, b in enumerate(blocks)
+                  if b.lines[0].text == GC)
+        blocks[gc:gc] = moved
+    return blocks
+
+
+class TestAtomizedPrepassDenseGate:
+    """The pre-scanner claims dense 4-row shattered tables before Pass 1."""
+
+    def test_p4096_page11_prepass_claims_dense_four_row_table(self):
+        sections, used = _detect_side_by_side_tables(
+            _p4096_page11_blocks(), atomized_only=True)
+        assert len(sections) == 1
+        sec = sections[0]
+        assert sec.page_num == 11
+        assert sec.table_source == "side_by_side_prepass"
+        assert len(sec.columns) == 5
+        assert all(len(row) == 4 for row in sec.columns)
+        assert [_cell_text(c) for c in sec.columns[0]] == [
+            "Criterion", "P2464R0[1] (2021)", "P2300R10[8] (2026)",
+            "Coroutine executor"]
+        assert [_cell_text(row[0]) for row in sec.columns[1:]] == [
+            "Error channel", "Lifecycle", "Generic composition",
+            "Deployed networking"]
+        assert _cell_text(sec.columns[4][1]) == '"I don\'t know"'
+
+    def test_line_level_header_acceptance_sees_fused_heading_pair(self):
+        """Fused 'P2300R10[8] (2026) // Coroutine executor' block holds
+        two column headings; clustering block x0s would find only 3."""
+        sections, _ = _detect_side_by_side_tables(
+            _p4096_page11_blocks(), atomized_only=True)
+        hdr = [_cell_text(c) for c in sections[0].columns[0]]
+        assert hdr[2] == "P2300R10[8] (2026)"
+        assert hdr[3] == "Coroutine executor"
+
+    def test_ragged_four_row_table_stays_below_general_gate(self):
+        """Two rows spanning only 2 of 4 columns: not dense, gate stays 5."""
+        sections, _ = _detect_side_by_side_tables(
+            _p4096_page11_blocks(ragged=True), atomized_only=True)
+        assert sections == []
+
+    def test_three_row_dense_table_rejected(self):
+        sections, _ = _detect_side_by_side_tables(
+            _p4096_page11_blocks(drop_rows={"Deployed networking"}),
+            atomized_only=True)
+        assert sections == []
+
+    def test_pass2_regular_source_is_side_by_side(self):
+        """Same blocks without the pre-pass flag: Pass 2 claims them and
+        labels the source accordingly."""
+        sections, _ = _detect_side_by_side_tables(_p4096_page11_blocks())
+        assert len(sections) == 1
+        assert sections[0].table_source == "side_by_side"
+
+    def test_pass1_source_is_horizontal_rows(self):
+        blocks = [
+            _geo_block(0, ("Property", 67, 100, 120, 113),
+                       ("Coroutine executor", 186, 100, 280, 113),
+                       ("Sender model", 304, 100, 400, 113)),
+            _geo_block(0, ("Age", 67, 120, 90, 133),
+                       ("New in 2026.", 186, 120, 280, 133),
+                       ("Five years old.", 304, 120, 400, 133)),
+            _geo_block(0, ("Deployments", 67, 140, 130, 153),
+                       ("Capy, Corosio.", 186, 140, 280, 153),
+                       ("Facebook, NVIDIA.", 304, 140, 400, 153)),
+        ]
+        sections, _ = detect_tables(blocks)
+        assert len(sections) == 1
+        assert sections[0].table_source == "horizontal_rows"
+
+
+def _three_col_row(page: int, y0: float, texts: tuple[str, str, str]) -> Block:
+    return _geo_block(
+        page, (texts[0], 67, y0, 150, y0 + 13),
+        (texts[1], 186, y0, 280, y0 + 13),
+        (texts[2], 304, y0, 400, y0 + 13))
+
+
+def _two_stacked_tables(gap: float, *, fragment: str) -> list[Block]:
+    """Two 3-row Pass 1 tables (p4125r1 benchmark layout) separated by a
+    block that starts *gap* points below the first table's last row.
+
+    *fragment* selects what sits in the gap: ``"orphan"`` is a single-line
+    block at column 0 (a scenario heading), ``"subset"`` a two-line block
+    covering columns 1 and 2 only (a shorter header of the next table).
+    """
+    rows_a = [_three_col_row(0, y, (f"a{k}", "1", "2"))
+              for k, y in enumerate((100, 120, 140))]
+    fy = 153 + gap
+    if fragment == "orphan":
+        mid = [_geo_block(0, ("Scenario 2 - Filled Book", 67, fy, 250, fy + 13))]
+    else:
+        mid = [_geo_block(0, ("Count", 186, fy, 230, fy + 13),
+                          ("Rate", 304, fy, 340, fy + 13))]
+    by0 = fy + 20
+    rows_b = [_three_col_row(0, y, (f"b{k}", "3", "4"))
+              for k, y in enumerate((by0, by0 + 20, by0 + 40))]
+    return rows_a + mid + rows_b
+
+
+def _p4125_page20_blocks() -> list[Block]:
+    """p4125r1 page_num 20 as detect_tables receives it: two benchmark
+    tables (Empty Book, Filled Book), each a shattered 7-block header
+    over five 10-cell row blocks, with scenario titles between."""
+    P = 20
+    cols = [56.7, 114.0, 170.8, 214.6, 262.8, 306.6, 350.4, 394.2, 438.0, 498.3]
+    cols_b = [49.5, 110.0, 166.8, 210.6, 263.1, 306.9, 350.7, 394.5, 438.3, 502.1]
+    labels = ["Count", "Min", "Max", "Mean", "P50", "P95", "P99", "Avg Rate"]
+
+    def header(cx, y):
+        h = 13.6
+        return [
+            _geo_block(P, ("Feed" if cx is cols else "Feed Rate", cx[0], y, cx[0] + 30, y + h)),
+            _geo_block(P, *[(t, cx[k + 1], y, cx[k + 1] + 35, y + h)
+                            for k, t in enumerate(labels)]),
+            _geo_block(P, ("Avg Rate", cx[9], y, cx[9] + 35, y + h)),
+            *([_geo_block(P, ("Rate", cx[0], y + 18.5, cx[0] + 18, y + 18.5 + h))]
+              if cx is cols else []),
+            _geo_block(P, ("(events/s)", cx[8], y + 18.5, cx[8] + 40, y + 18.5 + h)),
+            _geo_block(P, ("(orders/s)", cx[9], y + 18.5, cx[9] + 40, y + 18.5 + h)),
+            _geo_block(P, ("(msg/s)", cx[0], y + 37.0 if cx is cols else y + 18.5,
+                           cx[0] + 31, (y + 37.0 if cx is cols else y + 18.5) + h)),
+        ]
+
+    def rows(cx, y0):
+        out = []
+        for r, first in enumerate(("1,000", "10,000", "100,000", "200,000", "∞")):
+            y = y0 + r * 28.5
+            cells = [first, "10,000"] + [f"+{r}.{k}%" for k in range(8)]
+            out.append(_geo_block(P, *[(t, cx[k], y, cx[k] + 30, y + 13.6)
+                                       for k, t in enumerate(cells)]))
+        return out
+
+    blocks = [
+        _geo_block(P, ("Scenario 2 - Enter IOC, No Execution", 56.7, 56.0, 207.3, 70.3)),
+        _geo_block(P, ("Empty Book", 56.7, 94.5, 104.3, 108.1)),
+        *header(cols, 129.8),
+        *rows(cols, 195.3),
+        _geo_block(P, ("Scenario 2 - Enter IOC, No Execution", 56.7, 362.6, 207.3, 376.9)),
+        _geo_block(P, ("Filled Book", 56.7, 401.1, 100.7, 414.7)),
+        *header(cols_b, 436.4),
+        *rows(cols_b, 483.4),
+        _geo_block(P, ("Scenario 3 - Order Amends, Quantity Only", 56.7, 650.6, 230.8, 664.9)),
+    ]
+    blocks.sort(key=lambda b: ((b.bbox[1] + b.bbox[3]) / 2, b.bbox[0]))
+    return blocks
+
+
+def _p4094_page8_blocks() -> list[Block]:
+    """p4094r0 page_num 8 (Assertion / Source / Evidence): a regular
+    three-line header row block over a shattered body. Source+Evidence of
+    each row are one fused two-line block; every wrapped line of the
+    Assertion and Evidence cells is its own single-line block."""
+    P = 8
+    H = 13.6
+    c0, c1, c2 = 66.7, 183.6, 281.9
+
+    def row(y, assertion_lines, source, evidence_lines):
+        out = [_geo_block(P, (source, c1, y - 2.8, 260.0, y - 2.8 + H),
+                          (evidence_lines[0], c2, y - 2.8, 522.9, y - 2.8 + H))]
+        for k, t in enumerate(assertion_lines):
+            yy = y + k * 18.5
+            out.append(_geo_block(P, (t, c0, yy, c0 + 90.0, yy + H)))
+        for k, t in enumerate(evidence_lines[1:], start=1):
+            yy = y + k * 18.5
+            out.append(_geo_block(P, (t, c2, yy, c2 + 230.0, yy + H)))
+        return out
+
+    blocks = [
+        _geo_block(P, ("Assertion", c0, 68.3, 110.0, 81.9),
+                   ("Source", c1, 68.3, 220.0, 81.9),
+                   ("Evidence", c2, 68.3, 317.3, 81.9)),
+        *row(96.8, ['"we want to be able to', "have a single thread pool",
+                    "object that can be used", "for all of the above use",
+                    'cases"'],
+             "P0285R0[14] (2016)",
+             ["(none found in the published record)",
+              "that mix networking and parallel algorithm",
+              "same pool. No deployment data showing friction",
+              "pools."]),
+        *row(199.3, ['"each facility\'s unique', "interface necessitates an",
+                     "entirely different", 'implementation" (the N',
+                     "x M argument)"],
+             "P0761R2[13] (2018)",
+             ["One hypothetical code snippet.",
+              "a parallel_for with an if/else chain over",
+              "thread pool. This is the only code-level",
+              "published record for any unification rationale",
+              "authored by the proposal authors, not drawn",
+              "codebase. No measurement from a real standard",
+              "implementation."]),
+        *row(338.8, ['"the view of SG1 was', "that a single executor",
+                     "abstraction was", 'preferred"'],
+             "P1791R0[12] (2019)",
+             ["(none found in the published record)",
+              'poll "Start with Chris Mysen\'s proposal?"',
+              "(SF:9/WF:5/N:4/WA:0/SA:2). No rationale for",
+              "abstraction is preferred over multiple.",
+              "would be lost."]),
+        *row(441.3, ['"Proposals mostly', "converged, but some",
+                     'differences remain"'],
+             "N4199[11] (2014)",
+             ["(none found in the published record)",
+              "differences (begin-work/end-work brackets,",
+              "executors, three spawn variants) but no",
+              "these differences are reconcilable or fundamental."]),
+        *row(525.3, ['"serves the use cases of', "those independent",
+                     "proposals with a single", 'consistent programming',
+                     'model"'],
+             "P0443R0[1] (2016)",
+             ["(none found in the published record)",
+              "demonstrating that the unified model serves",
+              "No experiment comparing unified and domain-specific",
+              "approaches."]),
+        _geo_block(P, ("The published record was searched systematically.",
+                       c0, 640.0, 520.0, 653.6)),
+    ]
+    blocks.sort(key=lambda b: ((b.bbox[1] + b.bbox[3]) / 2, b.bbox[0]))
+    return blocks
+
+
+class TestSbsCol0BandReorder:
+    """Cells that precede their row's col-0 block in extraction order
+    (exact y tie or marginally lower y) are pulled behind it, so the
+    row groups on the col-0 block instead of gluing to the row above."""
+
+    @pytest.mark.parametrize("pre_dy", [0.0, 2.8])
+    def test_generic_composition_row_owns_its_cells(self, pre_dy):
+        sections, _ = _detect_side_by_side_tables(
+            _p4096_page11_blocks(cells_before_col0=pre_dy),
+            atomized_only=True)
+        assert len(sections) == 1
+        sec = sections[0]
+        assert sec.table_source == "side_by_side_prepass"
+        rows = {_cell_text(r[0]): r for r in sec.columns[1:]}
+        assert list(rows) == ["Error channel", "Lifecycle",
+                              "Generic composition", "Deployed networking"]
+        assert _cell_text(rows["Lifecycle"][2]) == (
+            "Structured lifecycle exists; task converts routine errors to "
+            "exceptions (P3552R3[14])")
+        assert _cell_text(rows["Generic composition"][2]) == (
+            "Sender algorithms exist; deployed for GPU dispatch, thread "
+            "pools, infrastructure")
+        assert _cell_text(rows["Generic composition"][3]) == (
+            "co_await replaces state machines")
+        assert _cell_text(rows["Deployed networking"][1]) == '"I don\'t know"'
+
+
+def _p4096_page10_blocks() -> list[Block]:
+    """p4096r0 page_num 10 (§5.2): two Pass 1 row-block tables.
+
+    Age table: every row is one 3-line block; wrapped col-2 tails are
+    single-line orphan blocks at the col-2 x. noexcept table: rows are
+    3-line or 2-line (col 0 + col 1) blocks with col-1 and col-2 tails as
+    orphans; the last row is followed by a numbered heading."""
+    P = 10
+    H = 13.62
+    c0, c1, c2 = 66.7, 171.3, 304.1
+    n1, n2 = 171.3, 373.9
+
+    def row3(y0, t0, t1, t2, xs=(c0, c1, c2), x1s=(160.0, 290.0, 530.0)):
+        return _geo_block(P, (t0, xs[0], y0, x1s[0], y0 + H),
+                          (t1, xs[1], y0, x1s[1], y0 + H),
+                          (t2, xs[2], y0, x1s[2], y0 + H))
+
+    def one(y0, text, x, x1=530.0):
+        return _geo_block(P, (text, x, y0, x1, y0 + H))
+
+    return [
+        one(56.0, "Ecosystem-scale validation:", 56.7, 200.0),
+        row3(91.96, "Property", "Coroutine executor",
+             "P2300R10[8] for networking"),
+        row3(120.46, "Age", "P4003R0[4] (2026). New.",
+             "P2464R0[1] redirected the committee toward P2300R10[8]"),
+        one(141.83, "in 2021. Five years.", c2),
+        row3(167.46, "Deployments", "Capy[6], Corosio[7].",
+             "P2470R0[15]: Facebook, NVIDIA, Bloomberg - GPU"),
+        one(188.83, "dispatch, thread pools, infrastructure.", c2),
+        row3(217.33, "Networking deployments", "New.",
+             "None published. Boost.Asio and Boost.Beast - the"),
+        one(235.83, "deployed networking that the committee set aside - used",
+            c2),
+        one(254.33, "the continuation model.", c2),
+        one(291.84, "The noexcept context. Both models must answer the same",
+            56.7),
+        one(310.34, "condition:", 56.7, 110.0),
+        row3(346.30, "Property", "Coroutine executor",
+             "execution::task (P3552R3[14])", xs=(c0, n1, n2),
+             x1s=(160.0, 360.0, 530.0)),
+        _geo_block(P, ("What throws", c0, 377.66, 130.0, 391.28),
+                   ("post(coroutine_handle<>) throws", n1, 377.66, 360.0,
+                    391.28)),
+        one(377.66, "AS-EXCEPT-PTR converts routine", n2),
+        one(396.16, "std::system_error on scheduling failure.", n1, 360.0),
+        one(396.16, "error_code to exception_ptr.", n2),
+        row3(424.66, "Trigger condition", "Scheduling failure on an I/O",
+             "ECONNRESET, ETIMEDOUT, EWOULDBLOCK -", xs=(c0, n1, n2),
+             x1s=(160.0, 360.0, 530.0)),
+        one(443.16, "routine I/O outcomes.", n2),
+        _geo_block(P, ("In a noexcept context", c0, 471.66, 165.0, 485.28),
+                   ("std::terminate on catastrophic", n1, 471.66, 360.0,
+                    485.28)),
+        one(471.66, "std::terminate on routine I/O", n2),
+        one(490.16, "condition.", n1, 230.0),
+        one(544.82, "5.3 The Outcome", 56.7, 150.0),
+        one(566.56, "The analysis was procedurally correct on every step.",
+            56.7),
+    ]
+
+
+class TestPass1ContinuationOrphans:
+    """A col-1+ orphan under an N-column row-block table is the wrapped
+    tail of the previous row, merged backward into that cell."""
+
+    def _age_table(self):
+        sections, _ = detect_tables(_p4096_page10_blocks())
+        by_hdr = {_cell_text(s.columns[0][2]): s for s in sections}
+        return by_hdr["P2300R10[8] for networking"]
+
+    def test_age_table_tails_merge_backward(self):
+        sec = self._age_table()
+        assert sec.table_source == "horizontal_rows"
+        assert len(sec.columns) == 4
+        assert [_cell_text(r[0]) for r in sec.columns] == [
+            "Property", "Age", "Deployments", "Networking deployments"]
+        assert _cell_text(sec.columns[1][2]).endswith(
+            "toward P2300R10[8] in 2021. Five years.")
+        assert _cell_text(sec.columns[2][2]).endswith(
+            "GPU dispatch, thread pools, infrastructure.")
+        assert _cell_text(sec.columns[3][2]).endswith(
+            "the continuation model.")
+
+
+class TestPass1ResumeAfterTrailingContinuation:
+    """A col-1+ orphan with no following full row (Branch 4a/4b fail) is
+    a trailing continuation; absorbing it inside the loop lets the scan
+    reach the partial row that follows (p4096r0 §5.2 noexcept row 3)."""
+
+    def _noexcept_table(self, blocks):
+        sections, remaining = detect_tables(blocks)
+        by_hdr = {_cell_text(s.columns[0][2]): s for s in sections}
+        return by_hdr["execution::task (P3552R3[14])"], remaining
+
+    def test_third_row_complete_and_heading_stays_out(self):
+        blocks = _p4096_page10_blocks()
+        sec, remaining = self._noexcept_table(blocks)
+        assert sec.table_source == "horizontal_rows"
+        assert [_cell_text(r[0]) for r in sec.columns] == [
+            "Property", "What throws", "Trigger condition",
+            "In a noexcept context"]
+        assert _cell_text(sec.columns[1][1]) == (
+            "post(coroutine_handle<>) throws std::system_error on "
+            "scheduling failure.")
+        assert _cell_text(sec.columns[1][2]) == (
+            "AS-EXCEPT-PTR converts routine error_code to exception_ptr.")
+        assert _cell_text(sec.columns[2][2]) == (
+            "ECONNRESET, ETIMEDOUT, EWOULDBLOCK - routine I/O outcomes.")
+        assert _cell_text(sec.columns[3][1]) == (
+            "std::terminate on catastrophic condition.")
+        assert _cell_text(sec.columns[3][2]) == (
+            "std::terminate on routine I/O")
+        assert any(b.lines[0].text == "5.3 The Outcome" for b in remaining)
+
+    def test_prose_after_trailing_orphan_still_ends_table(self):
+        blocks = [
+            _three_col_row(0, 100, ("Property", "A", "B")),
+            _three_col_row(0, 120, ("r1", "x", "y")),
+            _three_col_row(0, 140, ("r2", "x", "y")),
+            _three_col_row(0, 160, ("r3", "x", "wrapped")),
+            _geo_block(0, ("tail of wrapped", 304, 178, 400, 191)),
+            _geo_block(0, ("A paragraph that starts at the margin and runs on.",
+                           56.7, 205, 540, 218)),
+        ]
+        sections, remaining = detect_tables(blocks)
+        assert len(sections) == 1
+        assert _cell_text(sections[0].columns[3][2]) == "wrapped tail of wrapped"
+        assert len(remaining) == 1
+
+
+class TestSeparatorRowDrop:
+    """A body row of dash-only cells is a rendered markdown separator
+    (p1068r11 poll tables), not data."""
+
+    def test_all_dash_row_dropped_single_dash_cell_kept(self):
+        blocks = [
+            _three_col_row(0, 100, ("SF", "F", "N")),
+            _three_col_row(0, 120, ("-", "-", "\u2014")),
+            _three_col_row(0, 140, ("0", "-", "3")),
+            _three_col_row(0, 160, ("1", "2", "3")),
+            _three_col_row(0, 180, ("4", "5", "6")),
+        ]
+        sections, _ = detect_tables(blocks)
+        assert len(sections) == 1
+        rows = [[_cell_text(c) for c in r] for r in sections[0].columns]
+        assert rows == [["SF", "F", "N"], ["0", "-", "3"],
+                        ["1", "2", "3"], ["4", "5", "6"]]
+        assert "| - | - |" not in sections[0].text
+
+
+class TestAtomizedBodyPrepass:
+    """The pre-scanner routes a regular-header table with a shattered body
+    to the side-by-side family before Pass 1 can take each line as a row."""
+
+    def test_p4094_page8_prepass_claims_shattered_body(self):
+        sections, used = _detect_side_by_side_tables(
+            _p4094_page8_blocks(), atomized_only=True)
+        assert len(sections) == 1
+        sec = sections[0]
+        assert sec.table_source == "side_by_side_prepass"
+        assert len(sec.columns) == 6
+        assert [_cell_text(c) for c in sec.columns[0]] == [
+            "Assertion", "Source", "Evidence"]
+        assert [_cell_text(r[0]) for r in sec.columns[1:]] == [
+            '"we want to be able to have a single thread pool object that '
+            'can be used for all of the above use cases"',
+            '"each facility\'s unique interface necessitates an entirely '
+            'different implementation" (the N x M argument)',
+            '"the view of SG1 was that a single executor abstraction was '
+            'preferred"',
+            '"Proposals mostly converged, but some differences remain"',
+            '"serves the use cases of those independent proposals with a '
+            'single consistent programming model"']
+        assert _cell_text(sec.columns[1][1]) == "P0285R0[14] (2016)"
+        assert _cell_text(sec.columns[1][2]).startswith(
+            "(none found in the published record) that mix networking")
+        assert _cell_text(sec.columns[5][2]).endswith("approaches.")
+
+    def test_end_to_end_page8_is_one_table(self):
+        sections, remaining = detect_tables(_p4094_page8_blocks())
+        assert [len(s.columns) for s in sections] == [6]
+        assert sections[0].table_source == "side_by_side_prepass"
+        assert len(remaining) == 1
+
+    def test_row_block_table_stays_with_pass1(self):
+        """Every row one multi-line block: not atomized, the pre-pass
+        leaves it to Pass 1 even at 5+ rows."""
+        blocks = [_three_col_row(0, 100 + 20 * k, (f"r{k}", "x", "y"))
+                  for k in range(6)]
+        sections, _ = _detect_side_by_side_tables(blocks, atomized_only=True)
+        assert sections == []
+        sections, _ = detect_tables(blocks)
+        assert len(sections) == 1
+        assert sections[0].table_source == "horizontal_rows"
+
+
+class TestPass1FragmentAbsorptionGap:
+    """Branch 3 and 4 absorb table fragments only within the same y-gap
+    that Branch 3b and 5 already require. Beyond it the table ends, so
+    two stacked tables never chain through the heading between them."""
+
+    def test_orphan_beyond_gap_ends_table(self):
+        """A column-0 title 40pt below the last row opens the next table;
+        one column covered is no header, so it stays prose."""
+        sections, remaining = detect_tables(
+            _two_stacked_tables(40.0, fragment="orphan"))
+        assert [len(s.columns) for s in sections] == [3, 3]
+        assert [_cell_text(s.columns[0][0]) for s in sections] == ["a0", "b0"]
+        assert [_cell_text(s.columns[-1][0]) for s in sections] == ["a2", "b2"]
+        assert len(remaining) == 1
+
+    def test_subset_beyond_gap_becomes_next_tables_header(self):
+        """A two-column header block 40pt below table A belongs to table B:
+        Pass 1 no longer chains it into A, the spanning-header post-pass
+        prepends it to B."""
+        sections, remaining = detect_tables(
+            _two_stacked_tables(40.0, fragment="subset"))
+        assert [len(s.columns) for s in sections] == [3, 4]
+        assert [_cell_text(c) for c in sections[1].columns[0]] == [
+            "", "Count", "Rate"]
+        assert _cell_text(sections[1].columns[1][0]) == "b0"
+        assert remaining == []
+
+    def test_p4125r1_page20_two_headed_tables(self):
+        """Real p4125r1 page 20 geometry: two 5x10 tables, each under a
+        header shattered into seven blocks. The shattered headers become
+        header rows; the scenario title and 'Empty Book' stay prose."""
+        sections, remaining = detect_tables(_p4125_page20_blocks())
+        assert [len(s.columns) for s in sections] == [6, 6]
+        hdr = [_cell_text(c) for c in sections[0].columns[0]]
+        assert hdr == ["Feed Rate (msg/s)", "Count", "Min", "Max", "Mean",
+                       "P50", "P95", "P99", "Avg Rate (events/s)",
+                       "Avg Rate (orders/s)"]
+        assert _cell_text(sections[0].columns[1][0]) == "1,000"
+        assert _cell_text(sections[1].columns[0][0]) == "Feed Rate (msg/s)"
+        assert [" ".join(l.text.strip() for l in b.lines) for b in remaining] == [
+            "Scenario 2 - Enter IOC, No Execution", "Empty Book",
+            "Scenario 2 - Enter IOC, No Execution", "Filled Book",
+            "Scenario 3 - Order Amends, Quantity Only"]
+
+    def test_prose_above_table_is_not_a_header(self):
+        """A paragraph at column 0 plus one aligned fragment must not be
+        folded into a header row: stacked lines in one column are header
+        labels only when short."""
+        blocks = [
+            _geo_block(0, ("This paragraph explains the benchmark setup in",
+                           67, 100, 400, 113),
+                       ("some detail and continues for a second line here.",
+                        67, 115, 400, 128)),
+            _geo_block(0, ("Count", 186, 115, 230, 128)),
+        ]
+        blocks += [_three_col_row(0, y, (f"a{k}", "1", "2"))
+                   for k, y in enumerate((140, 160, 180))]
+        sections, remaining = detect_tables(blocks)
+        assert len(sections) == 1
+        assert len(sections[0].columns) == 3
+        assert len(remaining) == 2
+
+    def test_prose_directly_above_header_ends_cluster_not_header(self):
+        """A long column-0 sentence 6pt above a two-cell header block
+        must not cost the table its header: the cluster ends at the
+        sentence and keeps the block below it."""
+        blocks = [
+            _geo_block(0, ("This sentence introduces the table that follows"
+                           " and spans the full width of the page.",
+                           67, 100, 400, 113)),
+            _geo_block(0, ("Count", 186, 119, 230, 132),
+                       ("Rate", 304, 119, 350, 132)),
+        ]
+        blocks += [_three_col_row(0, y, (f"a{k}", "1", "2"))
+                   for k, y in enumerate((140, 160, 180))]
+        sections, remaining = detect_tables(blocks)
+        assert len(sections) == 1
+        assert [_cell_text(c) for c in sections[0].columns[0]] == [
+            "", "Count", "Rate"]
+        assert len(remaining) == 1
+        assert remaining[0].lines[0].text.startswith("This sentence")
+
+    def test_single_spanning_line_is_not_a_header_cell(self):
+        """One aligned fragment plus a page-wide sentence at column 0 (a
+        single line, so the stacked-length guard never sees it) yields no
+        header: the sentence spills past the next column."""
+        blocks = [
+            _geo_block(0, ("Count", 186, 100, 230, 113)),
+            _geo_block(0, ("The following table lists the measured values"
+                           " for every scenario in the benchmark run.",
+                           67, 119, 540, 132)),
+        ]
+        blocks += [_three_col_row(0, y, (f"a{k}", "1", "2"))
+                   for k, y in enumerate((140, 160, 180))]
+        sections, remaining = detect_tables(blocks)
+        assert len(sections) == 1
+        assert len(sections[0].columns) == 3
+        assert len(remaining) == 2
+
+    def test_whitespace_spacer_between_header_and_table_is_skipped(self):
+        blocks = [
+            _geo_block(0, ("Count", 186, 100, 230, 113),
+                       ("Rate", 304, 100, 350, 113)),
+            _geo_block(0, ("   ", 67, 118, 70, 130)),
+        ]
+        blocks += [_three_col_row(0, y, (f"a{k}", "1", "2"))
+                   for k, y in enumerate((140, 160, 180))]
+        sections, remaining = detect_tables(blocks)
+        assert [_cell_text(c) for c in sections[0].columns[0]] == [
+            "", "Count", "Rate"]
+        assert len(remaining) == 1 and not remaining[0].lines[0].text.strip()
+
+    @pytest.mark.parametrize("fragment", ["orphan", "subset"])
+    def test_fragment_within_gap_still_absorbed(self, fragment):
+        sections, remaining = detect_tables(
+            _two_stacked_tables(7.0, fragment=fragment))
+        assert len(sections) == 1
+        assert remaining == []
+        joined = " ".join(_cell_text(c) for r in sections[0].columns for c in r)
+        assert "b2" in joined and ("Scenario 2" in joined or "Count" in joined)
+
+
+class TestTableBugFixes:
+    """Regression tests for table parsing bugs (issue #369)."""
+
+    def test_block_column_positions_clusters_wrapped_lines(self):
+        # Block with 3 columns where column 1 and column 2 have wrapped lines
+        lines = [
+            _line("Col0", 60.0, 100.0, 100.0, 110.0),
+            _line("Col1 line 1", 150.0, 100.0, 200.0, 110.0),
+            _line("Col1 line 2", 150.0, 112.0, 200.0, 122.0),
+            _line("Col2 line 1", 300.0, 100.0, 400.0, 110.0),
+            _line("Col2 line 2", 300.0, 112.0, 400.0, 122.0),
+        ]
+        blk = _block_from_lines(lines)
+        cols = _block_column_positions(blk)
+        assert cols is not None
+        assert len(cols) == 3
+        assert cols[0] == 60.0
+        assert cols[1] == 150.0
+        assert cols[2] == 300.0
+
+    def test_block_column_positions_wrapped_col0(self):
+        # Col 0 has wrapped lines
+        lines = [
+            _line("Deterministic ST (L=16,", 60.7, 100.0, 150.0, 110.0),
+            _line("8-block unroll)", 60.7, 112.0, 140.0, 122.0),
+            _line("26.5 GB/s", 280.0, 100.0, 320.0, 110.0),
+            _line("+391%", 420.0, 100.0, 460.0, 110.0),
+        ]
+        blk = _block_from_lines(lines)
+        cols = _block_column_positions(blk)
+        assert cols is not None
+        assert len(cols) == 3
+
+    def test_build_rows_sequential_assigns_by_x_coordinate(self):
+        # Row with multiline cell in col 1
+        lines = [
+            _line("Facility A", 60.0, 100.0, 120.0, 110.0),
+            _line("Canonical expression", 150.0, 100.0, 250.0, 110.0),
+            _line("(§4)", 150.0, 112.0, 180.0, 122.0),
+            _line("Fixed", 300.0, 100.0, 350.0, 110.0),
+        ]
+        blk = _block_from_lines(lines)
+        ref_cols = [60.0, 150.0, 300.0]
+        rows, all_lines = _build_rows_sequential([blk], ref_cols, 3, set())
+        assert len(rows) == 1
+        row = rows[0]
+        assert "".join(s.text for s in row[0]).strip() == "Facility A"
+        assert "Canonical expression" in "".join(s.text for s in row[1])
+        assert "(§4)" in "".join(s.text for s in row[1])
+        assert "".join(s.text for s in row[2]).strip() == "Fixed"
+
+    def test_complete_pass1_not_deferred_to_mupdf(self):
+        # 5 blocks covering the region exactly
+        lines_header = [_line("Property", 60.0, 100.0, 100.0, 110.0)]
+        lines_r1 = [_line("Section", 60.0, 120.0, 100.0, 130.0)]
+        lines_r2 = [_line("Grouping", 60.0, 140.0, 100.0, 150.0)]
+        lines_r3 = [_line("Complexity", 60.0, 160.0, 100.0, 170.0)]
+        lines_r4 = [_line("Order", 60.0, 180.0, 100.0, 190.0)]
+        table_blocks = [
+            _block_from_lines(lines_header),
+            _block_from_lines(lines_r1),
+            _block_from_lines(lines_r2),
+            _block_from_lines(lines_r3),
+            _block_from_lines(lines_r4),
+        ]
+        all_blocks = list(table_blocks)
+        region = (55.0, 95.0, 360.0, 195.0)
+        # All blocks in region are claimed -> complete
+        assert not _pass1_region_incomplete(region, 0, table_blocks, all_blocks)
+
+        # An extra block exists in the region that Pass 1 did not claim -> incomplete
+        orphan_block = _block_from_lines([_line("Missed note", 70.0, 150.0, 150.0, 160.0)])
+        all_blocks_with_extra = all_blocks + [orphan_block]
+        assert _pass1_region_incomplete(region, 0, table_blocks, all_blocks_with_extra)
+
+    def test_is_column_aligned_orphan_multiline_narrow_col0(self):
+        # Multiline block at col 0 (x0=60.7, x1=98.0) width=37.3 <= 200
+        lines = [
+            _line("PyTorch /", 60.7, 225.8, 90.9, 233.2),
+            _line("TensorFlow", 60.7, 235.0, 98.0, 242.4),
+        ]
+        blk = _block_from_lines(lines)
+        col_xs = frozenset({60.7, 134.9, 209.0, 397.0})
+        assert _is_column_aligned_orphan(blk, col_xs)
+
+    def test_build_rows_ybanded_vertically_staggered_cells(self):
+        # Header block (all 4 cols)
+        header_lines = [
+            _line("Library", 60.7, 150.2, 86.4, 157.7),
+            _line("Feature", 134.9, 150.2, 162.1, 157.7),
+            _line("Mechanism", 209.0, 150.2, 302.0, 157.7),
+            _line("Scope", 397.0, 150.2, 450.1, 157.7),
+        ]
+        b_hdr = _block_from_lines(header_lines)
+
+        # Row 1: Col 1 starts at y=163.0 (4 lines), Col 0 starts at y=176.8, Cols 2-3 at y=172.2
+        b_col1 = _block_from_lines([
+            _line("Conditional", 134.9, 163.0, 171.9, 170.3),
+            _line("Numerical", 134.9, 172.2, 168.7, 179.6),
+            _line("Reproducibility", 134.9, 181.4, 184.2, 188.8),
+            _line("(CNR)", 134.9, 190.6, 155.0, 198.0),
+        ])
+        b_col0 = _block_from_lines([
+            _line("Intel oneMKL", 60.7, 176.8, 104.7, 184.2),
+        ])
+        b_col23 = _block_from_lines([
+            _line("Constrains execution paths", 209.0, 176.8, 367.0, 184.2),
+            _line("Reproducibility across specified CPU", 397.0, 172.2, 516.0, 179.6),
+            _line("configurations", 397.0, 181.4, 443.3, 188.8),
+        ])
+
+        ref_cols = [60.7, 134.9, 209.0, 397.0]
+        tbl_blocks = [b_hdr, b_col1, b_col0, b_col23]
+        rows, all_lines = _build_rows_ybanded(tbl_blocks, ref_cols, 4)
+
+        assert len(rows) == 2
+        # Header row
+        assert "".join(s.text for s in rows[0][0]).strip() == "Library"
+        assert "".join(s.text for s in rows[0][1]).strip() == "Feature"
+        assert "".join(s.text for s in rows[0][2]).strip() == "Mechanism"
+        assert "".join(s.text for s in rows[0][3]).strip() == "Scope"
+        # Data row 1
+        assert "".join(s.text for s in rows[1][0]).strip() == "Intel oneMKL"
+        assert "Conditional" in "".join(s.text for s in rows[1][1])
+        assert "Constrains execution paths" in "".join(s.text for s in rows[1][2])
+        assert "Reproducibility across specified CPU" in "".join(s.text for s in rows[1][3])
+
+
+def _grid_row(page: int, y0: float, cells: list[tuple[str, float, float]]) -> Block:
+    """One row of a bordered grid: (text, x0, x1) per cell, 7.4pt tall."""
+    y1 = y0 + 7.4
+    lines = [
+        Line(spans=[Span(text=text, font_size=8.0)],
+             bbox=(x0, y0, x1, y1), page_num=page)
+        for text, x0, x1 in cells
+    ]
+    return Block(lines=lines,
+                 bbox=(cells[0][1], y0, max(c[2] for c in cells), y1),
+                 page_num=page)
+
+
+class TestPass3CompletesGridRun:
+    """Pass 3 completes a run that is a partial view of a find_tables()
+    grid (p4016r0 D.3 and N.6): rows whose cell texts are uneven fail
+    _gap_asymmetry_reject, but they sit on the run's columns inside the
+    bordered region MuPDF reports, so they are rows of the same table.
+    Pass 3 takes them itself, ordered by y, instead of emitting the rows
+    it happened to accept (header as a heading, last row as prose).
+    """
+
+    _PAGE = 34
+    _COLS = [60.7, 123.2, 248.9]
+    _REGION = {34: [
+        {"bbox": (57.2, 708.6, 352.4, 773.3), "row_count": 5, "col_count": 3,
+         "cells": []}]}
+
+    def _d3_blocks(self) -> list[Block]:
+        # p4016r0 tomd page 34 geometry. "Property" (gaps 31.8 / 6.8pt),
+        # "Standard Section" (6.8 / 48.4) and "Evaluation Order" (7.1 /
+        # 78.9) fail the asymmetry gate; "Grouping" and "Complexity" pass
+        # it and form Pass 3's run.
+        return [
+            _grid_row(self._PAGE, 711.7, [
+                ("Property", 60.7, 91.4),
+                ("Sequential (accumulate/fold_left)", 123.2, 242.1),
+                ("Parallel (reduce)", 248.9, 308.7)]),
+            _grid_row(self._PAGE, 725.1, [
+                ("Standard Section", 60.7, 116.4),
+                ("[accumulate] / [alg.fold]", 123.2, 200.5),
+                ("[reduce]", 248.9, 276.0)]),
+            _grid_row(self._PAGE, 737.7, [
+                ("Grouping", 60.7, 90.9),
+                ("Mandated: Left-to-right", 123.2, 199.1),
+                ("Generalized Sum (Unspecified)", 248.9, 349.0)]),
+            _grid_row(self._PAGE, 750.4, [
+                ("Complexity", 60.7, 96.9),
+                ("O(N) operations", 123.2, 175.0),
+                ("O(N) operations", 248.9, 300.7)]),
+            _grid_row(self._PAGE, 763.7, [
+                ("Evaluation Order", 60.7, 116.1),
+                ("Fully specified", 123.2, 170.0),
+                ("Not specified", 248.9, 291.4)]),
+        ]
+
+    @staticmethod
+    def _col0(section: Section) -> list[str]:
+        return ["".join(s.text for s in row[0]).strip()
+                for row in section.columns]
+
+    def test_fixture_is_faithful(self):
+        blocks = self._d3_blocks()
+        assert _block_horizontal_row(blocks[0]) is None
+        assert _block_horizontal_row(blocks[1]) is None
+        assert _block_horizontal_row(blocks[2]) is not None
+        assert _block_horizontal_row(blocks[3]) is not None
+        assert _block_horizontal_row(blocks[4]) is None
+
+    def test_left_behind_rows_are_found(self):
+        blocks = self._d3_blocks()
+        run = [blocks[2], blocks[3]]
+        got = _grid_rows_left_behind(run, self._COLS, blocks, self._REGION)
+        assert [b.lines[0].spans[0].text for b in got] == [
+            "Property", "Standard Section", "Evaluation Order"]
+
+    def test_run_is_completed_in_y_order(self):
+        blocks = self._d3_blocks()
+        tables, used = _detect_horizontal_row_tables(
+            blocks, rotated_pages=frozenset(),
+            page_mupdf_tables=self._REGION)
+        assert len(tables) == 1
+        assert used == {0, 1, 2, 3, 4}
+        assert self._col0(tables[0]) == [
+            "Property", "Standard Section", "Grouping", "Complexity",
+            "Evaluation Order"]
+        assert all(len(row) == 3 for row in tables[0].columns)
+
+    def test_without_mupdf_region_pass3_keeps_its_partial_run(self):
+        blocks = self._d3_blocks()
+        tables, used = _detect_horizontal_row_tables(
+            blocks, rotated_pages=frozenset())
+        assert len(tables) == 1
+        assert used == {2, 3}
+        assert self._col0(tables[0]) == ["Grouping", "Complexity"]
+
+    def test_region_reporting_no_more_rows_than_run_is_ignored(self):
+        # A rows=0 box spanning stacked poll grids (p1068r11 page 7) is
+        # not a view of any one run; Pass 3 keeps its own rows only.
+        blocks = self._d3_blocks()
+        region = {34: [{"bbox": (57.2, 708.6, 352.4, 773.3), "row_count": 0,
+                        "col_count": 0, "cells": []}]}
+        tables, used = _detect_horizontal_row_tables(
+            blocks, rotated_pages=frozenset(), page_mupdf_tables=region)
+        assert len(tables) == 1
+        assert used == {2, 3}
+
+    def test_block_off_the_columns_inside_region_does_not_qualify(self):
+        # A 3-line block inside the box whose x-starts are not the run's
+        # columns (a wrapped prose paragraph MuPDF split into lines at
+        # the left margin) is not a row of the grid.
+        blocks = self._d3_blocks()
+        stray = Block(
+            lines=[
+                Line(spans=[Span(text=f"prose {k}", font_size=8.0)],
+                     bbox=(57.5, 763.7, 340.0, 771.1), page_num=34)
+                for k in range(3)],
+            bbox=(57.5, 763.7, 340.0, 771.1), page_num=34)
+        run = [blocks[2], blocks[3]]
+        got = _grid_rows_left_behind(
+            run, self._COLS, run + [stray], self._REGION)
+        assert got == []
+
+    def test_rows_beyond_the_fragment_gap_stay_out(self):
+        # Two complete grids sharing columns inside one over-reaching box:
+        # the far grid's rows are not chained to this run.
+        blocks = self._d3_blocks()
+        far = _grid_row(34, 763.7 + 60.0, [
+            ("Far", 60.7, 80.0), ("x", 123.2, 130.0), ("y", 248.9, 260.0)])
+        region = {34: [{"bbox": (57.2, 708.6, 352.4, 840.0), "row_count": 6,
+                        "col_count": 3, "cells": []}]}
+        run = [blocks[2], blocks[3]]
+        got = _grid_rows_left_behind(
+            run, self._COLS, blocks + [far], region)
+        assert far not in got
+        assert len(got) == 3
+
+
+def _p4016_page54_blocks() -> list[Block]:
+    """p4016r0 page_num 54 (N.14 Summary) as MuPDF delivers it.
+
+    Header and three body rows are fused two-column blocks. The
+    "Determinism" row arrives as a col-0 label block plus a separate
+    three-line cell block on column 1 that overlaps the label in y
+    (label is vertically centred). The "Practicality" cell wraps onto a
+    trailing block whose top (431.6) is 2.8pt above the row block's
+    bottom (434.4). Prose above and below stays out of the table.
+    """
+    return [
+        _geo_block(54, ("The multi-threaded stack ordered state merge "
+                        "algorithm achieves:", 57.0, 321.6, 329.6, 331.0)),
+        _geo_block(54, ("Property", 60.7, 342.8, 91.4, 350.2),
+                   ("Guarantee", 288.4, 342.8, 325.6, 350.2)),
+        _geo_block(54, ("Determinism", 60.7, 365.2, 106.9, 372.7)),
+        _geo_block(54, ("Expression-identical to the single-threaded canonical "
+                        "expression for any T", 288.4, 356.1, 527.0, 363.5),
+                   ("under the specified partition/merge scheme; bitwise "
+                    "identity additionally", 288.4, 365.3, 523.0, 372.7),
+                   ("requires a matching floating-point evaluation model (§6)",
+                    288.4, 374.5, 469.7, 381.9)),
+        _geo_block(54, ("Correctness", 60.7, 391.8, 103.2, 399.2),
+                   ("Equivalent to the canonical pairwise tree (argument "
+                    "outlined in Appendix", 288.4, 387.2, 525.2, 394.6),
+                   ("N)", 288.4, 396.4, 296.4, 403.8)),
+        _geo_block(54, ("Efficiency", 60.7, 409.6, 95.5, 417.1),
+                   ("O(N) work, O(N/T + T log N) span",
+                    288.4, 409.7, 398.4, 417.1)),
+        _geo_block(54, ("Practicality", 60.7, 426.9, 101.5, 434.4),
+                   ("Demonstrated competitive with, and in some configurations "
+                    "faster than,", 288.4, 422.4, 522.2, 429.8)),
+        _geo_block(54, ("std::reduce with SIMD on the tested platforms/harness",
+                        288.4, 431.6, 467.4, 439.0)),
+        _geo_block(54, ("The key insights enabling this approach are:",
+                        57.0, 449.6, 239.3, 459.0)),
+    ]
+
+
+class TestPass1SplitRow:
+    """Branch 4d: a row delivered as a col-0 label block beside a cell
+    block on one non-first column (p4016r0 N.14 "Determinism"), and the
+    trailing-continuation tolerance for a wrapped cell whose tail starts
+    slightly above the row bottom ("Practicality")."""
+
+    _COLS = [60.7, 288.4]
+
+    def test_block_on_one_column(self):
+        blocks = _p4016_page54_blocks()
+        assert _block_on_one_column(blocks[3], self._COLS) == 1  # cell block
+        assert _block_on_one_column(blocks[2], self._COLS) == 0  # label
+        assert _block_on_one_column(blocks[4], self._COLS) is None  # 2-col row
+        off = _geo_block(54, ("x", 150.0, 356.1, 200.0, 363.5))
+        assert _block_on_one_column(off, self._COLS) is None
+
+    def test_split_row_label_first(self):
+        blocks = _p4016_page54_blocks()
+        got = _try_split_row(blocks, 2, self._COLS, [blocks[1]])
+        assert got is not None
+        assert got.advance_to == 4
+        assert got.absorbed_ids == frozenset({id(blocks[3])})
+
+    def test_split_row_cell_first(self):
+        blocks = _p4016_page54_blocks()
+        blocks[2], blocks[3] = blocks[3], blocks[2]
+        got = _try_split_row(blocks, 2, self._COLS, [blocks[1]])
+        assert got is not None
+        assert got.advance_to == 4
+        assert got.absorbed_ids == frozenset({id(blocks[2])})
+
+    def test_split_row_rejects_disjoint_y_bands(self):
+        blocks = _p4016_page54_blocks()
+        # Label moved below the cell block: two different rows, not one.
+        blocks[2] = _geo_block(54, ("Determinism", 60.7, 385.0, 106.9, 392.5))
+        assert _try_split_row(blocks, 2, self._COLS, [blocks[1]]) is None
+
+    def test_split_row_rejects_col0_cell(self):
+        blocks = _p4016_page54_blocks()
+        # A multi-line block on column 0 beside a label is prose, not a cell.
+        blocks[3] = _geo_block(54, ("a", 60.7, 356.1, 200.0, 363.5),
+                               ("b", 60.7, 365.3, 200.0, 372.7))
+        assert _try_split_row(blocks, 2, self._COLS, [blocks[1]]) is None
+
+    def test_split_row_rejects_single_line_cell(self):
+        # p4007r0 §7: "set_error on" beside "Partial results destroyed",
+        # both single-line. A fragment; claiming it hides the
+        # find_tables() grid from Pass 5.
+        blocks = _p4016_page54_blocks()
+        blocks[3] = _geo_block(54, ("Partial results destroyed",
+                                    288.4, 365.2, 420.0, 372.7))
+        assert _try_split_row(blocks, 2, self._COLS, [blocks[1]]) is None
+
+    def test_split_row_rejects_wider_table(self):
+        # p4098r1 §2.6: four columns; a label plus one cell block is not
+        # a row.
+        blocks = _p4016_page54_blocks()
+        cols = [60.7, 200.0, 288.4, 400.0]
+        assert _try_split_row(blocks, 2, cols, [blocks[1]]) is None
+
+    def test_split_row_rejects_label_below_cell_band(self):
+        # Label overlaps the cell's last line only: two rows, not one
+        # centred label.
+        blocks = _p4016_page54_blocks()
+        blocks[2] = _geo_block(54, ("Determinism", 60.7, 378.0, 106.9, 385.5))
+        assert _try_split_row(blocks, 2, self._COLS, [blocks[1]]) is None
+
+    def test_split_row_rejects_other_page(self):
+        blocks = _p4016_page54_blocks()
+        blocks[3].page_num = 55
+        assert _try_split_row(blocks, 2, self._COLS, [blocks[1]]) is None
+
+    def test_trailing_continuation_tolerates_small_negative_gap(self):
+        blocks = _p4016_page54_blocks()
+        tail, row = blocks[7], blocks[6]
+        assert tail.bbox[1] - row.bbox[3] == pytest.approx(-2.8)
+        assert _is_trailing_continuation(tail, self._COLS, row.bbox[3], True)
+
+    def test_trailing_continuation_rejects_large_overlap(self):
+        blocks = _p4016_page54_blocks()
+        tail, row = blocks[7], blocks[6]
+        assert not _is_trailing_continuation(
+            tail, self._COLS, row.bbox[3] + 10.0, True)
+
+    def test_n14_summary_is_one_table(self):
+        blocks = _p4016_page54_blocks()
+        sections, remaining = detect_tables(blocks)
+        assert len(sections) == 1
+        sec = sections[0]
+        assert sec.table_source == "horizontal_rows"
+        assert len(sec.columns) == 5  # rows
+        assert all(len(r) == 2 for r in sec.columns)
+        assert [_cell_text(r[0]) for r in sec.columns] == [
+            "Property", "Determinism", "Correctness", "Efficiency",
+            "Practicality"]
+        assert _cell_text(sec.columns[1][1]).startswith(
+            "Expression-identical to the single-threaded")
+        assert _cell_text(sec.columns[1][1]).endswith(
+            "evaluation model (§6)")
+        assert _cell_text(sec.columns[4][1]) == (
+            "Demonstrated competitive with, and in some configurations "
+            "faster than, std::reduce with SIMD on the tested "
+            "platforms/harness")
+        assert [b.lines[0].text for b in remaining] == [
+            "The multi-threaded stack ordered state merge algorithm achieves:",
+            "The key insights enabling this approach are:"]
+
+    def test_n14_summary_cell_block_first(self):
+        # MuPDF may deliver the cell block before its label; the label
+        # must still own the row (otherwise the partial-marked cell
+        # merges backward into the header row).
+        blocks = _p4016_page54_blocks()
+        blocks[2], blocks[3] = blocks[3], blocks[2]
+        sections, _ = detect_tables(blocks)
+        assert len(sections) == 1
+        sec = sections[0]
+        assert [_cell_text(r[0]) for r in sec.columns] == [
+            "Property", "Determinism", "Correctness", "Efficiency",
+            "Practicality"]
+        assert _cell_text(sec.columns[0][1]) == "Guarantee"
+        assert _cell_text(sec.columns[1][1]).startswith(
+            "Expression-identical to the single-threaded")
+
+    def test_split_row_stands_down_on_two_column_pages(self):
+        # A left-column heading beside a right-column paragraph has the
+        # same geometry; Pass 1 must not build a row out of it there.
+        blocks = _p4016_page54_blocks()
+        sections, _ = detect_tables(blocks, two_column_pages=frozenset({54}))
+        assert not any(
+            _cell_text(r[0]) == "Determinism"
+            for s in sections for r in s.columns)

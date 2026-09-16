@@ -276,10 +276,22 @@ Tightening similarity without prompts; loosening TOC detection; aggressive parag
 **Orphans**
 
 - Single-line blocks aligned to known columns can merge into the **next** row when lookahead confirms a table row; **same-page only** ([`table.py`](lib/pdf/table.py) module docstring).
+- A non-monospace orphan at **column 1 or later** directly under a row is the wrapped tail of that row's cell and merges **backward** (any column count; top-aligned cells put a row's first line on its col-0 line, so the tail cannot open the next row). A col-0 orphan still merges forward (Pass B).
+- An orphan with **no confirming full row** behind it (the next row is partial, or the table ends) is a **trailing continuation** absorbed inside the scan loop (Branch 4c), so a following partial row can still join. Fragment absorption (Branches 3, 4) only reaches across the same y-gap as Branch 5 (`_PARTIAL_ROW_MAX_Y_GAP`), so two stacked tables never chain through the heading between them.
+
+**Side-by-side pre-scanner (atomized tables)**
+
+- Before Pass 1, [`_detect_side_by_side_tables(atomized_only=True)`](lib/pdf/table.py) claims tables whose cells arrive **one block per wrapped line** (Google Docs exports). Two entry shapes: an **atomized header** (the header itself is line blocks over more x-positions than the seed has columns) or a **regular header row block over a shattered body** (`_body_is_atomized`: most grouped rows are assembled from 2+ blocks and most body blocks are single-line). Gates: `_ATOMIZED_PREPASS_MIN_ROWS` rows, or `_ATOMIZED_PREPASS_MIN_ROWS_DENSE` when every row spans `_ATOMIZED_PREPASS_DENSE_MIN_COLS`+ columns; a seed whose row above is within `_ATOMIZED_SEED_ABOVE_GAP` is mid-table and rejected. Sections carry `table_source="side_by_side_prepass"`.
+- Row grouping walks each col-0 block back over every preceding non-col-0 block within `_SBS_COL0_SWAP_BAND` (including exact y ties kept in extraction order), so a row always starts at column 0.
 
 **Side-by-side tables (Pass 2)**
 
 - After standard columnar detection, scan remaining blocks for **side-by-side tables** where each cell is a separate MuPDF block (e.g. "Tony Tables" with multi-line code cells). Cluster body block x-positions into columns, group by y-overlap into rows, require **at least two** valid data rows ([`_detect_side_by_side_tables`](lib/pdf/table.py)).
+
+**Post-passes (pass-agnostic)**
+
+- **Header cluster absorption:** free blocks directly above a table whose lines each sit on a table column become the header row; stacked short lines in one column join with a space (`_collect_header_cluster`). Prose above the table (a line not on any column, or two lines on one baseline) ends the cluster.
+- **Separator rows:** a body row whose every cell is a run of dashes is a rendered markdown `|---|` separator and is dropped (`_drop_separator_rows`).
 
 **Spatial path**
 
