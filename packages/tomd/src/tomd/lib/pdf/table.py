@@ -730,6 +730,12 @@ def _detect_side_by_side_tables(
     overlap a MuPDF ``find_tables()`` bbox with >= ``_SBS_MUPDF_DEFER_MIN_ROWS``
     rows are skipped so MuPDF Native (Pass 5) can handle them intact.
 
+    The row grouping walks the body candidates top-down and relies on
+    y order, which the pipeline's reading-order sort delivers on every
+    page it did not split into two text columns; on a split page the
+    same sort also puts the page into detect_tables' two_column_pages
+    (one decision, `_column_aware_sort`), so no re-sort happens here.
+
     Returns (table_sections, used_block_indices).
     """
     table_sections: list[Section] = []
@@ -777,6 +783,31 @@ def _detect_side_by_side_tables(
                         i, page, len(col_xs))
             i += 1
             continue
+
+        # Header grid: a regular header row block whose lines sit on more
+        # columns than the body's block x0s cluster into. A narrow column
+        # (p4098r1 "Year", 39pt before "Evidence") is never a block x0
+        # when the exporter fuses it into its left neighbour's block, and
+        # two columns closer than _COLUMN_GAP_THRESHOLD fall into one
+        # cluster. _block_column_positions clusters the header's lines
+        # at _COLUMN_X_TOLERANCE, so the header knows the grid. Adopt it
+        # when the body agrees: every body cluster is a header column and
+        # every header column has at least one body line on it. Mirror of
+        # the atomized-header recovery below, which repairs the opposite
+        # imbalance (body wider than the header block).
+        if len(cols) > len(col_xs):
+            body_line_xs = [ln.bbox[0] for _, b in body_candidates for ln in b.lines]
+            clusters_on_header = all(
+                any(abs(cx - hx) <= _COLUMN_X_TOLERANCE for hx in cols)
+                for cx in col_xs)
+            header_cols_populated = all(
+                any(abs(lx - hx) <= _COLUMN_X_TOLERANCE for lx in body_line_xs)
+                for hx in cols)
+            if clusters_on_header and header_cols_populated:
+                _log.debug("SBS header grid: seed %d on page %d, %d header "
+                           "cols over %d body cluster(s)",
+                           i, page, len(cols), len(col_xs))
+                col_xs = list(cols)
 
         # Cross-page extension: when the table reaches very close to
         # the page bottom, extend body_candidates to include column-

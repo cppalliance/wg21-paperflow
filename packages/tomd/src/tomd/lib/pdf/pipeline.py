@@ -440,6 +440,14 @@ def _merge_collinear_rules(
     return merged
 
 
+def _first_line_bottom(block) -> float:
+    """Bottom edge of a block's topmost line (the block bbox for a block
+    without lines). Superscripts raise a line's top, not its bottom. The
+    minimum over the lines, not ``lines[0]``: MuPDF's line order is the
+    content stream's, usually top-down but not a contract."""
+    return min(ln.bbox[3] for ln in block.lines) if block.lines else block.bbox[3]
+
+
 def _detect_column_split(blocks: list, page_width: float) -> float | None:
     """Find the x-coordinate that separates two text columns on a page.
 
@@ -510,14 +518,23 @@ def _detect_column_split(blocks: list, page_width: float) -> float | None:
     # --- Guard G2: row-alignment fraction ---
     # When most right-side blocks have a left-side block starting at the
     # same y0 (within tolerance), the page is a row-aligned table, not
-    # two independent text columns.
+    # two independent text columns. The bottom edge of the first line is
+    # checked as well: a superscript (p4098r1 "P1256R0 [16]") lifts a
+    # block's y0 by a few points above its row neighbours while the
+    # baseline, and with it the bottom edge, stays on the row. On the
+    # p4098r1 p.4 PDF, y0 alone counted 4/10 right blocks aligned; with
+    # the bottom edge 9/10 (the unit-test fixture is a subset: 8/10).
     if right_blocks and left_blocks:
         left_y0s = [b.bbox[1] for b in left_blocks]
+        left_bottoms = [_first_line_bottom(b) for b in left_blocks]
         aligned = 0
         for rb in right_blocks:
             ry0 = rb.bbox[1]
-            if any(abs(ry0 - ly0) <= _COLUMN_ROW_ALIGN_TOL
-                   for ly0 in left_y0s):
+            r_bottom = _first_line_bottom(rb)
+            if (any(abs(ry0 - ly0) <= _COLUMN_ROW_ALIGN_TOL
+                    for ly0 in left_y0s)
+                    or any(abs(r_bottom - lb) <= _COLUMN_ROW_ALIGN_TOL
+                           for lb in left_bottoms)):
                 aligned += 1
         frac = aligned / len(right_blocks)
         if frac >= _COLUMN_ROW_ALIGN_MAX_FRAC:
@@ -530,7 +547,7 @@ def _column_aware_sort(
     blocks: list,
     page_widths: dict[int, float],
     page_rotations: dict[int, tuple] | None = None,
-) -> None:
+) -> frozenset[int]:
     """Sort blocks by reading order: page, then column (if two-column), then y.
 
     For two-column pages the left column is emitted entirely before the
@@ -540,6 +557,13 @@ def _column_aware_sort(
     Rotated pages (page_rotations maps page -> rotation matrix) sort by
     the reading-space y-midpoint: block bboxes stay in unrotated page
     space, where the raw y-order does not match visual reading order.
+
+    Returns the pages that were sorted column-first. This is the one
+    definition of "two-column page" downstream: detect_tables receives
+    exactly the set this sort acted on, so a page can never arrive in
+    column order while being treated as single-column, or the reverse
+    (p4098r1 p.4/5 did, when the set was computed on the raw blocks
+    where the centred page number still filled the gutter).
     """
     page_blocks: dict[int, list] = {}
     for b in blocks:
@@ -571,6 +595,7 @@ def _column_aware_sort(
         return (pg, 0, y_mid)
 
     blocks.sort(key=sort_key)
+    return frozenset(pg for pg, split in splits.items() if split is not None)
 
 
 def _get_page0_text_colors(page) -> dict[float, float]:
@@ -1678,17 +1703,6 @@ def run_pipeline(
                 all_mupdf_blocks.extend(mupdf_blocks)
                 all_spatial_blocks.extend(spatial_blocks)
 
-            # Detect two-column pages from raw (pre-stripping) blocks.
-            two_column_pages: frozenset[int] = frozenset(
-                pg for pg in page_widths
-                if _detect_column_split(
-                    [b for b in all_mupdf_blocks if b.page_num == pg],
-                    page_widths[pg],
-                ) is not None
-            )
-            if two_column_pages:
-                _log.debug("Two-column pages: %s", sorted(two_column_pages))
-
             font_counts: Counter[str] = Counter()
             for b in all_mupdf_blocks:
                 for ln in b.lines:
@@ -1865,9 +1879,16 @@ def run_pipeline(
     # arbitrary extraction order (e.g. code blocks extracted after body
     # text despite higher y-positions) the merge target is wrong and
     # continuation text lands on the wrong block.  Sorting first ensures
-    # "last block on the page" means visually bottom-most.
-    _column_aware_sort(all_mupdf_blocks, page_widths, page_rotations)
+    # "last block on the page" means visually bottom-most. The sort also
+    # decides which pages are two-column; detect_tables gets that set, so
+    # block order and page classification come from the same blocks
+    # (the stripped ones: a centred page number in the raw blocks used to
+    # hide the gutter on p4098r1 p.4/5 and split the two decisions).
+    two_column_pages = _column_aware_sort(
+        all_mupdf_blocks, page_widths, page_rotations)
     _column_aware_sort(all_spatial_blocks, page_widths, page_rotations)
+    if two_column_pages:
+        _log.debug("Two-column pages: %s", sorted(two_column_pages))
 
     all_mupdf_blocks = cleanup_text(all_mupdf_blocks)
     all_spatial_blocks = cleanup_text(all_spatial_blocks)

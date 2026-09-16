@@ -2037,6 +2037,196 @@ class TestAtomizedBodyPrepass:
         assert sections[0].table_source == "horizontal_rows"
 
 
+def _p4098_page4_blocks(*, column_first: bool = False,
+                        year_column: bool = True) -> list[Block]:
+    """p4098r1 page_num 4 (section 2.3, Claim / Source / Year / Evidence)
+    as MuPDF delivers it: a regular four-line header block, then per row
+    one fused Source + Year + first-Evidence-line block, every wrapped
+    Claim line and Evidence continuation its own single-line block.
+
+    The Year column (x 330.3) is 39.4pt before Evidence (x 369.7), closer
+    than _COLUMN_GAP_THRESHOLD, and never a block x0. *column_first*
+    returns the order _column_aware_sort produces when it takes the page
+    for two text columns: heading, header and every Claim block first,
+    the right-hand blocks after them. *year_column=False* drops the Year
+    line from the fused blocks (no body line on the header's third
+    column), the negative case for the header-grid adoption.
+    """
+    P = 4
+    H = 13.6
+    c0, c1, c2, c3 = 66.7, 261.0, 330.3, 369.7
+
+    def fused(y, source, year, evidence, ev_x1):
+        # The bracketed reference is a superscript: the Source line's box
+        # starts 2.8pt above the row (PDF: 118.5 vs 121.3) and ends on the
+        # row's bottom edge like every other line (134.9).
+        lines = [(source, c1, y - 2.8, 309.3, y + H)]
+        if year_column:
+            lines.append((year, c2, y, 349.2, y + H))
+        lines.append((evidence, c3, y, ev_x1, y + H))
+        return _geo_block(P, *lines)
+
+    def single(text, x0, y, x1):
+        return _geo_block(P, (text, x0, y, x1, y + H))
+
+    heading = _geo_block(P, ("2.3 Networking Dependency (2018-2021)",
+                             56.7, 55.9, 244.2, 71.6))
+    header = _geo_block(P, ("Claim", c0, 92.8, 89.2, 106.4),
+                        ("Source", c1, 92.8, 288.2, 106.4),
+                        ("Year", c2, 92.8, 348.2, 106.4),
+                        ("Evidence", c3, 92.8, 405.1, 106.4))
+    claims = [
+        single('"SG1 has decided that the Networking TS', c0, 121.3, 224.6),
+        single("should not be merged into the C++ working", c0, 139.8, 234.1),
+        single('paper before executors go in."', c0, 158.3, 184.1),
+        single('"How blocked is networking on the executors', c0, 186.8, 240.9),
+        single('wording process?"', c0, 205.3, 138.0),
+        single('"we should not standardize the Networking', c0, 252.3, 234.1),
+        single("TS as it's currently designed. The problem is", c0, 270.8, 235.1),
+        single('the use of a P0443 executor."', c0, 289.3, 179.0),
+        single('"Stop spending energy on standardizing the', c0, 317.8, 236.4),
+        single('Networking TS for C++23."', c0, 336.3, 168.5),
+    ]
+    right = [
+        fused(121.3, "P1256R0 [16]", "2018",
+              "Published decision. The coupling is a", 510.6),
+        single("fact.", c3, 139.8, 386.2),
+        fused(186.8, "P2130R0 [17]", "2020",
+              "Pablo Halpern's question in the Prague", 519.8),
+        single("minutes. No published answer", c3, 205.3, 487.0),
+        single("quantifying the degree of blockage.", c3, 223.8, 507.1),
+        fused(252.3, "P2464R0 [18]", "2021",
+              "The analysis is under the work framing.", 520.8),
+        single("No analysis under the continuation", c3, 270.8, 504.2),
+        single("framing (P4096R0 [5] Section 2).", c3, 286.5, 492.3),
+        fused(317.8, "P2464R0 [18]", "2021",
+              "Published recommendation. The", 494.7),
+        single("committee acted on it.", c3, 336.3, 455.7),
+    ]
+    if column_first:
+        return [heading, header, *claims, *right]
+    body = sorted(claims + right,
+                  key=lambda b: (b.bbox[1] + b.bbox[3]) / 2)
+    return [heading, header, *body]
+
+
+class TestHeaderGridPrepass:
+    """A regular header row block knows more columns than the body's block
+    x0s cluster into (a narrow column fused into its neighbour's block);
+    the pre-scanner adopts the header's grid when the body sits on it.
+    Body order is the pipeline's business (TestColumnSplitOnTablePage)."""
+
+    _HEADER = ["Claim", "Source", "Year", "Evidence"]
+
+    def test_p4098_page4_header_grid_gives_four_columns(self):
+        sections, used = _detect_side_by_side_tables(
+            _p4098_page4_blocks(), atomized_only=True)
+        assert len(sections) == 1
+        sec = sections[0]
+        assert sec.table_source == "side_by_side_prepass"
+        assert len(sec.columns) == 5
+        assert [_cell_text(c) for c in sec.columns[0]] == self._HEADER
+        assert [_cell_text(r[2]) for r in sec.columns[1:]] == [
+            "2018", "2020", "2021", "2021"]
+        assert _cell_text(sec.columns[1][0]) == (
+            '"SG1 has decided that the Networking TS should not be merged '
+            'into the C++ working paper before executors go in."')
+        assert _cell_text(sec.columns[1][3]) == (
+            "Published decision. The coupling is a fact.")
+        assert _cell_text(sec.columns[2][3]) == (
+            "Pablo Halpern's question in the Prague minutes. No published "
+            "answer quantifying the degree of blockage.")
+        assert _cell_text(sec.columns[4][3]) == (
+            "Published recommendation. The committee acted on it.")
+        assert len(used) == 21  # header + 20 body blocks
+
+    def test_header_grid_needs_a_body_line_on_every_header_column(self):
+        """Without any body line on the header's Year column the header
+        grid is not adopted: the body's three clusters stand (the shape
+        before this fix, header cells cut to the cluster count)."""
+        sections, _ = _detect_side_by_side_tables(
+            _p4098_page4_blocks(year_column=False), atomized_only=True)
+        assert len(sections) == 1
+        assert [_cell_text(c) for c in sections[0].columns[0]] == [
+            "Claim", "Source", "Year"]
+
+    def test_end_to_end_page4_is_one_table(self):
+        sections, remaining = detect_tables(_p4098_page4_blocks())
+        assert [len(s.columns) for s in sections] == [5]
+        assert len(sections[0].columns[0]) == 4
+        assert sections[0].table_source == "side_by_side_prepass"
+        assert [b.lines[0].spans[0].text for b in remaining] == [
+            "2.3 Networking Dependency (2018-2021)"]
+
+
+class TestColumnSplitOnTablePage:
+    """p4098r1 p.4: a table page with one wide Claim column beside three
+    narrow ones must not pass for two text columns. Two things went wrong
+    in the pipeline: G2 compared block y0s, and the fused Source blocks
+    carry a superscript that lifts their y0 2.8pt above the Claim line
+    (4/10 aligned, below the 0.5 reject); and two_column_pages was computed
+    on the raw blocks, where the centred page number fills the gutter, so
+    the classification and the sort disagreed. Real geometry from the PDF
+    (page 4, 0-based), footer as MuPDF delivers it."""
+
+    _WIDTH = 612.0
+
+    @staticmethod
+    def _footer() -> Block:
+        return _geo_block(4, ("5", 295.7, 794.8, 299.5, 804.7))
+
+    def test_stripped_page_is_not_two_column(self):
+        blocks = _p4098_page4_blocks()
+        assert _detect_column_split(blocks, self._WIDTH) is None
+
+    def test_raw_page_with_footer_is_not_two_column(self):
+        """Regression pin for the raw-block state, not for this fix: with
+        the centred footer the largest x-mid gap moves left of the Claim
+        column and the x0 check already returns None. It documents why the
+        old raw-block classification and the sort disagreed."""
+        blocks = [*_p4098_page4_blocks(), self._footer()]
+        assert _detect_column_split(blocks, self._WIDTH) is None
+
+    def test_bottom_edge_is_what_rejects_the_split(self):
+        """The fixture models the superscript as a taller first line (top
+        lifted, bottom on the row). Lowering those four bottoms by the same
+        2.8pt, so that neither y0 nor bottom edge lines up, brings the
+        pre-fix state back: G2 counts 4/10 and the page splits."""
+        blocks = _p4098_page4_blocks()
+        fused = [b for b in blocks if b.bbox[0] > 200 and len(b.lines) == 3]
+        assert len(fused) == 4
+        for b in fused:
+            ln = b.lines[0]
+            assert ln.bbox[1] < b.lines[1].bbox[1]  # superscript lifts y0
+            assert abs(ln.bbox[3] - b.lines[1].bbox[3]) < 1e-6  # same bottom
+            x0, y0, x1, y1 = ln.bbox
+            ln.bbox = (x0, y0, x1, y1 - 2.8)
+        assert _detect_column_split(blocks, self._WIDTH) is not None
+
+    def test_sort_returns_split_pages_and_keeps_y_order_here(self):
+        blocks = _p4098_page4_blocks(column_first=True)
+        split_pages = _column_aware_sort(blocks, {4: self._WIDTH})
+        assert split_pages == frozenset()
+        ys = [(b.bbox[1] + b.bbox[3]) / 2 for b in blocks]
+        assert ys == sorted(ys)
+
+    def test_sort_returns_genuine_two_column_page(self):
+        left = [_split_block(72, y, 280, y + 12) for y in (100, 120, 140, 160, 180)]
+        right = [_split_block(310, y, 540, y + 12) for y in (105, 125, 145, 165, 185)]
+        blocks = [*right, *left]
+        assert _column_aware_sort(blocks, {0: self._WIDTH}) == frozenset({0})
+        assert [b.bbox[0] for b in blocks] == [72] * 5 + [310] * 5
+
+    def test_end_to_end_column_first_input_is_not_repaired(self):
+        """detect_tables no longer re-sorts: a column-first page reaching
+        it means the pipeline classified the page as two-column, and the
+        pre-pass must stand down there (a left heading beside a right
+        paragraph has exactly this geometry)."""
+        sections, _ = _detect_side_by_side_tables(
+            _p4098_page4_blocks(column_first=True), atomized_only=True)
+        assert sections == []
+
+
 class TestPass1FragmentAbsorptionGap:
     """Branch 3 and 4 absorb table fragments only within the same y-gap
     that Branch 3b and 5 already require. Beyond it the table ends, so
