@@ -719,6 +719,7 @@ def _detect_side_by_side_tables(
     *,
     atomized_only: bool = False,
     page_mupdf_tables: dict[int, list[dict]] | None = None,
+    two_column_pages: frozenset[int] = frozenset(),
 ) -> tuple[list[Section], set[int]]:
     """Detect tables where each cell is a separate side-by-side block.
 
@@ -729,6 +730,13 @@ def _detect_side_by_side_tables(
     When *page_mupdf_tables* is provided, candidate table regions that
     overlap a MuPDF ``find_tables()`` bbox with >= ``_SBS_MUPDF_DEFER_MIN_ROWS``
     rows are skipped so MuPDF Native (Pass 5) can handle them intact.
+
+    *two_column_pages* names the pages the pipeline classified as two
+    text columns. On every other upright page the body candidates are
+    put back into y order before row grouping, because the reading-order
+    sort may have split a wide-first-column table page into "columns"
+    (p4098r1 pages 4 and 5); on genuine two-column pages the incoming
+    order is kept.
 
     Returns (table_sections, used_block_indices).
     """
@@ -768,6 +776,24 @@ def _detect_side_by_side_tables(
             i += 1
             continue
 
+        # Geometric order. The row grouping below walks the candidates
+        # top-down and starts a new row at each col-0 block; it relies on
+        # y order. _column_aware_sort emits a page it took for two text
+        # columns left column first, which puts every col-0 cell before
+        # the rest of the table (p4098r1 pages 4 and 5: a wide Claim
+        # column beside three narrow ones). Restore y order on upright
+        # pages the pipeline did not classify as two-column; pages with
+        # a rotation entry (same definition as detect_tables' rotated_pages)
+        # sort by reading-space y and are left alone. On a page sorted by
+        # y-mid already this is the identity.
+        page_rotated = any(
+            t.get("rot") is not None
+            for t in (page_mupdf_tables or {}).get(page, []))
+        if page not in two_column_pages and not page_rotated:
+            body_candidates.sort(
+                key=lambda ib: (ib[1].page_num,
+                                (ib[1].bbox[1] + ib[1].bbox[3]) / 2))
+
         # Determine column structure from body block x-positions
         body_xs = [b.bbox[0] for _, b in body_candidates]
         col_xs = _cluster_x_positions(body_xs)
@@ -777,6 +803,31 @@ def _detect_side_by_side_tables(
                         i, page, len(col_xs))
             i += 1
             continue
+
+        # Header grid: a regular header row block whose lines sit on more
+        # columns than the body's block x0s cluster into. A narrow column
+        # (p4098r1 "Year", 39pt before "Evidence") is never a block x0
+        # when the exporter fuses it into its left neighbour's block, and
+        # two columns closer than _COLUMN_GAP_THRESHOLD fall into one
+        # cluster. _block_column_positions clusters the header's lines
+        # at _COLUMN_X_TOLERANCE, so the header knows the grid. Adopt it
+        # when the body agrees: every body cluster is a header column and
+        # every header column has at least one body line on it. Mirror of
+        # the atomized-header recovery below, which repairs the opposite
+        # imbalance (body wider than the header block).
+        if len(cols) > len(col_xs):
+            body_line_xs = [ln.bbox[0] for _, b in body_candidates for ln in b.lines]
+            clusters_on_header = all(
+                any(abs(cx - hx) <= _COLUMN_X_TOLERANCE for hx in cols)
+                for cx in col_xs)
+            header_cols_populated = all(
+                any(abs(lx - hx) <= _COLUMN_X_TOLERANCE for lx in body_line_xs)
+                for hx in cols)
+            if clusters_on_header and header_cols_populated:
+                _log.debug("SBS header grid: seed %d on page %d, %d header "
+                           "cols over %d body cluster(s)",
+                           i, page, len(cols), len(col_xs))
+                col_xs = list(cols)
 
         # Cross-page extension: when the table reaches very close to
         # the page bottom, extend body_candidates to include column-
@@ -5135,7 +5186,8 @@ def detect_tables(
     # blocks that belong to the larger atomized-header table.
     sbs_pre_tables, sbs_pre_used = _detect_side_by_side_tables(
         blocks, atomized_only=True,
-        page_mupdf_tables=filtered_mupdf_tables)
+        page_mupdf_tables=filtered_mupdf_tables,
+        two_column_pages=two_column_pages)
     if sbs_pre_tables:
         table_sections.extend(sbs_pre_tables)
         blocks = [b for idx, b in enumerate(blocks)
@@ -5499,7 +5551,8 @@ def detect_tables(
 
     # Pass 2: side-by-side block tables (non-atomized) on remaining blocks
     sbs_tables, sbs_used = _detect_side_by_side_tables(
-        remaining, page_mupdf_tables=filtered_mupdf_tables)
+        remaining, page_mupdf_tables=filtered_mupdf_tables,
+        two_column_pages=two_column_pages)
     if sbs_tables:
         table_sections.extend(sbs_tables)
         remaining = [b for idx, b in enumerate(remaining)

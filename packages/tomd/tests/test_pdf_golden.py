@@ -111,6 +111,17 @@ _GOLDEN_STEMS = (
     # four tables plus the prose and headings around them; the family pins
     # below guard the routing itself.
     "p4096r0",
+    # Header-grid guard (#414): P4098R1's six Claim | Source | Year |
+    # Evidence tables (§2.1 to §2.6, tomd pages 2 to 7) are Google-Docs
+    # exports whose Year column is never a block x0 (fused into the Source
+    # block) and sits 39pt before Evidence, so the body's block x0s cluster
+    # into three columns. The header row block knows four; the side-by-side
+    # detector adopts the header's grid when every body line sits on it.
+    # Pages 4 and 5 additionally arrive in two-column reading order (every
+    # Claim block before the right-hand blocks); the detector regroups the
+    # body by y on pages the pipeline did not classify as two-column. The
+    # golden pins the four-column cells; the family pins below the routing.
+    "p4098r1",
 )
 
 # Issue-180 reported symptom: this sentence is P4024R0's final paragraph.
@@ -156,6 +167,22 @@ _P4016R0_TABLE_PINS = {
     (44, 9, 5, "prose_table", None),
     (51, 5, 4, "clean_matrix", None),
     (54, 5, 2, "key_value", "horizontal_rows"),
+}
+
+# Family pins for P4098R1 (#414): one Claim | Source | Year | Evidence
+# table per page, rows incl. header. §2.1 to §2.5 (pages 2 to 6) have 4+
+# data rows and go to the side-by-side pre-scanner; §2.6 (page 7) has 3
+# data rows, below _ATOMIZED_PREPASS_MIN_ROWS_DENSE, and is claimed by
+# Pass 2 (same detector, regular side-by-side) after Pass 1 rejects the
+# page. Pinned so a re-bless can never hand pages 4 and 5 back to Pass 1
+# (one row per wrapped line) or cut the tables to three columns again.
+_P4098R1_TABLE_PINS = {
+    (2, 7, 4, "prose_table", "side_by_side_prepass"),
+    (3, 5, 4, "prose_table", "side_by_side_prepass"),
+    (4, 5, 4, "prose_table", "side_by_side_prepass"),
+    (5, 5, 4, "prose_table", "side_by_side_prepass"),
+    (6, 6, 4, "prose_table", "side_by_side_prepass"),
+    (7, 4, 4, "prose_table", "side_by_side"),
 }
 
 
@@ -291,3 +318,30 @@ def test_p4016r0_table_family_pins():
         and s.page_num in (27, 30, 34, 38, 44, 51, 54)
     }
     assert got == _P4016R0_TABLE_PINS
+
+
+def test_p4098r1_table_family_pins():
+    """#414 focused guard: the six Claim | Source | Year | Evidence tables
+    keep four columns and one row per claim, and stay with the side-by-side
+    detector (pre-scanner on pages 2 to 6, Pass 2 on page 7). The Year
+    cell of every data row is a bare year, which is what the header-grid
+    adoption buys: without it Year and Evidence share one cell.
+    """
+    pdf_path = _GOLDEN / "p4098r1.pdf"
+    if not pdf_path.is_file():
+        pytest.skip(f"missing PDF fixture: {pdf_path}")
+    sections = run_pipeline(pdf_path).sections
+    tables = [s for s in sections
+              if s.kind == SectionKind.TABLE and s.page_num in range(2, 8)]
+    got = {
+        (s.page_num, len(s.columns), len(s.columns[0]),
+         s.table_kind, s.table_source)
+        for s in tables
+    }
+    assert got == _P4098R1_TABLE_PINS
+    for s in tables:
+        assert ["".join(sp.text for sp in c).strip() for c in s.columns[0]] == [
+            "Claim", "Source", "Year", "Evidence"]
+        for row in s.columns[1:]:
+            year = "".join(sp.text for sp in row[2]).strip()
+            assert year.isdigit() and len(year) == 4, (s.page_num, year)
