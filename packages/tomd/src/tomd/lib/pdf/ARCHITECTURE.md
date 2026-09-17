@@ -145,9 +145,11 @@ Enums:
 - Collapses multi-space (except in monospace spans)
 
 **T9. Dehyphenation**
-- `cleanup.py:cleanup_text` (span-level, active in pipeline)
-- Line ends with `-`, next line starts lowercase, prefix not in compound set (self, non, well, cross, etc.)
-- Modifies spans: removes hyphen from current line's last span, moves first word from next line
+- `cleanup.py:cleanup_text` (span-level, active in pipeline) via `collect_hyphen_evidence` + `dehyphenate_pair`
+- Line ends with `-` (no space before it), next line starts lowercase, same monospace-ness on both sides
+- Keep-or-glue decided per pair, document evidence first: compound seen hyphenated mid-line -> keep; glued word seen whole -> glue; prefix in `COMPOUND_PREFIXES` -> keep; acronym / digit-led prefix -> keep; both halves standalone words -> keep; tail ends another compound -> keep; else glue. Wrap fragments never count as evidence. Monospace pairs and hyphens after a non-alphanumeric (`convertible_-`) use the compound-seen rule only.
+- Both outcomes pull the next line's first word up onto the hyphen line, so a flattened paragraph never reads `non- associative`
+- `structure.py:_merge_paragraphs` runs `dehyphenate_pair` on a text-merge boundary (MuPDF opens a new block after a hyphen at normal line spacing), same evidence built from all section lines
 
 **T10. Cross-page paragraph joining**
 - `cleanup.py:_join_cross_page`
@@ -201,6 +203,7 @@ Enums:
 - Saturation gate: S < 0.15 -> achromatic (not a chromatic signal). Non-black achromatic text with lightness 0.25-0.65 classified as "context" (existing spec text).
 - Hue neighborhoods: green [90-180] = ins candidate, red [0-30 or 330-360] = del candidate, blue [210-270] = link (skipped)
 - Document-relative: body color identified from character-count histogram, only non-body chromatic text is classified
+- Block skip (`_block_has_foreign_colors`, `_block_has_highlighter_palette`): a block with a foreign chromatic hue (purple/orange/cyan), or with two or more distinct shades inside the green band or inside the red band (Pygments keyword + number green), is syntax-highlighted code and is skipped unless a red span carries a confirmed strikethrough (#413)
 
 **T18. Drawing decoration correlation**
 - `wording.py:_match_underline`, `_match_strikethrough`
@@ -263,6 +266,7 @@ Enums:
 **T25. Paragraph merging**
 - `structure.py:_merge_paragraphs`
 - Prev section (PARAGRAPH or LIST) ends without terminal punctuation, next PARAGRAPH starts lowercase -> merge
+- Inline continuation (`_starts_inline_continuation` + `_is_wrapped_continuation`): next PARAGRAPH opens with `(`, a bracketed reference the sentence runs on from (`[numerics.defns]. ...`, `[4] and ...`: closing bracket followed by punctuation or a lowercase word, `_BRACKET_CONTINUATION_RE`) or an inline code span on a mixed prose line, and the geometry proves a wrap: same page (by line), same font size (0.5pt), first line exactly one wrap pitch below the previous last line (baseline to baseline, `_WRAP_PITCH_TOL` 0.15 font sizes), starting at that line's left edge (a first-line indent to its left is allowed only when that line is the block's single line, nothing to its right), and the next block's first word would have crossed the text margin had it stayed on that line (`_AVG_CHAR_WIDTH` 0.5 em per glyph) -> merge. The wrap pitch (`_wrap_pitch`) is the median baseline distance over the pairs known to be wraps: consecutive prose lines inside one section and the boundaries the lowercase rule merges; it is exact per document (P4016R0 1.500, P0957R8 1.566, P4100R1 1.850) and a paragraph break adds at least 0.5 font sizes (Word 6pt after 12pt text), so the gate needs no tuned window. The margin (`_text_margin`) is the largest line end that at least `_LAYOUT_WITNESS_MIN` (3) paragraph/list lines in the document share within 6pt; fewer witnesses for either measure (a short list alone, a lone long URL, a document of one-line paragraphs ending in periods) means no inline merge; a wide code listing (still a paragraph at this stage) or the right column of a two-column layout inflates the margin and only disables the merge. MuPDF splits the block where the glyph run changes (`... topology coordinate` / `(lane count L), ...`); a short last line (definition entry `V be ...,` / `A be ...:`, bibliography URL then label) is a deliberate break, and `(1)`/`(a)` numbering (`_ENUM_LABEL_RE`), `[GB-SEQ] = ...` labels and `[Note: ...` openers are lexically excluded. The terminal-punctuation gate looks behind closing quotes, emphasis and brackets (`"unified interface."`); a trailing hyphen is left to the lowercase path (T9). All-monospace lines (code), bullets and list numbers never qualify.
 - Copies sections before mutating to prevent caller mutation
 
 **T26. Code block detection**

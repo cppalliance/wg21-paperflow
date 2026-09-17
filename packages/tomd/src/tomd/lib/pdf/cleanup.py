@@ -4,7 +4,7 @@ import fitz
 import logging
 import re
 from collections import defaultdict
-from dataclasses import replace
+from dataclasses import dataclass, replace
 
 from .. import strip_format_chars, DOC_NUM_RE
 from .types import (
@@ -510,6 +510,202 @@ def strip_hidden_blocks(
     return result
 
 
+# Word or hyphenated compound: Unicode alphanumeric runs (no underscore)
+# joined by single hyphens. Pure numbers are dropped by the caller;
+# leading/trailing punctuation is never part of a match, so "point,"
+# yields "point", "(lane-count)" yields "lane-count" and "convertible_"
+# yields "convertible".
+_HYPHEN_TOKEN_RE = re.compile(r"[^\W_]+(?:-[^\W_]+)*")
+
+
+@dataclass(frozen=True)
+class HyphenEvidence:
+    """What a document itself says about its hyphenated words.
+
+    Lowercased. ``words`` are tokens seen standalone (never as a wrap
+    fragment), ``compounds`` are ``a-b`` tokens seen mid-line, ``tails``
+    are the last parts of those compounds. Built once per document by
+    :func:`collect_hyphen_evidence`; consumed by :func:`dehyphenate_pair`.
+    """
+    words: frozenset[str]
+    compounds: frozenset[str]
+    tails: frozenset[str]
+
+
+def collect_hyphen_evidence(lines: list[Line]) -> HyphenEvidence:
+    """Gather word and compound evidence from lines in document order.
+
+    A line-ending hyphen marks a wrap: the fragment before it and the
+    first token of the following line are excluded from the counts, so
+    ``imple-`` / ``mentation`` never registers ``imple`` or ``mentation``
+    as standalone words. Everything else is evidence: ``non-associative``
+    written on one line proves the compound, ``nondeterminism`` written
+    whole proves the glued form.
+
+    Code lines contribute compounds only (an exposition-only identifier
+    such as ``simd-consteval-broadcast-arg`` is attested by its own
+    listing), never words or tails: identifier fragments (``some_time``)
+    and arithmetic (``n-1``) are not prose vocabulary.
+    """
+    words: set[str] = set()
+    compounds: set[str] = set()
+    tails: set[str] = set()
+    prev_wrapped = False
+    for line in lines:
+        text = line.text.strip()
+        if not text:
+            continue
+        tokens = [m.group(0).lower() for m in _HYPHEN_TOKEN_RE.finditer(text)]
+        wrapped = text.endswith("-") and not text[:-1].endswith((" ", "\t"))
+        if wrapped:
+            tokens = tokens[:-1]
+        if prev_wrapped:
+            tokens = tokens[1:]
+        prev_wrapped = wrapped
+        is_code = line.is_monospace
+        for tok in tokens:
+            if not any(ch.isalpha() for ch in tok):
+                continue
+            if "-" in tok:
+                compounds.add(tok)
+                if not is_code:
+                    tails.add(tok.rsplit("-", 1)[1])
+            elif not is_code:
+                words.add(tok)
+    return HyphenEvidence(frozenset(words), frozenset(compounds), frozenset(tails))
+
+
+@dataclass(frozen=True)
+class DehyphenatedPair:
+    """Result of joining a line-ending hyphen with the next line's word.
+
+    ``last_line`` now ends with ``joined``; ``next_line`` has lost
+    ``first_word`` (None when that was its only content). ``prefix_token``
+    is the hyphen-terminated token that ``joined`` replaces, so callers
+    holding a separate text copy can patch it the same way.
+    """
+    last_line: Line
+    next_line: Line | None
+    prefix_token: str
+    first_word: str
+    joined: str
+
+
+def _compound_seen(prefix_full: str, tail_full: str, evidence: HyphenEvidence) -> bool:
+    """True if the wrapped pair is attested hyphenated elsewhere.
+
+    Both the innermost pair (``lane-assignment`` from ``per-lane-`` /
+    ``assignment``) and the whole token (``simd-consteval-broadcast-arg``
+    from ``simd-consteval-`` / ``broadcast-arg``) count.
+    """
+    prefix = prefix_full.lower()
+    tail = tail_full.lower()
+    return (f"{prefix}-{tail}" in evidence.compounds
+            or f"{prefix.rsplit('-', 1)[-1]}-{tail.split('-', 1)[0]}" in evidence.compounds)
+
+
+def _keep_hyphen(prefix_full: str, tail_full: str, evidence: HyphenEvidence) -> bool:
+    """Decide whether a wrapped prose ``prefix-`` / ``tail`` pair is a compound.
+
+    Document evidence first, then form: the compound seen hyphenated
+    mid-line keeps it, the glued word seen whole drops it, a known compound
+    prefix keeps it, an acronym or digit-led prefix (``SIMD-``, ``64-``)
+    keeps it, two halves that both live as standalone words keep it, a
+    tail that ends another compound of the paper keeps it. Otherwise it is
+    a syllable break and the halves glue.
+
+    Model boundary: a TeX syllable break whose halves are both common words
+    (``how-`` / ``ever``) is kept unless the whole word occurs elsewhere in
+    the paper, which for common words it does.
+
+    shortcut: no suffix word list, so ``build-`` / ``proof`` with neither
+    half attested glues to ``buildproof``; the upgrade path is a dictionary
+    or a corpus-derived compound list, not a hand-kept suffix set.
+    """
+    if _compound_seen(prefix_full, tail_full, evidence):
+        return True
+    prefix_key_raw = prefix_full.rsplit("-", 1)[-1]
+    prefix_key = prefix_key_raw.lower()
+    tail = tail_full.lower().split("-", 1)[0]
+    if f"{prefix_key}{tail}" in evidence.words:
+        return False
+    if prefix_key in COMPOUND_PREFIXES:
+        return True
+    if prefix_key_raw.isupper() or prefix_key_raw[0].isdigit():
+        return True
+    if prefix_key in evidence.words and tail in evidence.words:
+        return True
+    return tail in evidence.tails
+
+
+def dehyphenate_pair(last_line: Line, next_line: Line,
+                     evidence: HyphenEvidence) -> DehyphenatedPair | None:
+    """Join a line-ending hyphen with the first word of the next line.
+
+    Returns None when the pair is not a wrap: no trailing hyphen, a bare
+    dash (``foo -``), an uppercase continuation, or a font change (prose
+    ``over-`` followed by a code line ``int ilogb(...)`` is a paragraph
+    running into a listing, not a wrapped word). Otherwise the next line's
+    first word is pulled up onto the last line, glued (``imple-`` +
+    ``mentation`` -> ``implementation``) or kept as a compound (``non-`` +
+    ``associative`` -> ``non-associative``) per :func:`_keep_hyphen`.
+    Pulling the word up on keep is what removes the dangling
+    ``non- associative`` when the lines are later flattened with a space.
+
+    The form rules apply to prose only. Inside monospace text, or when the
+    hyphen follows a non-alphanumeric (``convertible_-`` / ``to``), only a
+    compound attested elsewhere keeps the hyphen; everything else glues,
+    as before. A prefix without any alphanumeric (a glyph placeholder,
+    ``--``) glues too.
+    """
+    if not last_line.spans or not next_line.spans:
+        return None
+    last_span = last_line.spans[-1]
+    next_first = next_line.spans[0]
+    # MuPDF spans may carry a trailing space at line end; it is not content.
+    last_text = last_span.text.rstrip()
+    next_text = next_first.text.lstrip()
+    if not last_text.endswith("-") or len(last_text) < 2 or last_text[-2].isspace():
+        return None
+    if not next_text or not next_text[0].islower():
+        return None
+    first_word = next_text.split()[0]
+    prefix_raw = last_text[:-1].split()[-1]
+    # Evidence keys are bare alphanumerics: "(non" -> "non", "point," -> "point".
+    prefix_runs = _HYPHEN_TOKEN_RE.findall(prefix_raw)
+    tail_match = _HYPHEN_TOKEN_RE.match(first_word)
+    # A word fragment only continues in the same font; a non-word prefix
+    # (glyph placeholder, "--") has no font to match and glues as before.
+    if prefix_runs and last_span.monospace != next_first.monospace:
+        return None
+    keep = False
+    if prefix_runs and tail_match is not None:
+        if last_span.monospace or not last_text[-2].isalnum():
+            keep = _compound_seen(prefix_runs[-1], tail_match.group(0), evidence)
+        else:
+            keep = _keep_hyphen(prefix_runs[-1], tail_match.group(0), evidence)
+
+    if keep:
+        joined = f"{prefix_raw}-{first_word}"
+        new_last_text = last_text + first_word
+    else:
+        joined = f"{prefix_raw}{first_word}"
+        new_last_text = last_text[:-1] + first_word
+    new_last = Line(spans=last_line.spans[:-1] + [replace(last_span, text=new_last_text)],
+                    bbox=last_line.bbox, page_num=last_line.page_num)
+
+    remainder = next_text[len(first_word):].lstrip()
+    if remainder:
+        new_next = Line(spans=[replace(next_first, text=remainder)] + next_line.spans[1:],
+                        bbox=next_line.bbox, page_num=next_line.page_num)
+    elif len(next_line.spans) > 1:
+        new_next = Line(spans=next_line.spans[1:],
+                        bbox=next_line.bbox, page_num=next_line.page_num)
+    else:
+        new_next = None
+    return DehyphenatedPair(new_last, new_next, f"{prefix_raw}-", first_word, joined)
+
+
 def cleanup_text(blocks: list[Block]) -> list[Block]:
     """Apply all text cleanup operations to extracted blocks."""
     result = []
@@ -535,45 +731,26 @@ def cleanup_text(blocks: list[Block]) -> list[Block]:
 
     result = _join_cross_page(result)
 
+    # T9 dehyphenation. Evidence comes from the whole document so a
+    # compound written on one line elsewhere decides its wrapped twin.
+    evidence = collect_hyphen_evidence([ln for blk in result for ln in blk.lines])
     dehyphenated = []
     for block in result:
+        lines = list(block.lines)
         new_lines = []
-        pending_trim = None
-        for i, line in enumerate(block.lines):
-            if pending_trim is not None:
-                if line.spans:
-                    if pending_trim:
-                        new_first = replace(line.spans[0], text=pending_trim)
-                        line = Line(spans=[new_first] + line.spans[1:],
-                                    bbox=line.bbox, page_num=line.page_num)
-                    elif len(line.spans) > 1:
-                        line = Line(spans=line.spans[1:],
-                                    bbox=line.bbox, page_num=line.page_num)
+        i = 0
+        while i < len(lines):
+            line = lines[i]
+            if i + 1 < len(lines):
+                pair = dehyphenate_pair(line, lines[i + 1], evidence)
+                if pair is not None:
+                    line = pair.last_line
+                    if pair.next_line is None:
+                        del lines[i + 1]
                     else:
-                        pending_trim = None
-                        continue
-                    pending_trim = None
-
-            if (i + 1 < len(block.lines)
-                    and line.spans and block.lines[i + 1].spans):
-                last_span = line.spans[-1]
-                next_first = block.lines[i + 1].spans[0]
-                if (last_span.text.endswith("-")
-                        and len(last_span.text) > 1
-                        and next_first.text
-                        and next_first.text[0].islower()):
-                    prefix = last_span.text[:-1].split()[-1].lower() if last_span.text[:-1].split() else ""
-                    if prefix not in COMPOUND_PREFIXES:
-                        next_text = next_first.text
-                        words = next_text.split()
-                        first_word = words[0] if words else ""
-                        new_last = replace(last_span,
-                                           text=last_span.text[:-1] + first_word)
-                        line = Line(spans=line.spans[:-1] + [new_last],
-                                    bbox=line.bbox, page_num=line.page_num)
-                        pending_trim = next_text[len(first_word):].lstrip()
-
+                        lines[i + 1] = pair.next_line
             new_lines.append(line)
+            i += 1
 
         dehyphenated.append(Block(
             lines=new_lines,

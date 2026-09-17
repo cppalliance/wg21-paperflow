@@ -1,8 +1,11 @@
 """Tests for lib.pdf.cleanup."""
 
+import pytest
+
 from conftest import make_span, make_line, make_block
 from tomd.lib.pdf.cleanup import (escape_leading_atx, normalize_whitespace,
-                                  cleanup_text, _join_cross_page)
+                                  cleanup_text, _join_cross_page,
+                                  collect_hyphen_evidence, dehyphenate_pair)
 from tomd.lib import strip_format_chars
 from tomd.lib.pdf.types import is_readable, Line, Block, Span
 
@@ -168,6 +171,140 @@ def test_cleanup_text_dehyphenates():
     result = cleanup_text([block])
     full_text = result[0].text
     assert "implementation" in full_text
+
+
+# (wrapped lines of the block under test, evidence lines elsewhere in the
+#  document, expected block lines after T9) - issue #413 compound-aware
+#  dehyphenation. Evidence decides before form; form decides before the
+#  default glue.
+_DEHYPHENATION_CASES = [
+    pytest.param(
+        ["imple-", "mentation of things"], [],
+        ["implementation", "of things"], id="syllable-default-glue"),
+    pytest.param(
+        ["a SIMD-", "friendly layout"], [],
+        ["a SIMD-friendly", "layout"], id="acronym-prefix-keeps"),
+    pytest.param(
+        ["needs 64-", "bit lanes"], [],
+        ["needs 64-bit", "lanes"], id="digit-prefix-keeps"),
+    pytest.param(
+        ["is non-", "associative here"], [],
+        ["is non-associative", "here"], id="compound-prefix-keeps-and-pulls-up"),
+    pytest.param(
+        ["the re-", "sult is"], ["the result was clear"],
+        ["the result", "is"], id="glued-seen-beats-prefix"),
+    pytest.param(
+        ["a floating-", "point value"], ["every floating-point type"],
+        ["a floating-point", "value"], id="compound-seen-keeps"),
+    pytest.param(
+        ["a floating-", "point value"], ["floating values", "the point is"],
+        ["a floating-point", "value"], id="both-standalone-keeps"),
+    pytest.param(
+        ["a cache-", "friendly walk"], ["a debugger-friendly comparator"],
+        ["a cache-friendly", "walk"], id="tail-of-other-compound-keeps"),
+    pytest.param(
+        ["build-", "proof output"], [],
+        ["buildproof", "output"], id="no-evidence-glues-known-residue"),
+    pytest.param(
+        ["a non-", "Associative op"], [],
+        ["a non-", "Associative op"], id="uppercase-next-word-untouched"),
+    pytest.param(
+        ["see figure -", "and table"], [],
+        ["see figure -", "and table"], id="bare-dash-untouched"),
+    pytest.param(
+        ["(non-", "associative)"], [],
+        ["(non-associative)"], id="punctuation-around-keys-ignored"),
+    pytest.param(
+        ["imple-", "mentation"], [],
+        ["implementation"], id="fully-consumed-next-line-dropped"),
+    pytest.param(
+        ["and how-", "ever it goes"], ["however, the rule"],
+        ["and however", "it goes"], id="glued-seen-beats-both-standalone"),
+    pytest.param(
+        ["-?-", "simd-arg subsumes"], [],
+        ["-?simd-arg", "subsumes"], id="no-alnum-prefix-glues-as-before"),
+]
+
+
+_MONO_CASES = [
+    pytest.param(
+        ["satisfies convertible_-", "to<value_type>"], [],
+        ["satisfies convertible_to<value_type>"], id="identifier-break-glues"),
+    pytest.param(
+        ["concept simd-consteval-", "broadcast-arg = see below;"],
+        ["simd-consteval-broadcast-arg subsumes"],
+        ["concept simd-consteval-broadcast-arg", "= see below;"],
+        id="attested-identifier-keeps"),
+    pytest.param(
+        ["a SIMD-", "friendly layout"], [],
+        ["a SIMDfriendly", "layout"], id="form-rules-do-not-apply-in-code"),
+]
+
+
+@pytest.mark.parametrize(("wrapped", "evidence", "expected"), _MONO_CASES)
+def test_cleanup_dehyphenation_monospace(wrapped, evidence, expected):
+    block = make_block(wrapped, monospace=True)
+    others = [make_block([ln], monospace=True) for ln in evidence]
+    result = cleanup_text(others + [block])
+    assert [ln.text for ln in result[-1].lines] == expected
+
+
+def test_cleanup_dehyphenation_tolerates_span_edge_whitespace():
+    """MuPDF leaves a trailing space on line-end spans; it is not content."""
+    block = Block(lines=[
+        Line(spans=[make_span("a floating- ")]),
+        Line(spans=[make_span(" point value")]),
+    ])
+    result = cleanup_text([make_block(["floating-point math"]), block])
+    assert [ln.text for ln in result[-1].lines] == ["a floating-point", "value"]
+
+
+def test_collect_hyphen_evidence_code_lines_give_compounds_only():
+    lines = [make_line(["x = some_time - n-1"], monospace=True),
+             make_line(["concept simd-arg = true;"], monospace=True)]
+    ev = collect_hyphen_evidence(lines)
+    assert ev.words == frozenset()
+    assert ev.tails == frozenset()
+    assert "simd-arg" in ev.compounds
+
+
+def test_cleanup_dehyphenation_font_change_is_not_a_wrap():
+    """Prose ``over-`` running into a code line keeps both lines intact."""
+    block = Block(lines=[
+        Line(spans=[make_span("functions form an over-")]),
+        Line(spans=[make_span("int ilogb(float arg)", monospace=True)]),
+    ])
+    result = cleanup_text([block])
+    assert [ln.text for ln in result[0].lines] == [
+        "functions form an over-", "int ilogb(float arg)"]
+
+
+@pytest.mark.parametrize(("wrapped", "evidence", "expected"), _DEHYPHENATION_CASES)
+def test_cleanup_dehyphenation_rules(wrapped, evidence, expected):
+    block = make_block(wrapped)
+    others = [make_block([ln]) for ln in evidence]
+    result = cleanup_text(others + [block])
+    assert [ln.text for ln in result[-1].lines] == expected
+
+
+def test_collect_hyphen_evidence_excludes_wrap_fragments():
+    lines = [make_line(["the imple-"]), make_line(["mentation is non-associative"])]
+    ev = collect_hyphen_evidence(lines)
+    assert "imple" not in ev.words
+    assert "mentation" not in ev.words
+    assert {"the", "is"} <= ev.words
+    assert "non-associative" in ev.compounds
+    assert "associative" in ev.tails
+
+
+def test_dehyphenate_pair_reports_tokens_for_text_patching():
+    ev = collect_hyphen_evidence([])
+    pair = dehyphenate_pair(make_line(["is non-"]), make_line(["associative,", " said"]), ev)
+    assert pair is not None
+    assert (pair.prefix_token, pair.first_word, pair.joined) == (
+        "non-", "associative,", "non-associative,")
+    assert pair.last_line.text == "is non-associative,"
+    assert pair.next_line is not None and pair.next_line.text == " said"
 
 
 class TestEscapeLeadingAtx:

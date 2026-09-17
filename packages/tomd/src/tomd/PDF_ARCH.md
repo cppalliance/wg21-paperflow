@@ -365,6 +365,7 @@ Tightening similarity without prompts; loosening TOC detection; aggressive parag
 **Paragraph merge**
 
 - Merge consecutive paragraphs when the first lacks **terminal punctuation** and the second starts **lowercase** ([`_merge_paragraphs`](lib/pdf/structure.py)).
+- Also merge when the second starts with `(`, a bracketed reference the sentence runs on from (`[numerics.defns]. ...`) or an inline code span on a prose line and the geometry proves a wrap: exactly one wrap pitch below (baseline to baseline, the document's own line pitch measured on its known wraps), same page and font, aligned at the left edge, and the second block's first word would not have fit before the document's text margin (the line end at least three body lines share). MuPDF splits a block where the glyph run changes mid-sentence; these starts are not lowercase, so the geometry decides. A paragraph break adds paragraph spacing to the pitch; a short last line or a bibliography label (`[GB-SEQ] = ...`) is a deliberate break and stays one.
 
 **Code**
 
@@ -438,6 +439,7 @@ Pass 2 (`strip_pre_content_paragraphs` in [`metadata_yaml/strip.py`](lib/metadat
   - Separator headings (lines of `=`, `-`, `~`, `*`).
   - WG21 category labels (`Programming Language C++`, `ISO/IEC JTC1`, `WG21 PROPOSAL`).
   - Title echo headings: word-stem overlap >= 50% with the front-matter title.
+  - Title tail headings: a heading directly after a stripped title echo whose stems (>= 2) are all title stems. A title that wraps onto a second line arrives as two heading blocks and the tail alone misses the 50% ratio (P4016R0 `Structure for Run-To-Run Consistency`).
   - Author-list headings: 3+ comma-separated items where >= 80% look like person names (1-4 words, uppercase initial).
   - Single-author headings: 1-4 word names (possibly italic/bold) that match reply-to tokens from metadata (>= 50% token overlap).
 - Pass 2 (post-boundary) applies the same patterns to page-0 headings **after** the first content heading. Title-echo matching in pass 2 is suppressed once a body paragraph (PARAGRAPH or LIST) has been seen, preventing legitimate sub-headings from being stripped when they share words with the title (e.g. P3373R4 "Operation States and Stack Frames" under title "Of Operation States and Their Lifetimes").

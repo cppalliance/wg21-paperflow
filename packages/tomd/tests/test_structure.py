@@ -22,8 +22,363 @@ from tomd.lib.pdf.structure import (
     _classify_code_line, _is_narrative_continuation, _trim_narrative_from_code,
     _absorb_trailing_label_into_code, _is_tail_prose,
     _peel_trailing_prose_from_code,
-    _weak_heading_qualifies,
+    _weak_heading_qualifies, _merge_paragraphs,
 )
+
+
+class TestMergeParagraphsDehyphenation:
+    """#413: a block boundary after a hyphen runs T9's pair rule, so the
+    merged paragraph never reads ``floating- point``."""
+
+    @staticmethod
+    def _para(text):
+        return make_section(text, lines=[make_line([text])])
+
+    def test_compound_boundary_keeps_hyphen_and_pulls_word_up(self):
+        evidence = self._para("All floating-point types.")
+        prev = self._para("uses a floating-")
+        cur = self._para("point value.")
+        merged = _merge_paragraphs([evidence, prev, cur])
+        assert len(merged) == 2
+        assert merged[1].text == "uses a floating-point value."
+        assert [ln.text for ln in merged[1].lines] == [
+            "uses a floating-point", "value."]
+
+    def test_syllable_boundary_glues(self):
+        prev = self._para("the imple-")
+        cur = self._para("mentation follows.")
+        merged = _merge_paragraphs([prev, cur])
+        assert len(merged) == 1
+        assert merged[0].text == "the implementation follows."
+        assert [ln.text for ln in merged[0].lines] == [
+            "the implementation", "follows."]
+
+    def test_fully_consumed_first_line_is_dropped(self):
+        prev = self._para("the imple-")
+        cur = make_section("mentation\nfollows.", lines=[
+            make_line(["mentation"]), make_line(["follows."])])
+        merged = _merge_paragraphs([prev, cur])
+        assert merged[0].text == "the implementation\nfollows."
+        assert [ln.text for ln in merged[0].lines] == [
+            "the implementation", "follows."]
+
+    def test_plain_merge_unchanged(self):
+        prev = self._para("a sentence that")
+        cur = self._para("continues here.")
+        merged = _merge_paragraphs([prev, cur])
+        assert merged[0].text == "a sentence that continues here."
+
+    def test_text_lines_mismatch_falls_back_to_plain_merge(self):
+        """Section text that does not carry the boundary tokens of its
+        lines keeps text and lines in step: neither is dehyphenated."""
+        prev = make_section("the imple-", lines=[make_line(["the imple-"])])
+        cur = make_section("mentation follows.",
+                           lines=[make_line(["[fn] mentation follows."])])
+        merged = _merge_paragraphs([prev, cur])
+        assert merged[0].text == "the imple- mentation follows."
+        assert [ln.text for ln in merged[0].lines] == [
+            "the imple-", "[fn] mentation follows."]
+
+
+class TestMergeParagraphsInlineContinuation:
+    """#413: a block that opens with ``(`` or an inline code span one wrap
+    pitch below a sentence fragment continues that sentence, when the
+    geometry proves the line wrapped."""
+
+    FS = 8.0
+    LINE = 10.0  # baseline-to-baseline at 8pt (pitch 1.25 font sizes)
+    X0 = 72.0
+    RIGHT = 500.0  # the text margin
+    BASELINE = 0.8  # baseline sits this far below the line top, in font sizes
+
+    def _line(self, spans, top, *, x0=X0, x1=RIGHT, page=1, font_size=FS,
+              mono=None):
+        mono = mono or [False] * len(spans)
+        origin = (x0, top + self.BASELINE * font_size)
+        return Line(
+            spans=[make_span(t, font_size=font_size, monospace=m, origin=origin)
+                   for t, m in zip(spans, mono)],
+            bbox=(x0, top, x1, top + font_size), page_num=page)
+
+    def _para(self, spans, top, *, page=1, font_size=FS, mono=None,
+              x0=X0, x1=RIGHT):
+        """A one-line block; ``x1`` is where its text ends."""
+        line = self._line(spans, top, page=page, font_size=font_size,
+                          mono=mono, x0=x0, x1=x1)
+        return make_section(line.text, lines=[line], page_num=page,
+                            font_size=font_size)
+
+    def _body(self, page=1, pitch=LINE):
+        """Four full-width body lines at ``pitch``: the witnesses that
+        establish the text margin and the wrap pitch
+        (``_LAYOUT_WITNESS_MIN``)."""
+        lines = [self._line([f"Body line {i} that runs to the margin."],
+                            20.0 + i * pitch, page=page) for i in range(4)]
+        return make_section("\n".join(ln.text for ln in lines), lines=lines,
+                            page_num=page, font_size=self.FS)
+
+    def _merged(self, *secs, pitch=LINE):
+        """Sections after the merge, without the witness body."""
+        return _merge_paragraphs([self._body(pitch=pitch), *secs])[1:]
+
+    # -- positive: the line wrapped -------------------------------------
+
+    def test_bracket_start_one_line_below_merges(self):
+        prev = self._para(["for a given input order and topology coordinate"], 100.0)
+        cur = self._para(["(lane count L), the expression is unique."],
+                         100.0 + self.LINE, x1=380.0)
+        assert [s.text for s in self._merged(prev, cur)] == [
+            "for a given input order and topology coordinate "
+            "(lane count L), the expression is unique."]
+
+    def test_square_bracket_start_merges(self):
+        prev = self._para(["specification models in"], 100.0)
+        cur = self._para(["[numerics.defns]. Both preserve order."],
+                         100.0 + self.LINE, x1=300.0)
+        assert len(self._merged(prev, cur)) == 1
+
+    def test_inline_code_start_on_mixed_line_merges(self):
+        prev = self._para(["permits reassociation (and, under"], 100.0)
+        cur = self._para(["GENERALIZED_SUM", ", operand reordering); no wrapper"],
+                         100.0 + self.LINE, mono=[True, False], x1=420.0)
+        merged = self._merged(prev, cur)
+        assert len(merged) == 1
+        assert merged[0].text.endswith(
+            "under GENERALIZED_SUM, operand reordering); no wrapper")
+
+    def test_next_word_that_would_not_fit_confirms_the_wrap(self):
+        """Ragged right: the line stopped 45pt short because the 15-char
+        word `(parenthesized)` needed ~65pt (P4016R0 p.5)."""
+        prev = self._para(["operands are combined and how they are grouped"],
+                          100.0, x1=self.RIGHT - 45.0)
+        cur = self._para(["(parenthesized) may produce different results."],
+                         100.0 + self.LINE)
+        assert len(self._merged(prev, cur)) == 1
+
+    def test_first_line_indent_still_merges(self):
+        """P0957R8: a one-line paragraph with an 8.5pt first-line indent
+        wraps to the paragraph's left edge."""
+        prev = self._para(["we may need to update the code. For example, what if"],
+                          100.0, x0=self.X0 + 8.5)
+        cur = self._para(["DoSomethingWithDrawable", " needs to call Area()?"],
+                         100.0 + self.LINE, mono=[True, False], x1=300.0)
+        assert len(self._merged(prev, cur)) == 1
+
+    def test_slight_box_overlap_still_merges(self):
+        """Tight leading: MuPDF's line boxes overlap by a fraction of the
+        font size (P0957R8: -0.37); the baselines are still one pitch apart."""
+        pitch = 0.95 * self.FS
+        prev = self._para(["for a given input order and topology coordinate"], 100.0)
+        cur = self._para(["(lane count L), the expression is unique."],
+                         100.0 + pitch, x1=380.0)
+        assert len(self._merged(prev, cur, pitch=pitch)) == 1
+
+    def test_second_line_of_paragraph_wraps_at_its_left_edge(self):
+        """The previous block already has two lines (first-line indent,
+        then the edge); the continuation aligns with the last one."""
+        lines = [self._line(["A paragraph whose first line is indented and"],
+                            90.0, x0=self.X0 + 8.5),
+                 self._line(["whose second line runs to the margin without"],
+                            100.0)]
+        prev = make_section("\n".join(ln.text for ln in lines), lines=lines,
+                            page_num=1, font_size=self.FS)
+        cur = self._para(["(a parenthetical) closing it."], 110.0, x1=300.0)
+        assert len(self._merged(prev, cur)) == 1
+
+    def test_citation_bracket_followed_by_lowercase_merges(self):
+        prev = self._para(["the semantics are the ones described in"], 100.0)
+        cur = self._para(["[4] and refined by [5]."], 110.0, x1=200.0)
+        assert len(self._merged(prev, cur)) == 1
+
+    def test_previous_block_spanning_pages_merges_on_its_last_page(self):
+        """After a lowercase merge across a page break the section's page
+        is still the first page; the wrap test looks at the lines."""
+        lines = [self._line(["a sentence that starts on one page and"], 700.0,
+                            page=1),
+                 self._line(["continues at the top of the next, right up to"],
+                            72.0, page=2)]
+        prev = make_section("\n".join(ln.text for ln in lines), lines=lines,
+                            page_num=1, font_size=self.FS)
+        cur = self._para(["(the margin) where it wraps again."], 82.0, page=2,
+                         x1=300.0)
+        assert len(_merge_paragraphs([self._body(1), prev, cur])) == 2
+
+    # -- negative: lexical ------------------------------------------------
+
+    def test_all_monospace_line_is_code_not_continuation(self):
+        prev = self._para(["The call reads"], 100.0)
+        cur = self._para(["(void)reduce(v.begin(), v.end());"], 100.0 + self.LINE,
+                         mono=[True])
+        assert len(self._merged(prev, cur)) == 2
+
+    def test_terminal_punctuation_blocks_merge(self):
+        prev = self._para(["The sentence ends here."], 100.0)
+        cur = self._para(["(Parenthetical aside follows.)"], 100.0 + self.LINE)
+        assert len(self._merged(prev, cur)) == 2
+
+    def test_terminal_punctuation_behind_closing_quote_blocks_merge(self):
+        prev = self._para(['the paper calls this "unified interface."'], 100.0)
+        cur = self._para(["(Section 5 discusses the cost.)"], 100.0 + self.LINE)
+        assert len(self._merged(prev, cur)) == 2
+
+    def test_trailing_hyphen_is_left_to_the_lowercase_path(self):
+        prev = self._para(["a topology-"], 100.0)
+        cur = self._para(["(lane count) mapping"], 100.0 + self.LINE)
+        assert len(self._merged(prev, cur)) == 2
+
+    def test_enumeration_labels_are_not_continuations(self):
+        for label in ("(a) keep", "(2) second", "(iii) third", "B) next"):
+            prev = self._para(["The options are laid out on the line above"], 100.0)
+            cur = self._para([f"{label} item text"], 100.0 + self.LINE)
+            assert len(self._merged(prev, cur)) == 2, label
+
+    def test_bracket_label_opening_an_entry_is_not_a_continuation(self):
+        """A bibliography label or note opener follows the closing bracket
+        with `=`, a capitalised word or nothing: not a sentence running on."""
+        for start in ("[GB-PAR] = https://godbolt.org/z/x", "[4] Smith, J.",
+                      "[N4950] Working Draft", "[Note: This differs.]"):
+            prev = self._para(["a line that runs right up to the text margin"],
+                              100.0)
+            cur = self._para([start], 100.0 + self.LINE, x1=300.0)
+            assert len(self._merged(prev, cur)) == 2, start
+
+    # -- negative: geometry -----------------------------------------------
+
+    def test_paragraph_gap_does_not_merge(self):
+        prev = self._para(["a fragment without a period"], 100.0)
+        cur = self._para(["(A new paragraph in parentheses.)"], 100.0 + self.FS * 1.9)
+        assert len(self._merged(prev, cur)) == 2
+
+    def test_paragraph_spacing_does_not_merge(self):
+        """Word's `6pt after` on 12pt text is half a font size on top of
+        the pitch, the tightest common paragraph spacing; a wrapped line
+        sits at the pitch exactly."""
+        prev = self._para(["a fragment without a period that fills the line"],
+                          100.0)
+        cur = self._para(["(A new paragraph in parentheses.)"],
+                         100.0 + self.LINE + 0.5 * self.FS)
+        assert len(self._merged(prev, cur)) == 2
+
+    def test_pitch_within_tolerance_merges(self):
+        prev = self._para(["a fragment without a period that fills the line"],
+                          100.0)
+        cur = self._para(["(continued) here."], 100.0 + self.LINE + 0.1 * self.FS,
+                         x1=200.0)
+        assert len(self._merged(prev, cur)) == 1
+
+    def test_document_without_a_pitch_never_merges(self):
+        """Three one-line paragraphs establish a margin but no wrap
+        pitch (no multi-line section, no lowercase boundary)."""
+        full = [self._para([f"Sentence {i} that runs to the margin."],
+                           20.0 + i * self.LINE) for i in range(3)]
+        prev = self._para(["a fragment without a period that fills the line"],
+                          100.0)
+        cur = self._para(["(continued) here."], 100.0 + self.LINE, x1=200.0)
+        assert len(_merge_paragraphs([*full, prev, cur])) == 5
+
+    def test_multi_line_block_does_not_take_an_outdented_paragraph(self):
+        """A list item's second line sits at the text indent; a body
+        paragraph 16pt to its left is a new block, not a first-line indent."""
+        lines = [self._line(["- an item whose text wraps onto a second"], 90.0,
+                            x0=self.X0 + 16.0),
+                 self._line(["line that runs right up to the margin without"],
+                            100.0, x0=self.X0 + 16.0)]
+        prev = make_section("\n".join(ln.text for ln in lines),
+                            kind=SectionKind.LIST, lines=lines, page_num=1,
+                            font_size=self.FS)
+        cur = self._para(["GENERALIZED_SUM", " permits reassociation."], 110.0,
+                         mono=[True, False], x1=230.0)
+        assert len(self._merged(prev, cur)) == 2
+
+    def test_page_change_blocks_merge(self):
+        prev = self._para(["a fragment without a period"], 700.0, page=1)
+        cur = self._para(["(continued) on the next page."], 72.0, page=2)
+        assert len(_merge_paragraphs([self._body(1), prev, self._body(2), cur])) == 4
+
+    def test_font_change_blocks_merge(self):
+        """A 0.9pt smaller face (8.1pt body, 7.2pt footnote) is a
+        different block, not a wrapped line."""
+        prev = self._para(["a fragment without a period"], 100.0)
+        cur = self._para(["(footnote text in a smaller face)"], 100.0 + self.LINE,
+                         font_size=self.FS - 0.9)
+        assert len(self._merged(prev, cur)) == 2
+
+    def test_short_last_line_is_not_a_wrap(self):
+        """Definition lists: the previous line stops well before the
+        margin although the next word would have fit, so nothing wrapped.
+        P4016R0 p.25 `V be ...,` / `A be ...:` is this shape."""
+        prev = self._para(["V", " be the value type of the input sequence elements,"],
+                          100.0, mono=[True, False], x1=300.0)
+        cur = self._para(["A", " be the reduction state type:"],
+                         100.0 + self.LINE, mono=[True, False], x1=220.0)
+        assert len(self._merged(prev, cur)) == 2
+
+    def test_bibliography_url_then_label_is_not_a_wrap(self):
+        prev = self._para(["[GB-SEQ] = https://godbolt.org/z/8EEhEqrz6"], 100.0,
+                          x1=260.0)
+        cur = self._para(["(single-threaded reference; faithful implementation)"],
+                         100.0 + self.LINE, x1=420.0)
+        assert len(self._merged(prev, cur)) == 2
+
+    def test_bibliography_entries_at_line_pitch_stay_apart(self):
+        """A long URL ending near the margin followed by the next label
+        one pitch below: the label is lexically an entry opener."""
+        prev = self._para(["[GB-SEQ] = https://godbolt.org/z/a/very/long/path/x"],
+                          100.0, x1=self.RIGHT - 20.0)
+        cur = self._para(["[GB-PAR] = https://godbolt.org/z/b"], 100.0 + self.LINE,
+                         x1=300.0)
+        assert len(self._merged(prev, cur)) == 2
+
+    def test_page_without_a_margin_never_merges(self):
+        """Two short blocks alone on a page establish no text margin, so
+        the wrap proof has nothing to measure against."""
+        prev = self._para(["V", " be the value type of the input sequence elements,"],
+                          100.0, mono=[True, False], x1=300.0)
+        cur = self._para(["A", " be the reduction state type:"],
+                         100.0 + self.LINE, mono=[True, False], x1=220.0)
+        assert len(_merge_paragraphs([prev, cur])) == 2
+
+    def test_lone_long_line_is_not_a_margin(self):
+        """One URL wider than everything else is an outlier, not the
+        margin; the body lines still establish it."""
+        url = self._para(["https://example.invalid/a/very/long/path/that/overflows"],
+                         60.0, x1=self.RIGHT + 40.0)
+        prev = self._para(["For a given input order and topology coordinate"], 100.0)
+        cur = self._para(["(lane count L), the expression is unique."],
+                         100.0 + self.LINE, x1=380.0)
+        assert len(_merge_paragraphs([self._body(), url, prev, cur])) == 3
+
+    def test_other_column_does_not_merge(self):
+        prev = self._para(["left column fragment without"], 100.0,
+                          x0=57.0, x1=290.0)
+        cur = self._para(["(right column) starts here"], 100.0 + self.LINE,
+                         x0=310.0, x1=540.0)
+        assert len(self._merged(prev, cur)) == 2
+
+    def test_outdented_label_does_not_merge(self):
+        """Hanging indent: item text at the text indent, the next label
+        outdented by more than a first-line indent."""
+        prev = self._para(["item text that runs to the margin without a stop"],
+                          100.0, x0=self.X0 + 2.5 * self.FS)
+        cur = self._para(["(see note) opens the next item"], 100.0 + self.LINE,
+                         x1=300.0)
+        assert len(self._merged(prev, cur)) == 2
+
+    def test_list_item_without_stop_keeps_following_paragraph(self):
+        prev = make_section("- third bullet without stop", kind=SectionKind.LIST,
+                            lines=[self._line(["- third bullet without stop"],
+                                              100.0, x1=210.0)],
+                            page_num=1, font_size=self.FS)
+        cur = self._para(["GENERALIZED_SUM", " permits reassociation."],
+                         100.0 + self.LINE, mono=[True, False], x1=230.0)
+        assert len(self._merged(prev, cur)) == 2
+
+    def test_block_above_on_same_baseline_does_not_merge(self):
+        """Side-by-side blocks (table cells) have a negative y-gap of a
+        full line height."""
+        prev = self._para(["left cell text"], 100.0)
+        cur = self._para(["(right cell)"], 100.0)
+        assert len(self._merged(prev, cur)) == 2
 
 
 class TestHeadingConfidence:
