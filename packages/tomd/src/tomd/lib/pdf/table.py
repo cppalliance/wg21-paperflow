@@ -24,9 +24,13 @@ Detection passes (run in order, each consumes matched blocks):
     atomized_only=True, run before Pass 1 so tables whose cells arrive as
     one block per wrapped line (Google Docs exports) are not taken line by
     line as Pass 1 rows.  Entry via an atomized header (line blocks over
-    more x-positions than the seed has columns) or a regular header row
-    block over a shattered body (_body_is_atomized).  Dense-table and
-    mid-table-seed gates bound it.  table_source="side_by_side_prepass".
+    more x-positions than the seed has columns), a regular header row
+    block over a shattered body (_body_is_atomized), or a header-grid
+    seed (_header_grid_positions: 3+ cells on one baseline, first column
+    narrower than _COLUMN_GAP_THRESHOLD, body lines on every column; the
+    header's grid replaces the body clustering).  Dense-table and
+    mid-table-seed gates bound it; stacked tables on one page seed in
+    turn.  table_source="side_by_side_prepass".
   Pass 1 (inline-column): blocks with 2+ lines whose x-starts have gaps
     > _COLUMN_GAP_THRESHOLD.  Orphan absorption for wrapped cell first-lines
     (forward, col 0) and wrapped tails (backward, col 1+, any column count);
@@ -112,6 +116,12 @@ _ATOMIZED_SEED_ABOVE_GAP = 40.0
 # (one block per wrapped line). Pass 1 would take each such line as a
 # row of its own.
 _ATOMIZED_BODY_MIN_SINGLE_FRAC = 0.6
+# Header-grid seed for the pre-pass: a header row block whose cells all
+# sit on one baseline, over an atomized body that populates every one
+# of its columns (p4047r0 prediction tables, "# | Prediction | Source |
+# Date | Outcome"). Two cells on one baseline is a list item or a TOC
+# entry as often as a table row; three is a grid.
+_HEADER_GRID_MIN_CELLS = 3
 # A table cell that is only a run of ASCII/en/em dashes, optionally with
 # the markdown alignment colons: a rendered separator, not data (see
 # _drop_separator_rows).
@@ -432,6 +442,31 @@ def _block_column_positions(block: Block) -> list[float] | None:
     return unique_xs
 
 
+def _header_grid_positions(block: Block) -> list[float] | None:
+    """Column x-starts of a single-band header row block, or None.
+
+    _block_column_positions rejects a header whose first column is
+    narrower than _COLUMN_GAP_THRESHOLD (p4047r0 "#", 30pt before
+    "Prediction"); that rule tells a columnar block from wrapped prose,
+    where a wrapped line starts a little right of the first. A block
+    whose lines all end on one baseline cannot be wrapped prose: MuPDF
+    splits a line inside a block only at a horizontal gap, so every
+    line is a cell of the same row. Three or more cells, each with
+    text, x-starts increasing by more than _COLUMN_X_TOLERANCE.
+    """
+    if len(block.lines) < _HEADER_GRID_MIN_CELLS:
+        return None
+    if any(not ln.spans or not ln.text.strip() for ln in block.lines):
+        return None
+    bottoms = [ln.bbox[3] for ln in block.lines]
+    if max(bottoms) - min(bottoms) > _TABLE_Y_OVERLAP_MARGIN:
+        return None
+    xs = [ln.bbox[0] for ln in block.lines]
+    if any(b - a <= _COLUMN_X_TOLERANCE for a, b in zip(xs, xs[1:])):
+        return None
+    return xs
+
+
 def _columns_match(
     cols_a: list[float],
     cols_b: list[float],
@@ -744,6 +779,15 @@ def _detect_side_by_side_tables(
 
     while i < len(blocks):
         cols = _block_column_positions(blocks[i])
+        # Pre-pass only: a single-baseline header row whose first column
+        # is too narrow for _block_column_positions. Its grid replaces
+        # the body clustering below (a 30pt column falls into its
+        # neighbour's _COLUMN_GAP_THRESHOLD cluster) once the body is
+        # seen to populate every header column.
+        header_grid: list[float] | None = None
+        if cols is None and atomized_only:
+            header_grid = _header_grid_positions(blocks[i])
+            cols = header_grid
         if cols is None or len(cols) < 2:
             # cols is None is ordinary prose (no column gaps), not a seed;
             # only a block that had positions but too few is worth a line.
@@ -784,6 +828,29 @@ def _detect_side_by_side_tables(
             i += 1
             continue
 
+        if header_grid is not None:
+            # The seed's own signature (three cells on one baseline) is
+            # shared by a wide data row; the mid-table guard tells them
+            # apart by what stands above. The body must then put at
+            # least one line on every header column.
+            if _seed_is_mid_table(blocks, i, header_grid, used):
+                _log.debug("SBS reject: header-grid seed %d on page %d is mid-table",
+                            i, page)
+                i += 1
+                continue
+            body_line_xs = [ln.bbox[0] for _, b in body_candidates for ln in b.lines]
+            unpopulated = [
+                hx for hx in header_grid
+                if not any(abs(lx - hx) <= _COLUMN_X_TOLERANCE for lx in body_line_xs)]
+            if unpopulated:
+                _log.debug("SBS reject: header-grid seed %d on page %d, no body line "
+                            "on header column(s) at x=%s", i, page,
+                            ["%.0f" % hx for hx in unpopulated])
+                i += 1
+                continue
+            _log.debug("SBS header-grid seed %d on page %d: %d header cols over "
+                       "%d body cluster(s)", i, page, len(header_grid), len(col_xs))
+            col_xs = list(header_grid)
         # Header grid: a regular header row block whose lines sit on more
         # columns than the body's block x0s cluster into. A narrow column
         # (p4098r1 "Year", 39pt before "Evidence") is never a block x0
@@ -1067,15 +1134,21 @@ def _detect_side_by_side_tables(
                             "(regular header, body not atomized)", i, page)
                 i += 1
                 continue
-            dense = (
-                len(col_xs) >= _ATOMIZED_PREPASS_DENSE_MIN_COLS
-                and bool(valid_row_col_counts)
-                and all(n >= len(col_xs) - 1 for n in valid_row_col_counts)
-            )
-            min_rows = max(
-                min_rows,
-                _ATOMIZED_PREPASS_MIN_ROWS_DENSE if dense
-                else _ATOMIZED_PREPASS_MIN_ROWS)
+            # The row minimum keeps the pre-pass off Pass 1's row-block
+            # tables. A header-grid seed is not one Pass 1 could take:
+            # its first column is narrower than Pass 1's gap and its
+            # body is shattered, so _MIN_TABLE_ROWS stands (p4047r0
+            # Implementation Maturity has two rows).
+            if header_grid is None:
+                dense = (
+                    len(col_xs) >= _ATOMIZED_PREPASS_DENSE_MIN_COLS
+                    and bool(valid_row_col_counts)
+                    and all(n >= len(col_xs) - 1 for n in valid_row_col_counts)
+                )
+                min_rows = max(
+                    min_rows,
+                    _ATOMIZED_PREPASS_MIN_ROWS_DENSE if dense
+                    else _ATOMIZED_PREPASS_MIN_ROWS)
         if len(valid_rows) < min_rows:
             _log.debug("SBS reject: seed %d on page %d, too few valid rows "
                         "(%d < %d)", i, page, len(valid_rows), min_rows)
@@ -1219,7 +1292,13 @@ def _detect_side_by_side_tables(
             for idx, _ in row:
                 used.add(idx)
 
-        i = j
+        if atomized_only:
+            # Stacked shattered tables (p4047r0: two per page, a heading
+            # between them) seed one after the other: resume behind the
+            # table's last block, not behind the page.
+            i = max(idx for row in consumed_rows for idx, _ in row) + 1
+        else:
+            i = j
 
     return table_sections, used
 
