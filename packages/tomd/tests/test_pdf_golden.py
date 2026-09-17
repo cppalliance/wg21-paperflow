@@ -409,6 +409,20 @@ def test_p4098r1_table_family_pins():
     sections = run_pipeline(pdf_path).sections
     tables = [s for s in sections
               if s.kind == SectionKind.TABLE and s.page_num in range(2, 8)]
+    got = {
+        (s.page_num, len(s.columns), len(s.columns[0]),
+         s.table_kind, s.table_source)
+        for s in tables
+    }
+    assert got == _P4098R1_TABLE_PINS
+    for s in tables:
+        assert ["".join(sp.text for sp in c).strip() for c in s.columns[0]] == [
+            "Claim", "Source", "Year", "Evidence"]
+        for row in s.columns[1:]:
+            year = "".join(sp.text for sp in row[2]).strip()
+            assert year.isdigit() and len(year) == 4, (s.page_num, year)
+
+
 def _header_cells(section) -> list[str]:
     """Header row cell texts, runs of whitespace collapsed."""
     return [" ".join("".join(sp.text for sp in cell).split())
@@ -432,13 +446,6 @@ def test_p4047r0_table_family_pins():
          s.table_kind, s.table_source)
         for s in tables
     }
-    assert got == _P4098R1_TABLE_PINS
-    for s in tables:
-        assert ["".join(sp.text for sp in c).strip() for c in s.columns[0]] == [
-            "Claim", "Source", "Year", "Evidence"]
-        for row in s.columns[1:]:
-            year = "".join(sp.text for sp in row[2]).strip()
-            assert year.isdigit() and len(year) == 4, (s.page_num, year)
     assert got == _P4047R0_TABLE_PINS
     prediction = [s for s in tables if s.table_source == "side_by_side_prepass"]
     assert len(prediction) == 7
