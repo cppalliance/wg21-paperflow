@@ -2785,3 +2785,100 @@ class TestPass1SplitRow:
         assert not any(
             _cell_text(r[0]) == "Determinism"
             for s in sections for r in s.columns)
+
+
+def _vote_header(page: int, y0: float) -> Block:
+    """A one-block SF/F/N/A/SA poll header, P3978R0 tomd page 1 geometry."""
+    return _grid_row(page, y0, [
+        ("SF", 79.7, 91.4), ("F", 103.5, 109.6), ("N", 121.7, 129.7),
+        ("A", 141.7, 148.7), ("SA", 160.7, 173.3)])
+
+
+def _caption(page: int, y0: float, text: str) -> Block:
+    return Block(
+        lines=[Line(spans=[Span(text=text, font_size=10.0)],
+                    bbox=(73.7, y0, 216.1, y0 + 10.6), page_num=page)],
+        bbox=(73.7, y0, 216.1, y0 + 10.6), page_num=page)
+
+
+class TestPass3EmptyVoteGrid:
+    """A suggested poll is a lone SF/F/N/A/SA header block with empty
+    cells below it (P3978R0 §2.1, #422). Pass 3 used to need two blocks
+    per run, so three such headers and their captions fell to Pass 4,
+    which fused them into one table. A lone vote header now forms a
+    2-row table with a synthesized empty body row, the shape Pass 3a
+    emits for P4012R0 §2.2.
+    """
+
+    _PAGE = 1
+
+    def _p3978_blocks(self) -> list[Block]:
+        return [
+            _caption(self._PAGE, 207.9, "Poll: Adopt P3978R0 for C++26"),
+            _vote_header(self._PAGE, 224.7),
+            _caption(self._PAGE, 269.3, "Poll: Adopt P3978R0 for C++29"),
+            _vote_header(self._PAGE, 286.2),
+            _caption(self._PAGE, 330.8,
+                     "Poll: Adopt P3978R0 for C++29 and apply as a DR"),
+            _vote_header(self._PAGE, 347.7),
+        ]
+
+    def test_fixture_is_faithful(self):
+        blocks = self._p3978_blocks()
+        assert _block_horizontal_row(blocks[1]) is not None
+        assert _block_horizontal_row(blocks[0]) is None
+
+    def test_each_header_is_its_own_table(self):
+        blocks = self._p3978_blocks()
+        tables, used = _detect_horizontal_row_tables(
+            blocks, rotated_pages=frozenset())
+        assert len(tables) == 3
+        assert used == {1, 3, 5}
+        for t in tables:
+            assert len(t.columns) == 2
+            assert [_cell_text(c) for c in t.columns[0]] == [
+                "SF", "F", "N", "A", "SA"]
+            assert [_cell_text(c) for c in t.columns[1]] == [""] * 5
+            assert t.table_kind == "clean_matrix"
+
+    def test_captions_stay_prose_through_detect_tables(self):
+        blocks = self._p3978_blocks()
+        sections, remaining = detect_tables(blocks)
+        tables = [s for s in sections if s.kind == SectionKind.TABLE]
+        assert len(tables) == 3
+        assert [b.lines[0].text for b in remaining] == [
+            "Poll: Adopt P3978R0 for C++26",
+            "Poll: Adopt P3978R0 for C++29",
+            "Poll: Adopt P3978R0 for C++29 and apply as a DR"]
+
+    def test_header_with_number_row_below_is_one_filled_table(self):
+        # The taken-poll shape (p2728r11, p3290r4): the number row sits
+        # 12pt under the header and joins the run; no empty row appears.
+        header = _vote_header(self._PAGE, 224.7)
+        numbers = _grid_row(self._PAGE, 236.7, [
+            ("8", 82.0, 88.0), ("3", 104.0, 110.0), ("1", 123.0, 129.0),
+            ("0", 142.0, 148.0), ("0", 164.0, 170.0)])
+        tables, used = _detect_horizontal_row_tables(
+            [header, numbers], rotated_pages=frozenset())
+        assert len(tables) == 1
+        assert used == {0, 1}
+        assert [_cell_text(c) for c in tables[0].columns[1]] == [
+            "8", "3", "1", "0", "0"]
+
+    def test_lone_dash_row_is_not_a_vote_header(self):
+        # p1068r11's rendered separator row has the geometry but not the
+        # vocabulary; it must not become a header-only table.
+        dashes = _grid_row(self._PAGE, 224.7, [
+            ("-", 82.0, 88.0), ("-", 104.0, 110.0), ("-", 123.0, 129.0),
+            ("-", 142.0, 148.0), ("-", 164.0, 170.0)])
+        tables, used = _detect_horizontal_row_tables(
+            [dashes], rotated_pages=frozenset())
+        assert tables == [] and used == set()
+
+    def test_lone_non_vote_row_is_not_claimed(self):
+        row = _grid_row(self._PAGE, 224.7, [
+            ("Name", 79.7, 100.0), ("Type", 121.7, 140.0),
+            ("Note", 160.7, 180.0)])
+        tables, used = _detect_horizontal_row_tables(
+            [row], rotated_pages=frozenset())
+        assert tables == [] and used == set()

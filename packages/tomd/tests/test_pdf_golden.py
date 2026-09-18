@@ -134,6 +134,15 @@ _GOLDEN_STEMS = (
     # and the §5 Conclusion with its last row still leaking as prose
     # ("Implementation maturity concerns", a col-0-only trailing row).
     "p4047r0",
+    # Empty vote-grid guard (#422): P3978R0's three suggested polls (tomd
+    # page 1) are one SF/F/N/A/SA header block each with nothing below;
+    # Pass 3 wanted two blocks per run, so Pass 4 fused the three headers
+    # and their "Poll: ..." captions into one 5x3 table. Pass 3 now claims
+    # a lone vote header as a 2x5 table with an empty body row, the shape
+    # P4012R0 §2.2 already has. The golden pins the three tables with their
+    # captions as prose between them and the page-2 rewrite mapping (8x4,
+    # Pass 1) untouched; the family pins below guard the routing.
+    "p3978r0",
 )
 
 # Issue-180 reported symptom: this sentence is P4024R0's final paragraph.
@@ -233,6 +242,17 @@ _P4100R1_TABLE_PINS = {
     (10, 7, 3, "clean_matrix", None),
     (10, 8, 3, "clean_matrix", None),
 }
+
+# Family pins for P3978R0 (#422): three identical empty poll grids on tomd
+# page 1 (Pass 3, header-only, synthesized empty body row; Pass 3 sections
+# carry no table_source) and the §3.1 rewrite mapping on page 2 (Pass 1).
+# A list, not a set: three tables share one shape and must all be present.
+_P3978R0_TABLE_PINS = [
+    (1, 2, 5, "clean_matrix", None),
+    (1, 2, 5, "clean_matrix", None),
+    (1, 2, 5, "clean_matrix", None),
+    (2, 8, 4, "clean_matrix", "horizontal_rows"),
+]
 
 
 def _normalize_newlines(text: str) -> str:
@@ -473,3 +493,30 @@ def test_p4100r1_table_family_pins():
     capy = [s for s in tables if s.table_source == "side_by_side_prepass"]
     assert len(capy) == 1
     assert _header_cells(capy[0]) == ["Library", "Role", "Status"]
+
+
+def test_p3978r0_table_family_pins():
+    """#422 focused guard: each suggested poll is its own 2x5 table with
+    the SF/F/N/A/SA header and an empty body row, and the page-2 rewrite
+    mapping keeps its 8x4 shape. Independent of the full golden so a
+    re-bless can never silently fuse the polls again.
+    """
+    pdf_path = _GOLDEN / "p3978r0.pdf"
+    if not pdf_path.is_file():
+        pytest.skip(f"missing PDF fixture: {pdf_path}")
+    sections = run_pipeline(pdf_path).sections
+    tables = [s for s in sections
+              if s.kind == SectionKind.TABLE and s.page_num in (1, 2)]
+    got = sorted(
+        (s.page_num, len(s.columns), len(s.columns[0]),
+         s.table_kind, s.table_source or "")
+        for s in tables
+    )
+    assert got == sorted(
+        (p, r, c, k, src or "") for p, r, c, k, src in _P3978R0_TABLE_PINS)
+    polls = [s for s in tables if s.page_num == 1]
+    for s in polls:
+        assert ["".join(sp.text for sp in c).strip() for c in s.columns[0]] == [
+            "SF", "F", "N", "A", "SA"]
+        assert all(not "".join(sp.text for sp in c).strip()
+                   for c in s.columns[1])
