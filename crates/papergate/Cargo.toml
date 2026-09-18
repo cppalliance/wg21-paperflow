@@ -12,12 +12,13 @@ workspace = true
 
 [dependencies]
 anyhow = "1.0.104"
-clap = { version = "4.6.6", features = ["derive"] }
+clap = { version = "4.6.6", features = ["derive", "env"] }
 fastrand = "2.5.0"
 paperstore = { version = "0.1.0", path = "../paperstore" }
 paperstore-sqlite = { version = "0.1.0", path = "../paperstore-sqlite" }
-promptforge-core = { path = "../../../promptforge/crates/promptforge-core" }
-promptforge-tool-picker = { path = "../../../promptforge/crates/promptforge-tool-picker" }
+promptforge-api-runtime = { path = "../../vendor/promptforge/crates/promptforge-api-runtime" }
+promptforge-api-types = { path = "../../vendor/promptforge/crates/promptforge-api-types" }
+shared-vfs = { path = "../../vendor/promptforge/crates/shared-vfs" }
 tokio = { version = "1.53.1", features = ["rt-multi-thread", "macros", "signal", "fs"] }
 
 [dev-dependencies]

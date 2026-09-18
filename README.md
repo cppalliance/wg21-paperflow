@@ -45,6 +45,21 @@ Requires Python 3.12+ and [uv](https://docs.astral.sh/uv/). Outside an activated
 
 Set `WG21_DATA_DIR` to point to your workspace directory.
 
+### Rust crates
+
+`crates/` holds `paperstore`, `paperstore-sqlite`, and the `papergate` CLI.
+`papergate` depends on [promptforge](https://github.com/cppalliance/promptforge)
+through the `vendor/promptforge` submodule, pinned to the commit the crate is
+built against. Initialize it before building:
+
+```bash
+git submodule update --init
+cargo build --release -p papergate
+```
+
+To move promptforge, check out the new commit inside `vendor/promptforge`,
+fix the crate against it, and commit both in one PR.
+
 ## Tests
 
 ```bash

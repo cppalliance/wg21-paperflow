@@ -1,15 +1,16 @@
 //! The `papergate` command-line tool.
 //!
-//! `papergate [PAPER_NUM] [--file <PATH>] [--output <PATH>] [--prompt <PATH>]`
-//! runs the vendored papergate promptforge prompt against one WG21 paper and
-//! writes the analysis report to stdout, or to `--output` when given. Exactly
-//! one input is required: a paper
-//! number resolved through the SQLite paper store, or `--file` to read a
-//! markdown file verbatim. A paper number needs `WG21_DATA_DIR` pointing at
-//! the paperflow workspace; `--file` never touches it. The gateway
-//! credentials `PROMPTFORGE_GATEWAY_URL` and `PROMPTFORGE_GATEWAY_API_KEY`
-//! must both be set: the prompt binds its writer model through the gateway,
-//! so a local-only run can only fail.
+//! `papergate [PAPER_NUM] [--file <PATH>] [--output <PATH>] [--prompt <PATH>]
+//! [--model <NAME>]` runs the embedded papergate promptforge prompt against
+//! one WG21 paper and writes the analysis report to stdout, or to `--output`
+//! when given. Exactly one input is required: a paper number resolved through
+//! the SQLite paper store, or `--file` to read a markdown file verbatim. A
+//! paper number needs `WG21_DATA_DIR` pointing at the paperflow workspace;
+//! `--file` never touches it. The gateway credentials
+//! `PROMPTFORGE_GATEWAY_URL` and `PROMPTFORGE_GATEWAY_API_KEY` must both be
+//! set: the prompt binds its writer model through the gateway, so a
+//! local-only run can only fail. `--model` (or `PAPERGATE_MODEL`) names the
+//! gateway model that role binds to.
 //!
 //! `main` is the process boundary: it parses arguments, installs the Ctrl-C
 //! signal, invokes the application runner, and selects the exit status. All
@@ -18,10 +19,10 @@
 use std::process::ExitCode;
 
 use clap::Parser;
-use promptforge_core::CancelHandle;
-use promptforge_core::execute::RunError;
+use promptforge_api_runtime::RunError;
+use promptforge_api_runtime::types::cancel::CancelHandle;
 
-use crate::app::{Cli, RunRequest};
+use crate::app::{Cancelled, Cli, RunRequest};
 
 mod app;
 
@@ -29,9 +30,10 @@ mod app;
 /// status. `clap` owns usage failures and their status; this returns 130 for a
 /// cancelled run and 1 for any other failure.
 ///
-/// The default multi-threaded runtime is required: the prompt's nested host
-/// calls (`fanout`, `model:infer`) bridge synchronous Lua into async work via
-/// `tokio::task::block_in_place`.
+/// The runtime needs no particular Tokio flavor: every chain step runs inside
+/// the runtime's one driver task and suspending host calls are coroutine
+/// yields. The default multi-threaded runtime keeps the leaf I/O waits off
+/// the driver.
 #[tokio::main]
 async fn main() -> ExitCode {
     let cli = Cli::parse();
@@ -41,6 +43,7 @@ async fn main() -> ExitCode {
         input: &input,
         output: cli.output.as_deref(),
         prompt: cli.prompt.as_deref(),
+        model: &cli.model,
         cancel,
     };
     match app::run(request).await {
@@ -72,12 +75,15 @@ fn install_cancel() -> CancelHandle {
 
 /// Maps a run failure to a process exit code: 130 for a cooperative
 /// cancellation (the conventional interrupted code), 1 for every other
-/// failure.
+/// failure. Cancellation arrives either as the app's own [`Cancelled`]
+/// marker (the runtime reported `RunResult::Cancelled`) or as a cancelled
+/// [`RunError`] surfaced from inside a failed run.
 fn exit_code(error: &anyhow::Error) -> u8 {
     let cancelled = error.chain().any(|cause| {
-        cause
-            .downcast_ref::<RunError>()
-            .is_some_and(RunError::is_cancelled)
+        cause.downcast_ref::<Cancelled>().is_some()
+            || cause
+                .downcast_ref::<RunError>()
+                .is_some_and(RunError::is_cancelled)
     });
     if cancelled { 130 } else { 1 }
 }

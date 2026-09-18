@@ -1,7 +1,12 @@
 ---
 name: papergate
 description: Report on the evidence a WG21 paper provides for its need of standardization
-promptforge: 1
+promptforge: 0
+models:
+  writer:
+    keywords: [no-thinking]
+    min_context: 32768
+    description: A careful analysis model suited to structured reasoning and long-context review
 input:
   path: paper.md
   description: The WG21 paper markdown to analyze
@@ -13,9 +18,7 @@ output:
 # Papergate
 
 ```lua
-models.default("writer",
-    "A careful analysis model suited to structured reasoning and long-context review",
-    { thinking = false, temperature = 0, context = 32768 })
+models.default("writer")
 ```
 
 ## Dissect
@@ -44,11 +47,15 @@ Identify every H2 section in this paper:
 For each section, record its name and line number range. Do not output any text.
 
 ```lua
+models.loop(messages.new():user(prose))
 local ranges = {}
 for _, s in ipairs(sections) do
     table.insert(ranges, s.start_line .. ":" .. s.end_line)
 end
-local result = fanout("### Evaluate", ranges)
+-- Arms return their evidence and the join delivers it in section order;
+-- the parent writes the merge. Two live arms may not write one store path.
+local evidence = fanout("### Evaluate", ranges)
+store.write("evidence.md", table.concat(evidence, "\n"))
 ```
 
 ### Evaluate
@@ -72,7 +79,7 @@ For each sentence in the section, write the sentence verbatim including its line
 * describes implementation experience, field experience, deployment experience
 
 ```lua
-store.append("evidence.md", reply)
+return models.infer(prose)
 ```
 
 ## Analyze
@@ -96,6 +103,6 @@ Verdict: exactly one of { n/a, None, Weak, Adequate, Strong, Excellent }
 {up to three bulleted sentences describing the best pieces of evidence}
 
 ```lua
-store.write("report.md", reply)
+store.write("report.md", models.infer(prose))
 return "Done."
 ```

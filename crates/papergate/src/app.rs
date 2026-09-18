@@ -5,10 +5,10 @@
 //! environment, resolves the prompt source (the embedded vendored prompt by
 //! default, `--prompt` from disk otherwise), loads the paper markdown (from
 //! the SQLite paper store for a paper number, verbatim from disk for
-//! `--file`), seeds a fresh per-run store with the paper under the prompt's
-//! declared `paper.md` input key, runs the prompt against the live model
-//! catalog, and extracts the prompt's declared `report.md` output to
-//! `--output`, or to stdout when no path is given.
+//! `--file`), binds the prompt's declared model role to one gateway model,
+//! seeds the run's store with the paper under the prompt's declared
+//! `paper.md` input key, runs the prompt, and extracts the prompt's declared
+//! `report.md` output to `--output`, or to stdout when no path is given.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -17,17 +17,31 @@ use anyhow::{Context, Result, bail};
 use clap::Parser;
 use paperstore::{PaperNum, StorageBackend};
 use paperstore_sqlite::SqliteBackend;
-use promptforge_core::CancelHandle;
-use promptforge_core::execute::{self, ResolutionContext, RunConfig};
-use promptforge_core::model::fetch_model_catalog;
-use promptforge_core::observe::{Observation, Observer};
-use promptforge_core::parser::Prompt;
-use promptforge_core::store::{FileStore, StoreError, StoreRef};
-use promptforge_core::tools::ToolCatalog;
-use promptforge_tool_picker::{Catalog, Config as PickerConfig, ToolPicker};
+use promptforge_api_runtime::client::{
+    GatewayClient, GatewayEndpoint, SecretString, fetch_model_catalog,
+};
+use promptforge_api_runtime::types::cancel::CancelHandle;
+use promptforge_api_runtime::types::models::{ModelCatalog, ModelDescriptor, ModelId};
+use promptforge_api_runtime::types::observe::{Observation, Observer};
+use promptforge_api_runtime::{
+    Environment, Prompt, RequirementCheck, Requirements, RunContext, RunResult, execute,
+};
+use shared_vfs::{Origin, VfsError, VfsRef};
 
-/// The embedded papergate prompt, vendored from the promptforge prompts.
+/// The embedded papergate prompt.
 const DEFAULT_PROMPT: &str = include_str!("../papergate.md");
+
+/// The gateway model the prompt's `writer` role binds to unless `--model`
+/// or `PAPERGATE_MODEL` names another. The capability-named catalog entry
+/// every C++ Alliance gateway serves.
+const DEFAULT_MODEL: &str = "reasoning-large";
+
+/// The mount prefix of the run-scoped store inside the run's virtual
+/// filesystem. Mirrors promptforge's `STORE_MOUNT`, which lives in a crate
+/// private to the promptforge family; the prompt's `store.read("paper.md")`
+/// resolves to `<STORE_MOUNT>/paper.md`, so the host seeds and extracts
+/// through the same prefix.
+const STORE_MOUNT: &str = "/_promptforge/store";
 
 /// The `papergate` command-line interface.
 #[derive(Debug, Parser)]
@@ -49,6 +63,9 @@ pub(crate) struct Cli {
     /// Read the prompt from PATH instead of the embedded papergate prompt.
     #[arg(long, value_name = "PATH")]
     pub(crate) prompt: Option<PathBuf>,
+    /// The gateway model the prompt's writer role binds to.
+    #[arg(long, value_name = "NAME", env = "PAPERGATE_MODEL", default_value = DEFAULT_MODEL)]
+    pub(crate) model: String,
 }
 
 impl Cli {
@@ -77,7 +94,8 @@ pub(crate) enum PaperInput {
     File(PathBuf),
 }
 
-/// A single analysis run: what to read, where to write, and cancellation.
+/// A single analysis run: what to read, where to write, which model, and
+/// cancellation.
 pub(crate) struct RunRequest<'a> {
     /// The paper input to analyze.
     pub(crate) input: &'a PaperInput,
@@ -85,6 +103,8 @@ pub(crate) struct RunRequest<'a> {
     pub(crate) output: Option<&'a Path>,
     /// An optional prompt file overriding the embedded default.
     pub(crate) prompt: Option<&'a Path>,
+    /// The gateway model name the prompt's declared role binds to.
+    pub(crate) model: &'a str,
     /// The cooperative cancellation handle wired to Ctrl-C.
     pub(crate) cancel: CancelHandle,
 }
@@ -96,9 +116,25 @@ impl std::fmt::Debug for RunRequest<'_> {
             .field("input", &self.input)
             .field("output", &self.output)
             .field("prompt", &self.prompt)
+            .field("model", &self.model)
             .finish_non_exhaustive()
     }
 }
+
+/// The run was cancelled cooperatively (Ctrl-C) before it produced a report.
+///
+/// The runtime reports cancellation as a value, not an error; this type
+/// carries it through the `anyhow` chain so `main` can select exit code 130.
+#[derive(Debug)]
+pub(crate) struct Cancelled;
+
+impl std::fmt::Display for Cancelled {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("the run was cancelled")
+    }
+}
+
+impl std::error::Error for Cancelled {}
 
 /// Runs one analysis using the gateway configuration read from the environment.
 ///
@@ -106,14 +142,16 @@ impl std::fmt::Debug for RunRequest<'_> {
 /// Returns an error if either gateway variable is unset or blank, the prompt
 /// fails to parse, the paper input cannot be loaded (`WG21_DATA_DIR` unset,
 /// the number missing from the store or without converted markdown, or the
-/// `--file` path unreadable), the model catalog cannot be fetched, execution
-/// fails (including cooperative cancellation), or the prompt did not produce
-/// its declared `report.md` output.
+/// `--file` path unreadable), the model catalog cannot be fetched or lacks
+/// the requested model, the prompt's declared requirements are unmet by that
+/// model, execution fails, the run is cancelled ([`Cancelled`]), or the
+/// prompt did not produce its declared `report.md` output.
 pub(crate) async fn run(request: RunRequest<'_>) -> Result<()> {
     let RunRequest {
         input,
         output,
         prompt,
+        model,
         cancel,
     } = request;
     let (endpoint, token) = gateway_from_env()?;
@@ -137,42 +175,44 @@ pub(crate) async fn run(request: RunRequest<'_>) -> Result<()> {
     // fails fast, before any network call.
     let paper_md = load_input_markdown(input).await?;
 
-    let models = fetch_model_catalog(&endpoint, &token)
+    let catalog = fetch_model_catalog(&endpoint, &token)
         .await
         .context("fetch the model catalog")?;
-    // The prompt defines its own tools via `tools.add_local`, so the picker
-    // indexes an empty catalog and the run receives an empty tool slice.
-    let picker = ToolPicker::build(Catalog::new(Vec::new()), PickerConfig::default())
-        .context("build the tool picker")?;
+    let descriptor = select_model(&catalog, model)?;
+    let client = GatewayClient::new(
+        GatewayEndpoint::new(&endpoint).context("parse PROMPTFORGE_GATEWAY_URL")?,
+        SecretString::new(token).context("read PROMPTFORGE_GATEWAY_API_KEY")?,
+    );
 
-    let output = output.map(Path::to_owned);
-    let written = output.clone();
-    let execution_id = execution.clone();
-    with_temp_store(&execution, move |store| async move {
-        seed_store(&store, &paper_md)?;
-        let config = RunConfig::new(execution_id.as_str())
-            .observer(observer)
-            .cancel(cancel);
-        execute::run(
-            &parsed,
-            "",
-            ResolutionContext::new(&picker, &models, &ToolCatalog::new(&[])?),
-            &store,
-            config,
-        )
-        .await?;
-        let report = read_report(&store)?;
-        match &output {
-            Some(path) => std::fs::write(path, &report)
-                .with_context(|| format!("write the report to {}", path.display()))?,
-            None => write_stdout(report.as_bytes())?,
+    // Prepare by hand rather than through `Environment::run`: the prepared
+    // context owns the run's fresh store, and the paper must be seeded into
+    // it before the run starts and the report read out of it after.
+    let context = RunContext::new(execution.as_str())
+        .observer(observer)
+        .cancel(cancel)
+        .client(client)
+        .model(descriptor);
+    let (context, requirements) = Environment::new().prepare(&parsed, context);
+    check_requirements(&requirements, model)?;
+    let vfs = context.vfs_handle().clone();
+    seed_store(&vfs, &paper_md)?;
+
+    match execute::run(&parsed, "", context).await {
+        RunResult::Ok(_) => {}
+        RunResult::Cancelled => return Err(Cancelled.into()),
+        RunResult::Failure(error) => {
+            return Err(anyhow::Error::from(error).context("run the papergate prompt"));
         }
-        Ok(())
-    })
-    .await?;
+    }
 
-    if let Some(path) = &written {
-        println!("{}", path.display());
+    let report = read_report(&vfs)?;
+    match output {
+        Some(path) => {
+            std::fs::write(path, &report)
+                .with_context(|| format!("write the report to {}", path.display()))?;
+            println!("{}", path.display());
+        }
+        None => write_stdout(report.as_bytes())?,
     }
     Ok(())
 }
@@ -219,9 +259,9 @@ fn load_paper_md(backend: &impl StorageBackend, num: &PaperNum) -> paperstore::R
 
 /// Reads the gateway environment, requiring both variables.
 ///
-/// The prompt binds its writer model with `models.default("writer", ...)`, so
-/// there is no local-only mode: a missing credential is a startup error naming
-/// both variables rather than a silent downgrade.
+/// The prompt binds its `writer` role through the gateway, so there is no
+/// local-only mode: a missing credential is a startup error naming both
+/// variables rather than a silent downgrade.
 fn gateway_from_env() -> Result<(String, String)> {
     let endpoint = env_optional("PROMPTFORGE_GATEWAY_URL")?;
     let token = env_optional("PROMPTFORGE_GATEWAY_API_KEY")?;
@@ -253,41 +293,90 @@ fn env_optional(name: &str) -> Result<Option<String>> {
     }
 }
 
-/// Runs `f` with a fresh per-run file store under the system temp dir, then
-/// removes the store directory whether the run succeeded or failed.
+/// Picks the descriptor named `model` out of the gateway's catalog.
 ///
-/// The store is per-run scratch: the prompt appends `evidence.md` across its
-/// fanout sections, so a reused directory would leak evidence between runs.
-async fn with_temp_store<F, Fut>(execution: &str, f: F) -> Result<()>
-where
-    F: FnOnce(StoreRef) -> Fut,
-    Fut: std::future::Future<Output = Result<()>>,
-{
-    let dir = std::env::temp_dir().join(execution);
-    let backend = FileStore::new(&dir)
-        .with_context(|| format!("create store directory {}", dir.display()))?;
-    let store = StoreRef::new(Box::new(backend));
-    let result = f(store).await;
-    // Best-effort: a cleanup failure must not mask the run's own outcome.
-    let _ignored = std::fs::remove_dir_all(&dir);
-    result
+/// The runtime binds every role the prompt declares to this one model and
+/// checks the role's hard requirements against it at prepare. A name the
+/// gateway does not serve is an error listing what it does serve, so a
+/// misconfigured `PAPERGATE_MODEL` is diagnosable from the message alone.
+fn select_model(catalog: &ModelCatalog, model: &str) -> Result<ModelDescriptor> {
+    let id = ModelId::gateway(model).with_context(|| format!("parse model name {model:?}"))?;
+    if let Some(descriptor) = catalog.get(&id) {
+        return Ok(descriptor.clone());
+    }
+    let available: Vec<&str> = catalog
+        .models()
+        .iter()
+        .map(|descriptor| descriptor.id().name())
+        .collect();
+    bail!("the gateway does not serve model {model:?}; it serves {available:?}")
 }
 
-/// Seeds the run store with the paper under the prompt's declared input key.
-fn seed_store(store: &StoreRef, paper_md: &str) -> Result<()> {
-    store
-        .write("paper.md", paper_md)
+/// Refuses to run a prompt whose prepare-time requirements are unmet, with
+/// one deliberate tolerance.
+///
+/// The prompt's `writer` role declares the `no-thinking` hard keyword, which
+/// is also how the runtime learns to send `enable_thinking: false` on every
+/// request. The runtime's fill check accepts that keyword only for a model
+/// that can never think, so a `Switchable` model (the only kind the C++
+/// Alliance gateway serves) is reported as unmet even though the request
+/// switch does exactly what the role asks. That one report is tolerated
+/// here and the run proceeds with thinking off; every other unmet
+/// requirement, missing capability, or conflict is an error.
+fn check_requirements(requirements: &Requirements, model: &str) -> Result<()> {
+    if requirements.is_satisfied() {
+        return Ok(());
+    }
+    let tolerated = |unmet: &promptforge_api_runtime::UnmetRequirement| {
+        unmet.check == RequirementCheck::HardKeyword
+            && unmet.required == "no-thinking"
+            && unmet.actual == "Switchable"
+    };
+    let blocking = requirements
+        .unmet_requirements
+        .iter()
+        .any(|unmet| !tolerated(unmet))
+        || !requirements.missing_required.is_empty()
+        || !requirements.conflicts.is_empty();
+    if blocking {
+        bail!("the prompt's declared requirements are unmet by model {model}: {requirements:?}");
+    }
+    eprintln!(
+        "note: model {model} is thinking-switchable; running with thinking off as the \
+         prompt's no-thinking role requests"
+    );
+    Ok(())
+}
+
+/// The full store path of a prompt-relative store file.
+fn store_path(name: &str) -> String {
+    format!("{STORE_MOUNT}/{name}")
+}
+
+/// Seeds the run's store with the paper under the prompt's declared input key.
+///
+/// The access is dropped on return, so its claim never meets the run's own
+/// identities.
+fn seed_store(vfs: &VfsRef, paper_md: &str) -> Result<()> {
+    let access = vfs
+        .acquire(Origin::new("papergate seed"))
+        .context("open the run store for seeding")?;
+    access
+        .write(&store_path("paper.md"), paper_md.as_bytes())
         .context("seed the run store with paper.md")
 }
 
-/// Reads the prompt's declared output from the run store.
+/// Reads the prompt's declared output from the run's store.
 ///
 /// A missing `report.md` is an explicit error naming the prompt's output
 /// contract, never an empty write.
-fn read_report(store: &StoreRef) -> Result<String> {
-    match store.read("report.md") {
+fn read_report(vfs: &VfsRef) -> Result<String> {
+    let access = vfs
+        .acquire(Origin::new("papergate report"))
+        .context("open the run store for the report")?;
+    match access.read_string(&store_path("report.md")) {
         Ok(report) => Ok(report),
-        Err(error @ StoreError::NotFound { .. }) => Err(error).context(
+        Err(error @ VfsError::NotFound(_)) => Err(error).context(
             "the prompt did not produce its declared output: report.md is missing \
              from the run store",
         ),
@@ -310,23 +399,58 @@ impl Observer for StderrObserver {
 
 #[cfg(test)]
 mod tests {
+    use std::num::NonZeroU32;
     use std::path::Path;
 
     use clap::Parser;
     use paperstore::PaperNum;
     use paperstore_sqlite::SqliteBackend;
-    use promptforge_core::store::{FileStore, StoreRef};
+    use promptforge_api_runtime::types::models::{
+        ModelCatalog, ModelDescriptor, ModelId, ThinkingMode,
+    };
+    use promptforge_api_runtime::types::observe::NullObserver;
+    use promptforge_api_runtime::{Environment, Prompt, RunContext};
+    use shared_vfs::{MemoryBackend, Origin, VfsRef};
     use tempfile::TempDir;
 
     use super::{
-        Cli, PaperInput, load_input_markdown, load_paper_md, read_report, seed_store,
-        with_temp_store,
+        Cli, DEFAULT_MODEL, DEFAULT_PROMPT, PaperInput, STORE_MOUNT, check_requirements,
+        load_input_markdown, load_paper_md, read_report, seed_store, select_model, store_path,
     };
 
-    fn file_store(dir: &TempDir) -> StoreRef {
-        let backend =
-            FileStore::new(dir.path()).unwrap_or_else(|e| panic!("create file store: {e}"));
-        StoreRef::new(Box::new(backend))
+    /// A run store shaped like the runtime's: a fresh memory backend at the
+    /// store mount.
+    fn run_store() -> VfsRef {
+        VfsRef::builder()
+            .mount(STORE_MOUNT, MemoryBackend::new())
+            .build()
+    }
+
+    fn read_store(vfs: &VfsRef, name: &str) -> String {
+        let access = vfs
+            .acquire(Origin::new("test read"))
+            .unwrap_or_else(|e| panic!("acquire: {e}"));
+        access
+            .read_string(&store_path(name))
+            .unwrap_or_else(|e| panic!("read {name}: {e}"))
+    }
+
+    fn write_store(vfs: &VfsRef, name: &str, contents: &str) {
+        let access = vfs
+            .acquire(Origin::new("test write"))
+            .unwrap_or_else(|e| panic!("acquire: {e}"));
+        access
+            .write(&store_path(name), contents.as_bytes())
+            .unwrap_or_else(|e| panic!("write {name}: {e}"));
+    }
+
+    fn descriptor(name: &str, context: u32, thinking: ThinkingMode) -> ModelDescriptor {
+        ModelDescriptor::new(
+            ModelId::gateway(name).unwrap_or_else(|e| panic!("model id: {e}")),
+            "a test model",
+            NonZeroU32::new(context).unwrap_or_else(|| panic!("non-zero context")),
+            thinking,
+        )
     }
 
     fn paper_num() -> PaperNum {
@@ -365,7 +489,10 @@ mod tests {
         let cli = Cli::parse_from(["papergate", "p4003r2"]);
         assert_eq!(cli.paper.as_ref().map(PaperNum::as_str), Some("P4003R2"));
         assert_eq!(cli.file, None);
-        assert_eq!(cli.output, None, "no --output means the report goes to stdout");
+        assert_eq!(
+            cli.output, None,
+            "no --output means the report goes to stdout"
+        );
         assert_eq!(cli.prompt, None);
 
         let cli = Cli::parse_from([
@@ -385,6 +512,21 @@ mod tests {
         let cli = Cli::parse_from(["papergate", "--file", "paper.md"]);
         assert_eq!(cli.paper, None);
         assert_eq!(cli.file.as_deref(), Some(Path::new("paper.md")));
+    }
+
+    #[test]
+    fn parser_defaults_the_model_and_accepts_an_override() {
+        let cli = Cli::parse_from(["papergate", "--file", "paper.md"]);
+        assert_eq!(cli.model, DEFAULT_MODEL);
+
+        let cli = Cli::parse_from([
+            "papergate",
+            "--file",
+            "paper.md",
+            "--model",
+            "analysis-large",
+        ]);
+        assert_eq!(cli.model, "analysis-large");
     }
 
     #[test]
@@ -420,6 +562,92 @@ mod tests {
             "clap must reject a trailing argument instead of silently dropping it",
         );
         assert!(Cli::try_parse_from(["papergate", "--bogus", "P4003R2"]).is_err());
+    }
+
+    #[test]
+    fn embedded_prompt_prepares_against_a_switchable_default_model() {
+        let prompt = Prompt::parse(DEFAULT_PROMPT, "test", &NullObserver::default())
+            .unwrap_or_else(|e| panic!("the embedded prompt must parse: {e}"));
+        let context = RunContext::new("test").model(descriptor(
+            DEFAULT_MODEL,
+            393_216,
+            ThinkingMode::Switchable,
+        ));
+
+        let (context, requirements) = Environment::new().prepare(&prompt, context);
+
+        check_requirements(&requirements, DEFAULT_MODEL).unwrap_or_else(|e| {
+            panic!("a switchable model must be accepted for the no-thinking writer role: {e}")
+        });
+        assert!(
+            context.vfs_handle().acquire(Origin::new("probe")).is_ok(),
+            "prepare must hand back a usable run store",
+        );
+    }
+
+    #[test]
+    fn embedded_prompt_prepares_cleanly_against_a_never_thinking_model() {
+        let prompt = Prompt::parse(DEFAULT_PROMPT, "test", &NullObserver::default())
+            .unwrap_or_else(|e| panic!("the embedded prompt must parse: {e}"));
+        let context =
+            RunContext::new("test").model(descriptor("plain", 393_216, ThinkingMode::Never));
+
+        let (_, requirements) = Environment::new().prepare(&prompt, context);
+
+        assert!(
+            requirements.is_satisfied(),
+            "a never-thinking model satisfies the writer role outright: {requirements:?}",
+        );
+    }
+
+    #[test]
+    fn a_too_small_context_window_is_refused() {
+        let prompt = Prompt::parse(DEFAULT_PROMPT, "test", &NullObserver::default())
+            .unwrap_or_else(|e| panic!("the embedded prompt must parse: {e}"));
+        let context =
+            RunContext::new("test").model(descriptor("tiny", 8192, ThinkingMode::Switchable));
+
+        let (_, requirements) = Environment::new().prepare(&prompt, context);
+
+        let error = match check_requirements(&requirements, "tiny") {
+            Ok(()) => panic!("an 8k model must fail the writer role's 32k minimum"),
+            Err(error) => error.to_string(),
+        };
+        assert!(
+            error.contains("tiny") && error.contains("ContextMinimum"),
+            "the error must name the model and the failed check: {error}",
+        );
+    }
+
+    #[test]
+    fn select_model_returns_the_named_descriptor() {
+        let wanted = descriptor("reasoning-large", 393_216, ThinkingMode::Switchable);
+        let catalog = ModelCatalog::new(vec![
+            descriptor("other", 8192, ThinkingMode::Never),
+            wanted.clone(),
+        ])
+        .unwrap_or_else(|e| panic!("catalog: {e}"));
+
+        let selected =
+            select_model(&catalog, "reasoning-large").unwrap_or_else(|e| panic!("select: {e}"));
+
+        assert_eq!(selected, wanted);
+    }
+
+    #[test]
+    fn select_model_names_the_available_models_when_missing() {
+        let catalog = ModelCatalog::new(vec![descriptor("other", 8192, ThinkingMode::Never)])
+            .unwrap_or_else(|e| panic!("catalog: {e}"));
+
+        let error = match select_model(&catalog, "reasoning-large") {
+            Ok(descriptor) => panic!("an unknown model must fail, got {descriptor:?}"),
+            Err(error) => error.to_string(),
+        };
+
+        assert!(
+            error.contains("reasoning-large") && error.contains("other"),
+            "the error must name the requested and the served models: {error}",
+        );
     }
 
     #[test]
@@ -485,37 +713,29 @@ mod tests {
 
     #[test]
     fn seeding_writes_the_input_verbatim_under_paper_md() {
-        let dir = TempDir::new().unwrap_or_else(|e| panic!("create temp dir: {e}"));
-        let store = file_store(&dir);
+        let vfs = run_store();
         let contents = "# Paper\n\nunicode \u{201c}quotes\u{201d} and trailing space \n\n";
 
-        seed_store(&store, contents).unwrap_or_else(|e| panic!("seed store: {e}"));
+        seed_store(&vfs, contents).unwrap_or_else(|e| panic!("seed store: {e}"));
 
-        let readback = store
-            .read("paper.md")
-            .unwrap_or_else(|e| panic!("read paper.md: {e}"));
-        assert_eq!(readback, contents);
+        assert_eq!(read_store(&vfs, "paper.md"), contents);
     }
 
     #[test]
     fn read_report_returns_the_store_report_verbatim() {
-        let dir = TempDir::new().unwrap_or_else(|e| panic!("create temp dir: {e}"));
-        let store = file_store(&dir);
-        store
-            .write("report.md", "Verdict: Strong\n")
-            .unwrap_or_else(|e| panic!("write report.md: {e}"));
+        let vfs = run_store();
+        write_store(&vfs, "report.md", "Verdict: Strong\n");
 
-        let report = read_report(&store).unwrap_or_else(|e| panic!("read report: {e}"));
+        let report = read_report(&vfs).unwrap_or_else(|e| panic!("read report: {e}"));
 
         assert_eq!(report, "Verdict: Strong\n");
     }
 
     #[test]
     fn missing_report_is_an_explicit_contract_error() {
-        let dir = TempDir::new().unwrap_or_else(|e| panic!("create temp dir: {e}"));
-        let store = file_store(&dir);
+        let vfs = run_store();
 
-        let error = match read_report(&store) {
+        let error = match read_report(&vfs) {
             Ok(report) => panic!("a missing report.md must fail, got {report:?}"),
             Err(error) => error.to_string(),
         };
@@ -523,41 +743,6 @@ mod tests {
         assert!(
             error.contains("declared output") && error.contains("report.md"),
             "the error must name the prompt's output contract: {error}",
-        );
-    }
-
-    #[tokio::test]
-    async fn temp_store_dir_is_removed_after_a_successful_run() {
-        let execution = format!("papergate-test-{:016x}", fastrand::u64(..));
-        let dir = std::env::temp_dir().join(&execution);
-        let probe = dir.clone();
-
-        let result = with_temp_store(&execution, move |store| async move {
-            assert!(probe.is_dir(), "the store dir must exist during the run");
-            seed_store(&store, "# Paper\n")?;
-            Ok(())
-        })
-        .await;
-
-        result.unwrap_or_else(|e| panic!("run: {e}"));
-        assert!(
-            !dir.exists(),
-            "the store dir must be removed after a successful run",
-        );
-    }
-
-    #[tokio::test]
-    async fn temp_store_dir_is_removed_after_a_failed_run() {
-        let execution = format!("papergate-test-{:016x}", fastrand::u64(..));
-        let dir = std::env::temp_dir().join(&execution);
-
-        let result =
-            with_temp_store(&execution, |_store| async { Err(anyhow::anyhow!("boom")) }).await;
-
-        assert!(result.is_err(), "the run's failure must propagate");
-        assert!(
-            !dir.exists(),
-            "the store dir must be removed after a failed run",
         );
     }
 }
