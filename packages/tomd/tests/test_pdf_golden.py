@@ -436,7 +436,7 @@ def test_p4047r0_table_family_pins():
     Independent of the full golden so a re-bless can never silently hand
     a prediction table back to Pass 1's 2-column shards.
     """
-    pdf_path = _GOLDEN / "p4047r0.pdf"
+    pdf_path = _GOLDEN / "sources" / "p4047r0.pdf"
     if not pdf_path.is_file():
         pytest.skip(f"missing PDF fixture: {pdf_path}")
     sections = run_pipeline(pdf_path).sections
