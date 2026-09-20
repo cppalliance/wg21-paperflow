@@ -79,6 +79,14 @@
     "table": 1.0,
     "text": 0.93
   },
+  "p3978r0": {
+    "code": 0.35,
+    "frontmatter": 1.0,
+    "heading": 0.81,
+    "list": 1.0,
+    "table": 0.75,
+    "text": 0.69
+  },
   "p4020r0": {
     "code": 1.0,
     "frontmatter": 1.0,

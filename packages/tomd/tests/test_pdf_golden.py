@@ -501,7 +501,7 @@ def test_p3978r0_table_family_pins():
     mapping keeps its 8x4 shape. Independent of the full golden so a
     re-bless can never silently fuse the polls again.
     """
-    pdf_path = _GOLDEN / "p3978r0.pdf"
+    pdf_path = _GOLDEN / "sources" / "p3978r0.pdf"
     if not pdf_path.is_file():
         pytest.skip(f"missing PDF fixture: {pdf_path}")
     sections = run_pipeline(pdf_path).sections
