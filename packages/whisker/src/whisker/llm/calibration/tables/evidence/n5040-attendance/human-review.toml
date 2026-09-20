@@ -1,0 +1,20 @@
+# N5040 human-review punch-list (ground truth from manual review).
+#
+# Every defect listed here must appear in the per-unit dump results.
+# Every unit NOT listed here must score as "aligned".
+# Extra fails on aligned units are a mismatch, not a silent pass.
+
+[defects.label_shift]
+header_contains = ["Name", "National Body"]
+first_header_cell_empty = true
+description = "Phantom column: header[1] is empty, body values shifted left"
+
+[defects.continuation]
+first_header_values = [
+  "de Wever, Mark",
+  "Kawulak, Robert",
+  "Nash, Phil",
+  "Tanwar Preeti",
+  "Mara Bos",
+]
+description = "Page-break promoted data rows to GFM headers"
