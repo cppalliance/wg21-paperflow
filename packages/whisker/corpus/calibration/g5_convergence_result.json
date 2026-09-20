@@ -1,0 +1,39 @@
+{
+  "fitted_tau": 0.9341,
+  "criterion_a_zero_miss": {
+    "pass": true,
+    "cases": [
+      {
+        "pid": "p1068r11-markitdown",
+        "unigram_coverage": 0.2624,
+        "flagged": true
+      },
+      {
+        "pid": "p2040r0-markitdown",
+        "unigram_coverage": 0.3917,
+        "flagged": true
+      }
+    ]
+  },
+  "criterion_b_tomd_fpr_ceiling": {
+    "pass": true,
+    "n": 10,
+    "false_positives": [],
+    "fpr": 0.0
+  },
+  "criterion_c_bootstrap_overlap": {
+    "n_pos": 2,
+    "n_neg": 20,
+    "fpr_band": [
+      0.0,
+      0.3333
+    ],
+    "tpr_band": [
+      0.0,
+      1.0
+    ],
+    "g4_holdout_fpr_point_estimate": 0.2222,
+    "g4_holdout_fpr_in_band": true
+  },
+  "decision": "promotion_eligible"
+}

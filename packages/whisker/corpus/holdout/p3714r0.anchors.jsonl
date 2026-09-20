@@ -1,0 +1,16 @@
+{"anchor_id": "p3714r0-meta-01", "stratum": "metadata", "quote": "Virtual values have virtual value", "source_location": {"page": 1}, "expected_candidate_status": "present_in_candidate", "notes": "Title"}
+{"anchor_id": "p3714r0-meta-02", "stratum": "metadata", "quote": "P3714R0", "source_location": {"page": 1}, "expected_candidate_status": "present_in_candidate", "notes": "Document number"}
+{"anchor_id": "p3714r0-meta-03", "stratum": "metadata", "quote": "2025-05-19", "source_location": {"page": 1}, "expected_candidate_status": "present_in_candidate", "notes": "Date"}
+{"anchor_id": "p3714r0-meta-04", "stratum": "metadata", "quote": "Joshua Cranmer", "source_location": {"page": 1}, "expected_candidate_status": "present_in_candidate", "notes": "Author"}
+{"anchor_id": "p3714r0-meta-05", "stratum": "metadata", "quote": "SG6", "source_location": {"page": 1}, "expected_candidate_status": "present_in_candidate", "notes": "Audience"}
+{"anchor_id": "p3714r0-prose-01", "stratum": "prose", "quote": "P3565 proposes a model of floating-point semantics", "source_location": {"page": 1}, "expected_candidate_status": "present_in_candidate", "notes": "Opening claim"}
+{"anchor_id": "p3714r0-prose-02", "stratum": "prose", "quote": "virtual value that could be more precise", "source_location": {"page": 1}, "expected_candidate_status": "present_in_candidate", "notes": "Core model description"}
+{"anchor_id": "p3714r0-prose-03", "stratum": "prose", "quote": "memory_order_consume", "source_location": {"page": 1}, "expected_candidate_status": "present_in_candidate", "notes": "Technical comparison"}
+{"anchor_id": "p3714r0-prose-04", "stratum": "prose", "quote": "pointer provenance", "source_location": {"page": 1}, "expected_candidate_status": "present_in_candidate", "notes": "Technical comparison"}
+{"anchor_id": "p3714r0-code-01", "stratum": "code", "quote": "float sum(float a, float b)", "source_location": {"page": 1}, "expected_candidate_status": "present_in_candidate", "notes": "Function declaration"}
+{"anchor_id": "p3714r0-code-02", "stratum": "code", "quote": "float mul = x * y;", "source_location": {"page": 1}, "expected_candidate_status": "present_in_candidate", "notes": "Multiplication expression"}
+{"anchor_id": "p3714r0-code-03", "stratum": "code", "quote": "assert(mul + z == sum(mul, z));", "source_location": {"page": 1}, "expected_candidate_status": "present_in_candidate", "notes": "Assertion under discussion"}
+{"anchor_id": "p3714r0-punct-01", "stratum": "punctuation", "quote": "#pragma STDC", "source_location": {"page": 1}, "expected_candidate_status": "present_in_candidate", "notes": "Preprocessor spelling"}
+{"anchor_id": "p3714r0-punct-02", "stratum": "punctuation", "quote": "command-line flags", "source_location": {"page": 2}, "expected_candidate_status": "present_in_candidate", "notes": "Hyphenated phrase"}
+{"anchor_id": "p3714r0-prose-05", "stratum": "prose", "quote": "FLT_EVAL_METHOD", "source_location": {"page": 1}, "expected_candidate_status": "present_in_candidate", "notes": "C floating-point mechanism"}
+{"anchor_id": "p3714r0-math-01", "stratum": "math", "quote": "mul + z == sum(mul, z)", "source_location": {"page": 1}, "expected_candidate_status": "present_in_candidate", "notes": "Floating-point equality expression under discussion"}

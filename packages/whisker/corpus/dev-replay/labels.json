@@ -1,0 +1,210 @@
+{
+  "$schema": "dev-replay-labels-v1",
+  "description": "Ground truth labels for the 9 Golden PR dev-replay papers. Defect groups are mechanically verified against source and ideal.",
+  "verified_date": "2026-07-17",
+  "papers": {
+    "p4020r0": {
+      "pr": 282,
+      "source_type": "html",
+      "human_verdict": "request_changes",
+      "defect_groups": [
+        {
+          "type": "heading_level_drift",
+          "description": "References heading is H3 in ideal but H2 in source",
+          "source_evidence": "source <h2>References</h2>",
+          "ideal_evidence": "ideal line 96: ### References",
+          "affected_count": 1,
+          "severity": "high"
+        }
+      ],
+      "expected_llm_verdict": "review",
+      "expected_det_verdict": "pass"
+    },
+    "p2040r0": {
+      "pr": 283,
+      "source_type": "pdf",
+      "human_verdict": "merge",
+      "defect_groups": [],
+      "expected_llm_verdict": "pass",
+      "expected_det_verdict": "pass"
+    },
+    "p0957r8": {
+      "pr": 284,
+      "source_type": "pdf",
+      "human_verdict": "request_changes",
+      "defect_groups": [
+        {
+          "type": "page_content_omission",
+          "description": "Page 13 entirely missing: 2 figures, 1 table, connecting prose",
+          "source_evidence": "PyMuPDF page 13: 2 images, Table 2, prose 'Because of pointer semantics...'",
+          "ideal_evidence": "No page-13 content in ideal",
+          "affected_count": 1,
+          "severity": "critical",
+          "page": 13
+        },
+        {
+          "type": "toc_leak",
+          "description": "TOC lines retained in body (ideal lines 10-64)",
+          "source_evidence": "PDF TOC on pages 1-2",
+          "ideal_evidence": "## Table of Contents heading in ideal",
+          "affected_count": 1,
+          "severity": "high"
+        },
+        {
+          "type": "table_corruption",
+          "description": "Table 4 drops '2' from 'mov al, 2'; Table 5 concatenates instructions",
+          "source_evidence": "PDF Table 4/5 rows",
+          "ideal_evidence": "ideal lines 519, 527",
+          "affected_count": 2,
+          "severity": "high"
+        }
+      ],
+      "expected_llm_verdict": "review",
+      "expected_det_verdict": "not-llm-readable"
+    },
+    "p3556r0": {
+      "pr": 285,
+      "source_type": "pdf",
+      "human_verdict": "request_changes",
+      "defect_groups": [
+        {
+          "type": "toc_leak",
+          "description": "TOC lines retained (ideal lines 12-25)",
+          "source_evidence": "PDF page 1 Contents heading",
+          "ideal_evidence": "## Contents in ideal body",
+          "affected_count": 1,
+          "severity": "medium"
+        }
+      ],
+      "expected_llm_verdict": "review",
+      "expected_det_verdict": "not-llm-readable"
+    },
+    "p1068r11": {
+      "pr": 286,
+      "source_type": "pdf",
+      "human_verdict": "request_changes",
+      "defect_groups": [
+        {
+          "type": "heading_hierarchy",
+          "description": "VIII. Past poll results should be H2; telecon dates H3",
+          "source_evidence": "PDF font 16pt for section, 13pt for telecons",
+          "ideal_evidence": "Inconsistent H2/H3/H4 in ideal",
+          "affected_count": 5,
+          "severity": "critical"
+        },
+        {
+          "type": "html_entities",
+          "description": "13 &lt; artifacts across nine lines should be literal <",
+          "source_evidence": "PDF has literal < in code",
+          "ideal_evidence": "&lt; in ideal body text",
+          "affected_count": 13,
+          "severity": "high"
+        },
+        {
+          "type": "table_corruption",
+          "description": "Six poll table header cells have SF split as S due to vertical text wrap",
+          "source_evidence": "PDF pages 8-9: cells contain vertically wrapped SF text (S at x=77.25, F below)",
+          "ideal_evidence": "Candidate lines 382, 394, 405, 415, 425, 433: |S|F|N|A|SA| instead of |SF|F|N|A|SA|",
+          "affected_count": 6,
+          "severity": "critical",
+          "pages": [8, 9]
+        }
+      ],
+      "expected_llm_verdict": "review",
+      "expected_det_verdict": "review"
+    },
+    "p1122r3": {
+      "pr": 290,
+      "source_type": "pdf",
+      "human_verdict": "request_changes",
+      "defect_groups": [
+        {
+          "type": "front_matter_error",
+          "description": "Title wrong; date missing; reply-to has 18-item pileup instead of single author",
+          "source_evidence": "PDF cover page metadata",
+          "ideal_evidence": "Front matter block in ideal",
+          "affected_count": 3,
+          "severity": "critical"
+        },
+        {
+          "type": "toc_leak",
+          "description": "TOC leaked at ideal lines 25-42",
+          "source_evidence": "PDF pp1-2 with right-column page numbers",
+          "ideal_evidence": "TOC headings and page numbers in ideal body",
+          "affected_count": 1,
+          "severity": "critical"
+        }
+      ],
+      "expected_llm_verdict": "review",
+      "expected_det_verdict": "not-llm-readable"
+    },
+    "p0533r9": {
+      "pr": 293,
+      "source_type": "pdf",
+      "human_verdict": "request_changes",
+      "defect_groups": [
+        {
+          "type": "qualifier_omission",
+          "description": "151 constexpr qualifiers missing from function declarations",
+          "source_evidence": "PDF has 231 constexpr tokens; 116 constexpr decl patterns",
+          "ideal_evidence": "Ideal has 80 constexpr tokens; 17 constexpr decl patterns",
+          "affected_count": 151,
+          "severity": "critical",
+          "token": "constexpr"
+        },
+        {
+          "type": "toc_leak",
+          "description": "TOC CONTENTS heading leaked",
+          "source_evidence": "PDF TOC page",
+          "ideal_evidence": "CONTENTS label in ideal body",
+          "affected_count": 1,
+          "severity": "high"
+        },
+        {
+          "type": "table_flattened",
+          "description": "Source Tables II-III are real tables but ideal flattens them to prose",
+          "source_evidence": "PDF p.4 3-column and 2-column tables",
+          "ideal_evidence": "ideal lines 206-212 as prose",
+          "affected_count": 2,
+          "severity": "critical"
+        }
+      ],
+      "expected_llm_verdict": "review",
+      "expected_det_verdict": "not-llm-readable"
+    },
+    "p3411r5": {
+      "pr": 294,
+      "source_type": "html",
+      "human_verdict": "request_changes",
+      "defect_groups": [
+        {
+          "type": "punctuation_omission",
+          "description": "One period dropped after 'any_view'",
+          "source_evidence": "source HTML: any_view</code>.",
+          "ideal_evidence": "ideal omits trailing period",
+          "affected_count": 1,
+          "severity": "low"
+        }
+      ],
+      "expected_llm_verdict": "review",
+      "expected_det_verdict": "pass"
+    },
+    "p3953r0": {
+      "pr": 295,
+      "source_type": "html",
+      "human_verdict": "request_changes",
+      "defect_groups": [
+        {
+          "type": "heading_label_retained",
+          "description": "Four H2 headings retain source span.secno structural labels (1. through 4.)",
+          "source_evidence": "Source <h2><span class='secno'>1. </span>Introduction</h2> etc.",
+          "ideal_evidence": "Candidate headings include '1. Introduction' instead of 'Introduction'",
+          "affected_count": 4,
+          "severity": "high"
+        }
+      ],
+      "expected_llm_verdict": "review",
+      "expected_det_verdict": "review"
+    }
+  }
+}
