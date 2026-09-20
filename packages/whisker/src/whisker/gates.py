@@ -19,7 +19,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
-__all__ = ["GateResult", "run_gates"]
+__all__ = ["GateResult", "iter_body_lines", "run_gates", "split_front_matter"]
 
 
 @dataclass(frozen=True)
@@ -34,7 +34,7 @@ _HEADING_RE = re.compile(r"^(#{1,6})\s+\S")
 _REQUIRED_FRONT_MATTER_KEYS = ("title", "document")
 
 
-def _split_front_matter(md_text: str) -> tuple[list[str] | None, str]:
+def split_front_matter(md_text: str) -> tuple[list[str] | None, str]:
     """Return (front-matter lines, body). Front matter is None if absent.
 
     A valid block is a leading ``---`` line and the next ``---`` terminator.
@@ -75,7 +75,7 @@ def _gate_front_matter(fm_lines: list[str] | None) -> GateResult:
     )
 
 
-def _iter_body_lines(body: str):
+def iter_body_lines(body: str):
     """Yield (line, in_fence) skipping nothing; tracks fenced-code state."""
     in_fence = False
     fence_marker = ""
@@ -95,7 +95,7 @@ def _iter_body_lines(body: str):
 
 def _gate_heading_monotone(body: str) -> GateResult:
     prev = 0
-    for line, kind in _iter_body_lines(body):
+    for line, kind in iter_body_lines(body):
         if kind != "text":
             continue
         m = _HEADING_RE.match(line)
@@ -115,7 +115,7 @@ def _gate_heading_monotone(body: str) -> GateResult:
 def _gate_no_empty_code(body: str) -> GateResult:
     pending_open = False
     saw_content = False
-    for line, kind in _iter_body_lines(body):
+    for line, kind in iter_body_lines(body):
         if kind == "fence_toggle":
             if not pending_open:
                 pending_open = True
@@ -129,11 +129,67 @@ def _gate_no_empty_code(body: str) -> GateResult:
     return GateResult("no_empty_code", True)
 
 
+_TOC_LABEL_RE = re.compile(
+    r"^(?:#{1,6}\s+)?(?:table\s+of\s+contents|contents)\s*:?\s*$", re.IGNORECASE
+)
+_HEADING_TEXT_RE = re.compile(r"^#{1,6}\s+(\S.*)$")
+_PAGE_SUFFIX_RE = re.compile(r"^(?P<stem>.*\S)\s+(?P<page>\d{1,4})$")
+
+
+def _normalize_heading_text(text: str) -> str:
+    return re.sub(r"\s+", " ", text).strip().lower()
+
+
+def _gate_no_toc_leak(body: str) -> GateResult:
+    """Detect table-of-contents content that leaked into the body.
+
+    tomd's contract strips the TOC; body headings replace it. Two leak
+    signatures survive that strip failing (PRs #290/#293, golden-qa-gap):
+
+    a) A standalone "Contents" / "Table of Contents" line (plain or heading).
+    b) A page-numbered duplicate: one heading is another heading's text plus
+       a trailing bare number (the TOC page number), e.g. "## 1. Introduction 3"
+       alongside "## 1. Introduction". Matching is pairwise so unrelated
+       numbered headings ("## Step 1" / "## Step 2") never collide.
+    """
+    suffixed_stems: dict[str, str] = {}
+    seen_plain: set[str] = set()
+    for line, kind in iter_body_lines(body):
+        if kind != "text":
+            continue
+        stripped = line.strip()
+        if _TOC_LABEL_RE.match(stripped):
+            return GateResult("no_toc_leak", False, f"TOC label in body: {stripped!r}")
+        m = _HEADING_TEXT_RE.match(stripped)
+        if not m:
+            continue
+        text = _normalize_heading_text(m.group(1))
+        pm = _PAGE_SUFFIX_RE.match(text)
+        if pm:
+            stem = pm.group("stem")
+            suffixed_stems.setdefault(stem, text)
+            if stem in seen_plain:
+                return GateResult(
+                    "no_toc_leak",
+                    False,
+                    f"page-numbered duplicate heading {text!r} after {stem!r} (TOC leak)",
+                )
+        if text in suffixed_stems and suffixed_stems[text] != text:
+            return GateResult(
+                "no_toc_leak",
+                False,
+                f"duplicate heading {text!r} previously seen as "
+                f"{suffixed_stems[text]!r} (TOC leak)",
+            )
+        seen_plain.add(text)
+    return GateResult("no_toc_leak", True)
+
+
 _TABLE_SEP_RE = re.compile(r"^\s*\|?\s*:?-{2,}:?\s*(\|\s*:?-{2,}:?\s*)*\|?\s*$")
 
 
 def _gate_no_empty_table(body: str) -> GateResult:
-    lines = [ln for ln, kind in _iter_body_lines(body) if kind == "text"]
+    lines = [ln for ln, kind in iter_body_lines(body) if kind == "text"]
     for i, line in enumerate(lines):
         # A GFM table separator must contain a pipe and sit directly under a
         # header row that also has a pipe. Without the pipe checks a bare "---"
@@ -152,11 +208,12 @@ def _gate_no_empty_table(body: str) -> GateResult:
 
 def run_gates(md_text: str) -> list[GateResult]:
     """Run every tier-0 structural gate. All gates are hard (FAIL on failure)."""
-    fm_lines, body = _split_front_matter(md_text)
+    fm_lines, body = split_front_matter(md_text)
     return [
         _gate_non_empty(body),
         _gate_front_matter(fm_lines),
         _gate_heading_monotone(body),
         _gate_no_empty_code(body),
         _gate_no_empty_table(body),
+        _gate_no_toc_leak(body),
     ]

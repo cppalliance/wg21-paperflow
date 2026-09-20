@@ -40,16 +40,20 @@ from lxml import html as lxml_html
 from pylatexenc.latex2text import LatexNodes2Text
 from rapidfuzz.distance import Levenshtein as _Lev
 
-from whisker.gates import _split_front_matter
+from whisker.gates import split_front_matter
 
 __all__ = [
     "clean_string",
     "content_recall",
     "content_tokens",
     "has_headings",
+    "heading_level_parity",
     "mhs",
     "normalized_edit_distance",
     "normalized_text",
+    "parse_headings",
+    "punct_content_recall",
+    "punct_content_tokens",
     "replace_textcircle",
     "safe_latex_to_text",
     "teds",
@@ -293,6 +297,8 @@ def safe_latex_to_text(latex: str, fallback: str | None = None, latex_type: str 
         with _suppress_pylatexenc_warnings():
             return LatexNodes2Text().latex_to_text(stripped)
     except Exception:
+        # Normalization fallback firewall: malformed source can make pylatexenc
+        # raise outside its documented parse errors; preserve the raw content.
         return stripped if fallback is None else fallback
 
 
@@ -329,6 +335,8 @@ def textblock2unicode(text: str) -> str:
                 )
                 removal_positions.append((match.start(), match.end(), unicode_content))
         except Exception:
+            # Per-formula fallback firewall: one malformed inline expression
+            # must remain unchanged rather than abort whole-document scoring.
             continue
     for start, end, unicode_content in sorted(removal_positions, reverse=True):
         text = text[:start] + unicode_content.strip() + text[end:]
@@ -369,7 +377,47 @@ def content_tokens(text: str) -> list[str]:
     return _CONTENT_TOKEN_RE.findall(textblock2unicode(text).lower())
 
 
-def content_recall(candidate: str, reference: str) -> float:
+# Punctuation-preserving tokenizer: like content_tokens but keeps operator and
+# bracket characters that clean_string / \w+ discard. Split on whitespace, keep
+# every non-empty fragment.  This captures `<=`, `>=`, `T&&`, `->`, `::`, `<`,
+# `>` as discrete tokens so a recall comparison detects operator corruption that
+# the alphanumeric tokenizer is blind to (Auditv3 E28).
+_PUNCT_TOKEN_RE = re.compile(r"\S+", re.UNICODE)
+
+
+def punct_content_tokens(text: str) -> list[str]:
+    """Whitespace-split tokens preserving operators and brackets.
+
+    Unlike ``content_tokens`` (``\\w+``), this tokenizer keeps every non-
+    whitespace run, so ``<=``, ``>=``, ``T&&``, ``->`` survive as tokens.
+    LaTeX folding via ``textblock2unicode`` is still applied for parity with
+    the alphanumeric path. Deterministic.
+    """
+    return _PUNCT_TOKEN_RE.findall(textblock2unicode(text).lower())
+
+
+def punct_content_recall(candidate: str, reference: str) -> float:
+    """Multiset punctuation-preserving recall of reference tokens in candidate.
+
+    The same multiset recall as ``content_recall`` but using ``punct_content_
+    tokens`` instead of ``content_tokens``. The divergence ``content_recall -
+    punct_content_recall`` isolates punctuation-only corruption that the
+    alphanumeric recall is blind to. Deterministic.
+    """
+    ref = Counter(punct_content_tokens(reference))
+    if not ref:
+        return 1.0
+    hyp = Counter(punct_content_tokens(candidate))
+    matched = sum(min(count, hyp[token]) for token, count in ref.items())
+    return matched / sum(ref.values())
+
+
+def content_recall(
+    candidate: str,
+    reference: str,
+    *,
+    candidate_counts: Counter[str] | None = None,
+) -> float:
     """Multiset word recall of the reference content present in the candidate.
 
     The Unstructured ``cct-%missing`` complement (1 - fraction missing): the
@@ -380,11 +428,18 @@ def content_recall(candidate: str, reference: str) -> float:
     section" blind spot edit distance hides. Extra or duplicated candidate words
     are NOT penalized (additive drift is a separate, score-path signal). An
     empty reference yields 1.0 (nothing to recall). Deterministic.
+
+    ``candidate_counts`` reuses a precomputed ``Counter(content_tokens(candidate))``
+    when the same markdown is scored against many reference pages.
     """
     ref = Counter(content_tokens(reference))
     if not ref:
         return 1.0
-    hyp = Counter(content_tokens(candidate))
+    hyp = (
+        candidate_counts
+        if candidate_counts is not None
+        else Counter(content_tokens(candidate))
+    )
     matched = sum(min(count, hyp[token]) for token, count in ref.items())
     return matched / sum(ref.values())
 
@@ -580,18 +635,18 @@ def _inline_text(node: dict) -> str:
     return "".join(parts)
 
 
-def _parse_headings(md_text: str) -> list[tuple[int, str]]:
+def parse_headings(md_text: str) -> list[tuple[int, str]]:
     """Return ordered (level, text) pairs from ATX and setext headings.
 
     Parsed via mistune's CommonMark AST (the engine tomd QA uses), so setext
     headings (``Title`` over ``=====``) count, inline markup in heading text is
     flattened to prose (``## **Bold** [x](u)`` -> ``Bold x``), and fenced code
     is suppressed by the parser. Front matter is stripped first (whisker's own
-    ``gates._split_front_matter``) so its ``---`` fences are never misread as
+    ``gates.split_front_matter``) so its ``---`` fences are never misread as
     setext underlines. Only top-level headings are collected, matching tomd QA's
     documented limitation (headings nested in lists/blockquotes are skipped).
     """
-    _, body = _split_front_matter(md_text)
+    _, body = split_front_matter(md_text)
     headings: list[tuple[int, str]] = []
     for token in _AST_RENDERER(body):
         if token.get("type") != "heading":
@@ -654,7 +709,7 @@ def _build_heading_tree(md_text: str) -> _HeadingTree:
     """Nest headings by level into a tree under a synthetic root."""
     root = _HeadingTree({"level": 0, "text": "\x00root"})
     stack: list[tuple[int, _HeadingTree]] = [(0, root)]
-    for level, text in _parse_headings(md_text):
+    for level, text in parse_headings(md_text):
         node = _HeadingTree({"level": level, "text": text})
         while stack and stack[-1][0] >= level:
             stack.pop()
@@ -672,7 +727,7 @@ def has_headings(md_text: str) -> bool:
     as ineligible (``None``) rather than a synthetic 1.0 that would inflate the
     corpus mean (the opendataloader-pdf null-eligibility rule).
     """
-    return bool(_parse_headings(md_text))
+    return bool(parse_headings(md_text))
 
 
 def mhs(md_a: str, md_b: str, *, structure_only: bool = False) -> float:
@@ -691,3 +746,30 @@ def mhs(md_a: str, md_b: str, *, structure_only: bool = False) -> float:
         return 1.0
     dist = APTED(tree_a, tree_b, _MhsConfig(structure_only)).compute_edit_distance()
     return max(0.0, 1.0 - dist / denom)
+
+
+def heading_level_parity(candidate_md: str, reference_md: str) -> float | None:
+    """Fraction of aligned headings whose levels match.
+
+    ``mhs`` compares heading TEXT via tree-edit distance but is level-blind:
+    a uniform level shift is an isomorphic tree and scores 1.0. This axis
+    catches the case ``_MhsConfig.rename`` misses, e.g. ``### References``
+    in the candidate against a source ``<h2>``.
+
+    Returns ``None`` when the reference has no headings (ineligible, same rule
+    as ``mhs``). Alignment is positional (zip-shortest on the two ordered
+    heading sequences); unmatched trailing headings count as mismatches.
+    """
+    ref_h = parse_headings(reference_md)
+    if not ref_h:
+        return None
+    cand_h = parse_headings(candidate_md)
+    total = max(len(cand_h), len(ref_h))
+    if total == 0:
+        return None
+    matches = sum(
+        1
+        for (cl, _ct), (rl, _rt) in zip(cand_h, ref_h)
+        if cl == rl
+    )
+    return matches / total
