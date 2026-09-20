@@ -19,7 +19,13 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
+from whisker.tables import split_pipe_cells
+
 __all__ = ["GateResult", "iter_body_lines", "run_gates", "split_front_matter"]
+
+# WG21 straw-poll ballot. A header-only / blank-body grid with these cells
+# in this order is a filled-in form, not a missing table (#424, P3978R0).
+_POLL_HEADER_CELLS = ("SF", "F", "N", "A", "SA")
 
 
 @dataclass(frozen=True)
@@ -201,7 +207,11 @@ def _gate_no_empty_table(body: str) -> GateResult:
         if "|" not in header:
             continue
         nxt = lines[i + 1] if i + 1 < len(lines) else ""
-        if "|" not in nxt or not nxt.replace("|", "").strip():
+        if "|" not in nxt:
+            return GateResult("no_empty_table", False, "table separator with no data row")
+        if not nxt.replace("|", "").strip():
+            if tuple(split_pipe_cells(header)) == _POLL_HEADER_CELLS:
+                continue
             return GateResult("no_empty_table", False, "table separator with no data row")
     return GateResult("no_empty_table", True)
 

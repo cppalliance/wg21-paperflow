@@ -112,6 +112,24 @@ def test_real_table_with_data_passes():
     assert g.passed
 
 
+def test_empty_poll_grid_is_allowed():
+    md = (
+        "---\ntitle: x\ndocument: P1\n---\n\n## A\n\n"
+        "| SF | F | N | A | SA |\n| --- | --- | --- | --- | --- |\n"
+        "|  |  |  |  |  |\n"
+    )
+    assert _gate(run_gates(md), "no_empty_table").passed
+
+
+def test_empty_row_under_other_header_still_fails():
+    md = (
+        "---\ntitle: x\ndocument: P1\n---\n\n## A\n\n"
+        "| Name | Meaning |\n| --- | --- |\n|  |  |\n"
+    )
+    g = _gate(run_gates(md), "no_empty_table")
+    assert not g.passed
+
+
 # --- no_toc_leak (PR-replay regressions: #290 p1122r3, #293 p0533r9) ---
 
 
