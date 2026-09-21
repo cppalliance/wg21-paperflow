@@ -110,10 +110,10 @@ class TestShaHelpers:
 
 class TestComputeFingerprint:
     def test_lane_version_covers_fail_closed_source_checks(self):
-        assert _LANE_VERSION == 26
+        assert _LANE_VERSION == 27
 
     def test_lane_version_is_current(self):
-        assert _LANE_VERSION == 26
+        assert _LANE_VERSION == 27
 
     def test_pdf_contract_includes_source_aware_calls(self):
         prompt = _pdf_prompt_contract()

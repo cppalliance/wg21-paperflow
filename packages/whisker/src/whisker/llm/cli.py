@@ -178,7 +178,12 @@ _SAFE_SERVICE_FIELDS = (
 # wrap_orphan / hyphen_glue units are judged instead of skipped with
 # "no typed question" (P4178R0 T6, #427). Fleet blast radius at v25: that
 # one unit; every other skip in the protected fleet is an aligned unit.
-_LANE_VERSION = 26
+# v27: header_is_data asks whether the markdown header is the PDF's top
+# row or a body row that moved up, and only the exact answer "body row"
+# confirms. "data values" no longer confirms: a section reference is a
+# data value and still the real header (P4178R0 HEAD, #427). The typed
+# fallback sends the text-layer page along when one was paired.
+_LANE_VERSION = 27
 
 # Fleet LJF: papers are sorted by descending predicted work before dispatch
 # (_predicted_work_seconds: sidecar duration, else PDF page count, else

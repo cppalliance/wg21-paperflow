@@ -456,25 +456,33 @@ def resolve_source_typed_probe(
     return False, "typed did not confirm"
 
 
+_HEADER_DEFECT_ANSWERS = frozenset({"body row"})
+
+
 def score_header_is_data_answer(answer: str) -> tuple[bool, str]:
     """Score the closed question for a header_is_data unit.
 
-    Same question as continuation: "column headers or data values?"
-    Passes (defect confirmed) when the model says "data values".
+    The question asks whether the markdown header is the PDF's top
+    row or a body row that moved up. Only the exact answer ``body row``
+    confirms. ``data values`` does not: a section reference is a data
+    value and still the real header (P4178R0, #427).
     """
-    norm = _norm_cell(answer)
-    if any(kw in norm for kw in _DATA_KEYWORDS):
-        return True, "model says header cells are data values"
-    return False, f"model did not confirm data values: {answer[:80]!r}"
+    if _norm_cell(answer) in _HEADER_DEFECT_ANSWERS:
+        return True, "model says the header row is a displaced body row"
+    return False, f"model did not confirm a displaced body row: {answer[:80]!r}"
 
 
 def score_wording_clause_answer(answer: str) -> tuple[bool, str]:
     """Score the closed question for a wording_clause unit.
 
-    Reuses the header_is_data data-value keywords, then accepts
-    numbered-paragraph phrasing. A typed "column headers" answer does
-    not confirm (and cannot clear the det flag; see ``_NO_CLEAR_CLASSES``).
+    A body row that moved into the header confirms, and so does the
+    exact answer ``data values`` (the older closed form this probe
+    still accepts). Numbered-paragraph phrasing confirms too. A typed
+    "column headers" or "top row" answer does not confirm (and cannot
+    clear the det flag; see ``_NO_CLEAR_CLASSES``).
     """
+    if _norm_cell(answer) == "data values":
+        return True, "model says header cells are data values"
     ok, reason = score_header_is_data_answer(answer)
     if ok:
         return ok, reason
@@ -520,10 +528,10 @@ def _build_header_is_data_question(
 ) -> tuple[str, str, str] | None:
     """Build ``(probe_id, question, table_md)`` for a header_is_data unit.
 
-    Same closed question as continuation: asks whether header cells are
-    column headers or data values. When the PDF header row is known it
-    is quoted so the model is not asked to judge the already-broken GFM
-    header in isolation.
+    Asks whether the markdown header is the PDF's top row (a section
+    reference counts) or a body row that moved up because the real
+    header was lost. A section reference is not, by itself, the defect.
+    When the PDF header row is known it is quoted.
     """
     header_names = [h.strip() for h in unit.cells[0] if h.strip()]
     if not header_names:
@@ -544,10 +552,11 @@ def _build_header_is_data_question(
     table_md = _raw_rows_to_md(unit)
     quoted = " and ".join(repr(h) for h in quoted_cells)
     question = (
-        f"Are the values {quoted} actual column header names (like "
-        f"field labels), or are they data values (like a person's "
-        f"name or a code identifier)? "
-        f"Answer 'column headers' or 'data values'."
+        f"The markdown header row is {quoted}. A section number, "
+        f"paper reference, or citation that opens this table in the "
+        f"PDF is the top row. Answer 'body row' only when the PDF "
+        f"shows a different header above this row. Otherwise answer "
+        f"'top row'."
     )
     if source_header:
         src = " | ".join(cell for cell in source_header if cell)
@@ -1304,6 +1313,8 @@ def run_unit_dumps(
                                     client, base_url, api_key, model,
                                     typed_md, typed_question,
                                     system_prompt=_comprehension_prompt,
+                                    source_text=source_text,
+                                    source_page=source_page,
                                 )
                                 latency += typed_ms
                                 typed_ok, typed_reason = _score_typed_answer(
@@ -1393,6 +1404,8 @@ def run_unit_dumps(
                         client, base_url, api_key, model,
                         typed_md, question,
                         system_prompt=_comprehension_prompt,
+                        source_text=source_text,
+                        source_page=source_page,
                     )
                 except (httpx.HTTPError, KeyError) as exc:
                     answer = f"(transport error: {type(exc).__name__}: {exc})"

@@ -875,7 +875,7 @@ Full evidence: `research/research/llm-qa-integration/SYNTHESIS.md`.
 - **Run modes.** Bare `whisker-tapetum-llm` (no PIDs) is a full run: every
   converted paper, with automatic fingerprint-based skip (sidecar records
   SHA-256 of markdown, source, prompt, model, output schema,
-  `_LANE_VERSION` (currently 26), a `unit_check_mode` key tracking the
+  `_LANE_VERSION` (currently 27), a `unit_check_mode` key tracking the
   `TAPETUM_VERDICT_FIRST` toggle, and `coverage_mode`; unchanged papers are
   skipped, `--force` re-evaluates everything). `_LANE_VERSION` 11 -> 12
   closed a fingerprint gap: the verdict-first `UnitCheckClear`/
@@ -1291,7 +1291,11 @@ acting; this section describes the state as of 2026-07-22.
    absent. A typed confirmation can confirm the defect; reject-and-keep classes
    such as `flattened` abstain when the typed answer does not confirm. Aligned
    units still skip rather than self-judge, and a class with no typed question
-   still skips.
+   still skips.    Since v27, `header_is_data` confirms only the exact answer `body row`,
+   and only when the PDF shows a different header above the markdown
+   header. A section reference that opens the table is the top row.
+   `data values` abstains. The typed fallback sends the paired text-layer
+   page along.
 8. **Defect groups express scale, not exhaustive evidence.** A defect group
    reports the LLM's `affected_count` plus representative examples. Countable
    keyword groups replace that estimate with document-wide `source_count`,

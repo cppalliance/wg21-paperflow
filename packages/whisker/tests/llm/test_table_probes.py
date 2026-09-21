@@ -855,13 +855,26 @@ class TestClassifyFlattened:
 class TestScoreHeaderIsDataAnswer:
     """Scorer for header_is_data closed question."""
 
-    def test_data_values_confirms_defect(self):
-        ok, reason = score_header_is_data_answer("data values")
+    def test_body_row_confirms_defect(self):
+        ok, reason = score_header_is_data_answer("body row")
         assert ok
-        assert "data" in reason.lower()
+        assert "body row" in reason.lower()
+
+    def test_data_values_does_not_confirm(self):
+        """A section reference is a data value and still the real header."""
+        ok, _reason = score_header_is_data_answer("data values")
+        assert not ok
+
+    def test_data_substring_does_not_confirm(self):
+        ok, _reason = score_header_is_data_answer("this is data, not a body row")
+        assert not ok
 
     def test_column_headers_means_no_defect(self):
         ok, reason = score_header_is_data_answer("column headers")
+        assert not ok
+
+    def test_top_row_means_no_defect(self):
+        ok, _reason = score_header_is_data_answer("top row")
         assert not ok
 
     def test_ambiguous_is_no_confirmation(self):
@@ -1667,7 +1680,49 @@ class TestFlattenedTypedQuestion:
         assert not probe.skipped
         assert not probe.defect_confirmed
         assert len(asked) == 1
-        assert "column header names" in asked[0]
+        assert "top row" in asked[0]
+        assert "body row" in asked[0]
+
+    def test_data_values_on_section_header_abstains(self, monkeypatch):
+        """The old closed answer must not confirm a real section header."""
+        _patch_pod(monkeypatch, "data values")
+        result = run_unit_dumps(
+            "P4178R0", (_p4178_header_pair_unit(),),
+            base_url="http://pod.invalid", api_key="k",
+        )
+        probe = result.units[0].probe
+        assert not probe.skipped
+        assert not probe.defect_confirmed
+
+    def test_body_row_confirms(self, monkeypatch):
+        _patch_pod(monkeypatch, "body row")
+        result = run_unit_dumps(
+            "P4178R0", (_p4178_header_pair_unit(),),
+            base_url="http://pod.invalid", api_key="k",
+        )
+        probe = result.units[0].probe
+        assert probe.defect_confirmed
+
+    def test_typed_fallback_sends_paired_textlayer(self, monkeypatch):
+        import whisker.llm.table_probes as tp
+
+        seen: list[str | None] = []
+
+        def fake_ask(client, base_url, api_key, model_name, table_md, question,
+                     system_prompt=tp._R1_SYSTEM_PROMPT, source_text=None,
+                     source_page=None):
+            seen.append(source_text)
+            return "match", 1
+
+        monkeypatch.setattr(tp, "_ask_pod_defect", fake_ask)
+        monkeypatch.setattr(tp, "pair_unit_to_page", lambda unit, pages: (4, "PDF page text"))
+        result = run_unit_dumps(
+            "P4178R0", (_p4178_header_pair_unit(),),
+            base_url="http://pod.invalid", api_key="k",
+            textlayer_pages=["unused"],
+        )
+        assert seen == ["PDF page text", "PDF page text"]
+        assert not result.units[0].probe.defect_confirmed
 
     def test_aligned_without_textlayer_still_skipped(self, monkeypatch):
         """The aligned branch is untouched: no self-dump without a source."""

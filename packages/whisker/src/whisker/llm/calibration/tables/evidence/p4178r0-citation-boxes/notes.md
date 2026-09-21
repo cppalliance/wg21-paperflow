@@ -97,7 +97,31 @@ uv run --package whisker pytest packages/whisker/tests/llm/test_table_probes.py 
 uv run --package whisker pytest packages/whisker/tests/llm/test_table_probes.py packages/whisker/tests/llm/test_incremental.py -q
 ```
 
-Current affected-file result: `248 passed, 3 skipped`.
+Current affected-file result after the lane 27 scorer and question change: `254 passed, 3 skipped`.
+
+## Lane v27: section-reference headers
+
+HEAD golden sha256 `03cb700354ce4b618dc8855b10e2ae1783439a9cadfa26d61840ba493cf1cf7f`.
+Lane v26 judged that file `review` 0.95 with zero `flattened` units, and
+confirmed three `header_is_data` units (3 Section 4.15, 9 1.9.3/receiver,
+14 4.9.4/Context) because the typed question asked whether a section
+reference was a data value, and the typed call did not send the text
+layer. Source-first had said `match`.
+
+Lane v27 asks whether the markdown header is the PDF's top row or a body
+row that moved up. Only the exact answer `body row` confirms. `data values`
+abstains. The typed fallback sends the paired text-layer page.
+
+BASE on lane 27 (`6a19ffc7…`, `tapetum-inspect-BASE-v27.md`): T0 aligned
+PASS, T1 `header_is_data` ABSTAIN (`top row`), T2-T6 `flattened` DEFECT.
+The broken paper stayed broken.
+
+The first HEAD wording (2026-09-21) confirmed 10 units with `body row`.
+The question then said a section reference opens the table and is the
+top row, and `body row` only when the PDF shows a different header above
+it. Second HEAD rerun, same golden `03cb7003…`: 19 units, 0
+`defect_confirmed`, every `header_is_data` typed answer `top row`. Fused
+`review` 0.95 remains the text nid gate (0.75), not a table defect.
 
 The following files are local evidence under the issue scratch directory.
 They are not shipped:
