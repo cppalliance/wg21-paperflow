@@ -122,6 +122,18 @@ _GOLDEN_STEMS = (
     # body by y on pages the pipeline did not classify as two-column. The
     # golden pins the four-column cells; the family pins below the routing.
     "p4098r1",
+    # Header-grid guard (#377): P4047R0 is a Google-Docs export with seven
+    # prediction tables of one layout (`# | Prediction | Source | Date |
+    # Outcome`), two per page under a heading each. The `#` column is 30pt
+    # wide, under _COLUMN_GAP_THRESHOLD, so no pass saw the header as a
+    # row and Pass 1 took the fused Date/Outcome blocks as 2-column
+    # shards. The side-by-side pre-scanner now seeds on the single-
+    # baseline header block and takes the header's grid (all seven,
+    # including the Timeline that Pass 4 had assembled correctly). The
+    # golden also holds the §4 Scorecard (Pass 1 plus header cluster)
+    # and the §5 Conclusion with its last row still leaking as prose
+    # ("Implementation maturity concerns", a col-0-only trailing row).
+    "p4047r0",
 )
 
 # Issue-180 reported symptom: this sentence is P4024R0's final paragraph.
@@ -183,6 +195,43 @@ _P4098R1_TABLE_PINS = {
     (5, 5, 4, "prose_table", "side_by_side_prepass"),
     (6, 6, 4, "prose_table", "side_by_side_prepass"),
     (7, 4, 4, "prose_table", "side_by_side"),
+}
+
+# Family pins for P4047R0 (#377): the seven prediction tables (tomd pages
+# 2-5, printed 3-6; Timeline, Safety and Correctness, Customization
+# Mechanism, Universality and Scope, Domain Viability, Networking,
+# Implementation Maturity) are header-grid seeds of the side-by-side
+# pre-scanner. The Scorecard (page 6) is Pass 1 with its header cluster
+# absorbed; the Conclusion (page 6) is Pass 1 at header plus three rows,
+# its fourth row leaks as prose (pinned as is, tracked separately).
+_P4047R0_TABLE_PINS = {
+    (2, 6, 5, "prose_table", "side_by_side_prepass"),
+    (3, 6, 5, "clean_matrix", "side_by_side_prepass"),
+    (3, 4, 5, "prose_table", "side_by_side_prepass"),
+    (4, 7, 5, "clean_matrix", "side_by_side_prepass"),
+    (4, 4, 5, "clean_matrix", "side_by_side_prepass"),
+    (5, 4, 5, "prose_table", "side_by_side_prepass"),
+    (5, 3, 5, "clean_matrix", "side_by_side_prepass"),
+    (6, 9, 6, "clean_matrix", "horizontal_rows"),
+    (6, 4, 2, "clean_matrix", "horizontal_rows"),
+}
+_P4047R0_PREDICTION_HEADER = ["#", "Prediction", "Source", "Date", "Outcome"]
+
+# Family pins for P4100R1: the p.3 (printed 4) Capy/Corosio table, a
+# header-grid seed like P4047R0's (`Library | Role | Status` on one
+# baseline over a shattered two-row body; before, a `####` heading plus
+# prose), and the p.10 (printed 11) protocol table that Pass 3 completes
+# from the find_tables() grid (no table_source), locked since #380. The
+# test filters by page, so the other tables of those pages are pinned as
+# they are today: p.3 the second `Library | Role | Status` table (5x3)
+# and the `Library | Author | Status` table (4x3), both Pass 1; p.10 the
+# Stage Two `# | Paper | Abstraction` table (8x3, Pass 3).
+_P4100R1_TABLE_PINS = {
+    (3, 3, 3, "clean_matrix", "side_by_side_prepass"),
+    (3, 5, 3, "clean_matrix", "horizontal_rows"),
+    (3, 4, 3, "prose_table", "horizontal_rows"),
+    (10, 7, 3, "clean_matrix", None),
+    (10, 8, 3, "clean_matrix", None),
 }
 
 
@@ -372,3 +421,55 @@ def test_p4098r1_table_family_pins():
         for row in s.columns[1:]:
             year = "".join(sp.text for sp in row[2]).strip()
             assert year.isdigit() and len(year) == 4, (s.page_num, year)
+
+
+def _header_cells(section) -> list[str]:
+    """Header row cell texts, runs of whitespace collapsed."""
+    return [" ".join("".join(sp.text for sp in cell).split())
+            for cell in section.columns[0]]
+
+
+def test_p4047r0_table_family_pins():
+    """#377 focused guard: the seven prediction tables are pre-scanner
+    header-grid tables with the PDF's five columns and their header row
+    intact; the Scorecard and the Conclusion keep their Pass 1 shape.
+    Independent of the full golden so a re-bless can never silently hand
+    a prediction table back to Pass 1's 2-column shards.
+    """
+    pdf_path = _GOLDEN / "sources" / "p4047r0.pdf"
+    if not pdf_path.is_file():
+        pytest.skip(f"missing PDF fixture: {pdf_path}")
+    sections = run_pipeline(pdf_path).sections
+    tables = [s for s in sections if s.kind == SectionKind.TABLE]
+    got = {
+        (s.page_num, len(s.columns), len(s.columns[0]),
+         s.table_kind, s.table_source)
+        for s in tables
+    }
+    assert got == _P4047R0_TABLE_PINS
+    prediction = [s for s in tables if s.table_source == "side_by_side_prepass"]
+    assert len(prediction) == 7
+    for s in prediction:
+        assert _header_cells(s) == _P4047R0_PREDICTION_HEADER, s.page_num
+
+
+def test_p4100r1_table_family_pins():
+    """Focused guard for the P4100R1 tables on tomd pages 3 and 10: the
+    Capy/Corosio table stays a 3x3 pre-scanner table with its header
+    row, and the protocol table stays at Pass 3's seven rows.
+    """
+    pdf_path = _GOLDEN / "p4100r1.pdf"
+    if not pdf_path.is_file():
+        pytest.skip(f"missing PDF fixture: {pdf_path}")
+    sections = run_pipeline(pdf_path).sections
+    tables = [s for s in sections
+              if s.kind == SectionKind.TABLE and s.page_num in (3, 10)]
+    got = {
+        (s.page_num, len(s.columns), len(s.columns[0]),
+         s.table_kind, s.table_source)
+        for s in tables
+    }
+    assert got == _P4100R1_TABLE_PINS
+    capy = [s for s in tables if s.table_source == "side_by_side_prepass"]
+    assert len(capy) == 1
+    assert _header_cells(capy[0]) == ["Library", "Role", "Status"]
