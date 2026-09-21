@@ -1,0 +1,17 @@
+# Anti-narrative-trim guard: P3181R1's "Stronger semantics" / "Why this
+# matters" sections leaked whole prose paragraphs into ```cpp fences
+# (wholesale _rescue_unfenced_code promotion of mixed prose+code regions).
+# _trim_narrative_from_code splits those by symbol-density / alpha-ratio
+# (not font), so the prose renders as prose and only the Thread A/B/C
+# pseudo-code and the fetch_sub/atomic_thread_fence listings stay fenced.
+# The p4174r0 and p0533r9 goldens above were re-blessed for the same fix
+# (their fences likewise held prose).
+#
+# Residual-fence fix (trailing-label + tail-peel): P3181R1's "Detailed
+# example" had its leading listing label "Thread A:" wrapped onto the prose
+# tail (_absorb_trailing_label_into_code moves it into the fence head), and
+# its "Stronger semantics" tail sentence fragmented across the closing fence
+# (_peel_trailing_prose_from_code peels the trailing prose out). p0957r8 was
+# re-blessed for the same trailing-label move: a "public:" access specifier
+# that wrapped onto the prose tail now heads its class body in the fence,
+# consistent with the Circle/Point bodies below it.
