@@ -371,6 +371,30 @@ def pair_unit_to_page(
     return best_i, excerpt
 
 
+# Prompts ask for one exact closed answer. Score the complete normalized
+# string only; prose, negation, punctuation, embedded forms, and multiple
+# verdicts are non-confirming.
+_FLATTEN_DEFECT_ANSWERS = frozenset({"flattened", "flatten"})
+_WRAP_DEFECT_ANSWERS = frozenset({"wrap"})
+_GLUE_DEFECT_ANSWERS = frozenset({"glue", "glued"})
+_SOURCE_AMBIGUOUS_PREFIX = "ambiguous source verdict:"
+_SOURCE_EXACT_ANSWERS: dict[str, str] = {
+    "match": "match",
+    "split": "split",
+    "data-header": "data-header",
+    "data header": "data-header",
+    "leaked-rows": "leaked-rows",
+    "leaked rows": "leaked-rows",
+    "merged-rows": "merged-rows",
+    "merged rows": "merged-rows",
+    "wrap": "wrap",
+    "glue": "glue",
+    "glued": "glue",
+    "flattened": "flattened",
+    "flatten": "flattened",
+}
+
+
 def score_source_mismatch_answer(
     answer: str,
     *,
@@ -378,32 +402,19 @@ def score_source_mismatch_answer(
 ) -> tuple[bool, str]:
     """Score the source-vs-markdown closed question.
 
+    Parses the complete normalized answer as exactly one closed-set
+    verdict (``match``, ``split``, ``data-header`` / ``data header``,
+    ``leaked-rows`` / ``leaked rows``, ``merged-rows`` / ``merged rows``,
+    ``wrap``, ``glue`` / ``glued``, ``flatten`` / ``flattened``).
+    Anything else is ambiguous.
     ``expect_defect=True``: any verdict except ``match`` confirms the defect.
     ``expect_defect=False``: only ``match`` passes (clean control).
     """
-    norm = _norm_cell(answer)
-    verdict = ""
-    if "leaked" in norm:
-        verdict = "leaked-rows"
-    elif "merged" in norm:
-        verdict = "merged-rows"
-    elif "data-header" in norm or "data header" in norm:
-        verdict = "data-header"
-    elif "split" in norm:
-        verdict = "split"
-    elif "glue" in norm:
-        verdict = "glue"
-    elif "flattened" in norm or "flatten" in norm:
-        verdict = "flattened"
-    elif re.search(r"\bwrap\b", norm):
-        verdict = "wrap"
-    elif re.search(r"\bmatch\b", norm):
-        verdict = "match"
-    if not verdict:
-        return False, f"ambiguous source verdict: {answer[:80]!r}"
+    verdict = _SOURCE_EXACT_ANSWERS.get(_norm_cell(answer))
+    if verdict is None:
+        return False, f"{_SOURCE_AMBIGUOUS_PREFIX} {answer[:80]!r}"
     if expect_defect:
-        ok = verdict != "match"
-        return ok, f"source verdict={verdict}"
+        return verdict != "match", f"source verdict={verdict}"
     return verdict == "match", f"source verdict={verdict}"
 
 
@@ -692,9 +703,13 @@ def _build_flattened_question(unit: TableUnit) -> tuple[str, str, str] | None:
 
 
 def score_flattened_answer(answer: str) -> tuple[bool, str]:
-    """Score the closed question for a flattened unit."""
-    norm = _norm_cell(answer)
-    if "flattened" in norm or "flatten" in norm:
+    """Score the closed question for a flattened unit.
+
+    Confirms only when the complete normalized answer is exactly
+    ``flattened`` or ``flatten``. Exact ``match`` and every other string
+    (prose, negation, punctuation, embedded forms) do not confirm.
+    """
+    if _norm_cell(answer) in _FLATTEN_DEFECT_ANSWERS:
         return True, "model says content is a flattened table"
     return False, f"model did not confirm flattened table: {answer[:80]!r}"
 
@@ -736,13 +751,11 @@ def _score_typed_answer(cls: str, answer: str) -> tuple[bool, str]:
     if cls == "row_merge":
         return score_row_merge_answer(answer)
     if cls == "wrap_orphan":
-        norm = _norm_cell(answer)
-        if "wrap" in norm:
+        if _norm_cell(answer) in _WRAP_DEFECT_ANSWERS:
             return True, "model says wrap orphan"
         return False, f"model did not confirm wrap: {answer[:80]!r}"
     if cls == "hyphen_glue":
-        norm = _norm_cell(answer)
-        if "glued" in norm or "glue" in norm:
+        if _norm_cell(answer) in _GLUE_DEFECT_ANSWERS:
             return True, "model says hyphen glue"
         return False, f"model did not confirm glue: {answer[:80]!r}"
     if cls == "flattened":
@@ -1250,6 +1263,7 @@ def run_unit_dumps(
                         answer = f"(transport error: {type(exc).__name__}: {exc})"
                         latency = 0
                         error = True
+                    source_ambiguous = False
                     if error:
                         passed = False
                         expected_str = "source mismatch closed question"
@@ -1258,6 +1272,9 @@ def run_unit_dumps(
                             answer, expect_defect=expect_defect,
                         )
                         expected_str = reason
+                        source_ambiguous = reason.startswith(
+                            _SOURCE_AMBIGUOUS_PREFIX,
+                        )
                     if (
                         expect_defect
                         and not error
@@ -1305,7 +1322,10 @@ def run_unit_dumps(
                         )
                     is_defect_confirmed = (
                         not error
-                        and (passed if expect_defect else not passed)
+                        and (
+                            passed if expect_defect
+                            else (not passed and not source_ambiguous)
+                        )
                     )
                     result.units.append(UnitDumpResult(
                         unit_index=unit.index,
@@ -1336,29 +1356,24 @@ def run_unit_dumps(
                     ))
                     continue
 
-                typed_q: tuple[str, str, str] | None = None
-                if cls == "header_is_data":
-                    typed_q = _build_header_is_data_question(unit)
-                elif cls == "wording_clause":
-                    typed_q = _build_wording_clause_question(unit)
-                elif cls == "truncated_leak":
-                    if md_lines is None:
-                        result.units.append(UnitDumpResult(
-                            unit_index=unit.index,
-                            classification=cls,
-                            probe=ProbeResult(
-                                probe_id=f"{cls}-t{unit.index}",
-                                question="", expected="", answer="",
-                                passed=False, skipped=True,
-                                skip_reason="md_lines not provided",
-                            ),
-                        ))
-                        continue
-                    typed_q = _build_truncated_leak_question(
-                        unit, md_lines, _estimate_line_after(unit, md_lines),
-                    )
-                elif cls == "row_merge":
-                    typed_q = _build_row_merge_question(unit)
+                # No textlayer pairing: the typed question is the only
+                # probe. Same builder as the source-first fallback, so a
+                # class with a typed question there (flattened,
+                # wrap_orphan, hyphen_glue) is judged here too instead of
+                # skipped (P4178R0 T6, #427).
+                if cls == "truncated_leak" and md_lines is None:
+                    result.units.append(UnitDumpResult(
+                        unit_index=unit.index,
+                        classification=cls,
+                        probe=ProbeResult(
+                            probe_id=f"{cls}-t{unit.index}",
+                            question="", expected="", answer="",
+                            passed=False, skipped=True,
+                            skip_reason="md_lines not provided",
+                        ),
+                    ))
+                    continue
+                typed_q = _typed_question_for(cls, unit, md_lines)
                 if typed_q is None:
                     result.units.append(UnitDumpResult(
                         unit_index=unit.index,
@@ -1387,14 +1402,7 @@ def run_unit_dumps(
                     passed = False
                     expected_str = f"{cls} closed question"
                 else:
-                    if cls == "header_is_data":
-                        typed_ok, reason = score_header_is_data_answer(answer)
-                    elif cls == "wording_clause":
-                        typed_ok, reason = score_wording_clause_answer(answer)
-                    elif cls == "truncated_leak":
-                        typed_ok, reason = score_truncated_leak_answer(answer)
-                    else:
-                        typed_ok, reason = score_row_merge_answer(answer)
+                    typed_ok, reason = _score_typed_answer(cls, answer)
                     if cls in _NO_CLEAR_CLASSES:
                         grid_signal = (
                             grid_signal_for_unit(unit, compare)

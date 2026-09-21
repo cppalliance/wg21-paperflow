@@ -173,7 +173,12 @@ _SAFE_SERVICE_FIELDS = (
 # matches header plus body rows so repeated poll headers get their own
 # lookahead (P3290R4 T1-T5, #426). The unit-probe question is not in
 # prompt_sha256, so the bump re-evaluates.
-_LANE_VERSION = 25
+# v26: a unit without a textlayer pairing takes the same typed question as
+# the source-first fallback (_typed_question_for), so flattened /
+# wrap_orphan / hyphen_glue units are judged instead of skipped with
+# "no typed question" (P4178R0 T6, #427). Fleet blast radius at v25: that
+# one unit; every other skip in the protected fleet is an aligned unit.
+_LANE_VERSION = 26
 
 # Fleet LJF: papers are sorted by descending predicted work before dispatch
 # (_predicted_work_seconds: sidecar duration, else PDF page count, else

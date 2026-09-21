@@ -39,9 +39,11 @@ from whisker.llm.table_probes import (
     _estimate_line_after,
     _label_shift_on_unit,
     _raw_rows_to_md,
+    _score_typed_answer,
     pair_unit_to_page,
     parse_cell_dump,
     resolve_source_typed_probe,
+    run_unit_dumps,
     score_cell_dump,
     score_flattened_answer,
     score_header_is_data_answer,
@@ -949,6 +951,80 @@ class TestScoreSourceMismatchAnswer:
         ok, _reason = score_source_mismatch_answer("flattened", expect_defect=False)
         assert not ok
 
+    def test_not_flattened_match_is_ambiguous(self):
+        for expect_defect in (True, False):
+            ok, reason = score_source_mismatch_answer(
+                "not flattened; match", expect_defect=expect_defect,
+            )
+            assert not ok
+            assert reason.startswith("ambiguous source verdict:")
+
+    def test_unflattened_is_ambiguous(self):
+        for expect_defect in (True, False):
+            ok, reason = score_source_mismatch_answer(
+                "unflattened", expect_defect=expect_defect,
+            )
+            assert not ok
+            assert reason.startswith("ambiguous source verdict:")
+
+    def test_multiple_active_verdicts_are_ambiguous(self):
+        ok, reason = score_source_mismatch_answer(
+            "flattened match", expect_defect=True,
+        )
+        assert not ok
+        assert reason.startswith("ambiguous source verdict:")
+
+    def test_leaked_rows_still_confirms(self):
+        ok, reason = score_source_mismatch_answer(
+            "leaked-rows", expect_defect=True,
+        )
+        assert ok
+        assert reason == "source verdict=leaked-rows"
+
+    def test_leaked_rows_space_variant(self):
+        ok, reason = score_source_mismatch_answer(
+            "leaked rows", expect_defect=True,
+        )
+        assert ok
+        assert reason == "source verdict=leaked-rows"
+
+    def test_merged_rows_still_confirms(self):
+        ok, reason = score_source_mismatch_answer(
+            "merged-rows", expect_defect=True,
+        )
+        assert ok
+        assert reason == "source verdict=merged-rows"
+
+    def test_data_header_space_variant(self):
+        ok, reason = score_source_mismatch_answer(
+            "data header", expect_defect=True,
+        )
+        assert ok
+        assert reason == "source verdict=data-header"
+
+    def test_glue_variant_glued(self):
+        ok, reason = score_source_mismatch_answer("glued", expect_defect=True)
+        assert ok
+        assert reason == "source verdict=glue"
+
+    def test_flatten_variant(self):
+        ok, reason = score_source_mismatch_answer("flatten", expect_defect=True)
+        assert ok
+        assert reason == "source verdict=flattened"
+
+    def test_prose_and_punctuation_are_ambiguous(self):
+        for answer in (
+            "The content looks flatten",
+            "flattened.",
+            "flattened but not a match",
+            "flattened rather than match",
+        ):
+            ok, reason = score_source_mismatch_answer(
+                answer, expect_defect=True,
+            )
+            assert not ok, answer
+            assert reason.startswith("ambiguous source verdict:")
+
 
 class TestScoreFlattenedAnswer:
     """Scorer for flattened closed question."""
@@ -958,17 +1034,104 @@ class TestScoreFlattenedAnswer:
         assert ok
         assert "flattened" in reason.lower()
 
-    def test_flatten_variant_confirms(self):
-        ok, reason = score_flattened_answer("The content looks flatten")
+    def test_flatten_closed_answer_confirms(self):
+        ok, reason = score_flattened_answer("flatten")
         assert ok
+        assert "flattened" in reason.lower()
+
+    def test_flatten_in_prose_does_not_confirm(self):
+        ok, _reason = score_flattened_answer("The content looks flatten")
+        assert not ok
 
     def test_match_does_not_confirm(self):
         ok, _reason = score_flattened_answer("match")
         assert not ok
 
+    def test_not_flattened_match_does_not_confirm(self):
+        ok, _reason = score_flattened_answer("not flattened; match")
+        assert not ok
+
+    def test_unflattened_does_not_confirm(self):
+        ok, _reason = score_flattened_answer("unflattened")
+        assert not ok
+
+    def test_not_flattened_does_not_confirm(self):
+        ok, _reason = score_flattened_answer("not flattened")
+        assert not ok
+
+    def test_no_flattened_table_does_not_confirm(self):
+        ok, _reason = score_flattened_answer("no flattened table")
+        assert not ok
+
+    def test_cannot_be_flattened_does_not_confirm(self):
+        ok, _reason = score_flattened_answer("cannot be flattened")
+        assert not ok
+
+    def test_flattened_but_not_a_match_does_not_confirm(self):
+        ok, _reason = score_flattened_answer("flattened but not a match")
+        assert not ok
+
+    def test_flattened_rather_than_match_does_not_confirm(self):
+        ok, _reason = score_flattened_answer("flattened rather than match")
+        assert not ok
+
+    def test_does_not_look_flattened_does_not_confirm(self):
+        ok, _reason = score_flattened_answer("does not look flattened")
+        assert not ok
+
+    def test_non_flattened_does_not_confirm(self):
+        ok, _reason = score_flattened_answer("non-flattened")
+        assert not ok
+
     def test_ambiguous_does_not_confirm(self):
         ok, _reason = score_flattened_answer("I see a heading followed by text")
         assert not ok
+
+
+class TestClosedVocabTypedAnswers:
+    """Shared closed scorer: complete normalized answer must be exact."""
+
+    @pytest.mark.parametrize(
+        ("cls", "answer", "expected"),
+        [
+            ("flattened", "flattened", True),
+            ("flattened", "flatten", True),
+            ("flattened", "The content looks flatten", False),
+            ("flattened", "flattened but not a match", False),
+            ("flattened", "flattened rather than match", False),
+            ("flattened", "no flattened table", False),
+            ("flattened", "cannot be flattened", False),
+            ("flattened", "not flattened; match", False),
+            ("flattened", "unflattened", False),
+            ("flattened", "isn't flattened", False),
+            ("flattened", "can't be flattened", False),
+            ("flattened", "does not look flattened", False),
+            ("flattened", "non-flattened", False),
+            ("wrap_orphan", "wrap", True),
+            ("wrap_orphan", "clean", False),
+            ("wrap_orphan", "not wrap clean", False),
+            ("wrap_orphan", "doesn't wrap", False),
+            ("wrap_orphan", "not really wrap", False),
+            ("hyphen_glue", "glued", True),
+            ("hyphen_glue", "glue", True),
+            ("hyphen_glue", "normal", False),
+            ("hyphen_glue", "not glued normal", False),
+            ("hyphen_glue", "wasn't glued", False),
+            ("hyphen_glue", "never actually glued", False),
+            ("hyphen_glue", "un-glued", False),
+        ],
+    )
+    def test_required_closed_answers(
+        self, cls: str, answer: str, expected: bool,
+    ):
+        ok, reason = _score_typed_answer(cls, answer)
+        assert ok is expected
+        if expected and cls == "flattened":
+            assert reason == "model says content is a flattened table"
+        if expected and cls == "wrap_orphan":
+            assert reason == "model says wrap orphan"
+        if expected and cls == "hyphen_glue":
+            assert reason == "model says hyphen glue"
 
 
 class TestUnitDumpsToDict:
@@ -1220,12 +1383,28 @@ class TestDefectConfirmedFlag:
         assert not is_defect_confirmed
 
     def test_source_branch_aligned_mismatch(self):
-        """Source-mismatch branch: expect_defect=False (aligned), not passed -> defect."""
+        """Aligned recognized non-match (not passed, not ambiguous) -> defect."""
         expect_defect = False
         error = False
         passed = False
-        is_defect_confirmed = not error and (passed if expect_defect else not passed)
+        source_ambiguous = False
+        is_defect_confirmed = (
+            not error
+            and (passed if expect_defect else (not passed and not source_ambiguous))
+        )
         assert is_defect_confirmed
+
+    def test_source_branch_aligned_ambiguous_not_confirmed(self):
+        """Aligned ambiguous source answer must not confirm a defect."""
+        expect_defect = False
+        error = False
+        passed = False
+        source_ambiguous = True
+        is_defect_confirmed = (
+            not error
+            and (passed if expect_defect else (not passed and not source_ambiguous))
+        )
+        assert not is_defect_confirmed
 
     def test_inspect_renders_defect(self):
         from whisker.llm.inspect_report import _format_unit_dumps
@@ -1357,3 +1536,629 @@ class TestDefectConfirmedFlag:
         assert "abstain=1" in text
         assert "fail=0" in text
         assert "pass=1" in text
+
+
+# P4178R0 (#427): two-column citation boxes. det unitizes the `4.8 | 4.7`
+# box as flattened_prose (T6, `#### ... Section` / `#### ... Section 4.7` /
+# `##### 4.8` plus interleaved quotes). The unit has no textlayer pairing,
+# and the no-source branch of run_unit_dumps skipped it with "no typed
+# question for flattened" while T2-T5 (paired) confirmed. Lane v26 routes
+# the no-source branch through _typed_question_for.
+_P4178_CITE = (
+    "[P2300R10](https://www.open-std.org/jtc1/sc22/wg21/docs/papers/2024/"
+    "p2300r10.html)"
+)
+_P4178_T6_CELLS = (
+    (f"{_P4178_CITE} Section", f"{_P4178_CITE} Section 4.7", "4.8"),
+    ('"Senders are', '"A single-shot sender can only be connected to a '
+     'receiver at most once." forkable"', ""),
+)
+_P4178_T1_CELLS = (
+    (f"{_P4178_CITE} Section 1.9.2 (conclusion)",
+     f"{_P4178_CITE} Section 1.9.2 (sole evidence)"),
+    ('"the extra allocations and indirections are a deal-breaker"',
+     '"In our experience, more often than not"'),
+)
+
+
+def _p4178_flattened_unit(index: int = 6) -> TableUnit:
+    return TableUnit(
+        index=index,
+        fmt=FORMAT_PIPE,
+        cells=_P4178_T6_CELLS,
+        raw_rows=tuple("| " + " | ".join(row) + " |" for row in _P4178_T6_CELLS),
+        flattened_prose=True,
+    )
+
+
+def _p4178_header_pair_unit(index: int = 1) -> TableUnit:
+    return TableUnit(
+        index=index,
+        fmt=FORMAT_PIPE,
+        cells=_P4178_T1_CELLS,
+        raw_rows=tuple("| " + " | ".join(row) + " |" for row in _P4178_T1_CELLS),
+        header_is_data=True,
+    )
+
+
+def _patch_pod(monkeypatch, answer: str) -> list[str]:
+    """Replace the pod call; record the questions asked, return *answer*."""
+    import whisker.llm.table_probes as tp
+
+    asked: list[str] = []
+
+    def fake_ask(client, base_url, api_key, model_name, table_md, question,
+                 system_prompt=tp._R1_SYSTEM_PROMPT, source_text=None,
+                 source_page=None):
+        asked.append(question)
+        return answer, 1
+
+    monkeypatch.setattr(tp, "_ask_pod_defect", fake_ask)
+    return asked
+
+
+class TestFlattenedTypedQuestion:
+    """#427: a flattened unit without textlayer pairing is judged, not skipped."""
+
+    def test_flattened_unit_without_textlayer_gets_typed_question(self, monkeypatch):
+        asked = _patch_pod(monkeypatch, "flattened")
+        result = run_unit_dumps(
+            "P4178R0", (_p4178_flattened_unit(),),
+            base_url="http://pod.invalid", api_key="k",
+        )
+        assert len(result.units) == 1
+        probe = result.units[0].probe
+        assert result.units[0].classification == "flattened"
+        assert not probe.skipped
+        assert probe.probe_id == "flattened-t6"
+        assert len(asked) == 1
+        assert "heading followed by prose" in asked[0]
+        assert "Section 4.7" in asked[0]
+
+    def test_flattened_typed_answer_confirms(self, monkeypatch):
+        _patch_pod(monkeypatch, "flattened")
+        result = run_unit_dumps(
+            "P4178R0", (_p4178_flattened_unit(),),
+            base_url="http://pod.invalid", api_key="k",
+        )
+        probe = result.units[0].probe
+        assert probe.passed
+        assert probe.defect_confirmed
+        assert probe.expected == "typed confirmed defect"
+        assert result.fail_count == 0
+
+    def test_flattened_match_answer_abstains(self, monkeypatch):
+        """`match` does not clear the det class (reject-and-keep): abstain."""
+        _patch_pod(monkeypatch, "match")
+        result = run_unit_dumps(
+            "P4178R0", (_p4178_flattened_unit(),),
+            base_url="http://pod.invalid", api_key="k",
+        )
+        probe = result.units[0].probe
+        assert not probe.passed
+        assert not probe.defect_confirmed
+        assert probe.expected.startswith("abstain: typed did not confirm")
+
+    def test_not_flattened_match_abstains(self, monkeypatch):
+        """Substring 'flatten' in 'not flattened; match' must not confirm."""
+        _patch_pod(monkeypatch, "not flattened; match")
+        result = run_unit_dumps(
+            "P4178R0", (_p4178_flattened_unit(),),
+            base_url="http://pod.invalid", api_key="k",
+        )
+        probe = result.units[0].probe
+        assert not probe.skipped
+        assert not probe.passed
+        assert not probe.defect_confirmed
+        assert probe.expected.startswith("abstain: typed did not confirm")
+
+    def test_header_pair_stays_unconfirmed(self, monkeypatch):
+        """T1 (`Section 1.9.2 (conclusion) | (sole evidence)`) is the issue's
+        OK unit; det's header_is_data is noise. `column headers` keeps it
+        unconfirmed on the same no-source branch."""
+        asked = _patch_pod(monkeypatch, "column headers")
+        result = run_unit_dumps(
+            "P4178R0", (_p4178_header_pair_unit(),),
+            base_url="http://pod.invalid", api_key="k",
+        )
+        probe = result.units[0].probe
+        assert result.units[0].classification == "header_is_data"
+        assert probe.probe_id == "header_is_data-t1"
+        assert not probe.skipped
+        assert not probe.defect_confirmed
+        assert len(asked) == 1
+        assert "column header names" in asked[0]
+
+    def test_aligned_without_textlayer_still_skipped(self, monkeypatch):
+        """The aligned branch is untouched: no self-dump without a source."""
+        asked = _patch_pod(monkeypatch, "match")
+        result = run_unit_dumps(
+            "P4178R0", (_pipe_unit([["Pattern", "Description"],
+                                    ["1. Yes - But - Actually",
+                                     "Claim walked back within the same section"]]),),
+            base_url="http://pod.invalid", api_key="k",
+        )
+        probe = result.units[0].probe
+        assert result.units[0].classification == "aligned"
+        assert probe.skipped
+        assert probe.skip_reason == "no textlayer; refusing self-dump"
+        assert asked == []
+
+
+class TestNoSourceTypedBranch:
+    """No-textlayer typed path: skip only when the typed builder cannot run."""
+
+    def test_truncated_leak_without_md_lines_is_skipped(self, monkeypatch):
+        asked = _patch_pod(monkeypatch, "leaked rows")
+        unit = TableUnit(
+            index=0, fmt=FORMAT_PIPE,
+            cells=(("Feature", "Status"), ("Parameterization", "Complete")),
+            truncated_leak=True,
+        )
+        result = run_unit_dumps(
+            "P3290R4", (unit,),
+            base_url="http://pod.invalid", api_key="k",
+        )
+        probe = result.units[0].probe
+        assert result.units[0].classification == "truncated_leak"
+        assert probe.skipped
+        assert probe.skip_reason == "md_lines not provided"
+        assert asked == []
+
+    def test_wrap_orphan_without_textlayer_uses_typed_scorer(self, monkeypatch):
+        asked = _patch_pod(monkeypatch, "wrap")
+        unit = TableUnit(
+            index=0, fmt=FORMAT_PIPE,
+            cells=(
+                ("Reader", "Read"),
+                ("Implementer", "Polls, §4, Appendix B, N"),
+            ),
+            wrap_orphan=True,
+        )
+        result = run_unit_dumps(
+            "P4016R0", (unit,),
+            base_url="http://pod.invalid", api_key="k",
+        )
+        probe = result.units[0].probe
+        assert result.units[0].classification == "wrap_orphan"
+        assert not probe.skipped
+        assert probe.probe_id == "wrap_orphan-t0"
+        assert len(asked) == 1
+        assert "Answer 'wrap' or 'clean'" in asked[0]
+        assert probe.passed
+        assert probe.defect_confirmed
+        assert probe.expected == "model says wrap orphan"
+
+    def test_hyphen_glue_without_textlayer_uses_typed_scorer(self, monkeypatch):
+        asked = _patch_pod(monkeypatch, "glued")
+        unit = TableUnit(
+            index=0, fmt=FORMAT_PIPE,
+            cells=(
+                ("Demonstrator", "Notes"),
+                ("GB-SEQ", "Debuggerfriendly golden, singlethreaded only"),
+            ),
+            hyphen_glue=True,
+        )
+        result = run_unit_dumps(
+            "P4016R0", (unit,),
+            base_url="http://pod.invalid", api_key="k",
+        )
+        probe = result.units[0].probe
+        assert result.units[0].classification == "hyphen_glue"
+        assert not probe.skipped
+        assert probe.probe_id == "hyphen_glue-t0"
+        assert len(asked) == 1
+        assert "Answer 'glued' or 'normal'" in asked[0]
+        assert probe.passed
+        assert probe.defect_confirmed
+        assert probe.expected == "model says hyphen glue"
+
+    def test_flattened_negated_no_source_does_not_confirm(self, monkeypatch):
+        _patch_pod(monkeypatch, "no flattened table")
+        result = run_unit_dumps(
+            "P4178R0", (_p4178_flattened_unit(),),
+            base_url="http://pod.invalid", api_key="k",
+        )
+        probe = result.units[0].probe
+        assert not probe.skipped
+        assert not probe.passed
+        assert not probe.defect_confirmed
+        assert probe.expected.startswith("abstain: typed did not confirm")
+
+    def test_cannot_be_flattened_no_source_does_not_confirm(self, monkeypatch):
+        _patch_pod(monkeypatch, "cannot be flattened")
+        result = run_unit_dumps(
+            "P4178R0", (_p4178_flattened_unit(),),
+            base_url="http://pod.invalid", api_key="k",
+        )
+        probe = result.units[0].probe
+        assert not probe.skipped
+        assert not probe.passed
+        assert not probe.defect_confirmed
+        assert probe.expected.startswith("abstain: typed did not confirm")
+
+    def test_wrap_orphan_negated_no_source_does_not_confirm(self, monkeypatch):
+        _patch_pod(monkeypatch, "not wrap clean")
+        unit = TableUnit(
+            index=0, fmt=FORMAT_PIPE,
+            cells=(
+                ("Reader", "Read"),
+                ("Implementer", "Polls, §4, Appendix B, N"),
+            ),
+            wrap_orphan=True,
+        )
+        result = run_unit_dumps(
+            "P4016R0", (unit,),
+            base_url="http://pod.invalid", api_key="k",
+        )
+        probe = result.units[0].probe
+        assert result.units[0].classification == "wrap_orphan"
+        assert not probe.skipped
+        assert not probe.passed
+        assert not probe.defect_confirmed
+        assert "did not confirm wrap" in probe.expected
+
+    def test_hyphen_glue_negated_no_source_does_not_confirm(self, monkeypatch):
+        _patch_pod(monkeypatch, "not glued normal")
+        unit = TableUnit(
+            index=0, fmt=FORMAT_PIPE,
+            cells=(
+                ("Demonstrator", "Notes"),
+                ("GB-SEQ", "Debuggerfriendly golden, singlethreaded only"),
+            ),
+            hyphen_glue=True,
+        )
+        result = run_unit_dumps(
+            "P4016R0", (unit,),
+            base_url="http://pod.invalid", api_key="k",
+        )
+        probe = result.units[0].probe
+        assert result.units[0].classification == "hyphen_glue"
+        assert not probe.skipped
+        assert not probe.passed
+        assert not probe.defect_confirmed
+        assert "did not confirm glue" in probe.expected
+
+    def test_does_not_look_flattened_no_source_does_not_confirm(self, monkeypatch):
+        _patch_pod(monkeypatch, "does not look flattened")
+        result = run_unit_dumps(
+            "P4178R0", (_p4178_flattened_unit(),),
+            base_url="http://pod.invalid", api_key="k",
+        )
+        probe = result.units[0].probe
+        assert not probe.skipped
+        assert not probe.passed
+        assert not probe.defect_confirmed
+        assert probe.expected.startswith("abstain: typed did not confirm")
+
+    def test_non_flattened_no_source_does_not_confirm(self, monkeypatch):
+        _patch_pod(monkeypatch, "non-flattened")
+        result = run_unit_dumps(
+            "P4178R0", (_p4178_flattened_unit(),),
+            base_url="http://pod.invalid", api_key="k",
+        )
+        probe = result.units[0].probe
+        assert not probe.skipped
+        assert not probe.passed
+        assert not probe.defect_confirmed
+        assert probe.expected.startswith("abstain: typed did not confirm")
+
+    def test_flattened_rather_than_match_no_source_does_not_confirm(self, monkeypatch):
+        _patch_pod(monkeypatch, "flattened rather than match")
+        result = run_unit_dumps(
+            "P4178R0", (_p4178_flattened_unit(),),
+            base_url="http://pod.invalid", api_key="k",
+        )
+        probe = result.units[0].probe
+        assert not probe.skipped
+        assert not probe.passed
+        assert not probe.defect_confirmed
+        assert probe.expected.startswith("abstain: typed did not confirm")
+
+    def test_not_really_wrap_no_source_does_not_confirm(self, monkeypatch):
+        _patch_pod(monkeypatch, "not really wrap")
+        unit = TableUnit(
+            index=0, fmt=FORMAT_PIPE,
+            cells=(
+                ("Reader", "Read"),
+                ("Implementer", "Polls, §4, Appendix B, N"),
+            ),
+            wrap_orphan=True,
+        )
+        result = run_unit_dumps(
+            "P4016R0", (unit,),
+            base_url="http://pod.invalid", api_key="k",
+        )
+        probe = result.units[0].probe
+        assert not probe.skipped
+        assert not probe.passed
+        assert not probe.defect_confirmed
+        assert "did not confirm wrap" in probe.expected
+
+    def test_never_actually_glued_no_source_does_not_confirm(self, monkeypatch):
+        _patch_pod(monkeypatch, "never actually glued")
+        unit = TableUnit(
+            index=0, fmt=FORMAT_PIPE,
+            cells=(
+                ("Demonstrator", "Notes"),
+                ("GB-SEQ", "Debuggerfriendly golden, singlethreaded only"),
+            ),
+            hyphen_glue=True,
+        )
+        result = run_unit_dumps(
+            "P4016R0", (unit,),
+            base_url="http://pod.invalid", api_key="k",
+        )
+        probe = result.units[0].probe
+        assert not probe.skipped
+        assert not probe.passed
+        assert not probe.defect_confirmed
+        assert "did not confirm glue" in probe.expected
+
+    def test_un_glued_no_source_does_not_confirm(self, monkeypatch):
+        _patch_pod(monkeypatch, "un-glued")
+        unit = TableUnit(
+            index=0, fmt=FORMAT_PIPE,
+            cells=(
+                ("Demonstrator", "Notes"),
+                ("GB-SEQ", "Debuggerfriendly golden, singlethreaded only"),
+            ),
+            hyphen_glue=True,
+        )
+        result = run_unit_dumps(
+            "P4016R0", (unit,),
+            base_url="http://pod.invalid", api_key="k",
+        )
+        probe = result.units[0].probe
+        assert not probe.skipped
+        assert not probe.passed
+        assert not probe.defect_confirmed
+        assert "did not confirm glue" in probe.expected
+
+
+def _pairing_pages(unit: TableUnit) -> list[str]:
+    return [" ".join(cell for row in unit.cells[:3] for cell in row)]
+
+
+class TestSourcePairedClosedAnswers:
+    """Source-first path: complete normalized answer must be one exact verdict."""
+
+    def test_aligned_not_flattened_match_is_not_defect(self, monkeypatch):
+        asked = _patch_pod(monkeypatch, "not flattened; match")
+        unit = _pipe_unit([
+            ["Pattern", "Description"],
+            ["Yes But Actually", "Claim walked back"],
+        ])
+        result = run_unit_dumps(
+            "P4178R0", (unit,),
+            base_url="http://pod.invalid", api_key="k",
+            textlayer_pages=_pairing_pages(unit),
+        )
+        probe = result.units[0].probe
+        assert result.units[0].classification == "aligned"
+        assert probe.probe_id == "src-t0"
+        assert not probe.skipped
+        assert not probe.passed
+        assert not probe.defect_confirmed
+        assert probe.expected.startswith("ambiguous source verdict:")
+        assert len(asked) == 1
+
+    def test_flattened_not_flattened_match_does_not_confirm(self, monkeypatch):
+        asked = _patch_pod(monkeypatch, "not flattened; match")
+        unit = _p4178_flattened_unit()
+        result = run_unit_dumps(
+            "P4178R0", (unit,),
+            base_url="http://pod.invalid", api_key="k",
+            textlayer_pages=_pairing_pages(unit),
+        )
+        probe = result.units[0].probe
+        assert result.units[0].classification == "flattened"
+        assert probe.probe_id == "src-t6"
+        assert not probe.skipped
+        assert not probe.passed
+        assert not probe.defect_confirmed
+        assert probe.expected.startswith("abstain: typed did not confirm")
+        assert len(asked) == 2
+
+    def test_flattened_unflattened_does_not_confirm(self, monkeypatch):
+        asked = _patch_pod(monkeypatch, "unflattened")
+        unit = _p4178_flattened_unit()
+        result = run_unit_dumps(
+            "P4178R0", (unit,),
+            base_url="http://pod.invalid", api_key="k",
+            textlayer_pages=_pairing_pages(unit),
+        )
+        probe = result.units[0].probe
+        assert not probe.skipped
+        assert not probe.passed
+        assert not probe.defect_confirmed
+        assert probe.expected.startswith("abstain: typed did not confirm")
+        assert len(asked) == 2
+
+    def test_flattened_source_ambiguous_typed_exact_still_confirms(self, monkeypatch):
+        """Source ambiguity still allows typed/grid fallback on defect classes."""
+        import whisker.llm.table_probes as tp
+
+        answers = ["unflattened", "flattened"]
+        asked: list[str] = []
+
+        def fake_ask(client, base_url, api_key, model_name, table_md, question,
+                     system_prompt=tp._R1_SYSTEM_PROMPT, source_text=None,
+                     source_page=None):
+            asked.append(question)
+            return answers.pop(0), 1
+
+        monkeypatch.setattr(tp, "_ask_pod_defect", fake_ask)
+        unit = _p4178_flattened_unit()
+        result = run_unit_dumps(
+            "P4178R0", (unit,),
+            base_url="http://pod.invalid", api_key="k",
+            textlayer_pages=_pairing_pages(unit),
+        )
+        probe = result.units[0].probe
+        assert not probe.skipped
+        assert probe.passed
+        assert probe.defect_confirmed
+        assert probe.expected == "typed confirmed defect"
+        assert len(asked) == 2
+
+    def test_flattened_exact_source_still_confirms(self, monkeypatch):
+        asked = _patch_pod(monkeypatch, "flattened")
+        unit = _p4178_flattened_unit()
+        result = run_unit_dumps(
+            "P4178R0", (unit,),
+            base_url="http://pod.invalid", api_key="k",
+            textlayer_pages=_pairing_pages(unit),
+        )
+        probe = result.units[0].probe
+        assert probe.passed
+        assert probe.defect_confirmed
+        assert probe.expected == "source verdict=flattened"
+        assert len(asked) == 1
+
+    def test_flattened_rather_than_match_source_does_not_confirm(self, monkeypatch):
+        asked = _patch_pod(monkeypatch, "flattened rather than match")
+        unit = _p4178_flattened_unit()
+        result = run_unit_dumps(
+            "P4178R0", (unit,),
+            base_url="http://pod.invalid", api_key="k",
+            textlayer_pages=_pairing_pages(unit),
+        )
+        probe = result.units[0].probe
+        assert not probe.skipped
+        assert not probe.passed
+        assert not probe.defect_confirmed
+        assert probe.expected.startswith("abstain: typed did not confirm")
+        assert len(asked) == 2
+
+    def test_wrap_orphan_not_really_wrap_does_not_confirm(self, monkeypatch):
+        asked = _patch_pod(monkeypatch, "not really wrap")
+        unit = TableUnit(
+            index=0, fmt=FORMAT_PIPE,
+            cells=(
+                ("Reader", "Read"),
+                ("Implementer", "Polls, Appendix token leftover"),
+            ),
+            wrap_orphan=True,
+        )
+        result = run_unit_dumps(
+            "P4016R0", (unit,),
+            base_url="http://pod.invalid", api_key="k",
+            textlayer_pages=_pairing_pages(unit),
+        )
+        probe = result.units[0].probe
+        assert result.units[0].classification == "wrap_orphan"
+        assert probe.probe_id == "src-t0"
+        assert not probe.skipped
+        assert not probe.passed
+        assert not probe.defect_confirmed
+        assert probe.expected == "typed did not confirm"
+        assert len(asked) == 2
+
+    def test_hyphen_glue_un_glued_does_not_confirm(self, monkeypatch):
+        asked = _patch_pod(monkeypatch, "un-glued")
+        unit = TableUnit(
+            index=0, fmt=FORMAT_PIPE,
+            cells=(
+                ("Demonstrator", "Notes"),
+                ("GB-SEQ", "Debuggerfriendly golden, singlethreaded only"),
+            ),
+            hyphen_glue=True,
+        )
+        result = run_unit_dumps(
+            "P4016R0", (unit,),
+            base_url="http://pod.invalid", api_key="k",
+            textlayer_pages=_pairing_pages(unit),
+        )
+        probe = result.units[0].probe
+        assert result.units[0].classification == "hyphen_glue"
+        assert not probe.skipped
+        assert not probe.passed
+        assert not probe.defect_confirmed
+        assert probe.expected == "typed did not confirm"
+        assert len(asked) == 2
+
+    def test_aligned_unflattened_is_not_defect(self, monkeypatch):
+        asked = _patch_pod(monkeypatch, "unflattened")
+        unit = _pipe_unit([
+            ["Pattern", "Description"],
+            ["Yes But Actually", "Claim walked back"],
+        ])
+        result = run_unit_dumps(
+            "P4178R0", (unit,),
+            base_url="http://pod.invalid", api_key="k",
+            textlayer_pages=_pairing_pages(unit),
+        )
+        probe = result.units[0].probe
+        assert result.units[0].classification == "aligned"
+        assert not probe.skipped
+        assert not probe.passed
+        assert not probe.defect_confirmed
+        assert probe.expected.startswith("ambiguous source verdict:")
+        assert len(asked) == 1
+        from whisker.llm.inspect_report import _format_unit_dumps
+        text = "\n".join(_format_unit_dumps(unit_dumps_to_dict(result)))
+        assert "| DEFECT |" not in text
+
+    def test_aligned_flattened_match_is_not_defect(self, monkeypatch):
+        asked = _patch_pod(monkeypatch, "flattened match")
+        unit = _pipe_unit([
+            ["Pattern", "Description"],
+            ["Yes But Actually", "Claim walked back"],
+        ])
+        result = run_unit_dumps(
+            "P4178R0", (unit,),
+            base_url="http://pod.invalid", api_key="k",
+            textlayer_pages=_pairing_pages(unit),
+        )
+        probe = result.units[0].probe
+        assert result.units[0].classification == "aligned"
+        assert not probe.skipped
+        assert not probe.passed
+        assert not probe.defect_confirmed
+        assert probe.expected.startswith("ambiguous source verdict:")
+        assert len(asked) == 1
+        from whisker.llm.inspect_report import _format_unit_dumps
+        text = "\n".join(_format_unit_dumps(unit_dumps_to_dict(result)))
+        assert "| DEFECT |" not in text
+
+    def test_aligned_split_is_defect(self, monkeypatch):
+        asked = _patch_pod(monkeypatch, "split")
+        unit = _pipe_unit([
+            ["Pattern", "Description"],
+            ["Yes But Actually", "Claim walked back"],
+        ])
+        result = run_unit_dumps(
+            "P4178R0", (unit,),
+            base_url="http://pod.invalid", api_key="k",
+            textlayer_pages=_pairing_pages(unit),
+        )
+        probe = result.units[0].probe
+        assert result.units[0].classification == "aligned"
+        assert not probe.skipped
+        assert not probe.passed
+        assert probe.defect_confirmed
+        assert probe.expected == "source verdict=split"
+        assert len(asked) == 1
+        from whisker.llm.inspect_report import _format_unit_dumps
+        text = "\n".join(_format_unit_dumps(unit_dumps_to_dict(result)))
+        assert "| DEFECT |" in text
+
+    def test_aligned_exact_match_still_passes(self, monkeypatch):
+        asked = _patch_pod(monkeypatch, "match")
+        unit = _pipe_unit([
+            ["Pattern", "Description"],
+            ["Yes But Actually", "Claim walked back"],
+        ])
+        result = run_unit_dumps(
+            "P4178R0", (unit,),
+            base_url="http://pod.invalid", api_key="k",
+            textlayer_pages=_pairing_pages(unit),
+        )
+        probe = result.units[0].probe
+        assert result.units[0].classification == "aligned"
+        assert not probe.skipped
+        assert probe.passed
+        assert not probe.defect_confirmed
+        assert probe.expected == "source verdict=match"
+        assert len(asked) == 1
