@@ -2,31 +2,35 @@
 //!
 //! `main` owns the process boundary (argument parsing, signal installation,
 //! exit status). This module owns everything between: it validates the gateway
-//! environment, resolves the prompt source (the embedded vendored prompt by
-//! default, `--prompt` from disk otherwise), loads the paper markdown (from
-//! the SQLite paper store for a paper number, verbatim from disk for
-//! `--file`), binds the prompt's declared model role to one gateway model,
-//! seeds the run's store with the paper under the prompt's declared
-//! `paper.md` input key, runs the prompt, and extracts the prompt's declared
-//! `report.md` output to `--output`, or to stdout when no path is given.
+//! environment, resolves the prompt source (the embedded prompt by default,
+//! `--prompt` from disk otherwise), loads the paper markdown (from the SQLite
+//! paper store for a paper number, verbatim from disk for `--file`), stands
+//! up a one-shot promptforge harness over a per-run scratch directory, binds
+//! the gateway and the one model the prompt's `writer` role fills from,
+//! launches the prompt as a harness agent session with the paper as the run's
+//! `args`, follows the session to its close, and writes the report to
+//! `--output`, or to stdout when no path is given.
+//!
+//! The harness (`harness-api`) is the engine's production host: it owns the
+//! tokio effect loop, the gateway transport, the run log, and the run's
+//! store. papergate never touches the engine directly. The harness exposes a
+//! run's outcome as session state and events, not as a value, so the report
+//! is the run's last assistant reply: the prompt's final section ends with
+//! the model call that writes it.
 
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::time::Duration;
 
 use anyhow::{Context, Result, bail};
 use clap::Parser;
+use harness_api::cancel::CancelHandle;
+use harness_api::{
+    CatalogBinding, FailureKind, GatewayBinding, Harness, HarnessConfig, HostSnapshot,
+    LaunchRequest, Session, SessionEvent, SessionFailure, SessionState,
+};
 use paperstore::{PaperNum, StorageBackend};
 use paperstore_sqlite::SqliteBackend;
-use promptforge_api_runtime::client::{
-    GatewayClient, GatewayEndpoint, SecretString, fetch_model_catalog,
-};
-use promptforge_api_runtime::types::cancel::CancelHandle;
-use promptforge_api_runtime::types::models::{ModelCatalog, ModelDescriptor, ModelId};
-use promptforge_api_runtime::types::observe::{Observation, Observer};
-use promptforge_api_runtime::{
-    Environment, Prompt, RequirementCheck, Requirements, RunContext, RunResult, execute,
-};
-use shared_vfs::{Origin, VfsError, VfsRef};
+use tokio::sync::broadcast::error::RecvError;
 
 /// The embedded papergate prompt.
 const DEFAULT_PROMPT: &str = include_str!("../papergate.md");
@@ -36,12 +40,29 @@ const DEFAULT_PROMPT: &str = include_str!("../papergate.md");
 /// every C++ Alliance gateway serves.
 const DEFAULT_MODEL: &str = "reasoning-large";
 
-/// The mount prefix of the run-scoped store inside the run's virtual
-/// filesystem. Mirrors promptforge's `STORE_MOUNT`, which lives in a crate
-/// private to the promptforge family; the prompt's `store.read("paper.md")`
-/// resolves to `<STORE_MOUNT>/paper.md`, so the host seeds and extracts
-/// through the same prefix.
-const STORE_MOUNT: &str = "/_promptforge/store";
+/// The agent name the harness discovers the prompt under: it is written as
+/// `<AGENT>.md` into the run's agents directory and launched by this name.
+const AGENT: &str = "papergate";
+
+/// The generation papergate assigns its gateway and catalog bindings. The
+/// harness rebuilds its resources when a generation changes; a one-shot run
+/// pushes exactly one of each.
+const BINDING_GENERATION: u64 = 1;
+
+/// The OpenAI-compatible API root suffix the harness appends to the gateway
+/// base URL itself (`GatewayBinding::api_root`).
+const GATEWAY_API_SUFFIX: &str = "/v1";
+
+/// Event kinds the progress feed does not echo: the raw model-turn bodies,
+/// present only in debug runs and bulky when they are.
+const SILENT_EVENT_KINDS: &[&str] = &["request", "response"];
+
+/// How long a run that ended without success is given for its failure
+/// report to land. The harness flips the session state to `Closed` before it
+/// broadcasts the report, so a client that stopped listening at `Closed`
+/// would lose the reason. The report is sent in the same synchronous stretch
+/// as the state change, so this bounds scheduling, not a wait the run fills.
+const FAILURE_REPORT_GRACE: Duration = Duration::from_secs(2);
 
 /// The `papergate` command-line interface.
 #[derive(Debug, Parser)]
@@ -123,8 +144,9 @@ impl std::fmt::Debug for RunRequest<'_> {
 
 /// The run was cancelled cooperatively (Ctrl-C) before it produced a report.
 ///
-/// The runtime reports cancellation as a value, not an error; this type
-/// carries it through the `anyhow` chain so `main` can select exit code 130.
+/// The harness reports a requested close as session state, not as an error;
+/// this type carries it through the `anyhow` chain so `main` can select exit
+/// code 130.
 #[derive(Debug)]
 pub(crate) struct Cancelled;
 
@@ -139,13 +161,14 @@ impl std::error::Error for Cancelled {}
 /// Runs one analysis using the gateway configuration read from the environment.
 ///
 /// # Errors
-/// Returns an error if either gateway variable is unset or blank, the prompt
-/// fails to parse, the paper input cannot be loaded (`WG21_DATA_DIR` unset,
-/// the number missing from the store or without converted markdown, or the
-/// `--file` path unreadable), the model catalog cannot be fetched or lacks
-/// the requested model, the prompt's declared requirements are unmet by that
-/// model, execution fails, the run is cancelled ([`Cancelled`]), or the
-/// prompt did not produce its declared `report.md` output.
+/// Returns an error if either gateway variable is unset or blank, the paper
+/// input cannot be loaded (`WG21_DATA_DIR` unset, the number missing from the
+/// store or without converted markdown, or the `--file` path unreadable), the
+/// prompt file cannot be read, the harness refuses the launch, the session
+/// reports a failure (the prompt does not parse, the gateway does not serve
+/// the model, the model falls short of the prompt's requirements, or a model
+/// round fails), the run is cancelled ([`Cancelled`]), or the run ends
+/// without a report.
 pub(crate) async fn run(request: RunRequest<'_>) -> Result<()> {
     let RunRequest {
         input,
@@ -154,12 +177,7 @@ pub(crate) async fn run(request: RunRequest<'_>) -> Result<()> {
         model,
         cancel,
     } = request;
-    let (endpoint, token) = gateway_from_env()?;
-    let execution = format!(
-        "papergate-{:016x}{:016x}",
-        fastrand::u64(..),
-        fastrand::u64(..)
-    );
+    let gateway = gateway_from_env()?;
 
     let source = match prompt {
         Some(path) => tokio::fs::read_to_string(path)
@@ -167,45 +185,31 @@ pub(crate) async fn run(request: RunRequest<'_>) -> Result<()> {
             .with_context(|| format!("read prompt file {}", path.display()))?,
         None => DEFAULT_PROMPT.to_owned(),
     };
-    let observer: Arc<dyn Observer> = Arc::new(StderrObserver);
-    let parsed = Prompt::parse(&source, &execution, observer.as_ref())
-        .context("parse the papergate prompt")?;
 
-    // Load before the catalog fetch: a store miss or an unreadable file
+    // Load before the harness stands up: a store miss or an unreadable file
     // fails fast, before any network call.
     let paper_md = load_input_markdown(input).await?;
 
-    let catalog = fetch_model_catalog(&endpoint, &token)
-        .await
-        .context("fetch the model catalog")?;
-    let descriptor = select_model(&catalog, model)?;
-    let client = GatewayClient::new(
-        GatewayEndpoint::new(&endpoint).context("parse PROMPTFORGE_GATEWAY_URL")?,
-        SecretString::new(token).context("read PROMPTFORGE_GATEWAY_API_KEY")?,
-    );
+    let run_dir = std::env::temp_dir().join(format!(
+        "papergate-{:016x}{:016x}",
+        fastrand::u64(..),
+        fastrand::u64(..)
+    ));
+    let launch = Launch {
+        run_dir: &run_dir,
+        source: &source,
+        gateway,
+        model,
+        paper_md,
+        cancel,
+    };
+    let result = run_session(launch).await;
+    // Best-effort: the scratch directory holds the agent file and the
+    // harness's run log, and a cleanup failure must not mask the run's own
+    // outcome.
+    let _ignored = std::fs::remove_dir_all(&run_dir);
+    let report = result?;
 
-    // Prepare by hand rather than through `Environment::run`: the prepared
-    // context owns the run's fresh store, and the paper must be seeded into
-    // it before the run starts and the report read out of it after.
-    let context = RunContext::new(execution.as_str())
-        .observer(observer)
-        .cancel(cancel)
-        .client(client)
-        .model(descriptor);
-    let (context, requirements) = Environment::new().prepare(&parsed, context);
-    check_requirements(&requirements, model)?;
-    let vfs = context.vfs_handle().clone();
-    seed_store(&vfs, &paper_md)?;
-
-    match execute::run(&parsed, "", context).await {
-        RunResult::Ok(_) => {}
-        RunResult::Cancelled => return Err(Cancelled.into()),
-        RunResult::Failure(error) => {
-            return Err(anyhow::Error::from(error).context("run the papergate prompt"));
-        }
-    }
-
-    let report = read_report(&vfs)?;
     match output {
         Some(path) => {
             std::fs::write(path, &report)
@@ -215,6 +219,270 @@ pub(crate) async fn run(request: RunRequest<'_>) -> Result<()> {
         None => write_stdout(report.as_bytes())?,
     }
     Ok(())
+}
+
+/// Everything one harness session needs beyond the environment.
+struct Launch<'a> {
+    /// The per-run scratch directory: the agents directory and the
+    /// harness's state directory live under it.
+    run_dir: &'a Path,
+    /// The prompt source, written as the agent file.
+    source: &'a str,
+    /// The gateway the harness binds.
+    gateway: GatewayEnv,
+    /// The gateway model the prompt's declared role binds to.
+    model: &'a str,
+    /// The paper markdown, handed to the run as its `args`.
+    paper_md: String,
+    /// The cooperative cancellation handle wired to Ctrl-C.
+    cancel: CancelHandle,
+}
+
+/// Stands up a harness over the scratch directory, launches the prompt as an
+/// agent session with the paper as its `args`, and follows the session to
+/// its close, returning the report.
+async fn run_session(launch: Launch<'_>) -> Result<String> {
+    let Launch {
+        run_dir,
+        source,
+        gateway,
+        model,
+        paper_md,
+        cancel,
+    } = launch;
+    let agents_path = run_dir.join("agents");
+    tokio::fs::create_dir_all(&agents_path)
+        .await
+        .with_context(|| format!("create the agents directory {}", agents_path.display()))?;
+    let agent_file = agents_path.join(format!("{AGENT}.md"));
+    tokio::fs::write(&agent_file, source)
+        .await
+        .with_context(|| format!("write the agent file {}", agent_file.display()))?;
+
+    let harness = Harness::new(HarnessConfig {
+        agents_path,
+        state_dir: run_dir.join("state"),
+    });
+    harness.set_gateway(GatewayBinding {
+        base_url: gateway.base_url,
+        key: gateway.key,
+        generation: BINDING_GENERATION,
+    });
+    // The host snapshot's selection is the model every declared role fills
+    // from; the harness resolves it against the gateway's live catalog at
+    // launch and fails the run when the gateway does not serve it.
+    harness.set_host(HostSnapshot {
+        selected_model: Some(model.to_owned()),
+        workspace_roots: Vec::new(),
+    });
+    harness.set_catalog(catalog_binding(model));
+
+    let session = harness
+        .launch(LaunchRequest {
+            agent: AGENT.to_owned(),
+            args: paper_md,
+        })
+        .await
+        .context("launch the papergate agent session")?;
+    follow_session(&harness, &session, cancel).await
+}
+
+/// Follows a launched session to its close: echoes its events as progress
+/// lines, collects its failure reports, closes it on cancellation, and
+/// returns the report once it is closed.
+async fn follow_session(
+    harness: &Harness,
+    session: &Session,
+    cancel: CancelHandle,
+) -> Result<String> {
+    // Subscribe before the backfill: nothing between the two is lost, and a
+    // live event the backfill already covered is skipped by its index.
+    let mut events = session.subscribe_events();
+    let mut errors = session.subscribe_errors();
+    let mut state = session.subscribe_state();
+    let mut progress = Progress::default();
+    absorb_transcript(session, &mut progress).await?;
+    let mut closing = false;
+    while *state.borrow_and_update() != SessionState::Closed {
+        tokio::select! {
+            biased;
+            received = events.recv() => match received {
+                Ok(event) => show(progress.absorb(&event)),
+                // A lagged receiver lost live events; the transcript is the
+                // durable copy and the cursor says where to resume.
+                Err(RecvError::Lagged(_)) => absorb_transcript(session, &mut progress).await?,
+                Err(RecvError::Closed) => break,
+            },
+            received = errors.recv() => match received {
+                Ok(failure) => progress.fail(failure),
+                // Reports are ephemeral; a lagged receiver missed a report
+                // of a failure the state watch still ends the loop on.
+                Err(RecvError::Lagged(_)) => {}
+                Err(RecvError::Closed) => break,
+            },
+            changed = state.changed() => {
+                if changed.is_err() {
+                    break;
+                }
+            }
+            () = cancel.cancelled(), if !closing => {
+                closing = true;
+                progress.cancelled = true;
+                // Close, not cancel: a turn-cancel relaunches the program
+                // over the retained transcript; close ends the session for
+                // good and drains its outstanding effects.
+                let _was_running = harness.close(session.id());
+            }
+        }
+    }
+    // The log is written before each live broadcast, so a read past the
+    // cursor closes any gap between the last events and the close.
+    absorb_transcript(session, &mut progress).await?;
+    // The failure report, when the run needs one, may still be on its way:
+    // the state reaches `Closed` ahead of it.
+    if !progress.succeeded
+        && progress.failures.is_empty()
+        && let Ok(Ok(failure)) = tokio::time::timeout(FAILURE_REPORT_GRACE, errors.recv()).await
+    {
+        progress.fail(failure);
+    }
+    while let Ok(failure) = errors.try_recv() {
+        progress.fail(failure);
+    }
+    progress.report()
+}
+
+/// Reads the transcript past the progress cursor and absorbs it.
+async fn absorb_transcript(session: &Session, progress: &mut Progress) -> Result<()> {
+    let backlog = session
+        .transcript(progress.cursor)
+        .await
+        .context("read the session transcript")?;
+    for event in &backlog {
+        show(progress.absorb(event));
+    }
+    Ok(())
+}
+
+/// Writes one progress line to stderr, when there is one.
+///
+/// Progress is a side channel, so a failed write to stderr is deliberately
+/// dropped rather than surfaced.
+fn show(line: Option<String>) {
+    if let Some(line) = line {
+        eprintln!("{line}");
+    }
+}
+
+/// What papergate has learned from a session's event stream: how far it has
+/// read, the run's last assistant reply, and how the run ended.
+#[derive(Debug, Default)]
+struct Progress {
+    /// The next transcript index to take; events below it were absorbed.
+    cursor: u64,
+    /// The text of the last `assistant_reply` event seen: the report, once
+    /// the run has succeeded.
+    last_reply: Option<String>,
+    /// Whether a `run_succeeded` event was seen.
+    succeeded: bool,
+    /// The failures the session reported, in order.
+    failures: Vec<SessionFailure>,
+    /// Whether papergate itself asked the session to close (Ctrl-C).
+    cancelled: bool,
+}
+
+impl Progress {
+    /// Absorbs one event, returning the progress line to show for it, or
+    /// `None` when the event was already absorbed (a live event the
+    /// transcript backfill covered) or is one of the silent kinds.
+    fn absorb(&mut self, event: &SessionEvent) -> Option<String> {
+        if event.index < self.cursor {
+            return None;
+        }
+        self.cursor = event.index + 1;
+        let kind = field(&event.event, "kind").unwrap_or("unknown");
+        match kind {
+            "assistant_reply" => {
+                if let Some(text) = field(&event.event, "text") {
+                    self.last_reply = Some(text.to_owned());
+                }
+            }
+            "run_succeeded" => self.succeeded = true,
+            _ => {}
+        }
+        if SILENT_EVENT_KINDS.contains(&kind) {
+            return None;
+        }
+        let section = field(&event.event, "section").unwrap_or("");
+        Some(format!("[{AGENT}] {section}: {kind}"))
+    }
+
+    /// Records one failure the session reported.
+    fn fail(&mut self, failure: SessionFailure) {
+        self.failures.push(failure);
+    }
+
+    /// The report, once the session has closed.
+    ///
+    /// # Errors
+    /// Returns [`Cancelled`] when papergate closed the session itself, the
+    /// session's failure reports when it reported any, an error when the
+    /// run never reported success, and an error when it succeeded without
+    /// an assistant reply to serve as the report.
+    fn report(self) -> Result<String> {
+        if self.cancelled {
+            return Err(Cancelled.into());
+        }
+        if !self.failures.is_empty() {
+            let messages: Vec<String> = self
+                .failures
+                .iter()
+                .map(|failure| format!("{}: {}", failure_label(failure.kind), failure.message))
+                .collect();
+            bail!("the papergate run failed: {}", messages.join("; "));
+        }
+        if !self.succeeded {
+            bail!("the session closed without the run reporting success");
+        }
+        match self.last_reply {
+            Some(report) => Ok(report),
+            None => bail!(
+                "the run succeeded without an assistant reply to report: the prompt's final \
+                 section must end with the model call that writes the report"
+            ),
+        }
+    }
+}
+
+/// One string field of an event's persisted JSON shape.
+fn field<'a>(event: &'a serde_json::Value, name: &str) -> Option<&'a str> {
+    event.get(name).and_then(serde_json::Value::as_str)
+}
+
+/// The label for one failure kind. The match is exhaustive on purpose: a
+/// new kind fails this build until it is labelled here.
+fn failure_label(kind: FailureKind) -> &'static str {
+    match kind {
+        FailureKind::ModelTurnFailed => "model turn failed",
+        FailureKind::ToolCallFailed => "tool call failed",
+        FailureKind::RunFailed => "run failed",
+        FailureKind::Interrupted => "interrupted",
+    }
+}
+
+/// The chat catalog binding the harness gates launches on.
+///
+/// The harness holds a launched session until a catalog with at least one
+/// chat-capable entry is bound (in the Workshop, the model dropdown's list),
+/// and resolves the selected model against the gateway's live catalog at
+/// launch, failing the run when the gateway does not serve it. papergate has
+/// exactly one model in play, so its catalog is that one entry; the harness's
+/// own fetch is what validates the name.
+fn catalog_binding(model: &str) -> CatalogBinding {
+    CatalogBinding {
+        generation: BINDING_GENERATION,
+        models: vec![serde_json::json!({ "id": model })],
+    }
 }
 
 /// Writes bytes to stdout verbatim, flushing before return.
@@ -257,25 +525,46 @@ fn load_paper_md(backend: &impl StorageBackend, num: &PaperNum) -> paperstore::R
     backend.paper_md(num)
 }
 
+/// The gateway as the harness binds it: its base URL and bearer key.
+struct GatewayEnv {
+    base_url: String,
+    key: String,
+}
+
 /// Reads the gateway environment, requiring both variables.
 ///
 /// The prompt binds its `writer` role through the gateway, so there is no
 /// local-only mode: a missing credential is a startup error naming both
 /// variables rather than a silent downgrade.
-fn gateway_from_env() -> Result<(String, String)> {
+fn gateway_from_env() -> Result<GatewayEnv> {
     let endpoint = env_optional("PROMPTFORGE_GATEWAY_URL")?;
     let token = env_optional("PROMPTFORGE_GATEWAY_API_KEY")?;
     let endpoint = endpoint.map(|value| value.trim().to_owned());
     let token = token.map(|value| value.trim().to_owned());
     match (endpoint, token) {
         (Some(endpoint), Some(token)) if !endpoint.is_empty() && !token.is_empty() => {
-            Ok((endpoint, token))
+            Ok(GatewayEnv {
+                base_url: gateway_base_url(&endpoint),
+                key: token,
+            })
         }
         _ => bail!(
             "PROMPTFORGE_GATEWAY_URL and PROMPTFORGE_GATEWAY_API_KEY must both be set: \
              the papergate prompt binds its writer model through the gateway"
         ),
     }
+}
+
+/// The gateway base URL for the harness binding.
+///
+/// The harness derives the OpenAI-compatible API root itself by appending
+/// `/v1` to the base URL it is bound with. The variable has been given as
+/// that `/v1` root, so a trailing `/v1` is stripped here and either spelling
+/// binds the same gateway.
+fn gateway_base_url(endpoint: &str) -> String {
+    let trimmed = endpoint.trim_end_matches('/');
+    let base = trimmed.strip_suffix(GATEWAY_API_SUFFIX).unwrap_or(trimmed);
+    base.trim_end_matches('/').to_owned()
 }
 
 /// Reads an optional environment variable, distinguishing an absent variable
@@ -293,168 +582,62 @@ fn env_optional(name: &str) -> Result<Option<String>> {
     }
 }
 
-/// Picks the descriptor named `model` out of the gateway's catalog.
-///
-/// The runtime binds every role the prompt declares to this one model and
-/// checks the role's hard requirements against it at prepare. A name the
-/// gateway does not serve is an error listing what it does serve, so a
-/// misconfigured `PAPERGATE_MODEL` is diagnosable from the message alone.
-fn select_model(catalog: &ModelCatalog, model: &str) -> Result<ModelDescriptor> {
-    let id = ModelId::gateway(model).with_context(|| format!("parse model name {model:?}"))?;
-    if let Some(descriptor) = catalog.get(&id) {
-        return Ok(descriptor.clone());
-    }
-    let available: Vec<&str> = catalog
-        .models()
-        .iter()
-        .map(|descriptor| descriptor.id().name())
-        .collect();
-    bail!("the gateway does not serve model {model:?}; it serves {available:?}")
-}
-
-/// Refuses to run a prompt whose prepare-time requirements are unmet, with
-/// one deliberate tolerance.
-///
-/// The prompt's `writer` role declares the `no-thinking` hard keyword, which
-/// is also how the runtime learns to send `enable_thinking: false` on every
-/// request. The runtime's fill check accepts that keyword only for a model
-/// that can never think, so a `Switchable` model (the only kind the C++
-/// Alliance gateway serves) is reported as unmet even though the request
-/// switch does exactly what the role asks. That one report is tolerated
-/// here and the run proceeds with thinking off; every other unmet
-/// requirement, missing capability, or conflict is an error.
-fn check_requirements(requirements: &Requirements, model: &str) -> Result<()> {
-    if requirements.is_satisfied() {
-        return Ok(());
-    }
-    let tolerated = |unmet: &promptforge_api_runtime::UnmetRequirement| {
-        unmet.check == RequirementCheck::HardKeyword
-            && unmet.required == "no-thinking"
-            && unmet.actual == "Switchable"
-    };
-    let blocking = requirements
-        .unmet_requirements
-        .iter()
-        .any(|unmet| !tolerated(unmet))
-        || !requirements.missing_required.is_empty()
-        || !requirements.conflicts.is_empty();
-    if blocking {
-        bail!("the prompt's declared requirements are unmet by model {model}: {requirements:?}");
-    }
-    eprintln!(
-        "note: model {model} is thinking-switchable; running with thinking off as the \
-         prompt's no-thinking role requests"
-    );
-    Ok(())
-}
-
-/// The full store path of a prompt-relative store file.
-fn store_path(name: &str) -> String {
-    format!("{STORE_MOUNT}/{name}")
-}
-
-/// Seeds the run's store with the paper under the prompt's declared input key.
-///
-/// The access is dropped on return, so its claim never meets the run's own
-/// identities.
-fn seed_store(vfs: &VfsRef, paper_md: &str) -> Result<()> {
-    let access = vfs
-        .acquire(Origin::new("papergate seed"))
-        .context("open the run store for seeding")?;
-    access
-        .write(&store_path("paper.md"), paper_md.as_bytes())
-        .context("seed the run store with paper.md")
-}
-
-/// Reads the prompt's declared output from the run's store.
-///
-/// A missing `report.md` is an explicit error naming the prompt's output
-/// contract, never an empty write.
-fn read_report(vfs: &VfsRef) -> Result<String> {
-    let access = vfs
-        .acquire(Origin::new("papergate report"))
-        .context("open the run store for the report")?;
-    match access.read_string(&store_path("report.md")) {
-        Ok(report) => Ok(report),
-        Err(error @ VfsError::NotFound(_)) => Err(error).context(
-            "the prompt did not produce its declared output: report.md is missing \
-             from the run store",
-        ),
-        Err(error) => Err(error).context("read report.md from the run store"),
-    }
-}
-
-/// An observer that writes one progress line per event to stderr.
-#[derive(Debug)]
-struct StderrObserver;
-
-impl Observer for StderrObserver {
-    fn observe(&self, execution: &str, section: &str, event: Observation) {
-        use std::io::Write as _;
-        // Observers must not panic and progress is a side channel, so a failed
-        // write to stderr is deliberately dropped rather than surfaced.
-        let _ignored = writeln!(std::io::stderr(), "[{execution}] {section}: {event}");
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use std::num::NonZeroU32;
     use std::path::Path;
 
     use clap::Parser;
+    use harness_api::{FailureKind, SessionEvent, SessionFailure};
     use paperstore::PaperNum;
     use paperstore_sqlite::SqliteBackend;
-    use promptforge_api_runtime::types::models::{
-        ModelCatalog, ModelDescriptor, ModelId, ThinkingMode,
-    };
-    use promptforge_api_runtime::types::observe::NullObserver;
-    use promptforge_api_runtime::{Environment, Prompt, RunContext};
-    use shared_vfs::{MemoryBackend, Origin, VfsRef};
+    use promptforge_api_runtime::types::models::{ModelDescriptor, ModelId, ThinkingMode};
+    use promptforge_api_runtime::types::timestamp::Timestamp;
+    use promptforge_api_runtime::{Environment, Prompt, Requirements, RunContext};
     use tempfile::TempDir;
 
     use super::{
-        Cli, DEFAULT_MODEL, DEFAULT_PROMPT, PaperInput, STORE_MOUNT, check_requirements,
-        load_input_markdown, load_paper_md, read_report, seed_store, select_model, store_path,
+        Cancelled, Cli, DEFAULT_MODEL, DEFAULT_PROMPT, PaperInput, Progress, catalog_binding,
+        gateway_base_url, load_input_markdown, load_paper_md,
     };
-
-    /// A run store shaped like the runtime's: a fresh memory backend at the
-    /// store mount.
-    fn run_store() -> VfsRef {
-        VfsRef::builder()
-            .mount(STORE_MOUNT, MemoryBackend::new())
-            .build()
-    }
-
-    fn read_store(vfs: &VfsRef, name: &str) -> String {
-        let access = vfs
-            .acquire(Origin::new("test read"))
-            .unwrap_or_else(|e| panic!("acquire: {e}"));
-        access
-            .read_string(&store_path(name))
-            .unwrap_or_else(|e| panic!("read {name}: {e}"))
-    }
-
-    fn write_store(vfs: &VfsRef, name: &str, contents: &str) {
-        let access = vfs
-            .acquire(Origin::new("test write"))
-            .unwrap_or_else(|e| panic!("acquire: {e}"));
-        access
-            .write(&store_path(name), contents.as_bytes())
-            .unwrap_or_else(|e| panic!("write {name}: {e}"));
-    }
-
-    fn descriptor(name: &str, context: u32, thinking: ThinkingMode) -> ModelDescriptor {
-        ModelDescriptor::new(
-            ModelId::gateway(name).unwrap_or_else(|e| panic!("model id: {e}")),
-            "a test model",
-            NonZeroU32::new(context).unwrap_or_else(|| panic!("non-zero context")),
-            thinking,
-        )
-    }
 
     fn paper_num() -> PaperNum {
         PaperNum::parse("P4003R2").unwrap_or_else(|e| panic!("parse: {e}"))
+    }
+
+    /// One session event in the harness's persisted shape.
+    fn event(index: u64, kind: &str, section: &str, text: Option<&str>) -> SessionEvent {
+        let mut event = serde_json::json!({
+            "kind": kind,
+            "execution": "test",
+            "section": section,
+            "provenance": { "task": "0", "seq": index },
+        });
+        if let Some(text) = text {
+            event["text"] = serde_json::Value::String(text.to_owned());
+        }
+        SessionEvent {
+            index,
+            reply: None,
+            event,
+        }
+    }
+
+    /// Prepares the embedded prompt the way the harness does at launch:
+    /// every declared role filled from one descriptor, the requirements
+    /// reported back.
+    fn prepared_requirements(context: u32, thinking: ThinkingMode) -> Requirements {
+        let (prompt, _parse_events) = Prompt::parse(DEFAULT_PROMPT, "test");
+        let prompt = prompt.unwrap_or_else(|e| panic!("the embedded prompt must parse: {e}"));
+        let descriptor = ModelDescriptor::new(
+            ModelId::gateway(DEFAULT_MODEL).unwrap_or_else(|e| panic!("model id: {e}")),
+            "a test model",
+            NonZeroU32::new(context).unwrap_or_else(|| panic!("non-zero context")),
+            thinking,
+        );
+        let context = RunContext::new("test", 0, Timestamp::UNIX_EPOCH).model(descriptor);
+        let (_, requirements) = Environment::new().prepare(&prompt, context);
+        requirements
     }
 
     /// A temp-dir paper store with the schema ensured and rows inserted by
@@ -565,35 +748,18 @@ mod tests {
     }
 
     #[test]
-    fn embedded_prompt_prepares_against_a_switchable_default_model() {
-        let prompt = Prompt::parse(DEFAULT_PROMPT, "test", &NullObserver::default())
-            .unwrap_or_else(|e| panic!("the embedded prompt must parse: {e}"));
-        let context = RunContext::new("test").model(descriptor(
-            DEFAULT_MODEL,
-            393_216,
-            ThinkingMode::Switchable,
-        ));
-
-        let (context, requirements) = Environment::new().prepare(&prompt, context);
-
-        check_requirements(&requirements, DEFAULT_MODEL).unwrap_or_else(|e| {
-            panic!("a switchable model must be accepted for the no-thinking writer role: {e}")
-        });
+    fn embedded_prompt_prepares_against_a_switchable_model() {
+        let requirements = prepared_requirements(393_216, ThinkingMode::Switchable);
         assert!(
-            context.vfs_handle().acquire(Origin::new("probe")).is_ok(),
-            "prepare must hand back a usable run store",
+            requirements.is_satisfied(),
+            "the writer role must be satisfied by a thinking-switchable model, which is \
+             what the gateway serves; the harness refuses any unmet requirement: {requirements:?}",
         );
     }
 
     #[test]
-    fn embedded_prompt_prepares_cleanly_against_a_never_thinking_model() {
-        let prompt = Prompt::parse(DEFAULT_PROMPT, "test", &NullObserver::default())
-            .unwrap_or_else(|e| panic!("the embedded prompt must parse: {e}"));
-        let context =
-            RunContext::new("test").model(descriptor("plain", 393_216, ThinkingMode::Never));
-
-        let (_, requirements) = Environment::new().prepare(&prompt, context);
-
+    fn embedded_prompt_prepares_against_a_never_thinking_model() {
+        let requirements = prepared_requirements(393_216, ThinkingMode::Never);
         assert!(
             requirements.is_satisfied(),
             "a never-thinking model satisfies the writer role outright: {requirements:?}",
@@ -602,51 +768,162 @@ mod tests {
 
     #[test]
     fn a_too_small_context_window_is_refused() {
-        let prompt = Prompt::parse(DEFAULT_PROMPT, "test", &NullObserver::default())
-            .unwrap_or_else(|e| panic!("the embedded prompt must parse: {e}"));
-        let context =
-            RunContext::new("test").model(descriptor("tiny", 8192, ThinkingMode::Switchable));
-
-        let (_, requirements) = Environment::new().prepare(&prompt, context);
-
-        let error = match check_requirements(&requirements, "tiny") {
-            Ok(()) => panic!("an 8k model must fail the writer role's 32k minimum"),
-            Err(error) => error.to_string(),
-        };
+        let requirements = prepared_requirements(8192, ThinkingMode::Switchable);
         assert!(
-            error.contains("tiny") && error.contains("ContextMinimum"),
-            "the error must name the model and the failed check: {error}",
+            !requirements.is_satisfied(),
+            "an 8k model must fail the writer role's 32k minimum",
+        );
+        let notice = requirements.notice();
+        assert!(
+            notice.contains("writer") && notice.contains("32768"),
+            "the refusal must name the role and its minimum: {notice}",
         );
     }
 
     #[test]
-    fn select_model_returns_the_named_descriptor() {
-        let wanted = descriptor("reasoning-large", 393_216, ThinkingMode::Switchable);
-        let catalog = ModelCatalog::new(vec![
-            descriptor("other", 8192, ThinkingMode::Never),
-            wanted.clone(),
-        ])
-        .unwrap_or_else(|e| panic!("catalog: {e}"));
-
-        let selected =
-            select_model(&catalog, "reasoning-large").unwrap_or_else(|e| panic!("select: {e}"));
-
-        assert_eq!(selected, wanted);
+    fn catalog_binding_holds_the_one_model_by_id() {
+        let catalog = catalog_binding("reasoning-large");
+        assert_eq!(catalog.generation, 1);
+        assert_eq!(
+            catalog.models,
+            vec![serde_json::json!({ "id": "reasoning-large" })],
+            "the harness reads the entry's `id` as the fallback selection",
+        );
     }
 
     #[test]
-    fn select_model_names_the_available_models_when_missing() {
-        let catalog = ModelCatalog::new(vec![descriptor("other", 8192, ThinkingMode::Never)])
-            .unwrap_or_else(|e| panic!("catalog: {e}"));
+    fn gateway_base_url_strips_the_api_root_the_harness_appends() {
+        for (given, expected) in [
+            ("https://gw.example.com/v1", "https://gw.example.com"),
+            ("https://gw.example.com/v1/", "https://gw.example.com"),
+            ("https://gw.example.com", "https://gw.example.com"),
+            ("https://gw.example.com/", "https://gw.example.com"),
+            ("http://127.0.0.1:8081/v1", "http://127.0.0.1:8081"),
+            ("https://gw.example.com/v1x", "https://gw.example.com/v1x"),
+        ] {
+            assert_eq!(gateway_base_url(given), expected, "given {given:?}");
+        }
+    }
 
-        let error = match select_model(&catalog, "reasoning-large") {
-            Ok(descriptor) => panic!("an unknown model must fail, got {descriptor:?}"),
+    #[test]
+    fn progress_reports_the_last_reply_of_a_succeeded_run() {
+        let mut progress = Progress::default();
+        assert_eq!(
+            progress.absorb(&event(0, "run_started", "Papergate", None)),
+            Some("[papergate] Papergate: run_started".to_owned()),
+        );
+        progress.absorb(&event(1, "assistant_reply", "Evaluate", Some("- evidence")));
+        progress.absorb(&event(
+            2,
+            "assistant_reply",
+            "Analyze",
+            Some("Verdict: Strong\n"),
+        ));
+        progress.absorb(&event(3, "run_succeeded", "Papergate", None));
+
+        let report = progress.report().unwrap_or_else(|e| panic!("report: {e}"));
+
+        assert_eq!(report, "Verdict: Strong\n");
+    }
+
+    #[test]
+    fn progress_skips_events_below_the_cursor_and_silent_kinds() {
+        let mut progress = Progress::default();
+        progress.absorb(&event(0, "run_started", "Papergate", None));
+        progress.absorb(&event(1, "assistant_reply", "Analyze", Some("real")));
+        assert_eq!(progress.cursor, 2);
+
+        // A live copy of an event the transcript backfill already covered.
+        assert_eq!(
+            progress.absorb(&event(1, "assistant_reply", "Analyze", Some("stale"))),
+            None
+        );
+        assert_eq!(progress.last_reply.as_deref(), Some("real"));
+
+        // Raw model-turn bodies are absorbed (the cursor moves) but not echoed.
+        assert_eq!(progress.absorb(&event(2, "request", "Analyze", None)), None);
+        assert_eq!(
+            progress.absorb(&event(3, "response", "Analyze", None)),
+            None
+        );
+        assert_eq!(progress.cursor, 4);
+    }
+
+    #[test]
+    fn progress_fails_when_the_run_never_reported_success() {
+        let mut progress = Progress::default();
+        progress.absorb(&event(
+            0,
+            "assistant_reply",
+            "Analyze",
+            Some("Verdict: Weak\n"),
+        ));
+
+        let error = match progress.report() {
+            Ok(report) => panic!("a run without run_succeeded must fail, got {report:?}"),
             Err(error) => error.to_string(),
         };
 
         assert!(
-            error.contains("reasoning-large") && error.contains("other"),
-            "the error must name the requested and the served models: {error}",
+            error.contains("without the run reporting success"),
+            "the error must say the run never succeeded: {error}",
+        );
+    }
+
+    #[test]
+    fn progress_fails_with_the_session_failure_reports() {
+        let mut progress = Progress::default();
+        progress.absorb(&event(0, "run_started", "Papergate", None));
+        progress.fail(SessionFailure {
+            kind: FailureKind::RunFailed,
+            message: "the environment cannot satisfy this prompt".to_owned(),
+        });
+
+        let error = match progress.report() {
+            Ok(report) => panic!("a reported failure must fail the run, got {report:?}"),
+            Err(error) => error.to_string(),
+        };
+
+        assert!(
+            error.contains("run failed") && error.contains("cannot satisfy this prompt"),
+            "the error must carry the harness's report: {error}",
+        );
+    }
+
+    #[test]
+    fn progress_fails_when_a_succeeded_run_has_no_reply() {
+        let mut progress = Progress::default();
+        progress.absorb(&event(0, "run_succeeded", "Papergate", None));
+
+        let error = match progress.report() {
+            Ok(report) => panic!("a run without a reply has no report, got {report:?}"),
+            Err(error) => error.to_string(),
+        };
+
+        assert!(
+            error.contains("without an assistant reply"),
+            "the error must name the missing reply: {error}",
+        );
+    }
+
+    #[test]
+    fn a_cancelled_progress_reports_cancellation_over_everything_else() {
+        let mut progress = Progress::default();
+        progress.absorb(&event(0, "assistant_reply", "Analyze", Some("partial")));
+        progress.fail(SessionFailure {
+            kind: FailureKind::Interrupted,
+            message: "interrupted".to_owned(),
+        });
+        progress.cancelled = true;
+
+        let error = match progress.report() {
+            Ok(report) => panic!("a cancelled run has no report, got {report:?}"),
+            Err(error) => error,
+        };
+
+        assert!(
+            error.downcast_ref::<Cancelled>().is_some(),
+            "main selects exit 130 from the Cancelled marker: {error}",
         );
     }
 
@@ -709,40 +986,5 @@ mod tests {
             .unwrap_or_else(|e| panic!("load: {e}"));
 
         assert_eq!(text, contents);
-    }
-
-    #[test]
-    fn seeding_writes_the_input_verbatim_under_paper_md() {
-        let vfs = run_store();
-        let contents = "# Paper\n\nunicode \u{201c}quotes\u{201d} and trailing space \n\n";
-
-        seed_store(&vfs, contents).unwrap_or_else(|e| panic!("seed store: {e}"));
-
-        assert_eq!(read_store(&vfs, "paper.md"), contents);
-    }
-
-    #[test]
-    fn read_report_returns_the_store_report_verbatim() {
-        let vfs = run_store();
-        write_store(&vfs, "report.md", "Verdict: Strong\n");
-
-        let report = read_report(&vfs).unwrap_or_else(|e| panic!("read report: {e}"));
-
-        assert_eq!(report, "Verdict: Strong\n");
-    }
-
-    #[test]
-    fn missing_report_is_an_explicit_contract_error() {
-        let vfs = run_store();
-
-        let error = match read_report(&vfs) {
-            Ok(report) => panic!("a missing report.md must fail, got {report:?}"),
-            Err(error) => error.to_string(),
-        };
-
-        assert!(
-            error.contains("declared output") && error.contains("report.md"),
-            "the error must name the prompt's output contract: {error}",
-        );
     }
 }

@@ -12,15 +12,16 @@
 //! local-only run can only fail. `--model` (or `PAPERGATE_MODEL`) names the
 //! gateway model that role binds to.
 //!
-//! `main` is the process boundary: it parses arguments, installs the Ctrl-C
-//! signal, invokes the application runner, and selects the exit status. All
-//! orchestration lives in [`app`].
+//! The prompt runs as an agent session in the promptforge harness
+//! (`harness-api`), the engine's production host. `main` is the process
+//! boundary: it parses arguments, installs the Ctrl-C signal, invokes the
+//! application runner, and selects the exit status. All orchestration lives
+//! in [`app`].
 
 use std::process::ExitCode;
 
 use clap::Parser;
-use promptforge_api_runtime::RunError;
-use promptforge_api_runtime::types::cancel::CancelHandle;
+use harness_api::cancel::CancelHandle;
 
 use crate::app::{Cancelled, Cli, RunRequest};
 
@@ -30,10 +31,9 @@ mod app;
 /// status. `clap` owns usage failures and their status; this returns 130 for a
 /// cancelled run and 1 for any other failure.
 ///
-/// The runtime needs no particular Tokio flavor: every chain step runs inside
-/// the runtime's one driver task and suspending host calls are coroutine
-/// yields. The default multi-threaded runtime keeps the leaf I/O waits off
-/// the driver.
+/// The harness performs the run's effects on tokio tasks and its store
+/// operations on the blocking pool, so the default multi-threaded runtime is
+/// the right host for it.
 #[tokio::main]
 async fn main() -> ExitCode {
     let cli = Cli::parse();
@@ -75,15 +75,11 @@ fn install_cancel() -> CancelHandle {
 
 /// Maps a run failure to a process exit code: 130 for a cooperative
 /// cancellation (the conventional interrupted code), 1 for every other
-/// failure. Cancellation arrives either as the app's own [`Cancelled`]
-/// marker (the runtime reported `RunResult::Cancelled`) or as a cancelled
-/// [`RunError`] surfaced from inside a failed run.
+/// failure. Cancellation arrives as the app's own [`Cancelled`] marker: the
+/// session was closed on papergate's request before it produced a report.
 fn exit_code(error: &anyhow::Error) -> u8 {
-    let cancelled = error.chain().any(|cause| {
-        cause.downcast_ref::<Cancelled>().is_some()
-            || cause
-                .downcast_ref::<RunError>()
-                .is_some_and(RunError::is_cancelled)
-    });
+    let cancelled = error
+        .chain()
+        .any(|cause| cause.downcast_ref::<Cancelled>().is_some());
     if cancelled { 130 } else { 1 }
 }

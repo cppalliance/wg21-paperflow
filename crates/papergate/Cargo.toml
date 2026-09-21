@@ -14,13 +14,19 @@ workspace = true
 anyhow = "1.0.104"
 clap = { version = "4.6.6", features = ["derive", "env"] }
 fastrand = "2.5.0"
+# The promptforge harness: the engine's production host. It owns the tokio
+# effect loop, the gateway transport, the run log, and agent sessions;
+# papergate drives the prompt through it and never names the engine.
+harness-api = { path = "../../vendor/promptforge/crates/harness-api" }
 paperstore = { version = "0.1.0", path = "../paperstore" }
 paperstore-sqlite = { version = "0.1.0", path = "../paperstore-sqlite" }
-promptforge-api-runtime = { path = "../../vendor/promptforge/crates/promptforge-api-runtime" }
-promptforge-api-types = { path = "../../vendor/promptforge/crates/promptforge-api-types" }
-shared-vfs = { path = "../../vendor/promptforge/crates/shared-vfs" }
-tokio = { version = "1.53.1", features = ["rt-multi-thread", "macros", "signal", "fs"] }
+serde_json = "1.0.151"
+tokio = { version = "1.53.1", features = ["rt-multi-thread", "macros", "signal", "fs", "sync", "time"] }
 
 [dev-dependencies]
+# The embedded prompt's parse-and-prepare regression test names the engine
+# directly, the way the harness does at launch. Production code reaches the
+# engine only through harness-api.
+promptforge-api-runtime = { path = "../../vendor/promptforge/crates/promptforge-api-runtime" }
 rusqlite = { version = "0.40.2", features = ["bundled"] }
 tempfile = "3.27.0"

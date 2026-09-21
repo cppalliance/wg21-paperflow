@@ -8,12 +8,11 @@ models:
   # bumped. Until then runs sample at the gateway default and verdicts
   # vary. Adding it now is a parse error (ModelRole denies unknown fields).
   writer:
-    keywords: [no-thinking]
+    # No hard `no-thinking` keyword: the engine reports it unmet against a
+    # thinking-switchable model, and the harness refuses a prompt with an
+    # unmet requirement outright. Thinking follows the gateway's default.
     min_context: 32768
     description: A careful analysis model suited to structured reasoning and long-context review
-input:
-  path: paper.md
-  description: The WG21 paper markdown to analyze
 output:
   path: report.md
   description: The report produced by analysis
@@ -28,7 +27,11 @@ models.default("writer")
 ## Dissect
 
 ```lua
-var.paper = untrusted(store.read("paper.md"))
+-- The paper arrives as the run's args (the harness launch request). The
+-- Evaluate arms read numbered line ranges from the store, so the paper is
+-- written there before the fanout.
+store.write("paper.md", args)
+var.paper = untrusted(args)
 sections = {}
 tools.add_local("add_section", "Add a section with its line range", {
     name = {"string", "Section heading text"},
@@ -107,6 +110,10 @@ Verdict: exactly one of { n/a, None, Weak, Adequate, Strong, Excellent }
 {up to three bulleted sentences describing the best pieces of evidence}
 
 ```lua
-store.write("report.md", models.infer(prose))
-return "Done."
+-- The report is the declared store output and the run's final text. This
+-- must stay the run's last model call: papergate reads the last assistant
+-- reply of the run as the report.
+local report = models.infer(prose)
+store.write("report.md", report)
+return report
 ```

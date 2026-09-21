@@ -48,8 +48,10 @@ Set `WG21_DATA_DIR` to point to your workspace directory.
 ### Rust crates
 
 `crates/` holds `paperstore`, `paperstore-sqlite`, and the `papergate` CLI.
-`papergate` depends on [promptforge](https://github.com/cppalliance/promptforge)
-through the `vendor/promptforge` submodule, pinned to the commit the crate is
+`papergate` runs its prompt through the promptforge harness (`harness-api`,
+the engine's production host) from
+[promptforge](https://github.com/cppalliance/promptforge), vendored through
+the `vendor/promptforge` submodule and pinned to the commit the crate is
 built against. Initialize it before building:
 
 ```bash
