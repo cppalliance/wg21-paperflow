@@ -28,9 +28,18 @@ Detection passes (run in order, each consumes matched blocks):
     block over a shattered body (_body_is_atomized), or a header-grid
     seed (_header_grid_positions: 3+ cells on one baseline, first column
     narrower than _COLUMN_GAP_THRESHOLD, body lines on every column; the
-    header's grid replaces the body clustering).  Dense-table and
-    mid-table-seed gates bound it; stacked tables on one page seed in
-    turn.  table_source="side_by_side_prepass".
+    header's grid replaces the body clustering).  A recovered
+    two-column header with at least one WG21 paper-id-plus-Section cell
+    (the other cell may be a short header-like label) may adopt that
+    grid when later prose inflates body x-clusters, and may accept a
+    single atomized body row.  A citation header split across separate
+    blocks (wrapped section number beside the other column) is a
+    pre-pass seed when the reconstructed cells match that same family.
+    A citation title over the value column followed by exactly three
+    Yes/But/Actually row blocks (gap just under the 50pt column gate)
+    is the same family.  Dense-table and mid-table-seed gates bound
+    it; stacked tables on one page seed in turn.
+    table_source="side_by_side_prepass".
   Pass 1 (inline-column): blocks with 2+ lines whose x-starts have gaps
     > _COLUMN_GAP_THRESHOLD.  Orphan absorption for wrapped cell first-lines
     (forward, col 0) and wrapped tails (backward, col 1+, any column count);
@@ -107,6 +116,28 @@ _ATOMIZED_PREPASS_MIN_ROWS = 5  # min body rows for the atomized-only pre-pass
 # col-0/col-1 blocks first. Both conditions must hold.
 _ATOMIZED_PREPASS_MIN_ROWS_DENSE = 4
 _ATOMIZED_PREPASS_DENSE_MIN_COLS = 3
+# Two-column citation comparison box: at least one header cell begins
+# with a WG21 paper id plus "Section", the body is one atomized quoted
+# row. Does not lower the 4/5-row gates for any other atomized table.
+_ATOMIZED_PREPASS_MIN_ROWS_CITATION = 1
+# Header cell starts with P2300R10 Section / n5000r1 section, optional
+# wrapped section number on the next line of the same column.
+_WG21_CITATION_SECTION_HEADER_RE = re.compile(
+    r"^[PN]\d{3,5}R\d+\s+Section\b",
+    re.IGNORECASE,
+)
+# Non-citation sibling of a citation header cell: "Context", "The
+# receiver concept". Longer prose in that slot is not a header.
+_CITATION_HEADER_LABEL_MAX_WORDS = 4
+# Citation title over the value column, then Yes / But / Actually as
+# three two-line row blocks. Label-to-value gap is just under
+# _COLUMN_GAP_THRESHOLD, so _block_column_positions misses them.
+_YBA_LABELS = ("Yes", "But", "Actually")
+_YBA_MAX_ROW_GAP = 25.0
+_YBA_MAX_WRAP_GAP = 10.0
+# One continuation of the Actually value. A second same-column line
+# inside the wrap gap is the next sentence, not part of the cell.
+_YBA_MAX_WRAPS = 1
 # Mid-table seed guard: a genuine atomized header has prose or a heading
 # (left margin) above it. A cell aligned to column 1+ within this many
 # points above the seed means the seed is a data row of a table whose
@@ -751,6 +782,279 @@ def _body_is_atomized(rows: list[list[tuple[int, Block]]]) -> bool:
     return single / len(body) >= _ATOMIZED_BODY_MIN_SINGLE_FRAC
 
 
+def _sbs_cells_from_blocks(
+    blocks: list[Block],
+    indices: AbstractSet[int],
+    col_xs: list[float],
+) -> list[list]:
+    """Assign each line of *indices* to the nearest column in *col_xs*.
+
+    A fused block whose lines sit on more than one column is split per
+    line; a stacked wrap in one column stays in that column. Used for
+    atomized-header reconstruction and the citation-section header check.
+    """
+    cells: list[list] = [[] for _ in col_xs]
+    for k in sorted(indices):
+        blk_k = blocks[k]
+        line_cols = [_nearest_column(ln.bbox[0], col_xs) for ln in blk_k.lines]
+        multi_col = len(set(line_cols)) > 1
+        blk_ci = _nearest_column(blk_k.bbox[0], col_xs)
+        for ln, lc in zip(blk_k.lines, line_cols):
+            ci = lc if multi_col else blk_ci
+            if cells[ci]:
+                cells[ci].append(Span(text="\n"))
+            cells[ci].extend(ln.spans)
+    return cells
+
+
+def _cell_plain_text(cell: list) -> str:
+    return " ".join("".join(s.text for s in cell).split())
+
+
+def _header_is_citation_section(header_cells: list[list]) -> bool:
+    """True for a two-column citation-comparison header.
+
+    At least one cell begins with a WG21 paper id plus Section. A
+    non-citation sibling must be nonempty, short, and header-like
+    (not a quote, at most `_CITATION_HEADER_LABEL_MAX_WORDS`). Both
+    cells may be citations. Citation plus long prose is rejected.
+    """
+    if len(header_cells) != 2:
+        return False
+    texts = [_cell_plain_text(cell) for cell in header_cells]
+    if any(not t for t in texts):
+        return False
+    cites = [bool(_WG21_CITATION_SECTION_HEADER_RE.match(t)) for t in texts]
+    if not any(cites):
+        return False
+    for text, is_cite in zip(texts, cites):
+        if is_cite:
+            continue
+        if text[:1] in "\"'":
+            return False
+        if len(text.split()) > _CITATION_HEADER_LABEL_MAX_WORDS:
+            return False
+    return True
+
+
+# A citation cell that already ends on one of these is closed. A later
+# lowercase line is the next sentence, not a wrap of the quote.
+_CITATION_CELL_CLOSED = frozenset(".?!\"'”’")
+
+
+def _citation_open_cell_text(
+    row: list[tuple[int, Block]],
+    col: int,
+    col_xs: list[float],
+) -> str:
+    """Plain text already placed in *col* of the open citation row."""
+    parts: list[str] = []
+    for _, blk in row:
+        line_cols = [_nearest_column(ln.bbox[0], col_xs) for ln in blk.lines]
+        multi_col = len(set(line_cols)) > 1
+        blk_ci = _nearest_column(blk.bbox[0], col_xs)
+        for ln, lc in zip(blk.lines, line_cols):
+            if (lc if multi_col else blk_ci) == col:
+                parts.append("".join(sp.text for sp in ln.spans))
+    return " ".join(" ".join(parts).split())
+
+
+def _citation_row_continuation(text: str, open_cell: str) -> bool:
+    """True when *text* continues an unfinished citation quote.
+
+    A later citation header, a quote, or a sentence-initial line ends
+    the box. A lowercase tail stays only while *open_cell* does not
+    already end the quote (``data-races`` after ``there are no``).
+    Lowercase prose after a closed quote stays out.
+    """
+    if not text or not open_cell or _WG21_CITATION_SECTION_HEADER_RE.match(text):
+        return False
+    if open_cell[-1] in _CITATION_CELL_CLOSED:
+        return False
+    first = text[0]
+    if first in "\"'“‘":
+        return False
+    return first.islower()
+
+
+def _yba_line_text(line: Line) -> str:
+    return " ".join(line.text.split())
+
+
+def _citation_yes_but_actually_seed(
+    blocks: list[Block],
+    seed_idx: int,
+    used: set[int],
+) -> tuple[list[int], list[int], list[float]] | None:
+    """Citation title over col-1, then Yes/But/Actually two-line rows.
+
+    Each row block has two nonempty lines whose x-gap is just under
+    `_COLUMN_GAP_THRESHOLD`, so `_block_column_positions` is None.
+    Title must sit on the value column. At most `_YBA_MAX_WRAPS`
+    same-column continuation after Actually joins that cell. An extra
+    two-line row in the band, a missing/reordered label, or unstable
+    x-positions reject the seed.
+    """
+    title = blocks[seed_idx]
+    if not title.lines:
+        return None
+    title_text = _yba_line_text(title.lines[0])
+    if not _WG21_CITATION_SECTION_HEADER_RE.match(title_text):
+        return None
+    page = title.page_num
+    row_idxs: list[int] = []
+    prev_y1 = title.bbox[3]
+    k = seed_idx + 1
+    for label in _YBA_LABELS:
+        if k >= len(blocks) or k in used:
+            return None
+        blk = blocks[k]
+        if blk.page_num != page:
+            return None
+        if blk.bbox[1] - prev_y1 > _YBA_MAX_ROW_GAP:
+            return None
+        if len(blk.lines) != 2:
+            return None
+        texts = [_yba_line_text(ln) for ln in blk.lines]
+        if texts[0] != label or not texts[1]:
+            return None
+        row_idxs.append(k)
+        prev_y1 = blk.bbox[3]
+        k += 1
+    col0s = [blocks[r].lines[0].bbox[0] for r in row_idxs]
+    col1s = [blocks[r].lines[1].bbox[0] for r in row_idxs]
+    if max(col0s) - min(col0s) > _COLUMN_X_TOLERANCE:
+        return None
+    if max(col1s) - min(col1s) > _COLUMN_X_TOLERANCE:
+        return None
+    col_xs = [sum(col0s) / 3.0, sum(col1s) / 3.0]
+    if col_xs[1] - col_xs[0] <= _COLUMN_X_TOLERANCE:
+        return None
+    if abs(title.bbox[0] - col_xs[1]) > _COLUMN_X_TOLERANCE:
+        return None
+    wraps: list[int] = []
+    while (k < len(blocks) and k not in used
+           and len(wraps) < _YBA_MAX_WRAPS):
+        blk = blocks[k]
+        if blk.page_num != page:
+            break
+        if blk.bbox[1] - prev_y1 > _YBA_MAX_WRAP_GAP:
+            break
+        if len(blk.lines) != 1:
+            break
+        if abs(blk.lines[0].bbox[0] - col_xs[1]) > _COLUMN_X_TOLERANCE:
+            break
+        wraps.append(k)
+        prev_y1 = blk.bbox[3]
+        k += 1
+    if k < len(blocks) and k not in used:
+        extra = blocks[k]
+        if (extra.page_num == page
+                and extra.bbox[1] - prev_y1 <= _YBA_MAX_ROW_GAP
+                and len(extra.lines) == 2
+                and extra.lines[0].text.strip()
+                and extra.lines[1].text.strip()):
+            return None
+    return row_idxs, wraps, col_xs
+
+
+def _emit_citation_yba_table(
+    blocks: list[Block],
+    seed_idx: int,
+    row_idxs: list[int],
+    wraps: list[int],
+) -> tuple[Section, set[int]]:
+    """Build the 4x2 Yes/But/Actually table (empty col-0 over the title)."""
+    title = blocks[seed_idx]
+    header_cells: list[list] = [[], list(title.lines[0].spans)]
+    all_lines = list(title.lines)
+    all_rows: list[list[list]] = [header_cells]
+    consumed = {seed_idx, *row_idxs, *wraps}
+    last = len(row_idxs) - 1
+    for ri, ridx in enumerate(row_idxs):
+        blk = blocks[ridx]
+        c0 = list(blk.lines[0].spans)
+        c1 = list(blk.lines[1].spans)
+        all_lines.extend(blk.lines)
+        if ri == last:
+            for widx in wraps:
+                wblk = blocks[widx]
+                if c1:
+                    c1.append(Span(text="\n"))
+                c1.extend(wblk.lines[0].spans)
+                all_lines.extend(wblk.lines)
+        all_rows.append([c0, c1])
+    kind_val, strategy_val, all_rows = _classify_and_annotate(all_rows)
+    return Section(
+        kind=SectionKind.TABLE,
+        text=_render_table_text(all_rows),
+        confidence=Confidence.HIGH,
+        lines=all_lines,
+        page_num=title.page_num,
+        columns=all_rows,
+        table_kind=kind_val,
+        table_strategy=strategy_val,
+        table_source="side_by_side_prepass",
+    ), consumed
+
+
+def _collect_atomized_header_blocks(
+    blocks: list[Block],
+    seed_idx: int,
+    *,
+    end: int | None = None,
+    used: AbstractSet[int] | None = None,
+) -> set[int]:
+    """Consecutive same-page blocks in the atomized header band."""
+    seed = blocks[seed_idx]
+    page = seed.page_num
+    hdr_y0 = seed.bbox[1]
+    collected = {seed_idx}
+    max_y1 = seed.bbox[3]
+    stop = len(blocks) if end is None else end
+    for k in range(seed_idx + 1, stop):
+        if used is not None and k in used:
+            break
+        nb = blocks[k]
+        if nb.page_num != page:
+            break
+        if nb.bbox[1] - hdr_y0 > _ATOMIZED_HDR_MAX_HEIGHT:
+            break
+        if nb.bbox[1] - max_y1 > _ATOMIZED_HDR_MAX_LINE_GAP:
+            break
+        collected.add(k)
+        max_y1 = max(max_y1, nb.bbox[3])
+    return collected
+
+
+def _citation_split_header_seed(
+    blocks: list[Block],
+    seed_idx: int,
+    used: set[int],
+) -> tuple[set[int], list[float]] | None:
+    """Pre-pass seed when the citation header is split across blocks.
+
+    `_block_column_positions` is None for a one-line `P... Section`
+    cell. Gather the height/gap cluster, require exactly two x-columns,
+    and accept only when the reconstructed cells are a citation-
+    comparison header. A stacked section number in column 0 joins
+    that cell.
+    """
+    collected = _collect_atomized_header_blocks(
+        blocks, seed_idx, used=used)
+    ext_xs = _cluster_x_positions(
+        [ln.bbox[0] for k in sorted(collected)
+         for ln in blocks[k].lines])
+    if len(ext_xs) != 2:
+        return None
+    if _seed_is_mid_table(blocks, seed_idx, ext_xs, used):
+        return None
+    recovered = _sbs_cells_from_blocks(blocks, collected, ext_xs)
+    if not _header_is_citation_section(recovered):
+        return None
+    return collected, ext_xs
+
+
 def _detect_side_by_side_tables(
     blocks: list[Block],
     *,
@@ -780,7 +1084,11 @@ def _detect_side_by_side_tables(
     i = 0
 
     while i < len(blocks):
+        if i in used:
+            i += 1
+            continue
         cols = _block_column_positions(blocks[i])
+        split_hdr: set[int] | None = None
         # Pre-pass only: a single-baseline header row whose first column
         # is too narrow for _block_column_positions. Its grid replaces
         # the body clustering below (a 30pt column falls into its
@@ -793,23 +1101,60 @@ def _detect_side_by_side_tables(
         if cols is None or len(cols) < 2:
             # cols is None is ordinary prose (no column gaps), not a seed;
             # only a block that had positions but too few is worth a line.
-            if cols is not None:
-                _log.debug("SBS reject: seed %d has %d column(s) (need 2+), page %d",
-                            i, len(cols), blocks[i].page_num)
-            i += 1
-            continue
+            # Exception: atomized-only citation header split across
+            # separate blocks (wrapped section number beside the other
+            # column). Generic split headers stay rejected.
+            if atomized_only:
+                # Yes/But/Actually before the split-header seed: a Yes
+                # row inside _ATOMIZED_HDR_MAX_LINE_GAP would otherwise
+                # join the title cluster and the box would emit as 3
+                # rows instead of 4x2.
+                if (yba := _citation_yes_but_actually_seed(
+                        blocks, i, used)) is not None:
+                    row_idxs, wraps, _col_xs = yba
+                    sec, consumed = _emit_citation_yba_table(
+                        blocks, i, row_idxs, wraps)
+                    table_sections.append(sec)
+                    used.update(consumed)
+                    _log.debug(
+                        "SBS citation Yes/But/Actually: seed %d on page %d, "
+                        "4x2", i, blocks[i].page_num)
+                    nxt = max(consumed) + 1
+                    i = i + 1 if nxt <= i else nxt
+                    continue
+                split = _citation_split_header_seed(blocks, i, used)
+                if split is not None:
+                    split_hdr, cols = split
+                    _log.debug(
+                        "SBS citation split header: seed %d on page %d, "
+                        "%d header blocks, 2 cols",
+                        i, blocks[i].page_num, len(split_hdr))
+            if split_hdr is None:
+                if cols is not None:
+                    _log.debug("SBS reject: seed %d has %d column(s) (need 2+), page %d",
+                                i, len(cols), blocks[i].page_num)
+                i += 1
+                continue
 
         header = blocks[i]
         page = header.page_num
-        h_bottom = header.bbox[3]
+        if split_hdr is not None:
+            h_bottom = max(blocks[k].bbox[3] for k in split_hdr)
+            scan_from = max(split_hdr) + 1
+        else:
+            h_bottom = header.bbox[3]
+            scan_from = i + 1
 
         # Gather body candidates: same page, below header
         body_candidates: list[tuple[int, Block]] = []
-        j = i + 1
+        j = scan_from
         while j < len(blocks):
             b = blocks[j]
             if b.page_num != page:
                 break
+            if j in (split_hdr or ()):
+                j += 1
+                continue
             if b.bbox[1] >= h_bottom - _TABLE_Y_OVERLAP_MARGIN:
                 body_candidates.append((j, b))
             j += 1
@@ -932,26 +1277,48 @@ def _detect_side_by_side_tables(
         # separate Block. Collect all blocks in the header region and
         # cluster their x-positions; if the cluster matches col_xs the
         # table is accepted with a multi-block header.
+        #
+        # Exception: a recovered two-column header whose cells both
+        # begin with a WG21 paper id plus "Section". Later prose may
+        # inflate body clusters; adopt the two header columns when
+        # body lines populate both. Do not use the general header-grid
+        # rule (that rule requires every body cluster to sit on a
+        # header column, which the inflating prose fails).
         atomized_hdr: set[int] | None = None
-        if len(col_xs) > len(cols):
-            hdr_y0 = header.bbox[1]
+        citation_header = False
+        if split_hdr is not None:
+            atomized_hdr = split_hdr
+            citation_header = True
+            if len(col_xs) > len(cols):
+                body_line_xs = [
+                    ln.bbox[0]
+                    for idx, b in body_candidates
+                    if idx not in split_hdr
+                    for ln in b.lines
+                ]
+                if all(
+                    any(abs(lx - hx) <= _COLUMN_X_TOLERANCE
+                        for lx in body_line_xs)
+                    for hx in cols
+                ):
+                    _log.debug("SBS citation header grid: seed %d on page %d, "
+                               "%d header cols over %d body cluster(s)",
+                               i, page, len(cols), len(col_xs))
+                    col_xs = list(cols)
+                else:
+                    _log.debug("SBS reject: seed %d on page %d, split citation "
+                               "header body does not populate both columns",
+                               i, page)
+                    i += 1
+                    continue
+        elif len(col_xs) > len(cols):
             if _seed_is_mid_table(blocks, i, col_xs, used):
                 _log.debug("SBS reject: seed %d on page %d is mid-table (already consumed)",
                             i, page)
                 i += 1
                 continue
-            hdr_block_set: set[int] = {i}
-            max_collected_y1 = header.bbox[3]
-            for k in range(i + 1, j):
-                nb = blocks[k]
-                if nb.page_num != page:
-                    break
-                if nb.bbox[1] - hdr_y0 > _ATOMIZED_HDR_MAX_HEIGHT:
-                    break
-                if nb.bbox[1] - max_collected_y1 > _ATOMIZED_HDR_MAX_LINE_GAP:
-                    break
-                hdr_block_set.add(k)
-                max_collected_y1 = max(max_collected_y1, nb.bbox[3])
+            hdr_block_set = _collect_atomized_header_blocks(
+                blocks, i, end=j)
             # Cluster line x0s, not block x0s: a fused two-line header
             # block ("P2300R10[8] (2026)" / "Coroutine executor") holds
             # two column headings but only one block x0.
@@ -965,11 +1332,35 @@ def _detect_side_by_side_tables(
                            len(hdr_block_set), len(ext_xs), page,
                            header.text[:40])
             else:
-                _log.debug("SBS reject: seed %d on page %d, atomized header recovery "
-                            "failed (ext_xs %d < col_xs %d)",
-                            i, page, len(ext_xs), len(col_xs))
-                i += 1
-                continue
+                recovered = _sbs_cells_from_blocks(
+                    blocks, hdr_block_set, ext_xs)
+                body_line_xs = [
+                    ln.bbox[0]
+                    for idx, b in body_candidates
+                    if idx not in hdr_block_set
+                    for ln in b.lines
+                ]
+                if (len(ext_xs) == 2
+                        and _header_is_citation_section(recovered)
+                        and all(
+                            any(abs(lx - hx) <= _COLUMN_X_TOLERANCE
+                                for lx in body_line_xs)
+                            for hx in ext_xs)):
+                    _log.debug("SBS citation header grid: seed %d on page %d, "
+                               "%d header cols over %d body cluster(s)",
+                               i, page, len(ext_xs), len(col_xs))
+                    col_xs = list(ext_xs)
+                    atomized_hdr = hdr_block_set
+                    citation_header = True
+                else:
+                    _log.debug("SBS reject: seed %d on page %d, atomized header recovery "
+                                "failed (ext_xs %d < col_xs %d)",
+                                i, page, len(ext_xs), len(col_xs))
+                    i += 1
+                    continue
+        elif len(cols) == 2:
+            citation_header = _header_is_citation_section(
+                _sbs_cells_from_blocks(blocks, {i}, cols))
         # A regular header row block is not skipped here in the pre-pass:
         # the body may still be shattered (p4094r0 §Assertion table). The
         # decision is taken after row grouping, see _body_is_atomized.
@@ -1068,6 +1459,19 @@ def _detect_side_by_side_tables(
                     if current_row:
                         rows.append(current_row)
                     break
+            # A citation box is one atomized body row. Past the row
+            # band, keep only a lowercase tail of an unfinished quote.
+            # A sentence-initial line, a closed quote, or the next
+            # citation header ends the box and stays a later seed.
+            if (citation_header and has_col0
+                    and blk.bbox[1] - last_col0_y1 > _SBS_ROW_Y_BAND):
+                tail = "".join(
+                    s.text for ln in blk.lines for s in ln.spans).strip()
+                open_cell = _citation_open_cell_text(current_row, col, col_xs)
+                if col == 0 or not _citation_row_continuation(tail, open_cell):
+                    if current_row:
+                        rows.append(current_row)
+                    break
             if col == 0:
                 new_page = blk.page_num != last_col0_page and last_col0_page >= 0
                 gap_exceeds = blk.bbox[1] - last_col0_y1 > _SBS_ROW_Y_BAND
@@ -1151,6 +1555,11 @@ def _detect_side_by_side_tables(
                     min_rows,
                     _ATOMIZED_PREPASS_MIN_ROWS_DENSE if dense
                     else _ATOMIZED_PREPASS_MIN_ROWS)
+            if (citation_header
+                    and len(col_xs) == 2
+                    and len(valid_rows) == 1
+                    and _body_is_atomized(valid_rows)):
+                min_rows = _ATOMIZED_PREPASS_MIN_ROWS_CITATION
         if len(valid_rows) < min_rows:
             _log.debug("SBS reject: seed %d on page %d, too few valid rows "
                         "(%d < %d)", i, page, len(valid_rows), min_rows)
@@ -1161,23 +1570,10 @@ def _detect_side_by_side_tables(
 
         # Build header row.
         if atomized_hdr is not None:
-            header_cells = [[] for _ in range(num_cols)]
-            all_lines: list = []
-            for k in sorted(atomized_hdr):
-                blk_k = blocks[k]
-                # Per-line column assignment (mirrors body builder's
-                # multi_col logic): fused two-line header blocks like
-                # "Criterion"/"P2464R0[1]" assign each line separately.
-                line_cols = [_nearest_column(ln.bbox[0], col_xs)
-                             for ln in blk_k.lines]
-                multi_col = len(set(line_cols)) > 1
-                blk_ci = _nearest_column(blk_k.bbox[0], col_xs)
-                for ln, lc in zip(blk_k.lines, line_cols):
-                    ci = lc if multi_col else blk_ci
-                    if header_cells[ci]:
-                        header_cells[ci].append(Span(text="\n"))
-                    header_cells[ci].extend(ln.spans)
-                    all_lines.append(ln)
+            header_cells = _sbs_cells_from_blocks(
+                blocks, atomized_hdr, col_xs)
+            all_lines = [ln for k in sorted(atomized_hdr)
+                         for ln in blocks[k].lines]
         else:
             header_cells = []
             for ln in header.lines[:num_cols]:
@@ -1294,11 +1690,24 @@ def _detect_side_by_side_tables(
             for idx, _ in row:
                 used.add(idx)
 
+        # Stacked pre-pass tables (p4047r0 prediction tables, P4178
+        # citation boxes) seed one after the other. j is the page end:
+        # jumping there skips the next header. Resume after the last
+        # consumed header or body block on this page. Cross-page
+        # continuation indices stay in used but do not skip remaining
+        # same-page seeds. A regular side-by-side table keeps i = j.
         if atomized_only:
-            # Stacked shattered tables (p4047r0: two per page, a heading
-            # between them) seed one after the other: resume behind the
-            # table's last block, not behind the page.
-            i = max(idx for row in consumed_rows for idx, _ in row) + 1
+            consumed = {i}
+            if atomized_hdr is not None:
+                consumed.update(atomized_hdr)
+            consumed.update(idx for row in consumed_rows for idx, _ in row)
+            same_page = [
+                idx for idx in consumed
+                if 0 <= idx < len(blocks)
+                and blocks[idx].page_num == page
+            ]
+            nxt = (max(same_page) if same_page else i) + 1
+            i = i + 1 if nxt <= i else nxt
         else:
             i = j
 
