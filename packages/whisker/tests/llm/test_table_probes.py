@@ -25,8 +25,10 @@ from whisker.llm.table_compare import (
     GRID_ROW0_MISMATCH,
     GRID_UNRELIABLE,
 )
+from whisker.det.llm_readability.validate import table_units_from_markdown
 from whisker.llm.table_probes import (
     UNIT_DUMPS_KIND,
+    annotate_html_page_continuations,
     AllUnitDumpsResult,
     ProbeResult,
     UnitDumpResult,
@@ -2217,3 +2219,70 @@ class TestSourcePairedClosedAnswers:
         assert not probe.defect_confirmed
         assert probe.expected == "source verdict=match"
         assert len(asked) == 1
+
+
+_HTML_NAME_VALUE = """\
+<table>
+<tr><th>Name</th><th>Value</th></tr>
+<tr><td>HasCopyAssignment</td><td>HasCopyConstructor</td></tr>
+</table>
+"""
+
+_PIPE_CONTINUATION = """\
+| `HasNothrowMoveAssignment` | `HasNothrowMoveConstructor` |
+| --- | --- |
+| `HasMoveAssignment` | `HasMoveConstructor` |
+"""
+
+
+class TestHtmlPageContinuation:
+    """P0957R8 5.4.2.1: HTML Name/Value table, next page promoted to a header."""
+
+    def test_base_split_is_continuation(self):
+        md = _HTML_NAME_VALUE + "\n" + _PIPE_CONTINUATION
+        units, marked = annotate_html_page_continuations(
+            md, table_units_from_markdown(md))
+        assert len(marked) == 1
+        cont = next(unit for unit in units if unit.index in marked)
+        assert cont.fmt == FORMAT_PIPE
+        assert cont.continuation_of is not None
+        assert _classify_unit(cont) == "continuation"
+        above = next(unit for unit in units if unit.index == cont.continuation_of)
+        assert above.fmt == FORMAT_HTML
+        built = _build_continuation_question(cont, above)
+        assert built is not None
+        assert "HasCopyAssignment" in built[1]
+        assert "data values" in built[1]
+
+    def test_joined_table_is_not_continuation(self):
+        md = """\
+<table>
+<tr><th>Name</th><th>Value</th></tr>
+<tr><td>HasCopyAssignment</td><td>HasCopyConstructor</td></tr>
+<tr><td>HasNothrowMoveAssignment</td><td>HasNothrowMoveConstructor</td></tr>
+<tr><td>HasMoveAssignment</td><td>HasMoveConstructor</td></tr>
+</table>
+"""
+        _units, marked = annotate_html_page_continuations(
+            md, table_units_from_markdown(md))
+        assert marked == set()
+
+    def test_label_header_after_html_is_not_continuation(self):
+        md = _HTML_NAME_VALUE + """
+
+| Meeting | Date |
+| --- | --- |
+| Wrocław | 2024-11-20 |
+"""
+        _units, marked = annotate_html_page_continuations(
+            md, table_units_from_markdown(md))
+        assert marked == set()
+
+    def test_prose_between_is_not_continuation(self):
+        md = _HTML_NAME_VALUE + """
+The next section starts here.
+
+""" + _PIPE_CONTINUATION
+        _units, marked = annotate_html_page_continuations(
+            md, table_units_from_markdown(md))
+        assert marked == set()

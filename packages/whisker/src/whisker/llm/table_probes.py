@@ -43,12 +43,13 @@ from __future__ import annotations
 import logging
 import re
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 import httpx
 
-from whisker.det.llm_readability.models import TableUnit
+from whisker.det.llm_readability.models import FORMAT_HTML, FORMAT_PIPE, TableUnit
+from whisker.det.llm_readability.validate import _is_label_header
 from whisker.llm.table_compare import (
     GRID_EXTRA_OR_MISSING_ROWS,
     GRID_ROW0_MISMATCH,
@@ -864,8 +865,99 @@ def _build_count_dump_question(
     return question, table_md
 
 
+_HTML_TABLE_RE = re.compile(
+    r"<table\b[^>]*>.*?</table>", re.IGNORECASE | re.DOTALL,
+)
+_HTML_ROW_RE = re.compile(r"<tr\b[^>]*>(.*?)</tr>", re.IGNORECASE | re.DOTALL)
+_HTML_CELL_RE = re.compile(
+    r"<t[dh]\b[^>]*>(.*?)</t[dh]>", re.IGNORECASE | re.DOTALL,
+)
+_HTML_TAG_RE = re.compile(r"<[^>]+>")
+_PIPE_SEP_RE = re.compile(r"^\s*\|(?:\s*:?-{3,}:?\s*\|)+\s*$")
+
+
+def _html_row_cells(row_html: str) -> tuple[str, ...]:
+    cells = []
+    for cell in _HTML_CELL_RE.findall(row_html):
+        text = _HTML_TAG_RE.sub("", cell)
+        cells.append(" ".join(text.split()))
+    return tuple(cells)
+
+
+def _pipe_after_html(md: str, end: int) -> tuple[str, ...] | None:
+    """Header cells of a pipe table that follows ``md[:end]`` with only blanks."""
+    lines = md[end:].splitlines()
+    index = 0
+    while index < len(lines) and not lines[index].strip():
+        index += 1
+    if index >= len(lines) or not lines[index].lstrip().startswith("|"):
+        return None
+    header = tuple(split_pipe_cells(lines[index]))
+    nxt = index + 1
+    while nxt < len(lines) and not lines[nxt].strip():
+        nxt += 1
+    if nxt >= len(lines) or _PIPE_SEP_RE.match(lines[nxt]) is None:
+        return None
+    if not any(cell.strip() for cell in header):
+        return None
+    return header
+
+
+def annotate_html_page_continuations(
+    md: str, units: tuple[TableUnit, ...],
+) -> tuple[tuple[TableUnit, ...], set[int]]:
+    """Mark a pipe table that continues an HTML table across a page break.
+
+    det's continuation check only sees pipe tables that follow pipe
+    tables. P0957R8 5.4.2.1 emits the Name/Value grid as HTML and the
+    two rows at the top of the next page as a second table whose first
+    data row is the header. Same column count, nothing but blank lines
+    between them, and a header that is not a label header: that pipe
+    unit's ``continuation_of`` points at the HTML unit.
+    """
+    html_units = [unit for unit in units if unit.fmt == FORMAT_HTML]
+    marked: set[int] = set()
+    by_index = {unit.index: unit for unit in units}
+    html_seen = 0
+    for match in _HTML_TABLE_RE.finditer(md):
+        if html_seen >= len(html_units):
+            break
+        html_unit = html_units[html_seen]
+        html_seen += 1
+        rows = _HTML_ROW_RE.findall(match.group(0))
+        if not rows:
+            continue
+        html_width = len(_html_row_cells(rows[0]))
+        header = _pipe_after_html(md, match.end())
+        if header is None or len(header) != html_width:
+            continue
+        if _is_label_header(header):
+            continue
+        norm_header = tuple(" ".join(cell.split()) for cell in header)
+        target = next(
+            (
+                unit for unit in units
+                if unit.fmt == FORMAT_PIPE
+                and unit.continuation_of is None
+                and unit.index not in marked
+                and unit.cells
+                and tuple(" ".join(cell.split()) for cell in unit.cells[0]) == norm_header
+            ),
+            None,
+        )
+        if target is None:
+            continue
+        by_index[target.index] = replace(
+            target, continuation_of=html_unit.index,
+        )
+        marked.add(target.index)
+    ordered = tuple(by_index[unit.index] for unit in units)
+    return ordered, marked
+
+
 def _build_continuation_question(
     cont_unit: TableUnit,
+    previous: TableUnit | None = None,
 ) -> tuple[str, str, str] | None:
     """Build ``(probe_id, question, table_md)`` for a continuation header."""
     header_names = [h.strip() for h in cont_unit.cells[0] if h.strip()]
@@ -879,6 +971,13 @@ def _build_continuation_question(
         f"name and their organization)? "
         f"Answer 'column headers' or 'data values'."
     )
+    if previous is not None and previous.cells:
+        tail = " | ".join(cell.strip() for cell in previous.cells[-1])
+        question += (
+            f" The table above ends with the row {tail!r}. "
+            "If this header is the next data row of that table, "
+            "answer 'data values'."
+        )
     return ("diag-continuation-header", question, table_md)
 
 
@@ -1093,6 +1192,10 @@ def run_unit_dumps(
     Results are evidence, not certification.
     """
     result = AllUnitDumpsResult(pid=pid, model=model)
+    html_cont_ids: set[int] = set()
+    if md_lines:
+        units, html_cont_ids = annotate_html_page_continuations(
+            "\n".join(md_lines), units)
     pipe_units = [u for u in units if u.fmt in ("pipe", "html")]
     if not pipe_units:
         return result
@@ -1121,7 +1224,16 @@ def run_unit_dumps(
             source_text = paired[1] if paired else None
 
             if cls == "continuation":
-                cont_q = _build_continuation_question(unit)
+                previous = None
+                if (
+                    unit.index in html_cont_ids
+                    and unit.continuation_of is not None
+                ):
+                    previous = next(
+                        (u for u in units if u.index == unit.continuation_of),
+                        None,
+                    )
+                cont_q = _build_continuation_question(unit, previous)
                 if cont_q is None:
                     result.units.append(UnitDumpResult(
                         unit_index=unit.index,
@@ -1164,6 +1276,9 @@ def run_unit_dumps(
                         passed=passed,
                         latency_ms=latency,
                         error=error,
+                        defect_confirmed=(
+                            unit.index in html_cont_ids and not error and passed
+                        ),
                     ),
                 ))
 
