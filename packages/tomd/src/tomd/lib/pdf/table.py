@@ -41,7 +41,13 @@ Detection passes (run in order, each consumes matched blocks):
     it; stacked tables on one page seed in turn.
     table_source="side_by_side_prepass".
   Pass 1 (inline-column): blocks with 2+ lines whose x-starts have gaps
-    > _COLUMN_GAP_THRESHOLD.  Orphan absorption for wrapped cell first-lines
+    > _COLUMN_GAP_THRESHOLD.  A same-baseline header whose cells share one
+    row, followed by one block of data rows (each row returns to column 0;
+    the cells of a row are sibling lines), is its own detection family
+    (table_source="multirow_body"; the semantic kind stays clean_matrix
+    when the cells are short).  A two-column run of bare page numbers
+    under a same-page Contents label is a contents list, not a table.
+    Orphan absorption for wrapped cell first-lines
     (forward, col 0) and wrapped tails (backward, col 1+, any column count);
     a trailing continuation without a confirming row is absorbed in-loop
     (Branch 4c) so a following partial row still joins.  Fragment
@@ -80,6 +86,7 @@ from dataclasses import replace
 from enum import Enum
 from typing import NamedTuple, Optional
 
+from ..toc import MIN_TOC_RUN, is_toc_label
 from .types import Block, Line, Span, Section, SectionKind, Confidence, compute_bbox
 
 _log = logging.getLogger(__name__)
@@ -100,6 +107,20 @@ _MIN_SHARED_YBANDS = 2    # x must co-occur with other columns in 2+ y-bands
 # separate blocks by MuPDF.  Accept it when all its x-positions are a
 # subset of the table's reference columns and the y-gap is small.
 _PARTIAL_ROW_MAX_Y_GAP = 25.0
+# A data row packed into one block: sibling lines of the same row stay
+# within this many points in y0 (Yes sits 0.4pt off the function line;
+# the next row is ~13pt below). A larger jump starts the next row.
+_MULTIROW_SAME_ROW_Y = 4.0
+# Body line starts may sit right of a short header label (Comment -> G|U).
+_MULTIROW_BODY_X_SUPPORT_TOL = 25.0
+# Adjacent labels can be distinct columns even when the body column is empty.
+_MULTIROW_ADJACENT_HEADER_GAP = 5.0
+# Gap between adjacent spans that is a word space rather than kerning.
+# "float" / "frexp" is a few points; "G" / "|" is under one.
+_SPAN_WORD_GAP = 2.0
+# A last column of bare page numbers is a table of contents
+# ("1. Introduction" | "3"), not a data column.
+_PAGE_NUMBER_CELL_RE = re.compile(r"\d{1,3}")
 
 # Side-by-side table constants
 _SBS_MAX_SCAN_GAP = 30.0  # max y-gap before stopping body scan
@@ -1663,6 +1684,13 @@ def _detect_side_by_side_tables(
         # Bibliography: not a real table, skip so prose pipeline handles it.
         if kind_val == TableKind.BIBLIOGRAPHY.value:
             _log.debug("SBS bibliography bypass: page %d", page)
+            i = j
+            continue
+
+        # A contents list with no dot leaders is title | page number.
+        # Leave the blocks for the prose path. Do not mark them used.
+        if _is_labeled_contents_table(all_rows_data, blocks, page):
+            _log.debug("SBS contents bypass: page %d", page)
             i = j
             continue
 
@@ -5664,6 +5692,200 @@ def _drop_separator_rows(ts: Section) -> None:
         ts.text = _render_table_text(ts.columns)
 
 
+def _same_baseline_header_columns(
+    block: Block, body: Block,
+) -> list[float] | None:
+    """Span x-starts of a one-row header, or None.
+
+    ``_block_column_positions`` sees only line starts, so ``Pass`` and
+    ``Comment`` on one line collapse into a single column. A header is
+    one visual row when every ink line ends on the same baseline. Span
+    starts more than ``_COLUMN_X_TOLERANCE`` apart are cells. At least
+    one gap must still clear ``_COLUMN_GAP_THRESHOLD``, so a slightly
+    indented wrap is not a header.
+    """
+    ink = [ln for ln in block.lines if ln.text.strip()]
+    if len(ink) < 2:
+        return None
+    if _CODE_DECL_PREFIX_RE.match(ink[0].text):
+        return None
+    bottoms = [ln.bbox[3] for ln in ink]
+    if max(bottoms) - min(bottoms) > _TABLE_Y_OVERLAP_MARGIN:
+        return None
+    header_spans = sorted(
+        (sp.bbox[0], line_idx, sp.bbox[2])
+        for line_idx, ln in enumerate(ink)
+        for sp in ln.spans
+        if sp.text.strip()
+    )
+    if len(header_spans) < 2:
+        return None
+    clusters: list[list[tuple[float, int, float]]] = [[header_spans[0]]]
+    for item in header_spans[1:]:
+        if item[0] - clusters[-1][-1][0] <= _COLUMN_X_TOLERANCE:
+            clusters[-1].append(item)
+        else:
+            clusters.append([item])
+    representatives = [cluster[0] for cluster in clusters]
+    cols = [item[0] for item in representatives]
+    if len(cols) < 2:
+        return None
+    if max(b - a for a, b in zip(cols, cols[1:])) < _COLUMN_GAP_THRESHOLD:
+        return None
+    # A style change can split one header cell into several spans whose
+    # starts look like extra columns. Keep only candidates independently
+    # supported by body line starts; assign each line to its nearest
+    # candidate so one body column cannot validate two header fragments.
+    support = [0] * len(cols)
+    for line in body.lines:
+        if not line.text.strip():
+            continue
+        nearest = min(range(len(cols)), key=lambda idx: abs(line.bbox[0] - cols[idx]))
+        if abs(line.bbox[0] - cols[nearest]) <= _MULTIROW_BODY_X_SUPPORT_TOL:
+            support[nearest] += 1
+    kept: list[float] = []
+    for idx, (col, count) in enumerate(zip(cols, support)):
+        adjacent_empty_header = (
+            idx > 0
+            and representatives[idx][1] == representatives[idx - 1][1]
+            and _SPAN_WORD_GAP
+                < representatives[idx][0] - representatives[idx - 1][2]
+                <= _MULTIROW_ADJACENT_HEADER_GAP
+        )
+        if count >= 1 or adjacent_empty_header:
+            kept.append(col)
+    cols = kept
+    if len(cols) < 2:
+        return None
+    return cols
+
+
+def _column_at_or_before(x: float, cols: list[float]) -> int:
+    """Rightmost column whose start is at or just left of ``x``.
+
+    Nearest-column assignment pulls the tail of a long left cell
+    (``iptr)`` at x=468) into the Pass column 28pt away. A span belongs
+    to the last column that has already started.
+    """
+    chosen = 0
+    for i, col in enumerate(cols):
+        if col <= x + _COLUMN_X_TOLERANCE:
+            chosen = i
+        else:
+            break
+    return chosen
+
+
+def _append_cell_span(cell: list, sp: Span) -> None:
+    if cell and sp.bbox[0] - cell[-1].bbox[2] > _SPAN_WORD_GAP:
+        cell.append(Span(text=" "))
+    cell.append(sp)
+
+
+def _row_from_lines(lines: list[Line], cols: list[float]) -> list[list]:
+    row: list[list] = [[] for _ in cols]
+    for ln in lines:
+        for sp in ln.spans:
+            if not sp.text.strip():
+                continue
+            _append_cell_span(row[_column_at_or_before(sp.bbox[0], cols)], sp)
+    return row
+
+
+class _MultirowBodyResult(NamedTuple):
+    rows: list[list[list]]
+    used_lines: list[Line]
+    trailing_lines: list[Line]
+
+
+def _unpack_multirow_body(
+    block: Block, cols: list[float],
+) -> _MultirowBodyResult | None:
+    """Rows of a body block whose cells are sibling lines, or None.
+
+    ``_block_column_positions`` returns None as soon as a line's x goes
+    back to column 0, which is every data row after the first. Group
+    lines that share a baseline, assign spans to ``cols``, and accept
+    the block only when several of those rows actually use a later column.
+    """
+    ink = [ln for ln in block.lines if ln.text.strip()]
+    if len(ink) < 2:
+        return None
+    if abs(block.bbox[0] - cols[0]) > _COLUMN_X_TOLERANCE:
+        return None
+    ink.sort(key=lambda ln: (ln.bbox[1], ln.bbox[0]))
+    bands: list[list[Line]] = [[ink[0]]]
+    for ln in ink[1:]:
+        if ln.bbox[1] - bands[-1][0].bbox[1] > _MULTIROW_SAME_ROW_Y:
+            bands.append([ln])
+        else:
+            bands[-1].append(ln)
+    if len(bands) < _MIN_TABLE_ROWS:
+        return None
+    rows: list[list[list]] = []
+    used_lines: list[Line] = []
+    trailing_lines: list[Line] = []
+    used_other = 0
+    for band_idx, band in enumerate(bands):
+        row = _row_from_lines(band, cols)
+        if not any(sp.text.strip() for sp in row[0]):
+            return None
+        has_other = any(row[ci] for ci in range(1, len(cols)))
+        if not has_other:
+            if used_other < _MIN_TABLE_ROWS:
+                return None
+            trailing_lines = [
+                ln for rest in bands[band_idx:] for ln in rest
+            ]
+            break
+        used_other += 1
+        rows.append(row)
+        used_lines.extend(band)
+    if used_other < _MIN_TABLE_ROWS:
+        return None
+    return _MultirowBodyResult(rows, used_lines, trailing_lines)
+
+
+def _last_column_is_page_numbers(rows: list[list[list]]) -> bool:
+    """True when the last column is only bare page numbers."""
+    cells: list[str] = []
+    for row in rows:
+        if not row:
+            continue
+        text = "".join(sp.text for sp in row[-1]).strip()
+        if text:
+            cells.append(text)
+    if len(cells) < _MIN_TABLE_ROWS:
+        return False
+    return all(_PAGE_NUMBER_CELL_RE.fullmatch(cell) for cell in cells)
+
+
+def _same_page_contents_label(blocks: list[Block], page_num: int) -> bool:
+    for block in blocks:
+        if block.page_num != page_num:
+            continue
+        if any(is_toc_label(ln.text) for ln in block.lines):
+            return True
+    return False
+
+
+def _is_labeled_contents_table(
+    rows: list[list[list]], blocks: list[Block], page_num: int,
+) -> bool:
+    """A Contents list with no dot leaders still has two aligned columns.
+
+    The right column is a bare page number. That is not a data table
+    when a Contents label is on the same page and the run is long enough
+    to be a contents list. A numeric column without that label stays a
+    table.
+    """
+    if not rows or len(rows[0]) != 2 or len(rows) < MIN_TOC_RUN:
+        return False
+    if not _last_column_is_page_numbers(rows):
+        return False
+    return _same_page_contents_label(blocks, page_num)
+
+
 def detect_tables(
     blocks: list[Block],
     *,
@@ -5726,6 +5948,69 @@ def detect_tables(
             remaining.append(blocks[i])
             i += 1
             continue
+
+        span_cols = (
+            _same_baseline_header_columns(blocks[i], blocks[i + 1])
+            if i + 1 < len(blocks) else None
+        )
+        if (span_cols is not None
+                and len(span_cols) >= len(cols)
+                and i + 1 < len(blocks)
+                and blocks[i].page_num not in rotated_pages
+                and blocks[i + 1].page_num == blocks[i].page_num
+                and blocks[i + 1].bbox[1] - blocks[i].bbox[3]
+                    >= -_TABLE_Y_OVERLAP_MARGIN
+                and blocks[i + 1].bbox[1] - blocks[i].bbox[3]
+                    <= _PARTIAL_ROW_MAX_Y_GAP):
+            body_result = _unpack_multirow_body(blocks[i + 1], span_cols)
+            if body_result is not None:
+                body_rows = body_result.rows
+                rows = [
+                    _row_from_lines(blocks[i].lines, span_cols),
+                    *body_rows,
+                ]
+                # A packed body whose last column is only page numbers is
+                # a contents list. One body block can also hold the prose
+                # that follows the list (P1122R3), so this family refuses
+                # the shape even when the page has no Contents label.
+                # A labeled contents list is refused on the normal path too.
+                if not (_last_column_is_page_numbers(rows)
+                        or _is_labeled_contents_table(
+                            rows, blocks, blocks[i].page_num)):
+                    kind_val, strategy_val, rows = _classify_and_annotate(rows)
+                    if kind_val not in (
+                            TableKind.FALSE_POSITIVE.value,
+                            TableKind.BIBLIOGRAPHY.value):
+                        all_lines = [
+                            *blocks[i].lines,
+                            *body_result.used_lines,
+                        ]
+                        if body_result.trailing_lines:
+                            remaining.append(Block(
+                                lines=body_result.trailing_lines,
+                                bbox=compute_bbox([
+                                    ln.bbox for ln
+                                    in body_result.trailing_lines
+                                ]),
+                                page_num=blocks[i + 1].page_num,
+                            ))
+                        table_sections.append(Section(
+                            kind=SectionKind.TABLE,
+                            text=_render_table_text(rows),
+                            confidence=Confidence.HIGH,
+                            lines=all_lines,
+                            page_num=blocks[i].page_num,
+                            columns=rows,
+                            table_kind=kind_val,
+                            table_strategy=strategy_val,
+                            table_source="multirow_body",
+                        ))
+                        _log.debug(
+                            "Table detected: %d rows x %d cols on page %d "
+                            "(multirow body)",
+                            len(rows), len(span_cols), blocks[i].page_num)
+                        i += 2
+                        continue
 
         table_blocks = [blocks[i]]
         # Track the "reference" column positions used for strict matching.
@@ -6039,6 +6324,18 @@ def detect_tables(
                         p1_page, len(rows), p1_grid.get("col_count", 0))
 
             kind_val, strategy_val, rows = _classify_and_annotate(rows)
+
+            # Contents with no dot leaders: title and page number align
+            # like a two-column row. Give the blocks back to the prose
+            # path so the contents label can still strip them.
+            if _is_labeled_contents_table(rows, blocks, p1_page):
+                _log.debug(
+                    "Pass 1 contents bypass: %d blocks on page %d",
+                    len(table_blocks), p1_page)
+                for blk in table_blocks:
+                    remaining.append(blk)
+                i = j
+                continue
 
             # Bibliography: not a real table, return blocks to prose pipeline.
             if kind_val == TableKind.BIBLIOGRAPHY.value:

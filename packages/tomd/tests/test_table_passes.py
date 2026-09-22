@@ -35,9 +35,12 @@ from tomd.lib.pdf.table import (
     _detect_banded_rotated_tables,
 )
 from tomd.lib.pdf.pipeline import (
+    _column_of,
     _column_aware_sort,
     _detect_column_split,
     _detect_drawing_grids,
+    _drop_leading_contents,
+    _insert_table_sections,
 )
 
 # Page height of a 595x842 portrait page (P3100R6 geometry), shared by
@@ -3667,3 +3670,463 @@ class TestPass3EmptyVoteGrid:
         tables, used = _detect_horizontal_row_tables(
             [row], rotated_pages=frozenset())
         assert tables == [] and used == set()
+
+
+def _cell_line(text: str, x0: float, x1: float, y0: float, y1: float) -> Line:
+    return Line(
+        spans=[Span(text=text, font_size=10.0, bbox=(x0, y0, x1, y1))],
+        bbox=(x0, y0, x1, y1),
+    )
+
+
+def _spans_line(parts: list[tuple[str, float, float]], y0: float, y1: float) -> Line:
+    spans = [
+        Span(text=text, font_size=10.0, bbox=(x0, y0, x1, y1))
+        for text, x0, x1 in parts
+    ]
+    return Line(
+        spans=spans,
+        bbox=(parts[0][1], y0, parts[-1][2], y1),
+    )
+
+
+class TestMultiRowBodyBlock:
+    """One header row plus one block of data rows (P0533R9 Tables II-V).
+
+    MuPDF puts every data row in a single block. Each row is sibling
+    lines that return to column 0, so _block_column_positions gives up
+    and Pass 1 used to keep only the header.
+    """
+
+    def _header(self) -> Block:
+        lines = [
+            _cell_line("Function", 322.3, 370.0, 221.8, 230.8),
+            _spans_line(
+                [("Pass", 495.8, 515.0), ("Comment", 517.6, 556.8)],
+                221.8, 230.8),
+        ]
+        return _block_from_lines(lines)
+
+    def _body(self) -> Block:
+        lines = [
+            _spans_line(
+                [("float", 322.3, 345.8), ("frexp(float", 350.6, 402.3),
+                 ("value,", 407.0, 435.3), ("int*", 440.0, 458.8),
+                 ("exp)", 463.5, 482.4)],
+                237.4, 246.4),
+            _cell_line("Yes", 497.8, 516.0, 237.0, 246.0),
+            _cell_line("w", 533.9, 542.0, 237.0, 246.0),
+            _spans_line(
+                [("int", 322.3, 339.0), ("ilogb(float", 341.1, 395.0),
+                 ("arg)", 397.6, 420.0)],
+                250.6, 259.6),
+            _cell_line("Yes", 497.8, 516.0, 250.2, 259.2),
+            _cell_line("G", 533.6, 541.0, 250.2, 259.2),
+            _spans_line(
+                [("float", 322.3, 345.8), ("modf(float", 350.6, 397.6),
+                 ("value,", 402.3, 430.6), ("float*", 435.3, 463.5),
+                 ("iptr)", 468.2, 490.0), ("Yes", 497.8, 516.0)],
+                289.8, 299.2),
+        ]
+        return _block_from_lines(lines)
+
+    def test_header_and_body_become_one_clean_matrix(self):
+        tables, remaining = detect_tables([self._header(), self._body()])
+        assert len(tables) == 1
+        table = tables[0]
+        assert table.table_kind == "clean_matrix"
+        assert table.table_source == "multirow_body"
+        assert table.table_strategy == "pipe_table"
+        cells = [
+            ["".join(sp.text for sp in cell).strip() for cell in row]
+            for row in table.columns
+        ]
+        assert cells[0] == ["Function", "Pass", "Comment"]
+        assert cells[1] == [
+            "float frexp(float value, int* exp)", "Yes", "w"]
+        assert cells[2][1:] == ["Yes", "G"]
+        assert cells[3] == [
+            "float modf(float value, float* iptr)", "Yes", ""]
+        assert "iptr)" in cells[3][0]
+        assert "Yes" not in cells[3][0]
+        assert remaining == []
+
+    def test_styled_header_fragments_do_not_create_a_column(self):
+        header = _block_from_lines([
+            _spans_line(
+                [("Func", 322.3, 340.0), ("tion", 350.6, 370.0)],
+                221.8, 230.8),
+            _spans_line(
+                [("Pass", 495.8, 515.0), ("Comment", 517.6, 556.8)],
+                221.8, 230.8),
+        ])
+        tables, _remaining = detect_tables([header, self._body()])
+        assert len(tables) == 1
+        assert len(tables[0].columns[0]) == 3
+        text = "".join(sp.text for sp in tables[0].columns[0][0])
+        assert text.replace(" ", "") == "Function"
+
+    def test_contiguous_styled_header_fragments_are_one_cell(self):
+        header = _block_from_lines([
+            _spans_line(
+                [("Func", 322.3, 340.0), ("tion", 340.0, 370.0)],
+                221.8, 230.8),
+            _spans_line(
+                [("Pass", 495.8, 515.0), ("Comment", 517.6, 556.8)],
+                221.8, 230.8),
+        ])
+        tables, _remaining = detect_tables([header, self._body()])
+        assert len(tables) == 1
+        assert len(tables[0].columns[0]) == 3
+        assert "".join(
+            sp.text for sp in tables[0].columns[0][0]
+        ) == "Function"
+
+    def test_rotated_page_defers_the_multirow_family(self):
+        fragment = _banded_frag([(50.0, 60.0), (60.0, 70.0)])
+        tables, _remaining = detect_tables(
+            [self._header(), self._body()],
+            page_mupdf_tables={0: [fragment]},
+        )
+        assert all(table.table_source != "multirow_body" for table in tables)
+
+    def test_prose_under_a_wide_header_is_not_a_table(self):
+        header = self._header()
+        prose = _block_from_lines([
+            _cell_line(text, 322.3, 520.0, 240.0 + i * 14, 250.0 + i * 14)
+            for i, text in enumerate(
+                ("The functions listed below", "close on the rationals",
+                 "and do not set a flag"))
+        ])
+        tables, _remaining = detect_tables([header, prose])
+        assert tables == []
+
+    def test_body_starting_far_above_header_is_not_claimed(self):
+        header = self._header()
+        body = self._body()
+        shift = -200.0
+        for line in body.lines:
+            line.bbox = (
+                line.bbox[0], line.bbox[1] + shift,
+                line.bbox[2], line.bbox[3] + shift)
+            for span in line.spans:
+                span.bbox = (
+                    span.bbox[0], span.bbox[1] + shift,
+                    span.bbox[2], span.bbox[3] + shift)
+        body.bbox = (
+            body.bbox[0], body.bbox[1] + shift,
+            body.bbox[2], body.bbox[3] + shift)
+        tables, _remaining = detect_tables([header, body])
+        assert tables == []
+
+    def test_trailing_prose_in_body_block_stays_prose(self):
+        body = self._body()
+        prose = _cell_line(
+            "Following discussion continues here.",
+            322.3, 520.0, 310.0, 320.0)
+        body.lines.append(prose)
+        body.bbox = (
+            body.bbox[0], body.bbox[1],
+            max(body.bbox[2], prose.bbox[2]), prose.bbox[3])
+        tables, remaining = detect_tables([self._header(), body])
+        assert len(tables) == 1
+        assert len(tables[0].columns) == 4
+        assert len(remaining) == 1
+        assert remaining[0].text == "Following discussion continues here."
+        assert all(
+            "Following discussion" not in line.text
+            for line in tables[0].lines
+        )
+
+    def test_contents_page_numbers_are_not_a_table(self):
+        header = _block_from_lines([
+            _cell_line("1. Introduction", 72, 180, 356, 366),
+            _cell_line("3", 533.9, 545, 356, 366),
+        ])
+        body_lines = []
+        for title, page, y in (
+            ("2. History/Changes from Previous Release", "3", 379),
+            ("2020-08-28 [D1122R3] after virtual LWG meeting", "3", 392),
+            ("2020-08-25 [D1122R3] preparation for virtual LWG meeting", "4", 405),
+        ):
+            body_lines.append(_cell_line(title, 72, 400, y, y + 9))
+            body_lines.append(_cell_line(page, 533.9, 545, y, y + 9))
+        tables, remaining = detect_tables([header, _block_from_lines(body_lines)])
+        assert tables == []
+        assert len(remaining) == 2
+
+    def _page_number_rows(self) -> list[Block]:
+        rows = []
+        entries = (
+            ("I. Revision History", "1", 80),
+            ("II. Introduction", "1", 100),
+            ("III. Motivation & Scope", "1", 120),
+            ("IV. State of the Art", "3", 140),
+        )
+        for title, page, y in entries:
+            rows.append(_block_from_lines([
+                _cell_line(title, 54, 220, y, y + 10),
+                _cell_line(page, 400, 420, y, y + 10),
+            ]))
+        return rows
+
+    def test_labeled_contents_without_dot_leaders_is_not_a_table(self):
+        contents = _block_from_lines([
+            _cell_line("CONTENTS", 54, 130, 40, 52),
+        ])
+        tables, remaining = detect_tables([contents, *self._page_number_rows()])
+        assert tables == []
+        assert len(remaining) == 5
+
+    def test_page_numbers_without_contents_label_stay_a_table(self):
+        tables, remaining = detect_tables(self._page_number_rows())
+        assert len(tables) == 1
+        assert tables[0].table_source == "horizontal_rows"
+        assert len(tables[0].columns) == 4
+        assert remaining == []
+
+    def test_contents_prefix_is_removed_from_paragraph_lines(self):
+        lines = []
+        y = 10.0
+        for text in (
+            "CONTENTS",
+            "I. Revision History", "1",
+            "II. Introduction", "1",
+            "III. Motivation", "1",
+            "R1 Includes discussion",
+        ):
+            lines.append(Line(
+                spans=[Span(text=text, font_size=10.0, bbox=(54, y, 220, y + 10))],
+                bbox=(54, y, 220, y + 10),
+                page_num=0,
+            ))
+            y += 14
+        sec = Section(
+            kind=SectionKind.HEADING,
+            text="\n".join(ln.text for ln in lines),
+            heading_level=3,
+            lines=lines,
+            page_num=0,
+            mupdf_text="\n".join(ln.text for ln in lines),
+            spatial_text=(
+                "CONTENTS R6 interleaved\n"
+                "I. Revision History 1\n"
+                "other spatial evidence\n"
+                "II. Introduction 1\n"
+                "III. Motivation 1\n"
+                "stale spatial source"
+            ),
+            columns=[[[Span(text="stale")]]],
+            indent_level=2,
+            table_kind="clean_matrix",
+            table_strategy="pipe_table",
+            table_source="horizontal_rows",
+            table_continuation=True,
+        )
+        _drop_leading_contents(sec)
+        assert [ln.text for ln in sec.lines] == ["R1 Includes discussion"]
+        assert sec.text == "R1 Includes discussion"
+        assert sec.mupdf_text == "R1 Includes discussion"
+        assert "CONTENTS" not in sec.spatial_text
+        assert "Revision History" not in sec.spatial_text
+        assert "other spatial evidence" in sec.spatial_text
+        assert "stale spatial source" in sec.spatial_text
+        assert sec.spatial_text != sec.text
+        assert sec.kind == SectionKind.PARAGRAPH
+        assert sec.heading_level == 0
+        assert sec.columns == []
+        assert sec.indent_level == 0
+        assert sec.table_kind is None
+        assert sec.table_strategy is None
+        assert sec.table_source is None
+        assert not sec.table_continuation
+
+
+def _placed(text, x0, y0, x1, y1, page=4, kind=SectionKind.PARAGRAPH):
+    line = Line(
+        spans=[Span(text=text, font_size=10.0)],
+        bbox=(x0, y0, x1, y1),
+        page_num=page,
+    )
+    return Section(kind=kind, text=text, lines=[line], page_num=page)
+
+
+class TestTwoColumnTableInsert:
+    """A table goes back where the column sort put its blocks.
+
+    Raw y would put a right-column table (small y) ahead of the whole
+    left column. The split keeps each column together.
+    """
+
+    def test_right_column_table_stays_after_the_left_column(self):
+        sections = [
+            _placed("REFERENCES", 54, 55, 160, 64),
+            _placed("body of the references", 54, 80, 250, 160),
+            _placed("proposed wording", 54, 539, 250, 700),
+            _placed("TABLE V caption", 317, 235, 520, 255),
+        ]
+        table = _placed(
+            "Function", 322, 54, 540, 64, kind=SectionKind.TABLE)
+        _insert_table_sections(sections, [table], {}, {4: 300.0})
+        assert [s.text for s in sections] == [
+            "REFERENCES",
+            "body of the references",
+            "proposed wording",
+            "Function",
+            "TABLE V caption",
+        ]
+
+    def test_left_column_table_stays_inside_its_column(self):
+        sections = [
+            _placed("REFERENCES", 54, 55, 160, 64),
+            _placed("caption IV", 54, 470, 250, 490),
+            _placed("right column prose", 317, 54, 520, 80),
+        ]
+        table = _placed("ceil", 56, 184, 280, 194, kind=SectionKind.TABLE)
+        _insert_table_sections(sections, [table], {}, {4: 300.0})
+        assert [s.text for s in sections] == [
+            "REFERENCES",
+            "ceil",
+            "caption IV",
+            "right column prose",
+        ]
+
+    def test_narrow_header_word_stays_in_the_right_column(self):
+        # Page 4's split is 362, inside the right column. The header
+        # word "Function" is only x=322-358; the row reaches Comment.
+        sections = [
+            _placed("REFERENCES", 140, 55, 213, 64),
+            _placed("TABLE V caption", 317, 235, 540, 255),
+        ]
+        table = _placed(
+            "Function", 322, 54, 358, 64, kind=SectionKind.TABLE)
+        table.lines.append(Line(
+            spans=[Span(text="Comment", font_size=10.0)],
+            bbox=(517, 54, 560, 64),
+            page_num=4,
+        ))
+        _insert_table_sections(sections, [table], {}, {4: 362.5})
+        assert [s.text for s in sections] == [
+            "REFERENCES",
+            "Function",
+            "TABLE V caption",
+        ]
+
+    def test_cross_page_tail_does_not_choose_the_column(self):
+        section = _placed("left-column start", 54, 100, 250, 120)
+        section.lines.append(Line(
+            spans=[Span(text="right-column continuation", font_size=10.0)],
+            bbox=(400, 50, 560, 70),
+            page_num=5,
+        ))
+        assert _column_of(section, 300.0, None) == 0
+
+    def test_single_column_still_inserts_by_y(self):
+        sections = [
+            _placed("above", 54, 40, 400, 50, page=1),
+            _placed("below", 54, 200, 400, 220, page=1),
+        ]
+        table = _placed(
+            "grid", 54, 100, 400, 110, page=1, kind=SectionKind.TABLE)
+        _insert_table_sections(sections, [table], {}, {})
+        assert [s.text for s in sections] == ["above", "grid", "below"]
+
+
+def _multirow(text, x0, y0, x1, y1, page=4):
+    sec = _placed(text, x0, y0, x1, y1, page=page, kind=SectionKind.TABLE)
+    sec.table_source = "multirow_body"
+    return sec
+
+
+class TestSideBySideMultirowOrder:
+    """Overlapping multirow tables read left, then right, then continue."""
+
+    def _column_major(self):
+        return [
+            _placed("REFERENCES", 54, 55, 160, 64),
+            _multirow("ceil", 56, 184, 280, 450),
+            _placed("TABLE IV caption", 54, 460, 250, 480),
+            _placed("VIII. PROPOSED WORDING", 54, 514, 250, 530),
+            _multirow("fpclassify", 322, 54, 540, 224),
+            _placed("TABLE V caption", 317, 235, 520, 255),
+        ]
+
+    def test_overlapping_pair_reads_left_then_right(self):
+        sections = self._column_major()
+        _insert_table_sections(sections, [], {}, {4: 300.0})
+        assert [s.text for s in sections] == [
+            "REFERENCES",
+            "ceil",
+            "TABLE IV caption",
+            "fpclassify",
+            "TABLE V caption",
+            "VIII. PROPOSED WORDING",
+        ]
+
+    def test_non_overlapping_right_table_stays_after_the_left_column(self):
+        sections = [
+            _multirow("ceil", 56, 184, 280, 300),
+            _placed("VIII. PROPOSED WORDING", 54, 320, 250, 340),
+            _multirow("later", 322, 420, 540, 500),
+        ]
+        _insert_table_sections(sections, [], {}, {4: 300.0})
+        assert [s.text for s in sections] == [
+            "ceil",
+            "VIII. PROPOSED WORDING",
+            "later",
+        ]
+
+    def test_other_family_is_not_hoisted(self):
+        sections = self._column_major()
+        sections[4].table_source = "horizontal_rows"
+        _insert_table_sections(sections, [], {}, {4: 300.0})
+        assert [s.text for s in sections][3] == "VIII. PROPOSED WORDING"
+
+    def test_single_column_does_not_hoist(self):
+        sections = []
+        _insert_table_sections(sections, [
+            _multirow("fpclassify", 322, 54, 540, 224),
+            _multirow("ceil", 56, 184, 280, 450),
+        ], {}, {})
+        assert [s.text for s in sections] == ["fpclassify", "ceil"]
+
+    def test_rotated_page_does_not_hoist(self):
+        sections = self._column_major()
+        _insert_table_sections(sections, [], {4: _ROT90}, {4: 300.0})
+        assert [s.text for s in sections][3] == "VIII. PROPOSED WORDING"
+
+    def test_text_above_the_right_table_blocks_the_hoist(self):
+        sections = [
+            _multirow("ceil", 56, 200, 280, 400),
+            _placed("TABLE IV caption", 54, 410, 250, 430),
+            _placed("VIII. PROPOSED WORDING", 54, 450, 250, 470),
+            _placed("right prologue", 317, 50, 520, 80),
+            _multirow("fpclassify", 322, 220, 540, 320),
+            _placed("TABLE V caption", 317, 330, 520, 350),
+        ]
+        _insert_table_sections(sections, [], {}, {4: 300.0})
+        assert [s.text for s in sections] == [
+            "ceil",
+            "TABLE IV caption",
+            "VIII. PROPOSED WORDING",
+            "right prologue",
+            "fpclassify",
+            "TABLE V caption",
+        ]
+
+    def test_plain_paragraph_below_table_is_not_its_caption(self):
+        sections = [
+            _multirow("ceil", 56, 200, 280, 400),
+            _placed("TABLE IV caption", 54, 410, 250, 430),
+            _placed("VIII. PROPOSED WORDING", 54, 450, 250, 470),
+            _multirow("fpclassify", 322, 220, 540, 320),
+            _placed("ordinary paragraph", 317, 330, 520, 350),
+        ]
+        _insert_table_sections(sections, [], {}, {4: 300.0})
+        assert [s.text for s in sections] == [
+            "ceil",
+            "TABLE IV caption",
+            "fpclassify",
+            "VIII. PROPOSED WORDING",
+            "ordinary paragraph",
+        ]

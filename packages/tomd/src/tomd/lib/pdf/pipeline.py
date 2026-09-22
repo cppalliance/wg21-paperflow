@@ -107,6 +107,104 @@ _TOC_BODY_PROTECT_MIN_WORDS = 10
 _NUMBERED_LINE_RE = re.compile(r"^\s*\d+[\.\)]\s+\S")
 _BARE_PAGE_NUM_RE = re.compile(r"^\s*\d{1,3}\s*$")
 _LABEL_TOC_MIN_NUMBERED_LINES = 3
+_CONTENTS_ENTRY_MAX_CHARS = 80
+_TABLE_CAPTION_RE = re.compile(
+    r"^\s*Table\s+(?:\d+|[IVXLCDM]+)\b", re.IGNORECASE)
+
+
+def _leading_contents(
+    lines: list[str],
+) -> tuple[int, list[tuple[str, str]]] | None:
+    """Cut index and title/page entries of a leading Contents list.
+
+    Page numbers sit on their own lines. The cut keeps whatever body was
+    joined onto the same section.
+    """
+    i = 0
+    while i < len(lines) and not lines[i].strip():
+        i += 1
+    if i >= len(lines) or not is_toc_label(lines[i].strip()):
+        return None
+    i += 1
+    pages = 0
+    entries: list[tuple[str, str]] = []
+    while i < len(lines):
+        while i < len(lines) and not lines[i].strip():
+            i += 1
+        if i >= len(lines):
+            break
+        title = lines[i].strip()
+        k = i + 1
+        while k < len(lines) and not lines[k].strip():
+            k += 1
+        if (k >= len(lines) or not title
+                or len(title) > _CONTENTS_ENTRY_MAX_CHARS
+                or not _BARE_PAGE_NUM_RE.match(lines[k].strip())):
+            break
+        pages += 1
+        entries.append((title, lines[k].strip()))
+        i = k + 1
+    if pages < _LABEL_TOC_MIN_NUMBERED_LINES:
+        return None
+    return i, entries
+
+
+def _strip_contents_entries(
+    text: str, entries: list[tuple[str, str]],
+) -> str:
+    """Remove one Contents label and its known entries from an extraction.
+
+    Spatial extraction interleaves the other column between TOC entries,
+    so the list is not a contiguous prefix there. Exact title/page pairs
+    can still be removed without replacing the independent extraction.
+    """
+    text = re.sub(r"(?im)^\s*contents\b[ \t]*", "", text, count=1)
+    for title, page in entries:
+        pattern = rf"(?i){re.escape(title)}\s+{re.escape(page)}(?=\s|$)"
+        text = re.sub(pattern, "", text, count=1)
+    return text.lstrip("\n")
+
+
+def _drop_leading_contents(sec) -> None:
+    """Remove a leading Contents list from both the text and the lines.
+
+    Paragraphs render ``sec.lines``. Updating only ``sec.text`` would leave
+    the list on the page. Uncertain-region prompts read ``mupdf_text`` and
+    ``spatial_text``; leaving either raw extraction untouched would let the
+    reconciliation model put the removed list back.
+    """
+    parsed = _leading_contents(sec.text.split("\n"))
+    if parsed is None:
+        return
+    text_cut, entries = parsed
+    trimmed_lines = False
+    if sec.lines:
+        lines_parsed = _leading_contents([ln.text for ln in sec.lines])
+        if lines_parsed is not None:
+            line_cut, _ = lines_parsed
+            sec.lines = sec.lines[line_cut:]
+            sec.text = "\n".join(ln.text for ln in sec.lines)
+            trimmed_lines = True
+    if not trimmed_lines:
+        sec.text = "\n".join(sec.text.split("\n")[text_cut:]).lstrip("\n")
+        # The section's line order did not expose a contiguous title/page
+        # run (two-column extraction can interleave it). Render the clean
+        # text instead of the stale lines.
+        sec.lines = []
+    for attr in ("mupdf_text", "spatial_text"):
+        raw = getattr(sec, attr, "")
+        if not raw:
+            continue
+        setattr(sec, attr, _strip_contents_entries(raw, entries))
+    if sec.kind is not SectionKind.UNCERTAIN:
+        sec.kind = SectionKind.PARAGRAPH
+    sec.heading_level = 0
+    sec.columns = []
+    sec.indent_level = 0
+    sec.table_kind = None
+    sec.table_strategy = None
+    sec.table_source = None
+    sec.table_continuation = False
 _TOC_LABEL_MAX_WORDS = 4
 
 # Two-column detection: minimum gap (points) between the right edge of left-
@@ -543,10 +641,206 @@ def _detect_column_split(blocks: list, page_width: float) -> float | None:
     return best_split
 
 
+def _region_bbox(lines: list) -> tuple[float, float, float, float]:
+    """Union of line boxes. A header word is narrower than its row."""
+    return (
+        min(ln.bbox[0] for ln in lines),
+        min(ln.bbox[1] for ln in lines),
+        max(ln.bbox[2] for ln in lines),
+        max(ln.bbox[3] for ln in lines),
+    )
+
+
+def _section_region_bbox(sec) -> tuple[float, float, float, float]:
+    """Region on ``sec.page_num``; cross-page tails do not choose a column."""
+    same_page = [ln for ln in sec.lines if ln.page_num == sec.page_num]
+    return _region_bbox(same_page or sec.lines)
+
+
+def _column_reading_key(
+    bbox: tuple[float, float, float, float],
+    split: float | None,
+    rot: tuple | None,
+    x_bbox: tuple[float, float, float, float] | None = None,
+) -> tuple[int, float]:
+    """(column, y0) in the order ``_column_aware_sort`` emits.
+
+    With no split, or on a rotated page, the column is 0 and the key
+    is the y comparison table insertion already used. A two-column
+    split puts the whole left column before the right one, so a table
+    at the top of the right column stays after the left column instead
+    of jumping ahead of it because its page-space y is smaller.
+    ``x_bbox`` is the region used for the column (the block the sort
+    saw). The first line alone can sit left of the split: on P0533R9
+    page 4 the split is 362 and the word Function is only x=322-358.
+    """
+    y = _rot_bbox(bbox, rot)[1]
+    if split is None or rot is not None:
+        return (0, y)
+    box = x_bbox or bbox
+    x_mid = (box[0] + box[2]) / 2
+    return (0 if x_mid < split else 1, y)
+
+
+def _insert_table_sections(
+    sections: list,
+    table_sections: list,
+    page_rotations: dict[int, tuple],
+    column_splits: dict[int, float],
+) -> None:
+    """Place each table back into the section list at its reading position."""
+    for ts in table_sections:
+        inserted = False
+        data_on_label_page = ts.lines and ts.lines[0].page_num == ts.page_num
+        ts_rot = page_rotations.get(ts.page_num)
+        ts_split = column_splits.get(ts.page_num)
+        ts_key = (
+            _column_reading_key(
+                ts.lines[0].bbox, ts_split, ts_rot,
+                x_bbox=_section_region_bbox(ts))
+            if ts.lines else None
+        )
+        for i, sec in enumerate(sections):
+            if sec.page_num > ts.page_num:
+                sections.insert(i, ts)
+                inserted = True
+                break
+            if (
+                data_on_label_page
+                and ts_key is not None
+                and sec.page_num == ts.page_num
+                and sec.lines
+                and _column_reading_key(
+                    sec.lines[0].bbox, ts_split, ts_rot,
+                    x_bbox=_section_region_bbox(sec))
+                    > ts_key
+            ):
+                sections.insert(i, ts)
+                inserted = True
+                break
+        if not inserted:
+            sections.append(ts)
+    _hoist_overlapping_multirow_pairs(
+        sections, page_rotations, column_splits)
+
+
+# A caption sits just under its table. The P0533 captions are about 11pt
+# below the grid; a later heading is much further down.
+_SIDE_BY_SIDE_CAPTION_GAP = 30.0
+# Same band as structure._COLUMN_VOVERLAP_MIN: tables beside each other.
+_TABLE_COLUMN_OVERLAP_MIN = 3.0
+
+
+def _vertical_overlap(
+    a: tuple[float, float, float, float],
+    b: tuple[float, float, float, float],
+) -> float:
+    return min(a[3], b[3]) - max(a[1], b[1])
+
+
+def _column_of(sec, split: float, rot: tuple | None) -> int | None:
+    if not sec.lines:
+        return None
+    box = _section_region_bbox(sec)
+    return _column_reading_key(sec.lines[0].bbox, split, rot, x_bbox=box)[0]
+
+
+def _caption_after(
+    sections: list, table_index: int, split: float, rot: tuple | None,
+) -> int | None:
+    """The paragraph immediately under a table, in the same column."""
+    table = sections[table_index]
+    nxt = table_index + 1
+    if nxt >= len(sections):
+        return None
+    cap = sections[nxt]
+    if (cap.kind == SectionKind.TABLE or not cap.lines
+            or cap.page_num != table.page_num or not table.lines):
+        return None
+    if not _TABLE_CAPTION_RE.match(cap.text):
+        return None
+    table_box = _section_region_bbox(table)
+    cap_box = _section_region_bbox(cap)
+    if _column_of(cap, split, rot) != _column_of(table, split, rot):
+        return None
+    # A caption starts under the grid. A paragraph that overlaps the
+    # table is body text, not the caption.
+    gap = cap_box[1] - table_box[3]
+    if gap < 0 or gap > _SIDE_BY_SIDE_CAPTION_GAP:
+        return None
+    return nxt
+
+
+def _hoist_overlapping_multirow_pairs(
+    sections: list,
+    page_rotations: dict[int, tuple],
+    column_splits: dict[int, float],
+) -> None:
+    """Read a side-by-side multirow pair left, then right, then continue.
+
+    Column-major order finishes the left column, so the heading under the
+    left table lands before the table beside it. When the two tables are
+    the multirow_body family and their boxes overlap vertically, the right
+    table and the caption under it move to just after the left table and
+    its caption.
+    """
+    i = 0
+    while i < len(sections):
+        left = sections[i]
+        split = column_splits.get(left.page_num)
+        rot = page_rotations.get(left.page_num)
+        if (left.table_source != "multirow_body" or not left.lines
+                or split is None or rot is not None
+                or _column_of(left, split, rot) != 0):
+            i += 1
+            continue
+        left_box = _section_region_bbox(left)
+        right_at = None
+        for j in range(i + 1, len(sections)):
+            other = sections[j]
+            if other.page_num != left.page_num:
+                break
+            if other.table_source != "multirow_body" or not other.lines:
+                continue
+            if _column_of(other, split, rot) != 1:
+                continue
+            other_box = _section_region_bbox(other)
+            if _vertical_overlap(left_box, other_box) >= _TABLE_COLUMN_OVERLAP_MIN:
+                right_at = j
+                break
+        if right_at is None:
+            i += 1
+            continue
+        left_cap = _caption_after(sections, i, split, rot)
+        insert_at = i + 1
+        if left_cap is not None and left_cap < right_at:
+            insert_at = left_cap + 1
+        # Right-column text above this table is already in front of it.
+        # Hoisting would place the table before that text.
+        if any(_column_of(sections[k], split, rot) == 1
+               for k in range(insert_at, right_at)):
+            i += 1
+            continue
+        right_cap = _caption_after(sections, right_at, split, rot)
+        move = [right_at]
+        if right_cap is not None:
+            move.append(right_cap)
+        moved = [sections[k] for k in move]
+        for k in reversed(move):
+            del sections[k]
+        insert_at = i + 1
+        if left_cap is not None and left_cap < right_at:
+            insert_at = left_cap + 1
+        for offset, sec in enumerate(moved):
+            sections.insert(insert_at + offset, sec)
+        i = insert_at + len(moved)
+
+
 def _column_aware_sort(
     blocks: list,
     page_widths: dict[int, float],
     page_rotations: dict[int, tuple] | None = None,
+    splits_out: dict[int, float] | None = None,
 ) -> frozenset[int]:
     """Sort blocks by reading order: page, then column (if two-column), then y.
 
@@ -595,7 +889,14 @@ def _column_aware_sort(
         return (pg, 0, y_mid)
 
     blocks.sort(key=sort_key)
-    return frozenset(pg for pg, split in splits.items() if split is not None)
+    found = frozenset(pg for pg, split in splits.items() if split is not None)
+    if splits_out is not None:
+        splits_out.clear()
+        for pg in found:
+            split = splits[pg]
+            if split is not None:
+                splits_out[pg] = split
+    return found
 
 
 def _get_page0_text_colors(page) -> dict[float, float]:
@@ -1884,8 +2185,10 @@ def run_pipeline(
     # block order and page classification come from the same blocks
     # (the stripped ones: a centred page number in the raw blocks used to
     # hide the gutter on p4098r1 p.4/5 and split the two decisions).
+    column_splits: dict[int, float] = {}
     two_column_pages = _column_aware_sort(
-        all_mupdf_blocks, page_widths, page_rotations)
+        all_mupdf_blocks, page_widths, page_rotations,
+        splits_out=column_splits)
     _column_aware_sort(all_spatial_blocks, page_widths, page_rotations)
     if two_column_pages:
         _log.debug("Two-column pages: %s", sorted(two_column_pages))
@@ -1947,30 +2250,12 @@ def run_pipeline(
 
     sections = compare_extractions(all_mupdf_blocks, all_spatial_blocks)
 
-    for ts in table_sections:
-        inserted = False
-        data_on_label_page = ts.lines and ts.lines[0].page_num == ts.page_num
-        # On rotated pages compare in reading space; page-space y does
-        # not reflect visual order there.
-        ts_rot = page_rotations.get(ts.page_num)
-        for i, sec in enumerate(sections):
-            if sec.page_num > ts.page_num:
-                sections.insert(i, ts)
-                inserted = True
-                break
-            if (
-                data_on_label_page
-                and sec.page_num == ts.page_num
-                and sec.lines
-                and ts.lines
-                and _rot_bbox(sec.lines[0].bbox, ts_rot)[1]
-                > _rot_bbox(ts.lines[0].bbox, ts_rot)[1]
-            ):
-                sections.insert(i, ts)
-                inserted = True
-                break
-        if not inserted:
-            sections.append(ts)
+    # On a two-column page the section list is already column-then-y.
+    # Inserting a table by raw y pulls a right-column table (small y)
+    # up into the left column. The split from the same sort keeps it
+    # in its column.
+    _insert_table_sections(
+        sections, table_sections, page_rotations, column_splits)
 
     if result.images:
         _log.info(
@@ -2233,6 +2518,9 @@ def run_pipeline(
                     len(toc_indices),
                 )
                 toc_indices = set()
+
+    for sec in sections:
+        _drop_leading_contents(sec)
 
     for li, sec in enumerate(sections):
         if li in toc_indices:
