@@ -595,6 +595,73 @@ def _nearest_column(x: float, col_xs: list[float]) -> int:
     return min(range(len(col_xs)), key=lambda ci: abs(x - col_xs[ci]))
 
 
+def _column_by_start(x: float, col_xs: list[float]) -> int:
+    """Column whose start ``x`` has reached, not the nearest center.
+
+    A spaced word inside a cell can sit closer to the next column than
+    to its own (P0957R8 swap table: ``(rhs`` at x=296 between columns
+    at 185 and 365). Nearest-column then moves that word into the next
+    cell. A line belongs to column i once its left edge is within
+    ``_COLUMN_X_TOLERANCE`` of i's start, and stays there until the
+    next start.
+    """
+    chosen = 0
+    for i, cx in enumerate(col_xs):
+        if x + _COLUMN_X_TOLERANCE >= cx:
+            chosen = i
+        else:
+            break
+    return chosen
+
+
+def _resplit_rows_on_ruled_grid(valid_rows, grids, num_cols):
+    """Split an SBS row that crosses several ruled rows.
+
+    P0957R8 5.4.2.1 packs three Name/Value rows into one cell because
+    the next row's text starts a few points before the previous row's
+    block ends, so the y-gap test never fires. find_tables() already
+    has those rules. Only a grid with the same column count and at
+    most four extra rows is used, so a full-page phantom does not
+    re-cut a real table.
+    """
+    grid = None
+    for tbl in grids:
+        if tbl.get("rot") is not None or tbl.get("col_count") != num_cols:
+            continue
+        extra = tbl.get("row_count", 0) - len(valid_rows)
+        if 0 < extra <= 4 and tbl.get("cells"):
+            grid = tbl
+            break
+    if grid is None:
+        return valid_rows
+    cells = grid["cells"]
+    n_rows = grid["row_count"]
+
+    def grid_row(y):
+        for i, cell in enumerate(cells):
+            if cell and cell[1] <= y <= cell[3]:
+                return i % n_rows
+        return None
+
+    out = []
+    for row in valid_rows:
+        groups = {}
+        order = []
+        for item in row:
+            blk = item[1]
+            y = (blk.bbox[1] + blk.bbox[3]) / 2.0
+            ri = grid_row(y)
+            if ri not in groups:
+                groups[ri] = []
+                order.append(ri)
+            groups[ri].append(item)
+        if len(groups) <= 1:
+            out.append(row)
+        else:
+            out.extend(groups[ri] for ri in order)
+    return out
+
+
 _SBS_MUPDF_DEFER_MIN_ROWS = 5
 _MUPDF_REGION_MARGIN = 4.0  # pt of slack when testing block containment
 
@@ -1400,7 +1467,7 @@ def _detect_side_by_side_tables(
                 _, b_prev = body_sorted[k - 1]
                 if (_nearest_column(b_prev.bbox[0], col_xs) != 0
                         and b_prev.page_num == b_c0.page_num
-                        and 0 <= b_c0.bbox[1] - b_prev.bbox[1]
+                        and abs(b_c0.bbox[1] - b_prev.bbox[1])
                                 < _SBS_COL0_SWAP_BAND):
                     k -= 1
                 else:
@@ -1567,6 +1634,9 @@ def _detect_side_by_side_tables(
             continue
 
         num_cols = len(col_xs)
+        if page_mupdf_tables:
+            valid_rows = _resplit_rows_on_ruled_grid(
+                valid_rows, page_mupdf_tables.get(page, []), num_cols)
 
         # Build header row.
         if atomized_hdr is not None:
@@ -1587,7 +1657,7 @@ def _detect_side_by_side_tables(
         for row in valid_rows:
             col_spans: dict[int, list] = defaultdict(list)
             for _, blk in row:
-                line_cols = [_nearest_column(ln.bbox[0], col_xs)
+                line_cols = [_column_by_start(ln.bbox[0], col_xs)
                              for ln in blk.lines]
                 multi_col = len(set(line_cols)) > 1
                 blk_ci = _nearest_column(blk.bbox[0], col_xs)
@@ -2538,8 +2608,10 @@ def _detect_mupdf_native_tables(
             ]
             all_lines = []
 
+            caption_outside: list[int] = []
             for idx in table_block_indices:
                 blk = blocks[idx]
+                placed_lines: list[tuple[int, int, Line]] = []
                 for ln in blk.lines:
                     lmid_x, lmid_y = _rot_midpoint(ln.bbox, rot)
 
@@ -2562,13 +2634,28 @@ def _detect_mupdf_native_tables(
                                     best_r, best_c = ri, ci
 
                     if best_r >= 0:
-                        cell = all_rows_data[best_r][best_c]
-                        if cell and ln.spans:
-                            cell.append(Span(text="\n"))
-                        cell.extend(ln.spans)
-                    # Always retain the line so its spans are available
-                    # for Docling enrichment via _flat_spans_from_section.
+                        placed_lines.append((best_r, best_c, ln))
+                # A "Table N - ..." caption whose block midpoint falls
+                # inside the grid margin (P0957R8 Table 2 sits 8pt into
+                # the find_tables bbox) must stay prose. Placing it in
+                # the nearest cell drops it: the emitted rows come from
+                # the grid, and the block is marked used.
+                if _SPEC_TABLE_LABEL_RE.match(blk.text.strip()):
+                    caption_outside.append(idx)
+                    continue
+                for best_r, best_c, ln in placed_lines:
+                    cell = all_rows_data[best_r][best_c]
+                    if cell and ln.spans:
+                        cell.append(Span(text="\n"))
+                    cell.extend(ln.spans)
                     all_lines.append(ln)
+                if not placed_lines:
+                    all_lines.extend(blk.lines)
+            if caption_outside:
+                table_block_indices = [
+                    idx for idx in table_block_indices
+                    if idx not in caption_outside
+                ]
 
             # Cross-page continuation: when the table bbox extends
             # close to the page bottom, absorb code blocks from the

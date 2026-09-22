@@ -24,7 +24,7 @@ _GOLDEN = Path(__file__).resolve().parent.parent / "fixtures" / "golden"
 # in _try_orphan_lookahead rejected its wrapped cell tail; the pin keeps
 # it a table with the tail merged back into its cell (2 rows).
 _P0957R8_TABLE_PINS = {
-    (26, 14, 2, "code_comparison", "side_by_side_prepass"),
+    (26, 16, 2, "code_comparison", "side_by_side_prepass"),
     (27, 2, 2, "clean_matrix", "horizontal_rows"),
 }
 
