@@ -17,21 +17,19 @@ from tomd.lib.pdf.types import SectionKind
 
 _GOLDEN = Path(__file__).resolve().parent.parent / "fixtures" / "golden"
 
-# Family pins for P0957R8: the §5.4.2.1 Name/Value comparison (p.27
-# printed, tomd page 26, side-by-side pre-scanner) and the 2-column
-# monospace type-trait table on the next page (tomd page 27, Pass 1).
-# The latter regressed to a cpp fence when a 2-column monospace guard
-# in _try_orphan_lookahead rejected its wrapped cell tail; the pin keeps
-# it a table with the tail merged back into its cell (2 rows).
+# Family pins for P0957R8: the §5.4.2.1 Name/Value comparison (printed
+# p.27-28, tomd page 26). The two rows that start the next page join
+# this table when both fragments sit on the same ruled grid, so page 27
+# has no table of its own.
 _P0957R8_TABLE_PINS = {
-    (26, 16, 2, "code_comparison", "side_by_side_prepass"),
-    (27, 2, 2, "clean_matrix", "horizontal_rows"),
+    (26, 18, 2, "code_comparison", "side_by_side_prepass"),
 }
 
 def test_p0957r8_table_family_pins():
-    """Focused guard for the two P0957R8 tables on tomd pages 26 and 27.
-    Independent of the full golden so a re-bless can never silently drop
-    the type-trait table back into a code fence.
+    """Focused guard for the P0957R8 Name/Value table on tomd page 26.
+    The printed-page-28 continuation is part of that table. A re-bless
+    must not put those two rows back into their own table on page 27
+    or drop the type-trait rows into a code fence.
     """
     pdf_path = _GOLDEN / "sources" / "p0957r8.pdf"
     if not pdf_path.is_file():
