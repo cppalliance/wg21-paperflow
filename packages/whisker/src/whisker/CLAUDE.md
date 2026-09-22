@@ -875,7 +875,7 @@ Full evidence: `research/research/llm-qa-integration/SYNTHESIS.md`.
 - **Run modes.** Bare `whisker-tapetum-llm` (no PIDs) is a full run: every
   converted paper, with automatic fingerprint-based skip (sidecar records
   SHA-256 of markdown, source, prompt, model, output schema,
-  `_LANE_VERSION` (currently 27), a `unit_check_mode` key tracking the
+  `_LANE_VERSION` (currently 28), a `unit_check_mode` key tracking the
   `TAPETUM_VERDICT_FIRST` toggle, and `coverage_mode`; unchanged papers are
   skipped, `--force` re-evaluates everything). `_LANE_VERSION` 11 -> 12
   closed a fingerprint gap: the verdict-first `UnitCheckClear`/
