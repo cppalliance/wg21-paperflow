@@ -1295,6 +1295,21 @@ class TestHeaderIsDataQuestionSourceRow:
         assert "accumulate" in question
         assert "GENERALIZED_NONCOMMUTATIVE_REDUCE" in question
 
+    def test_numbered_header_quotes_the_whole_row(self):
+        unit = TableUnit(
+            index=0,
+            fmt=FORMAT_PIPE,
+            cells=(
+                ("1", "IoAwaitable Protocol", "Coroutine execution protocol, executor model"),
+                ("2", "Coroutine Task", "task"),
+            ),
+        )
+        built = _build_header_is_data_question(unit)
+        assert built is not None
+        _pid, question, _md = built
+        assert "1 | IoAwaitable Protocol" in question
+        assert "body row" in question
+
 
 class TestDefectConfirmedFlag:
     """ProbeResult.defect_confirmed distinguishes aligned non-match from real FAIL."""

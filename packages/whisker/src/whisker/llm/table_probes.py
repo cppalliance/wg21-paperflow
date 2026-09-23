@@ -537,6 +537,20 @@ def _build_header_is_data_question(
     header_names = [h.strip() for h in unit.cells[0] if h.strip()]
     if not header_names:
         return None
+    first = header_names[0]
+    table_md = _raw_rows_to_md(unit)
+    if first.isdigit():
+        # P4100 section 7.1: quoting only the long cell hid the "1" and the
+        # model called the abstraction sentence the top row.
+        quoted = " | ".join(header_names)
+        question = (
+            f"The markdown header row is '{quoted}'. "
+            f"The PDF's top row is '# | Paper | Abstraction', emitted as a "
+            f"heading above this table. Answer 'body row' when this numbered "
+            f"row is the first data row under that header. Otherwise answer "
+            f"'top row'."
+        )
+        return ("diag-header-is-data", question, table_md)
     data_like = [
         h for h in header_names
         if (
