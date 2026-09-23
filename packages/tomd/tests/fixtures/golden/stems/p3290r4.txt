@@ -1,0 +1,7 @@
+# Bibliography-as-prose guard (#426): P3290R4's six-entry bibliography
+# (pages 18 and 19, printed 19 and 20; label column + text column) was
+# once claimed as a 4-column table with three references packed into
+# one header cell. On this code it is six prose paragraphs; the golden
+# pins that, plus the five filled `SF | F | N | A | SA` polls (one
+# numeric row each, `Result: Consensus` as the paragraph below, never
+# a table row) and the two `Name | Meaning` enum tables of the wording.

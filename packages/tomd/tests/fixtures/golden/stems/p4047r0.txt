@@ -1,0 +1,11 @@
+# Header-grid guard (#377): P4047R0 is a Google-Docs export with seven
+# prediction tables of one layout (`# | Prediction | Source | Date |
+# Outcome`), two per page under a heading each. The `#` column is 30pt
+# wide, under _COLUMN_GAP_THRESHOLD, so no pass saw the header as a
+# row and Pass 1 took the fused Date/Outcome blocks as 2-column
+# shards. The side-by-side pre-scanner now seeds on the single-
+# baseline header block and takes the header's grid (all seven,
+# including the Timeline that Pass 4 had assembled correctly). The
+# golden also holds the §4 Scorecard (Pass 1 plus header cluster)
+# and the §5 Conclusion with its last row still leaking as prose
+# ("Implementation maturity concerns", a col-0-only trailing row).

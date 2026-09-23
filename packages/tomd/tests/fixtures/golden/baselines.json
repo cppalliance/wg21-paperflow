@@ -55,6 +55,14 @@
     "table": 1.0,
     "text": 0.95
   },
+  "p3290r4": {
+    "code": 0.9,
+    "frontmatter": 1.0,
+    "heading": 1.0,
+    "list": 0.51,
+    "table": 1.0,
+    "text": 0.66
+  },
   "p3411r5": {
     "code": 1.0,
     "frontmatter": 1.0,
@@ -78,6 +86,14 @@
     "list": 1.0,
     "table": 1.0,
     "text": 0.93
+  },
+  "p3978r0": {
+    "code": 0.35,
+    "frontmatter": 1.0,
+    "heading": 0.81,
+    "list": 1.0,
+    "table": 0.75,
+    "text": 0.69
   },
   "p4020r0": {
     "code": 1.0,

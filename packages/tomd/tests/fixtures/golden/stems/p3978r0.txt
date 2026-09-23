@@ -1,0 +1,8 @@
+# Empty vote-grid guard (#422): P3978R0's three suggested polls (tomd
+# page 1) are one SF/F/N/A/SA header block each with nothing below;
+# Pass 3 wanted two blocks per run, so Pass 4 fused the three headers
+# and their "Poll: ..." captions into one 5x3 table. Pass 3 now claims
+# a lone vote header as a 2x5 table with an empty body row, the shape
+# P4012R0 §2.2 already has. The golden pins the three tables with their
+# captions as prose between them and the page-2 rewrite mapping (8x4,
+# Pass 1) untouched; the family pins below guard the routing.

@@ -1,0 +1,4 @@
+# Leaked heading-kind TOC guard: p4100r1 shipped a front block of
+# empty duplicate headings (its Table of Contents leaked as headings without
+# a dot-leader page number). The dedup post-pass removes them (35 -> 0). Pure
+# Population A: no doubled body, so "body intact and not doubled" is real.

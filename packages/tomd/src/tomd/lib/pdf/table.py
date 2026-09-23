@@ -40,6 +40,8 @@ Detection passes (run in order, each consumes matched blocks):
   Pass 2 (side-by-side blocks): each cell is a separate MuPDF block at a
     different x-position (Tony Tables with multi-line code cells).
   Pass 3 (horizontal-row): narrow poll/vote grids with small column gaps.
+    A lone SF/F/N/A/SA header block with no row below it is an empty
+    suggested poll and gets a synthesized empty body row.
   Pass 4 (column-aligned): borderless tables where MuPDF distributes columns
     across separate single-column blocks.  Span-level x-position clustering.
   Pass 4b (spec-label): WG21 requirement tables anchored by a "Table N - ..."
@@ -2362,6 +2364,40 @@ _TRAILING_HR_MAX_CELL_LEN = 4
 _TRAILING_HR_Y_GAP = 8.0
 _TRAILING_HR_MIN_BANDS = 2  # header + at least one data row
 
+# Empty vote grid: a horizontal-row block whose cells are all WG21 poll
+# vocabulary and that has no data row below it is a suggested (not yet
+# taken) poll, e.g. P3978R0 §2.1. Pass 3 accepts it as a header-only
+# table with an empty body row, the shape Pass 3a emits for P4012R0 §2.2.
+_VOTE_HEADER_CELLS = frozenset({"SF", "F", "N", "A", "SA"})
+
+
+def _is_lone_vote_header(
+    blocks: list[Block],
+    idx: int,
+    used: set[int],
+) -> bool:
+    """True when blocks[idx] is a poll header row with no data row under it.
+
+    Every line text must be a member of _VOTE_HEADER_CELLS, and no unused
+    horizontal-row block on the same page may start within
+    _PARTIAL_ROW_MAX_Y_GAP below the header's bottom edge: a number row
+    that close belongs to the same table and is taken by the normal
+    two-block run, not by this header-only path.
+    """
+    block = blocks[idx]
+    if len(block.lines) < _HORIZONTAL_ROW_MIN_CELLS:
+        return False
+    if not all(ln.text.strip() in _VOTE_HEADER_CELLS for ln in block.lines):
+        return False
+    bottom = block.bbox[3]
+    for k, other in enumerate(blocks):
+        if k == idx or k in used or other.page_num != block.page_num:
+            continue
+        gap = other.bbox[1] - bottom
+        if 0 <= gap <= _PARTIAL_ROW_MAX_Y_GAP and _block_horizontal_row(other):
+            return False
+    return True
+
 
 def _block_horizontal_row(block: Block) -> list[float] | None:
     """Detect a block whose lines sit side-by-side at the same y-level.
@@ -2773,6 +2809,12 @@ def _detect_horizontal_row_tables(
     Two or more adjacent blocks on the same page, each with 3+ lines
     at identical y-level and matching cell count, form a table.
 
+    A single block whose cells are all poll vocabulary (SF, F, N, A, SA)
+    with no horizontal-row block directly below it is an empty suggested
+    poll (_is_lone_vote_header, P3978R0 §2.1); it forms a table on its
+    own with a synthesized empty body row. Without this, Pass 4 fuses
+    consecutive poll headers and their captions into one table.
+
     *rotated_pages* are skipped: the y-level geometry assumes upright
     text and produces garbage rows there; Pass 5 handles those pages
     rotation-aware.
@@ -2828,9 +2870,17 @@ def _detect_horizontal_row_tables(
             else:
                 break
 
-        if len(run) >= _MIN_TABLE_ROWS:
-            left_behind = _grid_rows_left_behind(
-                [blocks[idx] for idx in run], cols, blocks, page_mupdf_tables)
+        lone_vote_header = (
+            len(run) < _MIN_TABLE_ROWS
+            and _is_lone_vote_header(blocks, i, used)
+        )
+        if len(run) >= _MIN_TABLE_ROWS or lone_vote_header:
+            left_behind = (
+                [] if lone_vote_header
+                else _grid_rows_left_behind(
+                    [blocks[idx] for idx in run], cols, blocks,
+                    page_mupdf_tables)
+            )
             if left_behind:
                 idx_of = {id(b): k for k, b in enumerate(blocks)}
                 run.extend(idx_of[id(b)] for b in left_behind)
@@ -2878,6 +2928,12 @@ def _detect_horizontal_row_tables(
                         row[best_col].append(Span(text=" "))
                     row[best_col].extend(ln.spans)
                 rows.append(row)
+
+            if lone_vote_header:
+                # Header whose data cells are empty: synthesize the body
+                # row so the table does not render as a bare header
+                # (same shape as _split_trailing_horizontal_rows).
+                rows.append([[] for _ in range(ncols)])
 
             kind_val, strategy_val, rows = _classify_and_annotate(rows)
             text = _render_table_text(rows)
