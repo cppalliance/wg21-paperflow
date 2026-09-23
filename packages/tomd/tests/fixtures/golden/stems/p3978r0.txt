@@ -5,4 +5,4 @@
 # a lone vote header as a 2x5 table with an empty body row, the shape
 # P4012R0 §2.2 already has. The golden pins the three tables with their
 # captions as prose between them and the page-2 rewrite mapping (8x4,
-# Pass 1) untouched; the family pins below guard the routing.
+# Pass 1) untouched; pdf_pins/test_p3978r0.py guards the routing.

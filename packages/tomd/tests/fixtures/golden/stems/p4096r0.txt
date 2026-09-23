@@ -4,5 +4,5 @@
 # body), the two §5.2 tables stay with Pass 1 (row blocks with col-1+
 # wrapped tails merged backward, a trailing continuation absorbed
 # in-loop so the partial third row still joins). The golden pins all
-# four tables plus the prose and headings around them; the family pins
-# below guard the routing itself.
+# four tables plus the prose and headings around them;
+# pdf_pins/test_p4096r0.py guards the routing itself.

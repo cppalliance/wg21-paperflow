@@ -15,7 +15,7 @@ golden/
   baselines.json
 ```
 
-- **Stem** (`stems/<stem>.txt`): registers one PDF paper for `test_pdf_golden`. The body is the comment for that paper. A new paper is a new file. Family-pin tests live in `packages/tomd/tests/pdf_pins/`, one module per paper.
+- **Stem** (`stems/<stem>.txt`): registers one PDF paper for `test_pdf_golden`. The filename is the key: the test globs `stems/*.txt` and runs one byte-exact snapshot test per stem, so a golden without a stem file is not tested. The body is a free-form note about the paper and is never read. A new paper is a new file. Family-pin tests live in `packages/tomd/tests/pdf_pins/`, one module per paper.
 - **Source** (`sources/<stem>.{pdf,html}`): the paper, input to both nets.
 - **Snapshot** (`snapshots/<stem>.md`): a byte-exact lock on tomd's *current*
   output. Guarded by `test_pdf_golden` / `test_html_golden`. Answers "did the

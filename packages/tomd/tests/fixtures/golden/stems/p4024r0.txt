@@ -2,5 +2,6 @@
 # these practices ...") sits alone at the top of page 3, sharing y-buckets
 # with the page-1/2 headers. The old raw-occurrence count (doubled by the
 # dual extraction path) stripped it as a phantom header on this 3-page doc.
-# Distinct-page counting keeps it. The golden pins the full body; the
-# explicit closing-sentence assertion below is the focused guard.
+# Distinct-page counting keeps it. The golden pins the full body;
+# test_p4024r0_closing_paragraph_present in test_pdf_golden.py is the
+# focused guard.
