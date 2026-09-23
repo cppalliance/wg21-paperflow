@@ -4130,3 +4130,70 @@ class TestSideBySideMultirowOrder:
             "VIII. PROPOSED WORDING",
             "ordinary paragraph",
         ]
+
+
+class TestRunningHeaderGrid:
+    """A document-id column is page furniture, not a table (P3978R3)."""
+
+    def test_paper_id_beside_section_titles_is_not_a_table(self):
+        blocks = [
+            _geo_block(0, ("P3978R3", 40, 100, 90, 112),
+                       ("3 Motivation", 200, 100, 320, 112)),
+            _geo_block(0, ("3.2", 40, 120, 70, 132),
+                       ("status quo examples", 200, 120, 340, 132)),
+        ]
+        tables, remaining = detect_tables(blocks)
+        assert tables == []
+        assert remaining == []
+
+    def test_two_column_comparison_with_real_header_stays(self):
+        blocks = [
+            _geo_block(0, ("Library", 40, 100, 100, 112),
+                       ("Status", 200, 100, 260, 112)),
+            _geo_block(0, ("Capy", 40, 120, 80, 132),
+                       ("Published", 200, 120, 280, 132)),
+            _geo_block(0, ("Corosio", 40, 140, 90, 152),
+                       ("Published", 200, 140, 280, 152)),
+        ]
+        tables, _ = detect_tables(blocks)
+        assert len(tables) == 1
+        assert _cell_text(tables[0].columns[0][0]) == "Library"
+
+
+class TestHashHeaderAboveNumberedRow:
+    """`# | Paper | Abstraction` joins above row 1 (P4100R0 section 7.1)."""
+
+    def _numbered_rows(self):
+        rows = [
+            _geo_block(0, ("#", 66, 80, 74, 92),
+                       ("Paper", 94, 80, 130, 92),
+                       ("Abstraction", 196, 80, 260, 92)),
+        ]
+        labels = [
+            ("1", "IoAwaitable Protocol", "Coroutine execution protocol"),
+            ("2", "Coroutine Task", "task and launch functions"),
+            ("3", "Executor Utilities", "strand and any_executor"),
+            ("4", "Buffer Ranges", "scatter and gather"),
+            ("5", "Stream Concepts", "async byte IO"),
+        ]
+        y = 110
+        for a, b, c in labels:
+            rows.append(_geo_block(
+                0, (a, 66, y, 74, y + 12),
+                (b, 94, y, 160, y + 12),
+                (c, 196, y, 360, y + 12)))
+            y += 20
+        return rows
+
+    def test_hash_line_becomes_the_header(self):
+        tables, _ = detect_tables(self._numbered_rows())
+        assert len(tables) == 1
+        assert _cell_text(tables[0].columns[0][0]) == "#"
+        assert _cell_text(tables[0].columns[0][1]) == "Paper"
+        assert _cell_text(tables[0].columns[1][0]) == "1"
+
+    def test_numbered_header_without_hash_line_stays(self):
+        rows = self._numbered_rows()[1:]
+        tables, _ = detect_tables(rows)
+        assert len(tables) == 1
+        assert _cell_text(tables[0].columns[0][0]) == "1"
