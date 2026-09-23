@@ -3027,6 +3027,9 @@ def _collect_header_cluster(
 
 _PAPER_ID_CELL_RE = re.compile(r"^[PND]\d{3,5}R\d+$")
 _SECTION_NUM_CELL_RE = re.compile(r"^\d+(?:\.\d+)*$")
+# "4.1 exploration" is a section heading whose words were cut into
+# columns. A packed function table does not start that way (P0533R9).
+_SECTION_HEADING_CELL_RE = re.compile(r"^\d+\.\d+\b")
 _HASH_HEADER_CELL = "#"
 
 
@@ -6060,14 +6063,16 @@ def detect_tables(
                     _row_from_lines(blocks[i].lines, span_cols),
                     *body_rows,
                 ]
-                # A packed body whose last column is only page numbers is
-                # a contents list. One body block can also hold the prose
-                # that follows the list (P1122R3), so this family refuses
-                # the shape even when the page has no Contents label.
-                # A labeled contents list is refused on the normal path too.
-                if not (_last_column_is_page_numbers(rows)
+                header0 = "".join(sp.text for sp in rows[0][0]).strip()
+                # A contents list whose last column is only page numbers is
+                # refused below. A section heading cut into columns
+                # ("4.1 exploration | of | potential") is refused here.
+                if (_SECTION_HEADING_CELL_RE.match(header0)
+                        or _last_column_is_page_numbers(rows)
                         or _is_labeled_contents_table(
                             rows, blocks, blocks[i].page_num)):
+                    body_result = None
+                else:
                     kind_val, strategy_val, rows = _classify_and_annotate(rows)
                     if kind_val not in (
                             TableKind.FALSE_POSITIVE.value,

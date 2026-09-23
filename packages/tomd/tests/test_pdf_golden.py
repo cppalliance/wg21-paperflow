@@ -23,7 +23,7 @@ _P4024R0_CLOSING = "By embracing these practices"
 
 
 def _normalize_newlines(text: str) -> str:
-    return text.replace("\r\n", "\n").replace("\r", "\n")
+    return text.replace("\r\n", "\n").replace("\r", "\n").rstrip("\n") + "\n"
 
 
 def _diff_head(actual: str, golden: str, limit: int = 120) -> str:

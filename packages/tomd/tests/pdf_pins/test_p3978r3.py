@@ -20,6 +20,7 @@ from tomd.lib.pdf.types import SectionKind
 _GOLDEN = Path(__file__).resolve().parent.parent / "fixtures" / "golden"
 
 _P3978R3_TABLE_PINS = (
+    # A numbered section heading is not a packed table (4.1, 4.3).
     (1, 2, 5, "clean_matrix", None),
     (1, 2, 5, "clean_matrix", None),
     (1, 2, 5, "clean_matrix", None),
@@ -48,3 +49,5 @@ def test_p3978r3_table_family_pins():
         if s.kind == SectionKind.HEADING and s.text.startswith("P3978R3")
     ]
     assert leaked == []
+    assert not any(s.text.startswith("4.1") or s.text.startswith("4.3")
+                   for s in tables)
