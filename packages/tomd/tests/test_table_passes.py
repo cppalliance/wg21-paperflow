@@ -4159,6 +4159,16 @@ class TestRunningHeaderGrid:
         assert len(tables) == 1
         assert _cell_text(tables[0].columns[0][0]) == "Library"
 
+    def test_a_later_paper_id_is_not_furniture(self):
+        blocks = [
+            _geo_block(0, ("P3978R3", 40, 100, 100, 112),
+                       ("3 Motivation", 200, 100, 320, 112)),
+            _geo_block(0, ("P1234R0", 40, 120, 100, 132),
+                       ("Other paper", 200, 120, 320, 132)),
+        ]
+        tables, remaining = detect_tables(blocks)
+        assert tables or remaining
+
 
 class TestHashHeaderAboveNumberedRow:
     """`# | Paper | Abstraction` joins above row 1 (P4100R0 section 7.1)."""

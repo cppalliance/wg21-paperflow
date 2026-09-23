@@ -3053,8 +3053,6 @@ def _is_running_header_grid(rows: list) -> bool:
         if len(row) < 2:
             return False
         c0 = _row_cell_text(row[0])
-        if _PAPER_ID_CELL_RE.match(c0):
-            continue
         if not _SECTION_NUM_CELL_RE.match(c0):
             return False
     return True

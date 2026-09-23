@@ -21,6 +21,7 @@ _GOLDEN = Path(__file__).resolve().parent.parent / "fixtures" / "golden"
 
 _P3978R3_TABLE_PINS = (
     # A numbered section heading is not a packed table (4.1, 4.3).
+    # A later document id in column 0 is not furniture either.
     (1, 2, 5, "clean_matrix", None),
     (1, 2, 5, "clean_matrix", None),
     (1, 2, 5, "clean_matrix", None),
