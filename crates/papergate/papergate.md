@@ -12,13 +12,11 @@ output:
 
 # Papergate
 
-```lua
--- Keep this section free of prose: prose here would make it a section with a
--- prompt body, needing a model binding that the next statement is what
--- declares. Globals defined here do NOT survive into any section, so this
--- chunk holds the model binding and nothing else. Every other Lua block in
--- this file is self-contained and passes data through the store.
+Keep this section free of prose: prose here would make it a section with a prompt body, needing a model binding that the next statement is what declares. Globals defined here do NOT survive into any section, so this chunk holds the model binding and nothing else. Every other Lua block in this file is self-contained and passes data through the store.
 
+---
+
+```lua
 models.default("writer",
     "A careful analysis model suited to structured reasoning and long-context review",
     { thinking = false, temperature = 0.3, context = 32768 })
