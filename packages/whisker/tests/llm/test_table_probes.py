@@ -28,6 +28,7 @@ from whisker.llm.table_compare import (
 from whisker.det.llm_readability.validate import table_units_from_markdown
 from whisker.llm.table_probes import (
     UNIT_DUMPS_KIND,
+    annotate_hash_heading_header,
     annotate_html_page_continuations,
     AllUnitDumpsResult,
     ProbeResult,
@@ -2286,3 +2287,36 @@ The next section starts here.
         _units, marked = annotate_html_page_continuations(
             md, table_units_from_markdown(md))
         assert marked == set()
+
+
+class TestHashHeadingHeader:
+    """P4100 section 7.1: leaked `# Paper` heading, row 1 used as header."""
+
+    def test_numbered_header_under_hash_heading_is_header_is_data(self):
+        md = (
+            "#### # Paper Abstraction\n"
+            "\n"
+            "| 1 | IoAwaitable Protocol | Coroutine execution protocol |\n"
+            "| --- | --- | --- |\n"
+            "| 2 | Coroutine Task | task and launch |\n"
+        )
+        unit = _pipe_unit([
+            ["1", "IoAwaitable Protocol", "Coroutine execution protocol"],
+            ["2", "Coroutine Task", "task and launch"],
+        ])
+        marked = annotate_hash_heading_header(md, (unit,))
+        assert marked[0].header_is_data is True
+        assert _classify_unit(marked[0]) == "header_is_data"
+
+    def test_real_hash_header_is_not_marked(self):
+        md = (
+            "| # | Paper | Abstraction |\n"
+            "| --- | --- | --- |\n"
+            "| 1 | IoAwaitable Protocol | Coroutine execution protocol |\n"
+        )
+        unit = _pipe_unit([
+            ["#", "Paper", "Abstraction"],
+            ["1", "IoAwaitable Protocol", "Coroutine execution protocol"],
+        ])
+        marked = annotate_hash_heading_header(md, (unit,))
+        assert marked[0].header_is_data is False

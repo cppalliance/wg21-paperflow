@@ -183,7 +183,7 @@ _SAFE_SERVICE_FIELDS = (
 # confirms. "data values" no longer confirms: a section reference is a
 # data value and still the real header (P4178R0 HEAD, #427). The typed
 # fallback sends the text-layer page along when one was paired.
-_LANE_VERSION = 28
+_LANE_VERSION = 29
 
 # Fleet LJF: papers are sorted by descending predicted work before dispatch
 # (_predicted_work_seconds: sidecar duration, else PDF page count, else

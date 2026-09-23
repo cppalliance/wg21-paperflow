@@ -903,6 +903,54 @@ def _pipe_after_html(md: str, end: int) -> tuple[str, ...] | None:
     return header
 
 
+_HASH_HEADER_HEADING_RE = re.compile(
+    r"^#{1,6}\s+#\s+Paper\b", re.IGNORECASE,
+)
+
+
+def annotate_hash_heading_header(
+    md: str, units: tuple[TableUnit, ...],
+) -> tuple[TableUnit, ...]:
+    """Mark a numbered pipe header that sits under a leaked ``# Paper`` heading.
+
+    P4100R0 and P4100R1 section 7.1 emit ``#### # Paper Abstraction`` and
+    then a table whose header is the first data row (``1 | IoAwaitable
+    Protocol | ...``). The aligned source question answers ``match``
+    because those cells do appear in the PDF. Routing the unit to
+    ``header_is_data`` asks whether this row is the PDF's top row.
+    A real ``# | Paper | Abstraction`` header is not marked.
+    """
+    lines = md.splitlines()
+    pipes = [unit for unit in units if unit.fmt == FORMAT_PIPE]
+    by_index = {unit.index: unit for unit in units}
+    pipe_i = 0
+    i = 0
+    while i < len(lines):
+        if not lines[i].startswith("|"):
+            i += 1
+            continue
+        if pipe_i >= len(pipes):
+            break
+        unit = pipes[pipe_i]
+        pipe_i += 1
+        prev = ""
+        j = i - 1
+        while j >= 0 and not lines[j].strip():
+            j -= 1
+        if j >= 0:
+            prev = lines[j].strip()
+        first = unit.cells[0][0].strip() if unit.cells and unit.cells[0] else ""
+        if (
+            first.isdigit()
+            and _HASH_HEADER_HEADING_RE.match(prev)
+            and not unit.header_is_data
+        ):
+            by_index[unit.index] = replace(unit, header_is_data=True)
+        while i < len(lines) and lines[i].startswith("|"):
+            i += 1
+    return tuple(by_index[unit.index] for unit in units)
+
+
 def annotate_html_page_continuations(
     md: str, units: tuple[TableUnit, ...],
 ) -> tuple[tuple[TableUnit, ...], set[int]]:
@@ -1194,8 +1242,10 @@ def run_unit_dumps(
     result = AllUnitDumpsResult(pid=pid, model=model)
     html_cont_ids: set[int] = set()
     if md_lines:
+        joined = "\n".join(md_lines)
+        units = annotate_hash_heading_header(joined, units)
         units, html_cont_ids = annotate_html_page_continuations(
-            "\n".join(md_lines), units)
+            joined, units)
     pipe_units = [u for u in units if u.fmt in ("pipe", "html")]
     if not pipe_units:
         return result
