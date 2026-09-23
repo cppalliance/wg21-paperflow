@@ -1,0 +1,3 @@
+# Citation-box guard (#427): P4178R0's comparison boxes are tables.
+# T0 Pattern/Description and T1 conclusion/sole evidence stay Pass 1.
+# The other 17 are citation-comparison boxes claimed by the pre-scanner.
