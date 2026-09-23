@@ -7,4 +7,5 @@
 # Pages 4 and 5 additionally arrive in two-column reading order (every
 # Claim block before the right-hand blocks); the detector regroups the
 # body by y on pages the pipeline did not classify as two-column. The
-# golden pins the four-column cells; the family pins below the routing.
+# golden pins the four-column cells; pdf_pins/test_p4098r1.py pins the
+# routing.

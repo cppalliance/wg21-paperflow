@@ -1,4 +1,4 @@
-# Also the collateral-loss guard for the false-heading fix (#302). This
+# Collateral-loss guard for the false-heading fix (#302). This
 # single-page extract promoted its standardese footnote "3 explicit
 # conversion to `basic_vec` allows ..." to an H2, which made
 # _strip_pre_heading_fragments treat the whole page above it as pre-heading

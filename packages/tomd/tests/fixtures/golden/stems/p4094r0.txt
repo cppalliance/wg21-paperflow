@@ -5,5 +5,5 @@
 # rest. The unified detector removes the whole block: the golden front is
 # title -> metadata -> Abstract with no stray pre-Abstract sections and no
 # Table of Contents remnant. dup_body == 0 (no body duplication), so the
-# body below is untouched. p4100r1 above is the byte-identical guard that
+# body below is untouched. p4100r1 is the byte-identical guard that
 # the pass does not over-reach on an already-clean heading-kind TOC.

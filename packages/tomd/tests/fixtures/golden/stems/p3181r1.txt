@@ -4,7 +4,7 @@
 # _trim_narrative_from_code splits those by symbol-density / alpha-ratio
 # (not font), so the prose renders as prose and only the Thread A/B/C
 # pseudo-code and the fetch_sub/atomic_thread_fence listings stay fenced.
-# The p4174r0 and p0533r9 goldens above were re-blessed for the same fix
+# The p4174r0 and p0533r9 goldens were re-blessed for the same fix
 # (their fences likewise held prose).
 #
 # Residual-fence fix (trailing-label + tail-peel): P3181R1's "Detailed
