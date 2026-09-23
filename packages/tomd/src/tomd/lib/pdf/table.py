@@ -616,6 +616,89 @@ def _nearest_column(x: float, col_xs: list[float]) -> int:
     return min(range(len(col_xs)), key=lambda ci: abs(x - col_xs[ci]))
 
 
+def _column_by_start(x: float, col_xs: list[float]) -> int:
+    """Column whose start ``x`` has reached, not the nearest center.
+
+    A spaced word inside a cell can sit closer to the next column than
+    to its own (P0957R8 swap table: ``(rhs`` at x=296 between columns
+    at 185 and 365). Nearest-column then moves that word into the next
+    cell. A line belongs to column i once its left edge is within
+    ``_COLUMN_X_TOLERANCE`` of i's start, and stays there until the
+    next start.
+    """
+    chosen = 0
+    for i, cx in enumerate(col_xs):
+        if x + _COLUMN_X_TOLERANCE >= cx:
+            chosen = i
+        else:
+            break
+    return chosen
+
+
+def _column_for_body_line(
+    x: float, col_xs: list[float], prev_x1: float | None,
+) -> int:
+    """Column for one body line of a side-by-side row.
+
+    Spaced words of one cell stay with ``_column_by_start``. A line
+    that begins more than ``_COLUMN_GAP_THRESHOLD`` past the previous
+    line's right edge is the next column: P4012R0 puts
+    ``// exposition only`` 81pt after the code line and 27pt before
+    the column at x=421, which start-assignment would leave behind.
+    """
+    if prev_x1 is not None and x - prev_x1 > _COLUMN_GAP_THRESHOLD:
+        return _nearest_column(x, col_xs)
+    return _column_by_start(x, col_xs)
+
+
+def _resplit_rows_on_ruled_grid(valid_rows, grids, num_cols):
+    """Split an SBS row that crosses several ruled rows.
+
+    P0957R8 5.4.2.1 packs three Name/Value rows into one cell because
+    the next row's text starts a few points before the previous row's
+    block ends, so the y-gap test never fires. find_tables() already
+    has those rules. Only a grid with the same column count and at
+    most four extra rows is used, so a full-page phantom does not
+    re-cut a real table.
+    """
+    grid = None
+    for tbl in grids:
+        if tbl.get("rot") is not None or tbl.get("col_count") != num_cols:
+            continue
+        extra = tbl.get("row_count", 0) - len(valid_rows)
+        if 0 < extra <= 4 and tbl.get("cells"):
+            grid = tbl
+            break
+    if grid is None:
+        return valid_rows
+    cells = grid["cells"]
+    n_rows = grid["row_count"]
+
+    def grid_row(y):
+        for i, cell in enumerate(cells):
+            if cell and cell[1] <= y <= cell[3]:
+                return i % n_rows
+        return None
+
+    out = []
+    for row in valid_rows:
+        groups = {}
+        order = []
+        for item in row:
+            blk = item[1]
+            y = (blk.bbox[1] + blk.bbox[3]) / 2.0
+            ri = grid_row(y)
+            if ri not in groups:
+                groups[ri] = []
+                order.append(ri)
+            groups[ri].append(item)
+        if len(groups) <= 1:
+            out.append(row)
+        else:
+            out.extend(groups[ri] for ri in order)
+    return out
+
+
 _SBS_MUPDF_DEFER_MIN_ROWS = 5
 _MUPDF_REGION_MARGIN = 4.0  # pt of slack when testing block containment
 
@@ -1421,7 +1504,7 @@ def _detect_side_by_side_tables(
                 _, b_prev = body_sorted[k - 1]
                 if (_nearest_column(b_prev.bbox[0], col_xs) != 0
                         and b_prev.page_num == b_c0.page_num
-                        and 0 <= b_c0.bbox[1] - b_prev.bbox[1]
+                        and abs(b_c0.bbox[1] - b_prev.bbox[1])
                                 < _SBS_COL0_SWAP_BAND):
                     k -= 1
                 else:
@@ -1588,6 +1671,9 @@ def _detect_side_by_side_tables(
             continue
 
         num_cols = len(col_xs)
+        if page_mupdf_tables:
+            valid_rows = _resplit_rows_on_ruled_grid(
+                valid_rows, page_mupdf_tables.get(page, []), num_cols)
 
         # Build header row.
         if atomized_hdr is not None:
@@ -1608,8 +1694,12 @@ def _detect_side_by_side_tables(
         for row in valid_rows:
             col_spans: dict[int, list] = defaultdict(list)
             for _, blk in row:
-                line_cols = [_nearest_column(ln.bbox[0], col_xs)
-                             for ln in blk.lines]
+                line_cols: list[int] = []
+                prev_x1: float | None = None
+                for ln in blk.lines:
+                    line_cols.append(
+                        _column_for_body_line(ln.bbox[0], col_xs, prev_x1))
+                    prev_x1 = ln.bbox[2]
                 multi_col = len(set(line_cols)) > 1
                 blk_ci = _nearest_column(blk.bbox[0], col_xs)
                 for ln, lc in zip(blk.lines, line_cols):
@@ -2012,6 +2102,154 @@ def _merge_cross_page_fragments(
             ]
 
     return table_sections
+
+
+# Vertical rules of two find_tables() grids count as the same cut when
+# every x differs by at most this much. P0957R8's Name/Value grid is
+# 48.6 / 283.6 / 546.7 on one page and 48.5 / 283.6 / 546.8 on the next.
+_RULED_GRID_X_TOLERANCE = 1.0
+
+
+def _ruled_grid_xs(tbl: dict) -> list[float] | None:
+    """Sorted unique vertical-rule x positions of a find_tables() grid."""
+    xs: list[float] = []
+    for cell in tbl.get("cells") or []:
+        if not cell:
+            continue
+        xs.append(cell[0])
+        xs.append(cell[2])
+    if len(xs) < 4:
+        return None
+    xs.sort()
+    rules = [xs[0]]
+    for x in xs[1:]:
+        if x - rules[-1] > _RULED_GRID_X_TOLERANCE:
+            rules.append(x)
+    return rules if len(rules) >= 3 else None
+
+
+def _rules_match(left: list[float], right: list[float]) -> bool:
+    if len(left) != len(right):
+        return False
+    return all(
+        abs(a - b) <= _RULED_GRID_X_TOLERANCE for a, b in zip(left, right)
+    )
+
+
+def _section_y_span(section: Section, page: int) -> tuple[float, float] | None:
+    tops = [
+        ln.bbox[1] for ln in section.lines
+        if getattr(ln, "page_num", page) == page
+    ]
+    bots = [
+        ln.bbox[3] for ln in section.lines
+        if getattr(ln, "page_num", page) == page
+    ]
+    if not tops:
+        return None
+    return min(tops), max(bots)
+
+
+def _grid_for_section(
+    section: Section, page: int, grids: dict[int, list[dict]],
+) -> dict | None:
+    span = _section_y_span(section, page)
+    if span is None:
+        return None
+    y0, y1 = span
+    for tbl in grids.get(page, []):
+        if tbl.get("rot") is not None:
+            continue
+        tb = tbl.get("bbox")
+        rules = _ruled_grid_xs(tbl)
+        if tb is None or rules is None:
+            continue
+        if y1 < tb[1] or y0 > tb[3]:
+            continue
+        if tbl.get("col_count") != len(section.columns[0]):
+            continue
+        return tbl
+    return None
+
+
+def _prose_between(
+    blocks: list[Block], page_a: int, y_after: float,
+    page_b: int, y_before: float,
+) -> bool:
+    """True when a heading, caption or prose block sits between the fragments."""
+    for blk in blocks:
+        text = blk.text.strip()
+        if not text or text.isdigit():
+            continue
+        if blk.page_num == page_a and blk.bbox[1] > y_after + 2.0:
+            return True
+        if blk.page_num == page_b and blk.bbox[3] < y_before - 2.0:
+            return True
+    return False
+
+
+def _join_ruled_grid_continuations(
+    table_sections: list[Section],
+    grids: dict[int, list[dict]],
+    blocks: list[Block],
+) -> list[Section]:
+    """Append a page-top fragment onto the table it continues.
+
+    Both fragments must sit on ruled grids with the same vertical rules,
+    the first grid must end in the bottom band and the second must start
+    in the top band, and no prose may lie between them. A borderless
+    paper (P4098R1 has no find_tables() grid) never joins.
+    """
+    if len(table_sections) < 2 or not grids:
+        return table_sections
+    drop: set[int] = set()
+    for i, sec_a in enumerate(table_sections):
+        if i in drop or not sec_a.columns or not sec_a.lines:
+            continue
+        pages_a = {
+            ln.page_num for ln in sec_a.lines
+            if getattr(ln, "page_num", None) is not None
+        }
+        page_a = max(pages_a) if pages_a else sec_a.page_num
+        span_a = _section_y_span(sec_a, page_a)
+        if span_a is None or span_a[1] <= _CROSS_PAGE_BOTTOM_Y:
+            continue
+        grid_a = _grid_for_section(sec_a, page_a, grids)
+        if grid_a is None or grid_a["bbox"][3] <= _CROSS_PAGE_BOTTOM_Y:
+            continue
+        rules_a = _ruled_grid_xs(grid_a)
+        if rules_a is None:
+            continue
+        for j, sec_b in enumerate(table_sections):
+            if j == i or j in drop or not sec_b.columns or not sec_b.lines:
+                continue
+            if len(sec_a.columns[0]) != len(sec_b.columns[0]):
+                continue
+            if sec_b.page_num != page_a + 1:
+                continue
+            span_b = _section_y_span(sec_b, sec_b.page_num)
+            if span_b is None or span_b[0] >= _CROSS_PAGE_TOP_Y:
+                continue
+            grid_b = _grid_for_section(sec_b, sec_b.page_num, grids)
+            if grid_b is None or grid_b["bbox"][1] >= _CROSS_PAGE_TOP_Y:
+                continue
+            rules_b = _ruled_grid_xs(grid_b)
+            if rules_b is None or not _rules_match(rules_a, rules_b):
+                continue
+            if _prose_between(blocks, page_a, span_a[1], sec_b.page_num, span_b[0]):
+                continue
+            start = _header_dedup_start(sec_a.columns, sec_b.columns)
+            sec_a.columns.extend(sec_b.columns[start:])
+            sec_a.lines.extend(sec_b.lines)
+            sec_a.text = _render_table_text(sec_a.columns)
+            drop.add(j)
+            _log.debug(
+                "Ruled-grid continuation: page %d + %d, now %d rows",
+                page_a, sec_b.page_num, len(sec_a.columns))
+            break
+    if not drop:
+        return table_sections
+    return [s for i, s in enumerate(table_sections) if i not in drop]
 
 
 _LABEL_MAX_WORDS = 3  # column-0 cells with more words are not labels
@@ -2566,8 +2804,10 @@ def _detect_mupdf_native_tables(
             ]
             all_lines = []
 
+            caption_outside: list[int] = []
             for idx in table_block_indices:
                 blk = blocks[idx]
+                placed_lines: list[tuple[int, int, Line]] = []
                 for ln in blk.lines:
                     lmid_x, lmid_y = _rot_midpoint(ln.bbox, rot)
 
@@ -2590,13 +2830,28 @@ def _detect_mupdf_native_tables(
                                     best_r, best_c = ri, ci
 
                     if best_r >= 0:
-                        cell = all_rows_data[best_r][best_c]
-                        if cell and ln.spans:
-                            cell.append(Span(text="\n"))
-                        cell.extend(ln.spans)
-                    # Always retain the line so its spans are available
-                    # for Docling enrichment via _flat_spans_from_section.
+                        placed_lines.append((best_r, best_c, ln))
+                # A "Table N - ..." caption whose block midpoint falls
+                # inside the grid margin (P0957R8 Table 2 sits 8pt into
+                # the find_tables bbox) must stay prose. Placing it in
+                # the nearest cell drops it: the emitted rows come from
+                # the grid, and the block is marked used.
+                if _SPEC_TABLE_LABEL_RE.match(blk.text.strip()):
+                    caption_outside.append(idx)
+                    continue
+                for best_r, best_c, ln in placed_lines:
+                    cell = all_rows_data[best_r][best_c]
+                    if cell and ln.spans:
+                        cell.append(Span(text="\n"))
+                    cell.extend(ln.spans)
                     all_lines.append(ln)
+                if not placed_lines:
+                    all_lines.extend(blk.lines)
+            if caption_outside:
+                table_block_indices = [
+                    idx for idx in table_block_indices
+                    if idx not in caption_outside
+                ]
 
             # Cross-page continuation: when the table bbox extends
             # close to the page bottom, absorb code blocks from the
@@ -6454,6 +6709,9 @@ def detect_tables(
         table_sections.extend(mupdf_tables)
         remaining = [b for idx, b in enumerate(remaining)
                      if idx not in mupdf_used]
+
+    table_sections = _join_ruled_grid_continuations(
+        table_sections, filtered_mupdf_tables, remaining)
 
     # Post-pass: spanning-header absorption.  After all passes,
     # check whether any remaining block sits directly above a
