@@ -106,6 +106,8 @@ from whisker.llm.unit_judge import (
     resolve_runtime_table_contract,
     run_metadata_outline_check,
     run_unit_checks,
+    source_format_from_path,
+    source_format_line,
 )
 from whisker.metrics import content_recall, content_tokens, normalized_text, text_nid
 
@@ -410,6 +412,7 @@ async def _run_code_boundary_check(
     debug_log: list[str] | None = None,
     guard_tag: str | None = None,
     font_evidence: FenceFontEvidence | None = None,
+    source_format: str = "unknown",
 ) -> CodeBoundaryJudgment:
     """One scoped code-boundary check on a single fence slice.
 
@@ -436,6 +439,7 @@ async def _run_code_boundary_check(
         f"CANDIDATE MARKDOWN:\n"
         f"{inject_untrusted(candidate_md, tag)}\n\n"
         f"Paper: {pid}\n"
+        f"{source_format_line(source_format)}"
         f"Fence: {fence_locus}\n"
         f"Risk context: {risk_context}\n"
     )
@@ -575,6 +579,7 @@ async def _escalate_page(
     *,
     debug_log: list[str] | None = None,
     guard_tag: str | None = None,
+    source_format: str = "unknown",
 ) -> PageJudgment:
     """One scoped LLM call re-checking a single flagged page.
 
@@ -609,6 +614,7 @@ async def _escalate_page(
         f"CONVERTED MARKDOWN (full document):\n"
         f"{inject_untrusted(tomd_md, tag)}\n\n"
         f"Paper: {pid}\n"
+        f"{source_format_line(source_format)}"
         f"Page: {page_num}\n\n"
         f"RAW PDF TEXT (page {page_num} only):\n"
         f"{inject_untrusted(page_text, tag)}\n"
@@ -951,6 +957,7 @@ async def judge_pdf_extraction(
             f"{pid}: PDF-Text-Lane requires a PDF source, got "
             f"{source_path.suffix}"
         )
+    paper_format = source_format_from_path(source_path)
 
     _set_progress(progress, phase="extract")
     try:
@@ -1012,7 +1019,8 @@ async def judge_pdf_extraction(
         + guard_instruction(tag)
     )
     user_msg = (
-        f"Paper: {pid}\n\n"
+        f"Paper: {pid}\n"
+        f"{source_format_line(paper_format)}\n"
         f"RAW PDF TEXT:\n{inject_untrusted(pdf_text, tag)}\n\n"
         f"CONVERTED MARKDOWN:\n{inject_untrusted(tomd_md, tag)}\n"
     )
@@ -1220,6 +1228,7 @@ async def judge_pdf_extraction(
                         agent, pid, entry.page, page_text, tomd_md,
                         debug_log=debug_log,
                         guard_tag=guard_tag,
+                        source_format=paper_format,
                     )
                 except Exception as exc:
                     raise PdfLaneError(
@@ -1403,6 +1412,7 @@ async def judge_pdf_extraction(
                 exhaustive=True,
                 required_unit_ids=required_unit_ids,
                 guard_tag=guard_tag,
+                source_format=paper_format,
             )
         elif risk_signals:
             _set_progress(progress, phase="unit_checks", page_count=page_count)
@@ -1415,6 +1425,7 @@ async def judge_pdf_extraction(
                 debug_log=debug_log,
                 exhaustive=exhaustive_units,
                 guard_tag=guard_tag,
+                source_format=paper_format,
             )
 
         if unit_result is not None:
@@ -1567,6 +1578,7 @@ async def judge_pdf_extraction(
                 debug_log=debug_log,
                 guard_tag=guard_tag,
                 font_evidence=sl_evidence,
+                source_format=paper_format,
             )
             cb_result, cb_clamped = clamp_source_monospace(cb_result, sl_evidence)
             if cb_clamped:

@@ -152,7 +152,11 @@ CONVERSION_CONTRACT = (
     "to transcribe it. Do not flag it as missing.\n"
     "- HTML comments of the form <!-- tomd:... --> or <!-- tapetum:... --> "
     "are sanctioned converter disclosures, not corruption. This includes "
-    "<!-- tomd:lossy-table --> and <!-- tomd:mixed-table -->.\n"
+    "<!-- tomd:lossy-table -->. <!-- tomd:mixed-table --> stays sanctioned "
+    "only when the source is HTML, not when the source is a PDF. A PDF "
+    "source whose markdown contains a raw HTML table is a table defect "
+    "(raw_html_table), severity at least minor, verdict at least review. "
+    "The source format is given with the paper.\n"
     "- Wording markup is the DELIVERABLE of wording papers: inline "
     "<ins>/<del> tags mark proposed standard-text edits that were colored "
     "green/red (or struck through) in the PDF. Text inside these tags "
@@ -168,6 +172,39 @@ CONVERSION_CONTRACT = (
     "dehyphenated across line breaks; differing line breaks are not "
     "defects.\n\n"
 )
+
+
+def source_format_from_path(path: object | None) -> str:
+    """pdf, html, or unknown from a sibling source file.
+
+    A missing path, a path that is not a file, or any other suffix is
+    unknown. The suffix is taken from the path the caller already has.
+    """
+    if path is None:
+        return "unknown"
+    is_file = getattr(path, "is_file", None)
+    if not callable(is_file):
+        return "unknown"
+    try:
+        exists = bool(is_file())
+    except OSError:
+        return "unknown"
+    if not exists:
+        return "unknown"
+    suffix = str(getattr(path, "suffix", "")).lower()
+    if suffix == ".pdf":
+        return "pdf"
+    if suffix in (".html", ".htm"):
+        return "html"
+    return "unknown"
+
+
+def source_format_line(source_format: str) -> str:
+    """One user-message line. Only pdf, html, or unknown are emitted."""
+    if source_format not in ("pdf", "html", "unknown"):
+        source_format = "unknown"
+    return f"source format: {source_format}\n"
+
 
 FULL_AUDIT_NO_SIGNAL_CONTEXT = (
     "full audit: no specific risk signal; this unit is checked as part of "
@@ -734,6 +771,7 @@ async def run_unit_checks(
     exhaustive: bool = False,
     required_unit_ids: list[str] | None = None,
     guard_tag: str | None = None,
+    source_format: str = "unknown",
 ) -> UnitJudgeResult | None:
     """Run source-aware unit checks if risk signals warrant it.
 
@@ -888,6 +926,7 @@ async def run_unit_checks(
                 debug_log=debug_log,
                 guard_tag=guard_tag,
                 signal_types=signal_types,
+                source_format=source_format,
             )
             unit_results.append(result)
             checked_unit_ids.append(unit_id)
@@ -1283,6 +1322,7 @@ async def _check_one_unit(
     debug_log: list[str] | None = None,
     guard_tag: str | None = None,
     signal_types: set[str] | None = None,
+    source_format: str = "unknown",
 ) -> dict:
     """Run one scoped unit check via the LLM.
 
@@ -1313,6 +1353,7 @@ async def _check_one_unit(
         f"CANDIDATE MARKDOWN:\n"
         f"{inject_untrusted(candidate_md, tag)}\n\n"
         f"Paper: {pid}\n"
+        f"{source_format_line(source_format)}"
         f"Unit: {unit_id}\n"
         f"Risk signal: {signal_detail}\n\n"
         f"SOURCE TEXT ({unit_id}):\n"

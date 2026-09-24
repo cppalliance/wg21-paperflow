@@ -47,7 +47,11 @@ from whisker.constants import (
     BASELINE_MIN_ALNUM_CHARS,
 )
 from whisker.metrics import normalized_text, textblock2unicode
-from whisker.tables import parse_html_tables, parse_pipe_tables
+from whisker.tables import (
+    parse_code_table_groups,
+    parse_html_tables,
+    parse_pipe_tables,
+)
 
 __all__ = [
     "FACTS_KIND",
@@ -342,10 +346,15 @@ def _normalize_grid(grid: list[list[str]]) -> list[list[str]]:
 
 
 def _all_tables(md: str) -> list[list[list[str]]]:
-    """Return normalized grids from both pipe tables and HTML tables."""
+    """Return normalized grids from pipe, HTML, and fence-group tables.
+
+    A fence group is not also an HTML or pipe grid, so the three lists
+    do not count one table twice.
+    """
     pipe = [_normalize_grid(g) for g in parse_pipe_tables(md)]
     html = [_normalize_grid(g) for g in parse_html_tables(md)]
-    return pipe + html
+    code = [_normalize_grid(g) for g in parse_code_table_groups(md)]
+    return pipe + html + code
 
 
 def _neighbor_value(grid: list[list[str]], r: int, c: int, direction: str) -> str | None:

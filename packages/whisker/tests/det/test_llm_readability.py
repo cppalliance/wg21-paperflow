@@ -10,7 +10,7 @@
 These tests guard the properties that make the contract worth having, not the
 prose it happens to contain:
 
-- the rule set is exactly R1-R13, uniquely identified and uniquely checked;
+- the rule set is exactly R1-R14, uniquely identified and uniquely checked;
 - a malformed contract loads nothing at all rather than under-checking;
 - contract and profile hashes are stable across loads and move only when a
   normative value moves;
@@ -56,7 +56,6 @@ from whisker.det.llm_readability import cli as table_cli
 from whisker.det.llm_readability.contract import (
     CONTRACT_PACKAGE,
     DEFAULT_PROFILE_ID,
-    EXPECTED_RULE_COUNT,
     RULES_RESOURCE_NAME,
     canonical_hash,
     contract_to_dict,
@@ -243,9 +242,9 @@ class TestPackagedResources:
 
 
 class TestRuleSet:
-    def test_rules_are_exactly_r1_through_r13_in_order(self, core):
-        assert core.rule_ids == tuple(f"R{number}" for number in range(1, 14))
-        assert len(core.rules) == EXPECTED_RULE_COUNT
+    def test_rules_are_exactly_r1_through_r14_in_order(self, core):
+        assert core.rule_ids == tuple(f"R{number}" for number in range(1, 15))
+        assert len(core.rules) == 14
 
     def test_rule_ids_are_unique(self, core):
         assert len(set(core.rule_ids)) == len(core.rule_ids)
@@ -2558,11 +2557,11 @@ class TestReportRendering:
         assert payload["contract_version"] == load_core_contract().version
         assert payload["model_certified"] is False
         assert payload["certified"] is False
-        assert len(payload["rules"]) == EXPECTED_RULE_COUNT
+        assert len(payload["rules"]) == 14
 
     def test_status_counts_cover_every_rule(self):
         report = evaluate(resolved_core_only(), clean_units())
-        assert sum(status_counts(report).values()) == EXPECTED_RULE_COUNT
+        assert sum(status_counts(report).values()) == 14
 
     def test_markdown_report_states_the_contract_and_the_verdict(self):
         report = evaluate(resolved_core_only(), clean_units())
@@ -2592,7 +2591,7 @@ class TestCliSurface:
     def test_rules_json_is_parseable(self, capsys):
         assert table_cli.main(["rules", "--json"]) == table_cli.EXIT_OK
         payload = json.loads(capsys.readouterr().out)
-        assert len(payload["rules"]) == EXPECTED_RULE_COUNT
+        assert len(payload["rules"]) == 14
 
     def test_profiles_lists_deepseek(self, capsys):
         assert table_cli.main(["profiles"]) == table_cli.EXIT_OK

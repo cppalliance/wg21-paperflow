@@ -59,7 +59,6 @@ from whisker.det.llm_readability.contract import (
     CONTRACT_PACKAGE,
     DEFAULT_PROFILE_ID,
     EXPECTED_CODE_RULE_COUNT,
-    EXPECTED_RULE_COUNT,
     RULES_RESOURCE_NAME,
     canonical_hash,
     core_contract_text,
@@ -163,11 +162,11 @@ class TestConstructIsolation:
         assert code.id != table.id
         assert code.hash != table.hash
 
-    def test_code_contract_has_10_rules_table_has_13(self):
+    def test_code_contract_has_10_rules_table_has_14(self):
         code = load_core_contract(CONSTRUCT_CODEBLOCKS)
         table = load_core_contract(CONSTRUCT_TABLES)
         assert len(code.rules) == EXPECTED_CODE_RULE_COUNT
-        assert len(table.rules) == EXPECTED_RULE_COUNT
+        assert len(table.rules) == 14
 
     def test_construct_constants_are_distinct(self):
         assert CONSTRUCT_TABLES == "tables"
@@ -273,7 +272,7 @@ class TestCodeHashesAndRendering:
 
     def test_rubric_does_not_name_table_rules(self):
         rubric = render_llm_rubric(_resolved_code())
-        for n in range(1, 14):
+        for n in range(1, 15):
             assert f"## R{n} [" not in rubric
 
     def test_rules_markdown_lists_every_c_rule(self, code_core):
@@ -290,9 +289,9 @@ class TestCodeProfileResolution:
         resolved = resolve_contract(construct=CONSTRUCT_CODEBLOCKS)
         assert len(resolved.rules) == EXPECTED_CODE_RULE_COUNT
 
-    def test_resolve_table_contract_still_returns_13_rules(self):
+    def test_resolve_table_contract_still_returns_14_rules(self):
         resolved = resolve_contract(construct=CONSTRUCT_TABLES)
-        assert len(resolved.rules) == EXPECTED_RULE_COUNT
+        assert len(resolved.rules) == 14
 
     def test_code_load_combined(self):
         resolved = load_combined(DEEPSEEK_PROFILE_ID, construct=CONSTRUCT_CODEBLOCKS)

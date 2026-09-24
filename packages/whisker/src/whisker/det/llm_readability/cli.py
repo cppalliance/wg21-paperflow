@@ -177,10 +177,19 @@ def _run_check(args: argparse.Namespace) -> int:
             markdown_text=candidate,
         )
     else:
+        source = Path(args.path)
+        if source.with_suffix(".pdf").is_file():
+            source_format = "pdf"
+        elif source.with_suffix(".html").is_file():
+            source_format = "html"
+        else:
+            source_format = "unknown"
         report = evaluate(
             resolved,
             table_units_from_markdown(candidate),
             methods_executed=(METHOD_DETERMINISTIC,),
+            source_format=source_format,
+            markdown=candidate,
         )
     if args.json:
         print(json.dumps(report_to_dict(report), indent=2, sort_keys=False))

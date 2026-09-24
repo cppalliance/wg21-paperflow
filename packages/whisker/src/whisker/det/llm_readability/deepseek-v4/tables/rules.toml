@@ -1,6 +1,6 @@
 # DeepSeek V4 LLM-readable table extraction contract.
 #
-# THIS FILE IS THE SINGLE NORMATIVE COPY. Rules R1-R13, thresholds, the
+# THIS FILE IS THE SINGLE NORMATIVE COPY. Rules R1-R14, thresholds, the
 # DeepSeek V4 model profile, required probes and known weaknesses all live
 # here. Do not restate rule text in a prompt file, a markdown document, or a
 # Python constant: the LLM rubric, the CLI listing and every certification
@@ -22,7 +22,7 @@ evidence = [
 
 [contract]
 id = "whisker-llm-readability-deepseek-v4"
-version = "1.0.9"
+version = "1.0.10"
 schema_version = 1
 title = "DeepSeek V4 LLM-readable table extraction contract"
 authority = '''
@@ -109,6 +109,9 @@ description = "a table contains at least one blank cell"
 
 [applicability.chunking_in_scope]
 description = "the run chunks the document, so chunk boundaries are decidable"
+
+[applicability.pdf_source]
+description = "the markdown's sibling source file is a PDF"
 
 # --- Named thresholds ---------------------------------------------------------
 #
@@ -313,18 +316,21 @@ check_id = "representation_choice_spans"
 failure_status = "review"
 thresholds = []
 requirement = '''
-A source table whose meaning depends on spanning cells, on per-cell code, or on
-multi-line cell content is represented as HTML (or as a mixed table), so the
-structural coordinates survive.
+A code table from a PDF source arrives as a labeled fence group: a bold row
+label, an italic column header, and one cpp fence per column. HTML remains
+correct when the source is HTML. Spans stay repetition (R5).
 '''
 rationale = '''
-Pipe syntax cannot express colspan or rowspan at all. Structural and coordinate
-probes measure best on HTML, and merged-cell scoring requires it.
+A PDF code table has no HTML table to preserve. The fence group keeps each
+column's listing as its own block, with the row label and the column header
+still attached. An HTML source already is a table, so HTML in the markdown is
+the faithful form there. Span fidelity stays with R5.
 '''
 llm_instruction = '''
-For each table whose source carries spans, code cells or multi-line cells,
-confirm the conversion used HTML or a mixed table. A flattened pipe table here
-is a representation defect; name R4.
+For a code table, confirm a PDF source arrived as a labeled fence group (bold
+row label, italic column header, one cpp fence per column). HTML is correct
+when the source is HTML. A raw HTML table from a PDF source is a representation
+defect; name R4. Spans are R5, not this rule.
 '''
 evidence = [
   "packages/whisker/src/whisker/llm/calibration/tables/00-baseline.md:R4",
@@ -542,18 +548,19 @@ check_id = "code_cell_representation"
 failure_status = "not-llm-readable"
 thresholds = []
 requirement = '''
-Code inside a table cell is represented as a preformatted code block in an HTML
-or mixed table. It is never flattened into a pipe cell.
+Code inside a table cell arrives as a fence with its line structure intact. It
+is never flattened into a pipe cell and never written as escaped pre/code.
+HTML pre is still correct when the source is HTML.
 '''
 rationale = '''
-Pipe syntax and code collide on both the delimiter and the backtick, and a
-flattened cell loses the line breaks and indentation that make the code
-readable at all.
+A flattened pipe cell, or an escaped pre/code block, drops the line breaks and
+indentation that make the listing readable. A fence keeps those lines. An HTML
+source's pre block is the source's own form and stays correct.
 '''
 llm_instruction = '''
 For each table whose source cells contain code, confirm the code arrived as a
-preformatted block with its line structure intact. A one-line pipe cell holding
-what was a multi-line listing is a defect; name R11.
+fence with its line structure intact. A pipe cell, or escaped pre/code, is a
+defect; name R11. HTML pre is correct when the source is HTML.
 '''
 evidence = [
   "packages/whisker/src/whisker/llm/calibration/tables/00-baseline.md:R11",
@@ -631,6 +638,38 @@ evidence = [
   "packages/whisker/src/whisker/llm/calibration/tables/00-baseline.md:R13",
   "packages/whisker/research/research/llm-readability/05-web.md:43-50",
   "packages/whisker/research/research/llm-readability/18-table-semantics-auditor.md:12",
+]
+
+# --- R14 ----------------------------------------------------------------------
+
+[[rules]]
+id = "R14"
+title = "No raw HTML table from a PDF source"
+strength = "HARD"
+scope = "representation"
+method = "deterministic"
+applicability = "pdf_source"
+check_id = "html_table_in_markdown"
+failure_status = "not-llm-readable"
+thresholds = []
+requirement = '''
+A markdown file whose source is a PDF must not contain a raw table tag or HTML
+entities standing in for code (&lt; &gt; &amp; &quot;). ins and del wording tags
+do not count.
+'''
+rationale = '''
+A PDF source has no HTML table. A raw table tag, or entities standing in for
+code inside one, means the conversion escaped structure instead of emitting a
+fence group. Wording ins and del tags are the deliverable of a wording paper
+and are not this defect.
+'''
+llm_instruction = '''
+When the source is a PDF, a raw HTML table in the markdown is a table defect.
+Name R14. ins and del wording tags are not this defect. An HTML source may
+keep HTML tables.
+'''
+evidence = [
+  "packages/whisker/src/whisker/llm/calibration/tables/00-baseline.md:R14",
 ]
 
 # --- known weaknesses ---------------------------------------------------------

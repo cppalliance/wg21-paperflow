@@ -92,6 +92,8 @@ from whisker.llm.unit_judge import (
     resolve_runtime_table_contract,
     run_metadata_outline_check,
     run_unit_checks,
+    source_format_from_path,
+    source_format_line,
 )
 
 logger = logging.getLogger(__name__)
@@ -767,6 +769,7 @@ async def _run_html_unit_checks_body(
         debug_log=ctx.debug_log,
         exhaustive=state.exhaustive,
         guard_tag=GUARD_TAG,
+        source_format=source_format_from_path(source_path),
     )
 
 
@@ -855,6 +858,7 @@ async def _run_pdf_unit_checks(state: _PipelineState, ctx: StepContext) -> None:
             debug_log=ctx.debug_log,
             exhaustive=state.exhaustive,
             guard_tag=GUARD_TAG,
+            source_format=source_format_from_path(source_path),
         )
 
 
@@ -905,9 +909,11 @@ def _build_triage_message(
             f"chunk boundary.\n"
         )
 
+    source_format = "unknown"
     outline_block = ""
     try:
         source_path = ctx.backend.get_source_path(ctx.pid)
+        source_format = source_format_from_path(source_path)
         if str(source_path).lower().endswith((".html", ".htm")):
             html_source = source_path.read_text(encoding="utf-8", errors="replace")
             outline = format_outline(extract_heading_outline(html_source))
@@ -920,6 +926,7 @@ def _build_triage_message(
 
     header = (
         f"Paper: {ctx.pid}\n"
+        f"{source_format_line(source_format)}"
         f"{chunk_note}{outline_block}\n"
         f"Converted Markdown:\n"
     )
@@ -941,6 +948,14 @@ def _build_adjudicate_message(state: _PipelineState, ctx: StepContext) -> str:
     tier1 = state.tier1
     assert tier1 is not None
 
+    source_format = "unknown"
+    try:
+        source_format = source_format_from_path(
+            ctx.backend.get_source_path(ctx.pid)
+        )
+    except Exception:
+        source_format = "unknown"
+
     signals_str = ", ".join(state.escalation_signals) or "none"
     tier1_text = ctx.inject_untrusted(
         f"Tier 1 reasoning: {tier1.reasoning}\n"
@@ -948,6 +963,7 @@ def _build_adjudicate_message(state: _PipelineState, ctx: StepContext) -> str:
     )
     header = (
         f"Paper: {ctx.pid}\n"
+        f"{source_format_line(source_format)}"
         f"Escalation signals: {signals_str}\n\n"
         f"{tier1_text}\n"
         f"Tier 1 verdict: {tier1.verdict} (confidence {tier1.confidence:.2f})\n"

@@ -61,7 +61,7 @@ from whisker.det.llm_readability.models import (
     VERDICT_PASS,
     VERDICT_REVIEW,
     CheckOutcome,
-    DocumentFacts,
+    DocumentFacts as _ModelDocumentFacts,
     Finding,
     ResolvedContract,
     Rule,
@@ -70,7 +70,11 @@ from whisker.det.llm_readability.models import (
     TableUnit,
     Threshold,
 )
-from whisker.tables import _html_tables_with_spans, _scan_pipe_blocks  # noqa: PLC2701
+from whisker.tables import (  # noqa: PLC2701
+    _html_tables_with_spans,
+    _scan_pipe_blocks,
+    parse_code_table_groups,
+)
 
 __all__ = [
     "APPLICABILITY_PREDICATES",
@@ -98,6 +102,49 @@ REASON_NO_UNITS = "no_table_units"
 REASON_RAW_ROWS_UNAVAILABLE = "raw_rows_unavailable"
 REASON_SEPARATOR_UNKNOWN = "header_or_separator_unknown"
 
+# Fence-group tables are neither pipe nor html. TABLE_FORMATS stays the
+# pipe|html pair (models.py is frozen); this string is only a unit tag.
+FORMAT_CODE_GROUP = "code_group"
+
+_TABLE_BLOCK_RE = re.compile(
+    r"<table\b[^>]*>.*?</table>",
+    re.IGNORECASE | re.DOTALL,
+)
+_INS_DEL_BLOCK_RE = re.compile(
+    r"<(ins|del)\b[^>]*>.*?</\1>",
+    re.IGNORECASE | re.DOTALL,
+)
+_HTML_ENTITY_RE = re.compile(r"&(?:lt|gt|amp|quot);", re.IGNORECASE)
+
+
+@dataclass(frozen=True, slots=True)
+class DocumentFacts(_ModelDocumentFacts):
+    """Applicability facts, plus the PDF-source inputs R14 reads.
+
+    ``source_format`` and ``html_entity_count`` default at the end. The base
+    dataclass in ``models.py`` is unchanged.
+    """
+
+    source_format: str = "unknown"
+    html_entity_count: int = 0
+
+
+def _count_table_html_entities(markdown: str) -> int:
+    """Count ``&lt;`` ``&gt;`` ``&amp;`` ``&quot;`` inside ``table`` regions.
+
+    Entities outside a table do not count. ``ins`` and ``del`` elements,
+    tags and text, are removed before the count.
+    """
+    total = 0
+    for match in _TABLE_BLOCK_RE.finditer(markdown):
+        region = match.group(0)
+        previous = None
+        while previous != region:
+            previous = region
+            region = _INS_DEL_BLOCK_RE.sub("", region)
+        total += len(_HTML_ENTITY_RE.findall(region))
+    return total
+
 
 # -- document facts ------------------------------------------------------------
 
@@ -107,8 +154,13 @@ def document_facts(
     *,
     source_available: bool = False,
     chunking_evaluated: bool = False,
+    source_format: str = "unknown",
+    markdown: str | None = None,
 ) -> DocumentFacts:
-    """Derive the applicability facts from the supplied table units."""
+    """Derive the applicability facts from the supplied table units.
+
+    ``markdown`` is read only to count HTML entities inside tables.
+    """
     return DocumentFacts(
         table_count=len(units),
         pipe_table_count=sum(1 for unit in units if unit.fmt == FORMAT_PIPE),
@@ -119,11 +171,24 @@ def document_facts(
         tables_with_empty_cells=sum(1 for unit in units if _has_blank_cell(unit)),
         source_available=source_available,
         chunking_evaluated=chunking_evaluated,
+        source_format=source_format,
+        html_entity_count=_count_table_html_entities(markdown or ""),
     )
 
 
+def _is_code_group_corner(unit: TableUnit, row_index: int, col_index: int) -> bool:
+    """The fence-group corner is an empty label-column header, not a lost cell."""
+    return unit.fmt == FORMAT_CODE_GROUP and row_index == 0 and col_index == 0
+
+
 def _has_blank_cell(unit: TableUnit) -> bool:
-    return any(not cell.strip() for row in unit.cells for cell in row)
+    for row_index, row in enumerate(unit.cells):
+        for col_index, cell in enumerate(row):
+            if _is_code_group_corner(unit, row_index, col_index):
+                continue
+            if not cell.strip():
+                return True
+    return False
 
 
 # -- applicability -------------------------------------------------------------
@@ -155,6 +220,10 @@ def _chunking_in_scope(facts: DocumentFacts, _: Mapping[str, Threshold]) -> bool
     return facts.chunking_evaluated
 
 
+def _pdf_source(facts: DocumentFacts, _: Mapping[str, Threshold]) -> bool:
+    return facts.source_format == "pdf"
+
+
 APPLICABILITY_PREDICATES: Mapping[str, ApplicabilityPredicate] = {
     "any_table": _any_table,
     "any_pipe_table": _any_pipe_table,
@@ -162,6 +231,7 @@ APPLICABILITY_PREDICATES: Mapping[str, ApplicabilityPredicate] = {
     "long_table": _long_table,
     "table_with_empty_cell": _table_with_empty_cell,
     "chunking_in_scope": _chunking_in_scope,
+    "pdf_source": _pdf_source,
 }
 
 
@@ -1253,6 +1323,8 @@ def check_empty_cell_sentinel(ctx: CheckContext) -> CheckOutcome:
             for column_index, cell in enumerate(row):
                 if cell.strip():
                     continue
+                if _is_code_group_corner(unit, row_index, column_index):
+                    continue
                 findings.append(
                     Finding(
                         rule_id=ctx.rule.id,
@@ -1274,6 +1346,46 @@ def check_empty_cell_sentinel(ctx: CheckContext) -> CheckOutcome:
     )
 
 
+def check_html_table_in_markdown(ctx: CheckContext) -> CheckOutcome:
+    """R14: a PDF source must not arrive as a raw HTML table.
+
+    Fires only when applicability is ``pdf_source``. An HTML unit, or HTML
+    entities standing in for code inside a table, fails the rule. Findings
+    name the table index.
+    """
+    findings: list[Finding] = []
+    for unit in ctx.units:
+        if unit.fmt != FORMAT_HTML:
+            continue
+        findings.append(
+            Finding(
+                rule_id=ctx.rule.id,
+                locus=unit.locus,
+                message=f"raw HTML table index {unit.index}",
+            )
+        )
+    if ctx.facts.html_entity_count > 0:
+        indexes = [unit.index for unit in ctx.units if unit.fmt == FORMAT_HTML]
+        if not indexes:
+            indexes = [0]
+        for index in indexes:
+            findings.append(
+                Finding(
+                    rule_id=ctx.rule.id,
+                    locus=f"table index {index}",
+                    message=(
+                        f"HTML entities standing in for code in table index {index}"
+                    ),
+                )
+            )
+    return _aggregate(
+        ctx.rule,
+        findings=findings,
+        unevaluated=(),
+        evaluated_any=True,
+    )
+
+
 # The candidate-side checks that need nothing but the supplied units. Keys are
 # the `check_id` values declared in rules.toml. The remaining rules name check
 # ids that the source-compare (R3, R4, R5, R10, R11), chunking (R12) and
@@ -1286,6 +1398,7 @@ DETERMINISTIC_CHECKS: Mapping[str, Check] = {
     "wide_table_column_budget": check_wide_table_column_budget,
     "long_table_header_repeat": check_long_table_header_repeat,
     "empty_cell_sentinel": check_empty_cell_sentinel,
+    "html_table_in_markdown": check_html_table_in_markdown,
 }
 
 
@@ -1999,6 +2112,14 @@ def table_units_from_markdown(md: str) -> tuple[TableUnit, ...]:
         units.append(replace(year_col, index=len(units)))
     for shattered in _is_heading_shattered_table(md_lines):
         units.append(replace(shattered, index=len(units)))
+    for grid in parse_code_table_groups(md):
+        units.append(
+            TableUnit(
+                index=len(units),
+                fmt=FORMAT_CODE_GROUP,
+                cells=tuple(tuple(row) for row in grid),
+            )
+        )
     return tuple(units)
 
 
@@ -2182,6 +2303,8 @@ def evaluate(
     source_available: bool = False,
     chunking_evaluated: bool = False,
     registry: Mapping[str, Check] | None = None,
+    source_format: str = "unknown",
+    markdown: str | None = None,
 ) -> TableReadabilityReport:
     """Evaluate one document against the resolved contract.
 
@@ -2198,6 +2321,8 @@ def evaluate(
         ordered_units,
         source_available=source_available,
         chunking_evaluated=chunking_evaluated,
+        source_format=source_format,
+        markdown=markdown,
     )
     vacuous = facts.table_count == 0
     results = tuple(

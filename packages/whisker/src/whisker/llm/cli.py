@@ -183,7 +183,10 @@ _SAFE_SERVICE_FIELDS = (
 # confirms. "data values" no longer confirms: a section reference is a
 # data value and still the real header (P4178R0 HEAD, #427). The typed
 # fallback sends the text-layer page along when one was paired.
-_LANE_VERSION = 30
+# v31: raw_html_table. A PDF source with a raw HTML table is a table
+# defect. The mixed-table comment stays sanctioned only for an HTML
+# source. The paper user message states the source format.
+_LANE_VERSION = 31
 
 # Fleet LJF: papers are sorted by descending predicted work before dispatch
 # (_predicted_work_seconds: sidecar duration, else PDF page count, else

@@ -33,6 +33,7 @@ from html.parser import HTMLParser
 from typing import NamedTuple
 
 __all__ = [
+    "parse_code_table_groups",
     "parse_html_tables",
     "parse_pipe_tables",
     "split_pipe_cells",
@@ -342,3 +343,117 @@ def parse_html_tables(md: str) -> list[list[list[str]]]:
     stdlib ``html.parser`` (no extra dependency). Deterministic.
     """
     return [grid for grid, _had_spans in _html_tables_with_spans(md)]
+
+
+_MIXED_TABLE_MARKER = "<!-- tomd:mixed-table -->"
+_ATX_HEADING_RE = re.compile(r"^#{1,6}(?:\s|$)")
+_BOLD_ONLY_RE = re.compile(r"^\*\*(.+)\*\*$")
+_ITALIC_ONLY_RE = re.compile(r"^\*([^*].*)\*$")
+_FENCE_OPEN_RE = re.compile(r"^(`{3,}|~{3,})([^`~]*)$")
+
+
+def _is_pipe_table_line(lines: list[str], index: int) -> bool:
+    """True when ``lines[index]`` is a pipe-table row or its separator."""
+    line = lines[index]
+    if _TABLE_SEP_RE.match(line) or _has_outer_pipes(line):
+        return True
+    return _is_valid_pipe_start(lines, index)
+
+
+def _fence_marker(line: str) -> str | None:
+    match = _FENCE_OPEN_RE.match(line.strip())
+    if match is None:
+        return None
+    return match.group(1)
+
+
+def parse_code_table_groups(md: str) -> list[list[list[str]]]:
+    """Parse labeled fence groups that start at ``<!-- tomd:mixed-table -->``.
+
+    A group runs until the next marker, a pipe-table line, or an ATX heading.
+    A line that is only ``**label**`` starts a body row. A line that is only
+    ``*header*`` records the next column header. A fenced block fills the next
+    cell of the current row, and a plain paragraph under that row is a text
+    cell. The first grid row is ``""`` plus the column headers. Later rows are
+    the label plus cells. An HTML table after the marker produces no grid, so
+    it is not counted twice with ``parse_html_tables``.
+    """
+    lines = md.splitlines()
+    groups: list[list[list[str]]] = []
+    index = 0
+    while index < len(lines):
+        if lines[index].strip() != _MIXED_TABLE_MARKER:
+            index += 1
+            continue
+        grid, index = _parse_one_code_group(lines, index + 1)
+        if grid:
+            groups.append(grid)
+    return groups
+
+
+def _group_ends(lines: list[str], index: int) -> bool:
+    stripped = lines[index].strip()
+    return (
+        stripped == _MIXED_TABLE_MARKER
+        or bool(_ATX_HEADING_RE.match(stripped))
+        or _is_pipe_table_line(lines, index)
+    )
+
+
+def _parse_one_code_group(
+    lines: list[str], start: int,
+) -> tuple[list[list[str]], int]:
+    headers: list[str] = []
+    rows: list[list[str]] = []
+    current: list[str] | None = None
+    index = start
+    while index < len(lines):
+        if _group_ends(lines, index):
+            break
+        stripped = lines[index].strip()
+        if not stripped:
+            index += 1
+            continue
+        bold = _BOLD_ONLY_RE.match(stripped)
+        if bold:
+            if current is not None:
+                rows.append(current)
+            current = [bold.group(1).strip()]
+            index += 1
+            continue
+        italic = _ITALIC_ONLY_RE.match(stripped)
+        if italic:
+            headers.append(italic.group(1).strip())
+            index += 1
+            continue
+        marker = _fence_marker(lines[index])
+        if marker is not None:
+            body: list[str] = []
+            index += 1
+            while index < len(lines) and lines[index].strip() != marker:
+                body.append(lines[index])
+                index += 1
+            if index < len(lines) and lines[index].strip() == marker:
+                index += 1
+            if current is not None:
+                current.append("\n".join(body))
+            continue
+        paragraph: list[str] = []
+        while index < len(lines) and not _group_ends(lines, index):
+            piece = lines[index].strip()
+            if (
+                not piece
+                or _BOLD_ONLY_RE.match(piece)
+                or _ITALIC_ONLY_RE.match(piece)
+                or _fence_marker(lines[index]) is not None
+            ):
+                break
+            paragraph.append(piece)
+            index += 1
+        if current is not None and paragraph:
+            current.append("\n".join(paragraph))
+    if current is not None:
+        rows.append(current)
+    if not headers and not rows:
+        return [], index
+    return [[""] + headers, *rows], index
