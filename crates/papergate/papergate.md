@@ -3,9 +3,9 @@ name: papergate
 description: Report on the evidence a WG21 paper provides for its need of standardization
 promptforge: 0
 models:
-  # TODO(#445): add `temperature: 0` here once cppalliance/promptforge#69
-  # lands and the submodule is bumped. Until then the runtime binds
-  # temperature None, so runs sample at the gateway default and verdicts
+  # TODO(#445): pin a temperature here (0 before the port; #415 proposes
+  # 0.3) once cppalliance/promptforge#69 restores it and the submodule is
+  # bumped. Until then runs sample at the gateway default and verdicts
   # vary. Adding it now is a parse error (ModelRole denies unknown fields).
   writer:
     keywords: [no-thinking]
