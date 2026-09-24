@@ -1,0 +1,8 @@
+# Running-header guard (#438): P3978R3's page furniture is a 2-column
+# grid whose header cell is the document id (P3978R3 beside the section
+# title). Pass 1 and the side-by-side pass consume that grid and emit
+# nothing, so pages 3 and 9 are prose. The five page-1 polls stay
+# separate 2x5 grids and the page-2 expectations table stays 8x4.
+# Consuming the grid also drops the only copy of the "3.2 status quo
+# examples" heading text. That loss is accepted so the P4012R0 goldens
+# stay byte-identical; it is named in the ledger Residue column.

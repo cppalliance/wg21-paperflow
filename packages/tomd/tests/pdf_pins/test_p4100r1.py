@@ -30,7 +30,6 @@ _P4100R1_TABLE_PINS = {
     (3, 3, 3, "clean_matrix", "side_by_side_prepass"),
     (3, 5, 3, "clean_matrix", "horizontal_rows"),
     (3, 4, 3, "prose_table", "horizontal_rows"),
-    (10, 7, 3, "clean_matrix", None),
     (10, 8, 3, "clean_matrix", None),
 }
 
@@ -58,6 +57,12 @@ def test_p4100r1_table_family_pins():
         for s in tables
     }
     assert got == _P4100R1_TABLE_PINS
+    page10 = [s for s in tables if s.page_num == 10]
+    assert len(page10) == 2
+    assert all(_header_cells(s) == ["#", "Paper", "Abstraction"] for s in page10)
+    bodies = {_header_cells(s) and " ".join(
+        "".join(sp.text for sp in s.columns[1][0]).split()) for s in page10}
+    assert "1" in bodies
     capy = [s for s in tables if s.table_source == "side_by_side_prepass"]
     assert len(capy) == 1
     assert _header_cells(capy[0]) == ["Library", "Role", "Status"]

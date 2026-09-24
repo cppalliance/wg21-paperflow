@@ -47,7 +47,9 @@ Detection passes (run in order, each consumes matched blocks):
     (table_source="multirow_body"; the semantic kind stays clean_matrix
     when the cells are short).  A two-column run of bare page numbers
     under a same-page Contents label is a contents list, not a table.
-    Orphan absorption for wrapped cell first-lines
+    A 2-column grid whose header cell is a WG21 document id is page
+    furniture: Pass 1 and the side-by-side pass consume it and emit
+    nothing.  Orphan absorption for wrapped cell first-lines
     (forward, col 0) and wrapped tails (backward, col 1+, any column count);
     a trailing continuation without a confirming row is absorbed in-loop
     (Branch 4c) so a following partial row still joins.  Fragment
@@ -65,8 +67,9 @@ Detection passes (run in order, each consumes matched blocks):
   Pass 5 (MuPDF native): fallback using MuPDF find_tables() on remaining blocks.
   Post-passes (pass-agnostic): header cluster absorption (free blocks
     directly above a table whose lines sit on its columns become the header
-    row, _collect_header_cluster) and separator-row removal (a body row of
-    dash-only cells is a rendered markdown separator, _drop_separator_rows).
+    row, _collect_header_cluster); when that header cell is a bare integer,
+    a second look prepends a `#` line sitting above it.  Separator-row
+    removal drops a body row of dash-only cells (_drop_separator_rows).
 
 Classification flow:
   detect_tables() -> _compute_table_signals() -> _classify_table()
@@ -1777,10 +1780,22 @@ def _detect_side_by_side_tables(
             i = j
             continue
 
-        # A contents list with no dot leaders is title | page number.
-        # Leave the blocks for the prose path. Do not mark them used.
         if _is_labeled_contents_table(all_rows_data, blocks, page):
             _log.debug("SBS contents bypass: page %d", page)
+            i = j
+            continue
+
+        if _is_running_header_grid(all_rows_data):
+            # Consume the blocks without emitting a table. Returning
+            # them to prose turns the same furniture into headings on
+            # page-slice goldens (P4012R0).
+            _log.debug("SBS running-header bypass: page %d", page)
+            used.add(i)
+            if atomized_hdr is not None:
+                used.update(atomized_hdr)
+            for row in consumed_rows:
+                for idx, _ in row:
+                    used.add(idx)
             i = j
             continue
 
@@ -3265,6 +3280,39 @@ def _collect_header_cluster(
     return chosen, header_row
 
 
+_PAPER_ID_CELL_RE = re.compile(r"^[PND]\d{3,5}R\d+$")
+_SECTION_NUM_CELL_RE = re.compile(r"^\d+(?:\.\d+)*$")
+# "4.1 exploration" is a section heading whose words were cut into
+# columns. A packed function table does not start that way (P0533R9).
+_SECTION_HEADING_CELL_RE = re.compile(r"^\d+\.\d+\b")
+_HASH_HEADER_CELL = "#"
+
+
+def _row_cell_text(cell: list) -> str:
+    """Visible text of one table cell, with bold markers stripped."""
+    return "".join(s.text for s in cell).replace("*", "").strip()
+
+
+def _is_running_header_grid(rows: list) -> bool:
+    """A 2-column grid whose header cell is a WG21 document number.
+
+    Running headers (`P3978R3` beside `3 Motivation`) plus the section
+    number and small-caps title look like a table to Pass 1 and Pass 2.
+    Real tables do not put the document id in column 0.
+    """
+    if len(rows) < 2 or len(rows[0]) != 2:
+        return False
+    if not _PAPER_ID_CELL_RE.match(_row_cell_text(rows[0][0])):
+        return False
+    for row in rows[1:]:
+        if len(row) < 2:
+            return False
+        c0 = _row_cell_text(row[0])
+        if not _SECTION_NUM_CELL_RE.match(c0):
+            return False
+    return True
+
+
 def _header_cluster_well_formed(
     per_col: dict[int, list[tuple[float, float, Line]]],
 ) -> bool:
@@ -3282,6 +3330,50 @@ def _header_cluster_well_formed(
                for t in ordered):
             return False
     return True
+
+
+def _absorb_hash_header_above_number(
+    ts: Section,
+    remaining: list[Block],
+    absorbed: set[int],
+) -> None:
+    """Pull `# | Paper | Abstraction` onto a table whose header is row 1.
+
+    The numbered body row sits inside the first absorption gap. The real
+    header is one line further up, past the tightened 10pt cluster gap
+    (P4100R0 and P4100R1 section 7.1). A second look from the new top
+    reaches it. Only a header cell that is exactly `#` is prepended, so
+    a numbered row that is the real header stays put.
+    """
+    if not ts.columns or not ts.columns[0] or not ts.lines:
+        return
+    if not _row_cell_text(ts.columns[0][0]).isdigit():
+        return
+    ts_y_top = min(ln.bbox[1] for ln in ts.lines)
+    col_xs: list[float] = []
+    for cell in ts.columns[0]:
+        xs = [sp.bbox[0] for sp in cell
+              if hasattr(sp, "bbox") and sp.bbox and any(sp.bbox)]
+        col_xs.append(min(xs) if xs else 999.0)
+    if any(x >= 999 for x in col_xs):
+        return
+    cluster = _collect_header_cluster(
+        remaining, absorbed, ts.page_num, ts_y_top, col_xs)
+    if cluster is None:
+        return
+    cluster_idxs, header_row = cluster
+    if _row_cell_text(header_row[0]) != _HASH_HEADER_CELL:
+        return
+    if len(header_row) != len(ts.columns[0]):
+        return
+    for bi in cluster_idxs:
+        for ln in remaining[bi].lines:
+            ts.lines.insert(0, ln)
+    ts.columns.insert(0, header_row)
+    ts.text = _render_table_text(ts.columns)
+    absorbed.update(cluster_idxs)
+    _log.debug(
+        "Hash header absorbed above numbered row: page %d", ts.page_num)
 
 
 def _line_y_center(line: Line) -> float:
@@ -6224,14 +6316,16 @@ def detect_tables(
                     _row_from_lines(blocks[i].lines, span_cols),
                     *body_rows,
                 ]
-                # A packed body whose last column is only page numbers is
-                # a contents list. One body block can also hold the prose
-                # that follows the list (P1122R3), so this family refuses
-                # the shape even when the page has no Contents label.
-                # A labeled contents list is refused on the normal path too.
-                if not (_last_column_is_page_numbers(rows)
+                header0 = "".join(sp.text for sp in rows[0][0]).strip()
+                # A contents list whose last column is only page numbers is
+                # refused below. A section heading cut into columns
+                # ("4.1 exploration | of | potential") is refused here.
+                if (_SECTION_HEADING_CELL_RE.match(header0)
+                        or _last_column_is_page_numbers(rows)
                         or _is_labeled_contents_table(
                             rows, blocks, blocks[i].page_num)):
+                    body_result = None
+                else:
                     kind_val, strategy_val, rows = _classify_and_annotate(rows)
                     if kind_val not in (
                             TableKind.FALSE_POSITIVE.value,
@@ -6601,6 +6695,14 @@ def detect_tables(
                 i = j
                 continue
 
+            if _is_running_header_grid(rows):
+                # Consume without emitting. See the side-by-side bypass.
+                _log.debug(
+                    "Pass 1 running-header bypass: %d blocks on page %d",
+                    len(table_blocks), p1_page)
+                i = j
+                continue
+
             text = _render_table_text(rows)
 
             table_sections.append(Section(
@@ -6756,6 +6858,8 @@ def detect_tables(
             "%d of %d cols",
             ts.page_num, len(cluster_idxs),
             sum(1 for c in header_row if c), ncols)
+
+        _absorb_hash_header_above_number(ts, remaining, absorbed)
 
     if absorbed:
         remaining = [b for bi, b in enumerate(remaining)
