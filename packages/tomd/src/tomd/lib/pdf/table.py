@@ -6578,9 +6578,10 @@ def detect_tables(
                     next_gap = (ny - oy) if oy is not None and ny is not None else None
                     # A wrapped label line belongs to the nearer row.
                     # Forward was gluing the tail of the previous label
-                    # onto the next one (P4036R0 "members").
+                    # onto the next one (P4036R0 "members"). A tie keeps
+                    # the forward merge.
                     if (prev is not None and prev_gap is not None
-                            and (next_gap is None or prev_gap <= next_gap)):
+                            and (next_gap is None or prev_gap < next_gap)):
                         prev[0] = prev[0] + sep + row[0]
                         k += 1
                         continue
