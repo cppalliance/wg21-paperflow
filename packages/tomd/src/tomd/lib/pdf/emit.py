@@ -1,6 +1,5 @@
 """Markdown and companion prompts file generation."""
 
-import html as _html
 import logging
 import re
 
@@ -13,7 +12,6 @@ from .. import (
     strip_orphan_toc_list,
 )
 from .. import tables as _tables
-from ..shared import _find_front_matter_end
 from .cleanup import escape_leading_atx, normalize_whitespace
 from .code_format import is_diagram_block, maybe_normalize_code_line
 from .code_grid import CodeGrid
@@ -766,70 +764,125 @@ def _render_cell_spans(spans: list, suppress_bold: bool = False) -> str:
     return result.replace("|", "\\|")
 
 
-def _spans_to_code_lines(spans: list) -> str:
-    """Convert cell spans to multi-line code text.
+# First row of a code comparison is column headers when every cell is a
+# short label ("Before", 'The "proxy"'). Longer text is a data row.
+_CODE_COMPARISON_HEADER_MAX_WORDS = 3
 
-    Newline marker spans (text="\\n") from table.py line-merge are
-    converted to actual newlines. All other spans are concatenated as raw text.
+
+def _spans_to_code_lines(spans: list) -> str:
+    """Convert cell spans to multi-line code text, keeping indentation.
+
+    Newline marker spans from table.py line-merge become newlines.
+    The text is verbatim: no HTML escaping. Leading spaces on a line
+    stay. Trailing whitespace on each line is dropped.
     """
     if not spans:
         return ""
-    spans = [_decode_dingbats(s) for s in spans]
     parts: list[str] = []
     for sp in spans:
-        if sp.text == "\n":
+        sp = _decode_dingbats(sp)
+        if not sp.text.strip() and "\n" in sp.text:
             parts.append("\n")
         else:
             parts.append(sp.text)
-    return "".join(parts).strip()
+    text = "".join(parts).strip("\n")
+    return "\n".join(line.rstrip() for line in text.split("\n"))
+
+
+def _plain_cell_text(spans: list) -> str:
+    """Ordinary cell text on one line. Soft wraps collapse to spaces."""
+    if not spans:
+        return ""
+    raw = "".join(_decode_dingbats(sp).text for sp in spans)
+    return _flatten_cell(raw)
+
+
+def _cell_is_code(spans: list) -> bool:
+    """True when the cell's letter ink is monospace.
+
+    A newline marker between monospace lines is not ink. It stays inside
+    the fence. A prose cell the PDF soft-wrapped is ordinary text, even
+    when a newline span joins the lines. A symbol with no letters, such
+    as an emoji inside a code comment, does not turn the cell into prose.
+    """
+    ink = [s for s in spans if s.text.strip()]
+    if not ink:
+        return False
+    letters = [s for s in ink if any(c.isalpha() for c in s.text)]
+    judged = letters or ink
+    return all(s.monospace for s in judged)
+
+
+def _bold_label(text: str) -> str:
+    """Wrap *text* in a bold marker without letting `*` close it early."""
+    escaped = text.replace("\\", "\\\\").replace("*", "\\*")
+    return f"**{escaped}**"
+
+
+def _is_short_label_row(row: list) -> bool:
+    """True when every cell is a short non-code label."""
+    texts = [_plain_cell_text(cell) for cell in row]
+    if not any(texts):
+        return False
+    if any(_cell_is_code(cell) for cell in row):
+        return False
+    return all(
+        len(text.split()) <= _CODE_COMPARISON_HEADER_MAX_WORDS
+        for text in texts
+    )
 
 
 def _render_code_comparison(sec: Section) -> str:
-    """Render a code-comparison table as side-by-side fenced code blocks.
+    """Render a code comparison as a labeled fence group.
 
-    Each cell may contain multiple logical lines marked by newline spans
-    (text="\\n") inserted by table.py during cell merge.
-    If the first row contains short labels (e.g. "Before" / "After"),
-    they are used as headings above each code block.
+    ``<!-- tomd:mixed-table -->``, then for each body row a bold row
+    label (the first cell, when it is ordinary text) and, for each
+    remaining column, an italic column header plus either a cpp fence
+    (monospace cell) or a plain paragraph (ordinary text). Column
+    headers come from the first row when its cells are short labels.
+    Code is verbatim.
     """
     if not sec.columns:
         return sec.text
 
     rows = sec.columns
-    num_cols = max(len(row) for row in rows) if rows else 0
+    num_cols = max((len(row) for row in rows), default=0)
+    if num_cols == 0:
+        return sec.text
 
-    # Detect header row: first row with only short text (<=3 words per cell)
     headers: list[str] = []
     data_start = 0
-    if rows:
-        first_row = rows[0]
-        first_row_texts = []
-        for cell in first_row:
-            t = "".join(_decode_dingbats(s).text for s in cell).strip()
-            first_row_texts.append(t)
-        if all(len(t.split()) <= 3 for t in first_row_texts) and any(first_row_texts):
-            headers = first_row_texts
+    if rows and not getattr(sec, "table_continuation", False):
+        if _is_short_label_row(rows[0]):
+            headers = [_plain_cell_text(cell) for cell in rows[0]]
+            while len(headers) < num_cols:
+                headers.append("")
             data_start = 1
 
-    blocks_per_col: list[list[str]] = [[] for _ in range(num_cols)]
+    parts = [_tables.MIXED_TABLE_MARKER]
     for row in rows[data_start:]:
-        for col_idx in range(num_cols):
-            if col_idx < len(row):
-                cell_spans = row[col_idx]
-                cell_text = _spans_to_code_lines(cell_spans)
+        cells = list(row)
+        while len(cells) < num_cols:
+            cells.append([])
+        start = 0
+        label = _plain_cell_text(cells[0]) if cells else ""
+        if label and not _cell_is_code(cells[0]):
+            parts.append(_bold_label(label))
+            start = 1
+        for ci in range(start, num_cols):
+            spans = cells[ci]
+            if _cell_is_code(spans):
+                code = _spans_to_code_lines(spans)
+                if not code:
+                    continue
+                body = f"```{DEFAULT_FENCE_LANG}\n{code}\n```"
             else:
-                cell_text = ""
-            blocks_per_col[col_idx].append(cell_text)
-
-    parts = []
-    for col_idx, col_lines in enumerate(blocks_per_col):
-        content = "\n".join(col_lines).strip()
-        if content:
-            label = ""
-            if headers and col_idx < len(headers) and headers[col_idx]:
-                label = f"// {headers[col_idx]}\n"
-            parts.append(f"```cpp\n{label}{content}\n```")
-
+                body = _plain_cell_text(spans)
+                if not body:
+                    continue
+            if ci < len(headers) and headers[ci]:
+                parts.append("*" + _escape_italic_text(headers[ci]) + "*")
+            parts.append(body)
     return "\n\n".join(parts)
 
 
@@ -859,97 +912,6 @@ def _cell_text(row: list, ci: int) -> str:
     return "".join(s.text for s in row[ci]).strip()
 
 
-def _render_html_table(sec: Section) -> str:
-    """Render a table as HTML with <pre> blocks for multi-line code cells.
-
-    Used for code-comparison tables (e.g. "Tony Tables") where each cell
-    contains multi-line code that would be flattened by a pipe table.
-
-    When ``sec.table_continuation`` is true the section is a cross-page
-    continuation whose duplicate header has been stripped.  All rows are
-    rendered as ``<td>`` data cells (no ``<th>`` header row).
-    """
-    if not sec.columns:
-        return sec.text
-
-    rows = sec.columns
-    is_continuation = getattr(sec, "table_continuation", False)
-    num_cols = max(len(row) for row in rows)
-    # Shared markup (table tag, cell style, <pre><code> wrapping) lives in
-    # lib/tables.py so PDF and HTML comparison tables render identically.
-    _S = _tables.cell_style(num_cols)
-    parts: list[str] = []
-    # Mark code comparisons as structure-preserving, matching the HTML
-    # renderer. Other html_table kinds (SPEC_TABLE, nb_ballot) are not
-    # "mixed code" tables, so they carry no marker.
-    if getattr(sec, "table_kind", None) == "code_comparison":
-        parts.append(_tables.MIXED_TABLE_MARKER)
-    parts.append(_tables.TABLE_OPEN)
-
-    # NB-ballot cells: newlines are MuPDF line-wrapping artifacts from
-    # narrow PDF columns, not semantic breaks. Collapse to spaces.
-    is_nb_ballot = getattr(sec, "table_kind", None) == "nb_ballot"
-    collapse_newlines = is_nb_ballot
-
-    # Pre-compute rowspan for col-0 in NB-ballot tables: when consecutive
-    # data rows have an empty col-0 they are continuations of the same NB
-    # number, so the first row's col-0 cell spans them all (like the PDF).
-    col0_rowspan: dict[int, int] = {}  # ri -> span count (only for starters)
-    col0_skip: set[int] = set()        # ri values to skip col-0 rendering
-    if is_nb_ballot:
-        ri = 1 if not is_continuation else 0  # skip header row
-        while ri < len(rows):
-            span_start = ri
-            span_count = 1
-            while (ri + span_count < len(rows)
-                   and _cell_text(rows[ri + span_count], 0) == ""):
-                span_count += 1
-            if span_count > 1:
-                col0_rowspan[span_start] = span_count
-                for k in range(span_start + 1, span_start + span_count):
-                    col0_skip.add(k)
-            ri += span_count
-
-    for ri, row in enumerate(rows):
-        parts.append("<tr>")
-        is_header = (ri == 0 and not is_continuation)
-        tag = "th" if is_header else "td"
-        for ci in range(num_cols):
-            if ci == 0 and ri in col0_skip:
-                continue
-            cell_spans = row[ci] if ci < len(row) else []
-            cell_spans = [_decode_dingbats(s) for s in cell_spans]
-            cell_lines: list[str] = []
-            current_line: list[str] = []
-            for span in cell_spans:
-                if span.text == "\n":
-                    cell_lines.append("".join(current_line))
-                    current_line = []
-                else:
-                    current_line.append(span.text)
-            if current_line:
-                cell_lines.append("".join(current_line))
-            if collapse_newlines:
-                text = " ".join(
-                    part for line in cell_lines
-                    for part in [line.strip()] if part
-                ).strip()
-            else:
-                text = "\n".join(cell_lines).strip()
-            rowspan = col0_rowspan[ri] if (ci == 0 and ri in col0_rowspan) else 1
-            if is_header or not text:
-                # Header/empty cells carry plain escaped text (the PDF side
-                # has spans, not inline tags); text_cell emits it verbatim.
-                parts.append(_tables.text_cell(
-                    tag, _html.escape(text), _S, rowspan=rowspan))
-            else:
-                parts.append(_tables.code_cell(tag, text, _S, rowspan=rowspan))
-        parts.append("</tr>")
-
-    parts.append(_tables.TABLE_CLOSE)
-    return "\n".join(parts)
-
-
 _CELL_WRAP_RE = re.compile(r"\s*\n\s*")
 
 
@@ -963,12 +925,31 @@ def _flatten_cell(text: str) -> str:
     return _CELL_WRAP_RE.sub(" ", text).strip()
 
 
+def _repeat_nb_ballot_col0(rows: list, *, is_continuation: bool) -> list:
+    """Repeat a non-empty col-0 into following rows that leave it blank.
+
+    The PDF merges those continuation rows into one NB number. A pipe
+    table cannot span cells, so each continuation row carries the number.
+    Wrapped lines in the cells are collapsed later by ``_flatten_cell``.
+    """
+    filled: list = []
+    last = None
+    start = 0 if is_continuation else 1
+    for ri, row in enumerate(rows):
+        row = list(row)
+        if ri >= start:
+            if _cell_text(row, 0):
+                last = row[0]
+            elif last is not None and row:
+                row[0] = list(last)
+        filled.append(row)
+    return filled
+
+
 def _render_table(sec: Section) -> str:
     """Render a table section according to its assigned strategy."""
     if sec.table_strategy == "code_blocks":
         return _render_code_comparison(sec)
-    if sec.table_strategy == "html_table":
-        return _render_html_table(sec)
     if sec.table_strategy == "skip":
         return _render_table_as_text(sec)
 
@@ -977,6 +958,8 @@ def _render_table(sec: Section) -> str:
 
     rows = sec.columns
     is_continuation = getattr(sec, "table_continuation", False)
+    if getattr(sec, "table_kind", None) == "nb_ballot":
+        rows = _repeat_nb_ballot_col0(rows, is_continuation=is_continuation)
     num_cols = max(len(row) for row in rows)
 
     lines = []
@@ -1215,9 +1198,9 @@ def emit_markdown(
     _assign_emdash_nesting(sections)
 
     # Pre-pass: fold cross-page table continuations into the preceding
-    # table so they render as a single HTML/pipe table.  The detection
-    # layer marks the continuation with table_continuation=True and has
-    # already stripped its duplicate header row.
+    # table so they render as one pipe table or fence group.  The
+    # detection layer marks the continuation with table_continuation=True
+    # and has already stripped its duplicate header row.
     folded: set[int] = set()
     for i in range(len(sections) - 1, 0, -1):
         sec = sections[i]
@@ -1294,29 +1277,6 @@ def emit_markdown(
     md = dedup_paragraphs(md)
     md = strip_redundant_body_meta(md)
     md = strip_orphan_toc_list(md)
-
-    # Inject a <style> block for table borders when the document
-    # contains HTML tables. VS Code / Cursor markdown preview strips
-    # inline style attributes but honours embedded <style> tags.
-    if "<table " in md:
-        _TABLE_CSS = (
-            "<style>\n"
-            "table, th, td { border: 1px solid #999; "
-            "border-collapse: collapse; padding: 6px 10px; }\n"
-            "th { background: #f5f5f5; }\n"
-            "</style>"
-        )
-        insert_after = None
-        if fm:
-            fm_end = _find_front_matter_end(md)
-            if fm_end is not None:
-                line_end = md.find("\n", fm_end)
-                if line_end >= 0:
-                    insert_after = line_end + 1
-        if insert_after is not None:
-            md = md[:insert_after] + "\n" + _TABLE_CSS + "\n" + md[insert_after:]
-        else:
-            md = _TABLE_CSS + "\n\n" + md
 
     if fm:
         md = apply_strip_leading_h1(md, metadata.get("title", ""))

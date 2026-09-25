@@ -8,26 +8,20 @@
 
 """Shared HTML-table markup for code-comparison tables ("Tony Tables").
 
-The PDF emitter (``lib/pdf/emit.py::_render_html_table``) and the HTML renderer
-(``lib/html/render.py::_render_mixed_code_table``) both emit side-by-side
-comparison tables, and a paper's comparison should look the same whether it
-arrived as a PDF or as HTML. This module owns the *markup primitives* both
-sides share so that table tag, cell style, and code-cell wrapping are identical
-by construction.
+The HTML renderer (``lib/html/render.py::_render_mixed_code_table``) emits
+side-by-side comparison tables as HTML. A PDF table is a pipe table or a
+labeled fence group, never this markup. This module owns the table tag, cell
+style, and code-cell wrapping for the HTML path.
 
-It deliberately owns only the markup, not the iteration: each converter keeps
-its own row/cell walk because their inputs differ fundamentally (the PDF side
-has spans plus rowspan/continuation/NB-ballot concerns; the HTML side has a DOM
-with inline tags to preserve). The one residual difference is the *inner* text
-of non-code cells: the PDF side passes escaped plain text, the HTML side passes
-sanitized inline HTML. That is inherent to the inputs and out of scope here.
+It deliberately owns only the markup, not the iteration: the HTML converter
+walks its own DOM. Non-code cells pass sanitized inline HTML.
 """
 
 import html
 
 # Marker flagging a structure-preserving HTML table (vs a lossy flattened one).
-# Emitted by the HTML renderer for every mixed table, and by the PDF emitter
-# for CODE_COMPARISON tables (not its SPEC_TABLE / nb_ballot kinds).
+# Emitted by the HTML renderer for every mixed table. A PDF code table uses
+# the same marker in front of a labeled fence group, not an HTML table.
 MIXED_TABLE_MARKER = "<!-- tomd:mixed-table -->"
 
 # Inline-styled table open tag. WG21 markdown is consumed by renderers with no

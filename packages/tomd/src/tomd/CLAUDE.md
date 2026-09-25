@@ -151,6 +151,8 @@ The output Markdown must be clean and readable:
 - WG21 metadata block becomes YAML front matter
 - Collapse multiple spaces, replace non-breaking spaces, normalize whitespace
 
+A table extracted from a PDF is a pipe table, or, when a cell holds more than one line of code, a bold row label plus one labeled cpp fence per column. It is never a raw HTML table. The markdown is read raw by dissect, agora, grep and diff.
+
 ## Front Matter Strict Order (Contract)
 
 Every markdown produced by `convert_paper` has its YAML front matter

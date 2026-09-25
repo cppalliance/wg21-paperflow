@@ -164,7 +164,7 @@ class TestClassifyAndAnnotate:
         assert kind == "false_positive"
         assert strategy == "skip"
 
-    def test_tony_table_gets_html_table(self):
+    def test_tony_table_gets_code_blocks(self):
         long_cell = [make_span(f"line{i} ", monospace=True) for i in range(15)]
         rows = [
             [long_cell[:], long_cell[:]],
@@ -172,7 +172,7 @@ class TestClassifyAndAnnotate:
         ]
         kind, strategy, _ = _classify_and_annotate(rows)
         assert kind == "code_comparison"
-        assert strategy == "html_table"
+        assert strategy == "code_blocks"
 
     def test_soft_wrapped_prose_stays_a_pipe_table(self):
         """N5040: a wrapped prose cell is not multi-line content."""
@@ -188,7 +188,7 @@ class TestClassifyAndAnnotate:
         _, strategy, _ = _classify_and_annotate(rows)
         assert strategy == "pipe_table"
 
-    def test_multiline_code_cell_still_escapes_to_html(self):
+    def test_multiline_code_cell_uses_code_blocks(self):
         """A break inside monospace is semantic and must survive."""
         code = [
             make_span("struct Draw {", monospace=True),
@@ -200,9 +200,9 @@ class TestClassifyAndAnnotate:
             [code, _cell("some prose describing the change")],
         ]
         _, strategy, _ = _classify_and_annotate(rows)
-        assert strategy == "html_table"
+        assert strategy == "code_blocks"
 
-    def test_mixed_table_escapes_when_any_cell_is_code(self):
+    def test_mixed_table_uses_code_blocks_when_any_cell_is_code(self):
         """p0957r8: prose and assembly in one table; the assembly wins."""
         prose = [
             make_span("To evaluate code generation we "),
@@ -219,4 +219,4 @@ class TestClassifyAndAnnotate:
             [prose, asm],
         ]
         _, strategy, _ = _classify_and_annotate(rows)
-        assert strategy == "html_table"
+        assert strategy == "code_blocks"

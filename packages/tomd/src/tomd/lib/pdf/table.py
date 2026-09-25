@@ -4,13 +4,18 @@ Table Family (6 kinds, corpus-validated against 768 tables from 124 WG21 PDFs):
 
   CLEAN_MATRIX   Short-text cells (<15 words).  Pipe table.
                   Schedule grids, vote tallies, feature comparisons.
-  PROSE_TABLE    Any cell >15 words.  Pipe table (HTML if cells have newlines).
+  PROSE_TABLE    Any cell >15 words.  Pipe table.  Multi-line monospace
+                  in a cell selects the labeled fence group instead.
                   Rationale tables, design-alternative comparisons.
-  CODE_COMPARISON  "Tony Tables".  High monospace ratio, few cols/rows.  HTML
-                  table with <pre> blocks.  Side-by-side before/after code.
+  CODE_COMPARISON  "Tony Tables".  High monospace ratio, few cols/rows.
+                  Labeled fence group: a bold row label, then one italic
+                  column header and either a cpp fence or a paragraph
+                  per column.  Side-by-side before/after code.
   SPEC_TABLE     WG21 requirement tables.  3 columns, header matches
-                  "expression|operation" + "return|type".  HTML table.
+                  "expression|operation" + "return|type".  Pipe table.
                   Concept requirement tables (io_awaitable, executor).
+                  NB-ballot tables render as pipe tables too: a blank
+                  col-0 continuation repeats the previous NB number.
   KEY_VALUE      2-column tables with short field labels in col-0 (<=8 words)
                   and longer descriptive values in col-1 (>15 words).  Pipe
                   table.  Platform/compiler schema tables (Field | Value).
@@ -63,6 +68,9 @@ Detection passes (run in order, each consumes matched blocks):
     caption.  Collects all blocks (including monospace expression cells) in
     the spatial region below the label.  Cross-page continuation supported.
   Pass 5 (MuPDF native): fallback using MuPDF find_tables() on remaining blocks.
+    A rowspan grid that Pass 1 only partly claimed (one block's lines
+    jump back to column 0) is deferred here, and the rowspan keeps the
+    row labels from being transposed into headers.
   Post-passes (pass-agnostic): header cluster absorption (free blocks
     directly above a table whose lines sit on its columns become the header
     row, _collect_header_cluster) and separator-row removal (a body row of
@@ -231,18 +239,17 @@ class TableStrategy(Enum):
     """How to render this table in markdown."""
     PIPE_TABLE = "pipe_table"
     CODE_BLOCKS = "code_blocks"
-    HTML_TABLE = "html_table"
     SKIP = "skip"
 
 
 _STRATEGY_MAP = {
     TableKind.CLEAN_MATRIX: TableStrategy.PIPE_TABLE,
     TableKind.PROSE_TABLE: TableStrategy.PIPE_TABLE,
-    TableKind.CODE_COMPARISON: TableStrategy.HTML_TABLE,
-    TableKind.SPEC_TABLE: TableStrategy.HTML_TABLE,
+    TableKind.CODE_COMPARISON: TableStrategy.CODE_BLOCKS,
+    TableKind.SPEC_TABLE: TableStrategy.PIPE_TABLE,
     TableKind.KEY_VALUE: TableStrategy.PIPE_TABLE,
     TableKind.BIBLIOGRAPHY: TableStrategy.PIPE_TABLE,
-    TableKind.NB_BALLOT: TableStrategy.HTML_TABLE,
+    TableKind.NB_BALLOT: TableStrategy.PIPE_TABLE,
     TableKind.FALSE_POSITIVE: TableStrategy.SKIP,
 }
 
@@ -707,10 +714,31 @@ _MUPDF_REGION_MARGIN = 4.0  # pt of slack when testing block containment
 # validated bordered grid, so the guards written against find_tables()
 # guesses (phantom height, min size, label transposition) stand down.
 _DRAWING_GRID_SOURCE = "drawing_grid"
+# A cell contains another cell's top only when it spans that row.
+# A shared boundary (the next row starts where this cell ends) is not
+# a span. 2pt clears find_tables() edge noise.
+_FIND_TABLES_ROWSPAN_SLACK = 2.0
 
 
 def _is_drawing_grid(tbl_info: dict) -> bool:
     return tbl_info.get("source") == _DRAWING_GRID_SOURCE
+
+
+def _find_tables_has_rowspan(tbl_info: dict) -> bool:
+    """True when one find_tables() cell covers a later row's top.
+
+    A schedule grid (P1000R8) stores the right-hand note as one cell
+    across several date rows. That is a rowspan, not a wrapped line
+    in a single row: another cell's top sits strictly inside it.
+    """
+    cells = [c for c in (tbl_info.get("cells") or []) if c]
+    tops = [c[1] for c in cells]
+    slack = _FIND_TABLES_ROWSPAN_SLACK
+    for cell in cells:
+        y0, y1 = cell[1], cell[3]
+        if any(y0 + slack < top < y1 - slack for top in tops):
+            return True
+    return False
 
 
 def _rows_from_drawn_grid(
@@ -1331,7 +1359,9 @@ def _detect_side_by_side_tables(
         # the page bottom, extend body_candidates to include column-
         # aligned blocks from the top of the next page.  Guards:
         #  - Table bottom must be within ~90pt of the page edge (700+).
-        #  - Continuation blocks must start near the page top (y < 160).
+        #  - Continuation blocks must start near the page top (y < 160),
+        #    or sit inside the row band of a block already accepted
+        #    (a row label just under the cap, its first line above it).
         #  - At least 2 distinct columns must be represented.
         #  - Stop at numbered headings or misaligned blocks.
         _SBS_PAGE_BOTTOM_THRESH = 660.0
@@ -1349,7 +1379,16 @@ def _detect_side_by_side_tables(
                 if nb.page_num != next_page:
                     continue
                 if nb.bbox[1] > _SBS_CROSS_PAGE_Y_MAX:
-                    break
+                    # P4003R1 row 6: the prediction line is at y155 (inside
+                    # the cap) and the row label is at y164 (just outside).
+                    # Breaking on the label drops the rest of the row, which
+                    # follows it in y order. Keep a block that is still
+                    # inside the row band of one already accepted.
+                    if not cross_candidates:
+                        break
+                    last_y0 = max(b.bbox[1] for _, b in cross_candidates)
+                    if nb.bbox[1] - last_y0 > _SBS_ROW_Y_BAND:
+                        break
                 nb_text = "".join(
                     s.text for ln in nb.lines for s in ln.spans).strip()
                 if not nb_text:
@@ -1674,6 +1713,7 @@ def _detect_side_by_side_tables(
         if page_mupdf_tables:
             valid_rows = _resplit_rows_on_ruled_grid(
                 valid_rows, page_mupdf_tables.get(page, []), num_cols)
+        _reassign_block_closer_to_next_row(valid_rows, col_xs)
 
         # Build header row.
         if atomized_hdr is not None:
@@ -1690,6 +1730,7 @@ def _detect_side_by_side_tables(
             all_lines = list(header.lines)
 
         all_rows_data: list[list[list]] = [header_cells]
+        body_row_pages: list[set[int]] = []
 
         for row in valid_rows:
             col_spans: dict[int, list] = defaultdict(list)
@@ -1709,7 +1750,37 @@ def _detect_side_by_side_tables(
                     col_spans[ci].extend(ln.spans)
                     all_lines.append(ln)
             table_row = [col_spans.get(ci, []) for ci in range(num_cols)]
+            row_pages = {blk.page_num for _, blk in row}
             all_rows_data.append(table_row)
+            body_row_pages.append(row_pages)
+
+        # A continuation page repeats the header as its own body row.
+        # Pass 1 drops that row; this path did not, so the repeat survived
+        # as data (P4003R1 Prediction Registry, page 49). Exact cell text
+        # only, and only when every block of the row is on a later page
+        # than the header: a same-page header repeat is a section break
+        # inside the table (p4094r0 Assertion | Source | Evidence).
+        if len(all_rows_data) >= 3:
+            hdr_text = tuple(
+                "".join(s.text for s in cell).strip()
+                for cell in all_rows_data[0])
+            deduped_rows = [all_rows_data[0]]
+            dropped_headers = 0
+            for row, row_pages in zip(all_rows_data[1:], body_row_pages):
+                row_text = tuple(
+                    "".join(s.text for s in cell).strip()
+                    for cell in row)
+                if (row_text == hdr_text
+                        and row_pages
+                        and min(row_pages) > page):
+                    dropped_headers += 1
+                    continue
+                deduped_rows.append(row)
+            if dropped_headers:
+                _log.debug(
+                    "SBS dropped %d repeated header row(s) on page %d",
+                    dropped_headers, page)
+                all_rows_data = deduped_rows
 
         # MuPDF-overlap guard: if the body blocks overlap a substantial
         # MuPDF find_tables() region, defer to MuPDF Native (Pass 5) which
@@ -1978,14 +2049,11 @@ def _detect_inline_grid_tables(
 
         text = _render_table_text(all_rows_data)
 
+        # A newline in prose is a soft wrap and stays a pipe table.
+        # A newline in monospace is code and needs a fence group.
         strategy = TableStrategy.PIPE_TABLE
-        for row in all_rows_data:
-            for cell_spans in row:
-                if any("\n" in s.text for s in cell_spans):
-                    strategy = TableStrategy.HTML_TABLE
-                    break
-            if strategy == TableStrategy.HTML_TABLE:
-                break
+        if _has_multiline_code_cell(all_rows_data):
+            strategy = TableStrategy.CODE_BLOCKS
 
         table_sections.append(Section(
             kind=SectionKind.TABLE,
@@ -2901,7 +2969,9 @@ def _detect_mupdf_native_tables(
             # longer content, restructure so the labels become column
             # headers and corresponding data fills the columns below.
             # Never for a drawn grid: its rows are the drawn rows.
-            if not drawn:
+            # Never for a rowspan grid: the short col-0 texts are row
+            # labels (a date schedule), not headers stored as rows.
+            if not drawn and not _find_tables_has_rowspan(tbl_info):
                 non_empty_rows = _maybe_transpose_label_table(non_empty_rows)
 
             text = _render_table_text(non_empty_rows)
@@ -3024,6 +3094,67 @@ def _detect_mupdf_native_tables(
     table_sections = _merge_cross_page_fragments(table_sections)
 
     return table_sections, used
+
+
+def _reassign_block_closer_to_next_row(
+    valid_rows: list, col_xs: list[float],
+) -> None:
+    """Move a trailing block onto the next row when it sits closer to that row.
+
+    A wrapped cell can start above its row number. The row number then
+    opens the next row, and the first line stays on the previous row
+    (P4003R1 prediction 2, "The thread-local frame allocator achieves").
+    A repeated header is one fused block, so that first line is the only
+    block in its column (P4003R1 row 5: the criterion line at y93 sits
+    above the label at y110). The lone block is judged against this
+    row's label, on the same page, instead of a sibling line.
+    """
+    for i in range(len(valid_rows) - 1):
+        nxt = valid_rows[i + 1]
+        col0 = [b for _, b in nxt if _nearest_column(b.bbox[0], col_xs) == 0]
+        if not col0:
+            continue
+        next_y = min(b.bbox[1] for b in col0)
+        next_page = col0[0].page_num
+        row = valid_rows[i]
+        row_col0 = [
+            b for _, b in row
+            if _nearest_column(b.bbox[0], col_xs) == 0
+            and b.page_num == next_page
+        ]
+        by_col: dict[int, list] = defaultdict(list)
+        for item in row:
+            ci = _nearest_column(item[1].bbox[0], col_xs)
+            by_col.setdefault(ci, []).append(item)
+        move = []
+        for ci, items in by_col.items():
+            if ci == 0:
+                continue
+            items_sorted = sorted(items, key=lambda it: it[1].bbox[1])
+            if len(items_sorted) >= 2:
+                last = items_sorted[-1]
+                anchor_y1 = items_sorted[-2][1].bbox[3]
+            elif len(items_sorted) == 1 and row_col0:
+                last = items_sorted[0]
+                if last[1].page_num != next_page:
+                    continue
+                anchor_y1 = max(b.bbox[3] for b in row_col0)
+            else:
+                continue
+            gap_prev = last[1].bbox[1] - anchor_y1
+            gap_next = next_y - last[1].bbox[1]
+            if gap_next >= 0 and gap_prev > gap_next:
+                move.append(last)
+        for item in move:
+            row.remove(item)
+        for item in sorted(move, key=lambda it: it[1].bbox[1], reverse=True):
+            nxt.insert(0, item)
+
+
+def _ink_top(cell: list) -> float | None:
+    """Top y of the first span that carries text."""
+    tops = [s.bbox[1] for s in cell if s.text.strip() and s.bbox]
+    return min(tops) if tops else None
 
 
 _HORIZONTAL_ROW_Y_TOLERANCE = 3.0
@@ -3791,7 +3922,7 @@ def _classify_table(signals: dict) -> TableKind:
 
     # WG21 spec tables: 3-column requirement tables with known header
     # pattern (expression/return type/assertion).  Checked before the
-    # prose-word fallback so they get html_table rendering regardless
+    # prose-word fallback so they render as pipe tables regardless
     # of cell length.
     if signals.get("header_matches_spec"):
         return TableKind.SPEC_TABLE
@@ -3829,7 +3960,7 @@ def _merge_code_rows(rows: list[list[list]]) -> list[list[list]]:
     When Pass 2 detects a side-by-side code table, MuPDF may deliver
     each code line as a separate block, producing many single-line rows.
     This merges them into one data row with newline-joined cells so the
-    HTML renderer produces proper ``<pre>`` blocks.
+    fence-group renderer can keep each cell as one cpp fence.
 
     Only merges rows where every non-empty cell is monospace and
     contains no existing newlines (already multi-line cells stay as-is).
@@ -3884,10 +4015,10 @@ def _has_multiline_code_cell(rows: list[list[list]]) -> bool:
     """True when some cell holds monospace text broken across lines.
 
     A pipe cell cannot contain a line break, but not every break needs one.
-    In code the break is semantic and must survive, so the table has to
-    render as HTML. In prose it is only where the PDF soft-wrapped the cell,
-    and flattening back to one line loses nothing. Monospace is what tells
-    the two apart.
+    In code the break is semantic and must survive, so the table renders
+    as a labeled fence group. In prose it is only where the PDF
+    soft-wrapped the cell, and flattening back to one line loses nothing.
+    Monospace is what tells the two apart.
     """
     for row in rows:
         for cell_spans in row:
@@ -3910,11 +4041,11 @@ def _classify_and_annotate(
     if kind == TableKind.CODE_COMPARISON:
         rows = _merge_code_rows(rows)
 
-    # Pipe tables cannot represent multi-line cell content. Force HTML
-    # rendering when a break is load-bearing; soft-wrapped prose is
-    # flattened by the emitter instead.
+    # Pipe tables cannot represent multi-line cell content. A load-bearing
+    # break (monospace) selects the labeled fence group. Soft-wrapped
+    # prose is flattened by the emitter instead.
     if strategy == TableStrategy.PIPE_TABLE and _has_multiline_code_cell(rows):
-        strategy = TableStrategy.HTML_TABLE
+        strategy = TableStrategy.CODE_BLOCKS
 
     return kind.value, strategy.value, rows
 
@@ -5115,14 +5246,18 @@ def _detect_spec_tables_by_label(
         kind_val, strategy_val, logical_rows = _classify_and_annotate(
             logical_rows)
         # Override: these are known spec tables regardless of signal heuristics.
+        # Prose stays a pipe table. Multi-line monospace is a fence group.
         if kind_val == "false_positive":
             kind_val = TableKind.SPEC_TABLE.value
-            strategy_val = TableStrategy.HTML_TABLE.value
+            if _has_multiline_code_cell(logical_rows):
+                strategy_val = TableStrategy.CODE_BLOCKS.value
+            else:
+                strategy_val = TableStrategy.PIPE_TABLE.value
 
         # Collect consumed block indices and lines.  The label block
         # (first in collected) is NOT consumed: it stays in remaining
         # blocks so the structure phase emits it as a paragraph caption
-        # above the table HTML.
+        # above the table.
         consumed_indices: set[int] = set()
         all_lines = []
         for ci_idx, (gi, cb) in enumerate(collected):
@@ -6420,15 +6555,35 @@ def detect_tables(
             # Pass B: merge forward-orphans (single populated first
             # cell) into the following row.  This handles wrapped cell
             # first lines absorbed by the existing orphan-lookahead.
+            # A label-column grid already has one row per label. An
+            # empty right-hand cell is a real row (P1000R8 2027.1),
+            # not an orphan to glue onto the next label.
             merged: list[list[list]] = []
             k = 0
             while k < len(rows):
                 row = rows[k]
-                if (k + 1 < len(rows)
-                        and bool(row[0])
-                        and all(not cell for cell in row[1:])
+                orphan = (bool(row[0])
+                          and all(not cell for cell in row[1:]))
+                if (orphan and k + 1 < len(rows)
                         and bool(rows[k + 1][0])):
                     sep = [Span(text="\n")]
+                    prev = merged[-1] if merged and merged[-1][0] else None
+                    oy = _ink_top(row[0])
+                    prev_gap = None
+                    if prev is not None and oy is not None:
+                        py = _ink_top(prev[0])
+                        if py is not None:
+                            prev_gap = oy - py
+                    ny = _ink_top(rows[k + 1][0])
+                    next_gap = (ny - oy) if oy is not None and ny is not None else None
+                    # A wrapped label line belongs to the nearer row.
+                    # Forward was gluing the tail of the previous label
+                    # onto the next one (P4036R0 "members").
+                    if (prev is not None and prev_gap is not None
+                            and (next_gap is None or prev_gap <= next_gap)):
+                        prev[0] = prev[0] + sep + row[0]
+                        k += 1
+                        continue
                     merged.append(
                         [row[0] + sep + rows[k + 1][0]]
                         + rows[k + 1][1:])
@@ -6544,10 +6699,30 @@ def detect_tables(
                             # taller than what Pass 1 detected, MuPDF has
                             # merged prose with the real table. Keep the
                             # Pass 1 detection.
+                            # Exception: a rowspan grid Pass 1 only partly
+                            # claimed (P1000R8: the last two date rows are
+                            # columnar, the rows above jump back to column
+                            # 0 inside one block). The extra height is the
+                            # rest of the grid, so Pass 5 owns it.
                             mupdf_h = tb[3] - tb[1]
                             p1_h = max(ry1 - ry0, 1.0)
                             if mupdf_h > p1_h * 3.0:
-                                continue
+                                page_cov = tbl.get("page_coverage", 0.0)
+                                max_ch = tbl.get("max_cell_h", 0.0)
+                                phantom = (
+                                    page_cov > _MUPDF_TABLE_MAX_PAGE_COVERAGE
+                                    and max_ch / mupdf_h
+                                    > _MUPDF_TABLE_MAX_CELL_FRACTION)
+                                partial_rowspan = (
+                                    _pass1_region_incomplete(
+                                        tb, p1_page, table_blocks, blocks)
+                                    and tbl.get("row_count", 0)
+                                    > len(table_blocks)
+                                    and tbl.get("col_count") == num_cols
+                                    and _find_tables_has_rowspan(tbl)
+                                    and not phantom)
+                                if not partial_rowspan:
+                                    continue
                         if ov_x > 0 and ov_y > 0:
                             p1_area = max(
                                 (rx1 - rx0) * (ry1 - ry0), 1)
@@ -6638,7 +6813,7 @@ def detect_tables(
     # all side-by-side tables (pre-pass + regular pass) sorted by page.
     sbs_all = [s for s in table_sections
                if s.table_kind == "clean_matrix"
-               and s.table_strategy == "html_table"]
+               and s.table_strategy == "code_blocks"]
     sbs_all.sort(key=lambda s: s.page_num)
     for k in range(len(sbs_all) - 1):
         t1 = sbs_all[k]

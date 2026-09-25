@@ -1,0 +1,2 @@
+# Page 5 of P4036R0 only. The Boost.Asio capability table is 5x3.
+# The labels members and reallocation stay on their own rows.

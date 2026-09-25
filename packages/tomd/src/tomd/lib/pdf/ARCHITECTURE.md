@@ -330,6 +330,7 @@ Enums:
 **T34. Table rendering**
 - `emit.py:_render_table`
 - GitHub-style Markdown pipe tables. First row = header with bold suppressed.
+- A cell with more than one line of code renders as a labeled fence group: a bold row label, then one italic column header and a cpp fence or a plain paragraph per column. Never a raw HTML table.
 
 **T35. Uncertain region marking**
 - `emit.py:emit_markdown`

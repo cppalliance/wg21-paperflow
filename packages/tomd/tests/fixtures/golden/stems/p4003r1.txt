@@ -1,0 +1,2 @@
+# PDF pages 49-50 of P4003R1 only. The Prediction Registry is a 5x4
+# table and a 3x4 continuation. The repeated header is not a data row.

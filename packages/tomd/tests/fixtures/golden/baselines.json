@@ -24,12 +24,12 @@
     "text": 0.66
   },
   "p0957r8": {
-    "code": 0.82,
+    "code": 0.9,
     "frontmatter": 1.0,
     "heading": 0.97,
     "list": 1.0,
-    "table": 0.67,
-    "text": 0.86
+    "table": 1.0,
+    "text": 0.89
   },
   "p1068r11": {
     "code": 0.7,

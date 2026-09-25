@@ -381,38 +381,36 @@ def test_emit_table():
     assert "Cell 1" in md
 
 
-def test_emit_code_comparison_html_table():
-    """A CODE_COMPARISON table renders via the shared comparison markup:
-    the mixed-table marker, <th> headers, and <pre><code> code cells. This is
-    byte-identical to what the HTML converter emits (see lib/tables.py)."""
+def test_emit_code_comparison_emoji_stays_in_fence():
+    """A non-monospace emoji inside a code cell does not flatten the cell
+    into a bold paragraph (P4216R0, third Before cell)."""
     from tomd.lib.pdf.types import Section
     sec = Section(
         kind=SectionKind.TABLE,
         text="",
-        table_strategy="html_table",
+        table_strategy="code_blocks",
         table_kind="code_comparison",
         columns=[
-            [[make_span("Before")], [make_span("After")]],
-            [[make_span("int verbose();")], [make_span("int proposed();")]],
+            [[make_span("Before")], [make_span("Proposed")]],
+            [[make_span("lexicographical_compare_three_way(", monospace=True),
+              make_span("😬", monospace=False),
+              make_span(");", monospace=True)],
+             [make_span("p0 <=> p1;", monospace=True)]],
         ],
     )
     md = emit_markdown({}, [sec])
-    assert "<!-- tomd:mixed-table -->" in md
-    assert ">Before</th>" in md
-    assert ">After</th>" in md
-    assert '<pre style="margin: 0;"><code>int verbose();</code></pre>' in md
-    assert '<pre style="margin: 0;"><code>int proposed();</code></pre>' in md
+    assert "```cpp\nlexicographical_compare_three_way(😬);\n```" in md
+    assert "**lexicographical" not in md
 
 
-def test_emit_spec_table_html_no_mixed_marker():
-    """Other html_table kinds (here SPEC_TABLE) render as an HTML table with
-    the shared <pre><code> cells but carry no mixed-table marker: only code
-    comparisons are marked, matching the HTML side."""
+def test_emit_spec_table_is_pipe_table():
+    """A spec table renders as a pipe table, with no mixed-table marker
+    and no HTML table markup."""
     from tomd.lib.pdf.types import Section
     sec = Section(
         kind=SectionKind.TABLE,
         text="",
-        table_strategy="html_table",
+        table_strategy="pipe_table",
         table_kind="spec_table",
         columns=[
             [[make_span("Expression")], [make_span("Return type")]],
@@ -421,8 +419,76 @@ def test_emit_spec_table_html_no_mixed_marker():
     )
     md = emit_markdown({}, [sec])
     assert "<!-- tomd:mixed-table -->" not in md
-    assert "<table" in md
-    assert '<pre style="margin: 0;"><code>' in md
+    assert "<table" not in md
+    assert "<pre" not in md
+    assert "| Expression | Return type |" in md
+    assert "| a.foo() | int |" in md
+
+
+def test_pdf_emitter_tables_are_markdown():
+    """A code comparison and a spec table from the PDF emitter contain
+    no table tag, no escaped angle bracket, and no pre tag. The code
+    comparison carries a cpp fence with a real ``<``."""
+    from tomd.lib.pdf.types import Section
+    code = [
+        make_span("template <class T>", monospace=True),
+        make_span("\n"),
+        make_span("  void f();", monospace=True),
+    ]
+    comparison = Section(
+        kind=SectionKind.TABLE,
+        text="",
+        table_strategy="code_blocks",
+        table_kind="code_comparison",
+        columns=[
+            [[make_span("Concept")], [make_span('The "proxy"')]],
+            [[make_span("Abstraction")], code],
+        ],
+    )
+    spec = Section(
+        kind=SectionKind.TABLE,
+        text="",
+        table_strategy="pipe_table",
+        table_kind="spec_table",
+        columns=[
+            [[make_span("Expression")], [make_span("Return type")]],
+            [[make_span("a < b")], [make_span("bool")]],
+        ],
+    )
+    comparison_md = emit_markdown({}, [comparison])
+    spec_md = emit_markdown({}, [spec])
+    for md in (comparison_md, spec_md):
+        assert "<table" not in md
+        assert "&lt;" not in md
+        assert "<pre" not in md
+    assert "**Abstraction**" in comparison_md
+    assert '*The "proxy"*' in comparison_md
+    assert "```cpp\ntemplate <class T>\n  void f();\n```" in comparison_md
+    assert "| a < b | bool |" in spec_md
+
+
+def test_emit_nb_ballot_repeats_blank_col0():
+    """An empty NB-ballot col-0 repeats the previous number, and a
+    wrapped cell collapses to one line."""
+    from tomd.lib.pdf.types import Section
+    sec = Section(
+        kind=SectionKind.TABLE,
+        text="",
+        table_strategy="pipe_table",
+        table_kind="nb_ballot",
+        columns=[
+            [[make_span("NB number")], [make_span("Comment")]],
+            [[make_span("[ES-047]")],
+             [make_span("First line"), make_span("\n"), make_span("continued")]],
+            [[], [make_span("Follow-up")]],
+        ],
+    )
+    md = emit_markdown({}, [sec])
+    assert "<table" not in md
+    assert "&lt;" not in md
+    data = [line for line in md.splitlines() if line.startswith("| [ES-047]")]
+    assert len(data) == 2
+    assert "First line continued" in md
 
 
 def test_emit_wording_section():

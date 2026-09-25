@@ -757,6 +757,62 @@ class TestDrawingGridConsumers:
         assert len(tables) == 1
         assert len(tables[0].columns[0]) == 3  # labels became the header
 
+    def test_pass5_owns_rowspan_grid_pass1_only_partly_claimed(self):
+        # The upper block's lines return to column 0, so Pass 1 cannot
+        # extend past its seed and would keep only the last two rows.
+        # find_tables() already has the rowspan. Pass 5 must emit every
+        # label row, and must not turn the labels into a header.
+        # Three lines, and the last returns to column 0, so this is
+        # not an inline grid (that pass wants 4+ lines) and not a
+        # Pass 1 row.
+        jump = _bbox_block([
+            _line("A", 55.0, 108.0, 80.0, 117.0),
+            _line("span a", 160.0, 108.0, 300.0, 117.0),
+            _line("B", 55.0, 148.0, 80.0, 157.0),
+        ])
+        span_b = _bbox_block([
+            _line("span b", 160.0, 148.0, 300.0, 157.0),
+        ])
+        row_c = _bbox_block([
+            _line("C", 55.0, 188.0, 80.0, 197.0),
+            _line("c-val", 160.0, 188.0, 300.0, 197.0),
+        ])
+        row_d = _bbox_block([
+            _line("D", 55.0, 228.0, 80.0, 237.0),
+            _line("d-val", 160.0, 228.0, 300.0, 237.0),
+        ])
+        cells = [
+            (50.0, 100.0, 150.0, 140.0), (150.0, 100.0, 400.0, 180.0),
+            (50.0, 140.0, 150.0, 180.0),
+            (50.0, 180.0, 150.0, 220.0), (150.0, 180.0, 400.0, 220.0),
+            (50.0, 220.0, 150.0, 260.0), (150.0, 220.0, 400.0, 260.0),
+        ]
+        grid = {
+            "bbox": (50.0, 100.0, 400.0, 260.0),
+            "row_count": 4,
+            "col_count": 2,
+            "cells": cells,
+            "header_names": None,
+            "extract": [],
+            "rot": None,
+            "max_cell_h": 80.0,
+            "tbl_h": 160.0,
+            "page_coverage": 0.2,
+        }
+        tables, remaining = detect_tables(
+            [jump, span_b, row_c, row_d], page_mupdf_tables={0: [grid]})
+        assert remaining == []
+        assert len(tables) == 1
+        assert tables[0].table_source is None
+        texts = [["".join(s.text for s in cell).strip() for cell in row]
+                 for row in tables[0].columns]
+        assert texts == [
+            ["A", "span a\nspan b"],
+            ["B", ""],
+            ["C", "c-val"],
+            ["D", "d-val"],
+        ]
+
 
 # 90-degree rotation matrix of a 595x842 portrait page (P3100R6 appendix
 # geometry): maps unrotated page space into reading space via
@@ -2160,6 +2216,72 @@ class TestHeaderGridPrepass:
         assert sections[0].table_source == "side_by_side_prepass"
         assert [b.lines[0].spans[0].text for b in remaining] == [
             "2.3 Networking Dependency (2018-2021)"]
+
+
+class TestSbsRepeatedHeaderRehome:
+    """Continuation page repeats a fused header, and the next row's first
+    line sits above its label. The repeat is not a data row, the early
+    line moves onto the label, and a row label just under the cross-page
+    y cap is still scanned (P4003R1 Prediction Registry, pages 48-49)."""
+
+    def test_cross_page_header_repeat_rehomes_early_line(self):
+        c0, c1, c2, c3 = 67.0, 93.8, 295.7, 494.6
+        H = 9.2
+
+        def hdr(page, y):
+            return _geo_block(
+                page,
+                ("#", c0, y, 73.8, y + H),
+                ("Prediction", c1, y, 134.2, y + H),
+                ("Criterion", c2, y, 330.1, y + H),
+                ("Revisit", c3, y, 520.7, y + H),
+            )
+
+        def cell(page, text, x, y, x1):
+            return _geo_block(page, (text, x, y, x1, y + H))
+
+        blocks = [
+            hdr(0, 640.0),
+            cell(0, "1", c0, 670.0, 76.0),
+            cell(0, "pred one", c1, 670.0, 180.0),
+            cell(0, "crit one", c2, 670.0, 400.0),
+            cell(0, "+2 years", c3, 670.0, 530.0),
+            cell(0, "2", c0, 710.0, 76.0),
+            cell(0, "pred two", c1, 710.0, 180.0),
+            cell(0, "crit two", c2, 710.0, 400.0),
+            cell(0, "+3 years", c3, 710.0, 530.0),
+            hdr(1, 66.3),
+            cell(1, "early criterion", c2, 93.3, 470.0),
+            cell(1, "pred five a", c1, 102.3, 260.0),
+            cell(1, "5", c0, 110.6, 76.0),
+            cell(1, "crit five b", c2, 110.6, 450.0),
+            cell(1, "+5 years", c3, 110.6, 530.0),
+            cell(1, "pred five b", c1, 118.7, 240.0),
+            cell(1, "crit five c", c2, 127.8, 360.0),
+            cell(1, "pred six a", c1, 155.6, 270.0),
+            cell(1, "crit six a", c2, 155.6, 450.0),
+            cell(1, "6", c0, 163.8, 76.0),
+            cell(1, "+5 years", c3, 163.8, 530.0),
+            cell(1, "pred six b", c1, 172.0, 200.0),
+            cell(1, "crit six b", c2, 172.1, 430.0),
+            cell(1, "10. Suggested Straw Polls", 57.0, 254.6, 200.0),
+        ]
+        sections, _used = _detect_side_by_side_tables(
+            blocks, atomized_only=True)
+        assert len(sections) == 1
+        rows = [[_cell_text(c) for c in row] for row in sections[0].columns]
+        assert rows[0] == ["#", "Prediction", "Criterion", "Revisit"]
+        assert rows[1:] == [
+            ["1", "pred one", "crit one", "+2 years"],
+            ["2", "pred two", "crit two", "+3 years"],
+            ["5", "pred five a pred five b",
+             "early criterion crit five b crit five c", "+5 years"],
+            ["6", "pred six a pred six b",
+             "crit six a crit six b", "+5 years"],
+        ]
+        flat = " ".join(c for row in rows for c in row)
+        assert "Suggested Straw Polls" not in flat
+        assert sum(1 for row in rows if row[0] == "#") == 1
 
 
 def _citation_comparison_blocks(

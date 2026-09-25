@@ -1,0 +1,3 @@
+# Page 1 of P1000R8 only. The IS schedule is 9 rows by 2 columns
+# (2026.2 Brno through 2029.1). Empty 2027.1 and 2027.2 cells continue
+# the 2026.3 rowspan.
