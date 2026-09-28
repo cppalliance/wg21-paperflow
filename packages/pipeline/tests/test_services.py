@@ -94,6 +94,65 @@ def test_load_services_no_auth_styles_pass_empty_string(tmp_path, body):
     assert registry.api_key_envs["s1"] == ""
 
 
+def test_load_services_expands_env_vars_for_config_fields(tmp_path, monkeypatch):
+    monkeypatch.setenv("TEST_BASE_URL", "https://proxy.example.com/v1")
+    monkeypatch.setenv("TEST_MODEL", "custom-llm-v1")
+    monkeypatch.setenv("TEST_MAX_CTX", "262144")
+    monkeypatch.setenv("TEST_KEY", "secret-token")
+    p = _write_services_toml(tmp_path, """
+[services.s1]
+backend = "vllm_thinking"
+base_url = "$TEST_BASE_URL"
+api_key = "$TEST_KEY"
+model = "$TEST_MODEL"
+max_context_window = "$TEST_MAX_CTX"
+chars_per_token = 3.5
+""")
+    registry = load_services(p)
+    svc = registry.services["s1"]
+    assert svc._base_url == "https://proxy.example.com/v1"
+    assert svc._model == "custom-llm-v1"
+    assert svc._max_context_window == 262144
+    assert isinstance(svc._max_context_window, int)
+    assert svc._api_key == "secret-token"
+    assert registry.api_key_envs["s1"] == "TEST_KEY"
+
+
+def test_load_services_coerces_string_int_for_max_context_window(tmp_path):
+    p = _write_services_toml(tmp_path, """
+[services.s1]
+backend = "vllm_thinking"
+base_url = "https://example.com/v1"
+api_key = "test"
+model = "m1"
+max_context_window = "393216"
+""")
+    registry = load_services(p)
+    svc = registry.services["s1"]
+    assert svc._max_context_window == 393216
+    assert isinstance(svc._max_context_window, int)
+
+
+def test_load_services_env_var_defaults_when_unset(tmp_path, monkeypatch):
+    monkeypatch.delenv("UNSET_BASE_URL", raising=False)
+    monkeypatch.delenv("UNSET_MODEL", raising=False)
+    monkeypatch.delenv("UNSET_MAX_CTX", raising=False)
+    p = _write_services_toml(tmp_path, """
+[services.s1]
+backend = "vllm_thinking"
+base_url = "$UNSET_BASE_URL"
+api_key = "test"
+model = "$UNSET_MODEL"
+max_context_window = "$UNSET_MAX_CTX"
+""")
+    registry = load_services(p)
+    svc = registry.services["s1"]
+    assert svc._base_url == ""
+    assert svc._model == ""
+    assert svc._max_context_window == 131072
+    assert isinstance(svc._max_context_window, int)
+
+
 def test_load_services_required_api_key_env_mismatch_raises(tmp_path):
     p = _write_services_toml(tmp_path, """
 [services.s1]
