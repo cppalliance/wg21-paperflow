@@ -19,6 +19,8 @@ from fixtures.sample_documents import (
 )
 from tomd.lib.pdf.types import Block, Confidence, Line, Section, SectionKind, Span
 
+_SAMPLE_MD_DIR = _TESTS_DIR / "fixtures" / "markdown" / "sample_documents"
+
 
 def make_span(text, font_size=10.0, bold=False, italic=False,
               monospace=False, font_name="TestFont", **kwargs):
@@ -46,6 +48,15 @@ def make_section(text, kind=SectionKind.PARAGRAPH, page_num=0,
     return Section(kind=kind, text=text, confidence=confidence,
                    heading_level=heading_level, lines=lines,
                    page_num=page_num, font_size=font_size, **kwargs)
+
+
+@pytest.fixture
+def sample_markdown():
+    """Load an authentic Markdown sample fixture as a string."""
+    def _loader(name: str) -> str:
+        md_file = _SAMPLE_MD_DIR / f"{name}.md"
+        return md_file.read_text(encoding="utf-8")
+    return _loader
 
 
 @pytest.fixture
