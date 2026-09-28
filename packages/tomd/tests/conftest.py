@@ -1,6 +1,23 @@
 """Shared test fixtures for tomd."""
 
-from tomd.lib.pdf.types import Span, Line, Block, Section, SectionKind, Confidence
+import sys
+from pathlib import Path
+
+_TESTS_DIR = Path(__file__).resolve().parent
+if str(_TESTS_DIR) not in sys.path:
+    sys.path.insert(0, str(_TESTS_DIR))
+
+import pytest
+
+from fixtures.sample_documents import (
+    sample_abstract_prose_document,
+    sample_full_proposal_document,
+    sample_poll_table_document,
+    sample_rich_blocks_document,
+    sample_tony_table_document,
+    sample_wording_diff_document,
+)
+from tomd.lib.pdf.types import Block, Confidence, Line, Section, SectionKind, Span
 
 
 def make_span(text, font_size=10.0, bold=False, italic=False,
@@ -29,3 +46,33 @@ def make_section(text, kind=SectionKind.PARAGRAPH, page_num=0,
     return Section(kind=kind, text=text, confidence=confidence,
                    heading_level=heading_level, lines=lines,
                    page_num=page_num, font_size=font_size, **kwargs)
+
+
+@pytest.fixture
+def sample_abstract_doc():
+    return sample_abstract_prose_document()
+
+
+@pytest.fixture
+def sample_tony_table_doc():
+    return sample_tony_table_document()
+
+
+@pytest.fixture
+def sample_wording_diff_doc():
+    return sample_wording_diff_document()
+
+
+@pytest.fixture
+def sample_poll_table_doc():
+    return sample_poll_table_document()
+
+
+@pytest.fixture
+def sample_rich_blocks_doc():
+    return sample_rich_blocks_document()
+
+
+@pytest.fixture
+def sample_full_proposal_doc():
+    return sample_full_proposal_document()
