@@ -127,10 +127,10 @@ def _expand_env_str(val: Any, default: str = "") -> str:
     return val
 
 
-def _expand_env_int(val: Any, default: int = 131072) -> int:
+def _expand_env_int(val: Any, default: int = 0) -> int:
     """Expand $ENV_VAR reference or coerce string integer to int."""
-    if isinstance(val, int) and not isinstance(val, bool):
-        return val
+    if isinstance(val, (int, float)) and not isinstance(val, bool):
+        return int(val)
     if isinstance(val, str):
         if val.startswith("$"):
             val = os.environ.get(val[1:], "")
@@ -244,7 +244,9 @@ def load_services(path: Path | None = None) -> ServiceRegistry:
             "base_url": _expand_env_str(svc.get("base_url", "")),
             "api_key": api_key,
             "model": _expand_env_str(svc.get("model", "")),
-            "max_context_window": _expand_env_int(svc.get("max_context_window", 131072)),
+            "max_context_window": _expand_env_int(
+                svc.get("max_context_window", 393216), default=393216
+            ),
             "chars_per_token": _expand_env_float(svc.get("chars_per_token", 0.0)),
             "token_multiplier": _expand_env_float(svc.get("token_multiplier", 0.0)),
         }

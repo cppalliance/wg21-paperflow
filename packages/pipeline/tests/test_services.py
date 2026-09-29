@@ -35,6 +35,9 @@ from pipeline.errors import ServiceConfigError
 from pipeline.model_backends import BACKEND_REGISTRY, ModelBackend
 from pipeline.services import (
     ServiceRegistry,
+    _expand_env_float,
+    _expand_env_int,
+    _expand_env_str,
     _instantiate_classifier,
     load_services,
     resolve_classifiers,
@@ -125,7 +128,21 @@ backend = "vllm_thinking"
 base_url = "https://example.com/v1"
 api_key = "test"
 model = "m1"
-max_context_window = "393216"
+max_context_window = "524288"
+""")
+    registry = load_services(p)
+    svc = registry.services["s1"]
+    assert svc._max_context_window == 524288
+    assert isinstance(svc._max_context_window, int)
+
+
+def test_load_services_omitted_max_context_window_defaults_to_393216(tmp_path):
+    p = _write_services_toml(tmp_path, """
+[services.s1]
+backend = "vllm_thinking"
+base_url = "https://example.com/v1"
+api_key = "test"
+model = "m1"
 """)
     registry = load_services(p)
     svc = registry.services["s1"]
@@ -149,8 +166,59 @@ max_context_window = "$UNSET_MAX_CTX"
     svc = registry.services["s1"]
     assert svc._base_url == ""
     assert svc._model == ""
-    assert svc._max_context_window == 131072
+    assert svc._max_context_window == 393216
     assert isinstance(svc._max_context_window, int)
+
+
+def test_expand_env_str(monkeypatch):
+    assert _expand_env_str("simple") == "simple"
+    assert _expand_env_str(None) == ""
+    assert _expand_env_str(None, default="fallback") == "fallback"
+    assert _expand_env_str(123) == "123"
+
+    monkeypatch.setenv("TEST_EXPAND_STR", "expanded_val")
+    assert _expand_env_str("$TEST_EXPAND_STR") == "expanded_val"
+
+    monkeypatch.delenv("TEST_UNSET_STR", raising=False)
+    assert _expand_env_str("$TEST_UNSET_STR") == ""
+    assert _expand_env_str("$TEST_UNSET_STR", default="fallback") == "fallback"
+
+
+def test_expand_env_int(monkeypatch):
+    assert _expand_env_int(42) == 42
+    assert _expand_env_int(42.9) == 42
+    assert _expand_env_int("42") == 42
+    assert _expand_env_int("  42  ") == 42
+    assert _expand_env_int(None) == 0
+    assert _expand_env_int(None, default=393216) == 393216
+    assert _expand_env_int(True) == 0
+    assert _expand_env_int(False, default=10) == 10
+    assert _expand_env_int("not_an_int", default=393216) == 393216
+
+    monkeypatch.setenv("TEST_EXPAND_INT", "1000")
+    assert _expand_env_int("$TEST_EXPAND_INT") == 1000
+
+    monkeypatch.delenv("TEST_UNSET_INT", raising=False)
+    assert _expand_env_int("$TEST_UNSET_INT") == 0
+    assert _expand_env_int("$TEST_UNSET_INT", default=393216) == 393216
+
+
+def test_expand_env_float(monkeypatch):
+    assert _expand_env_float(3.14) == 3.14
+    assert _expand_env_float(42) == 42.0
+    assert _expand_env_float("3.14") == 3.14
+    assert _expand_env_float("  3.14  ") == 3.14
+    assert _expand_env_float(None) == 0.0
+    assert _expand_env_float(None, default=1.5) == 1.5
+    assert _expand_env_float(True) == 0.0
+    assert _expand_env_float("not_a_float", default=1.5) == 1.5
+
+    monkeypatch.setenv("TEST_EXPAND_FLOAT", "2.718")
+    assert _expand_env_float("$TEST_EXPAND_FLOAT") == 2.718
+
+    monkeypatch.delenv("TEST_UNSET_FLOAT", raising=False)
+    assert _expand_env_float("$TEST_UNSET_FLOAT") == 0.0
+    assert _expand_env_float("$TEST_UNSET_FLOAT", default=1.5) == 1.5
 
 
 def test_load_services_required_api_key_env_mismatch_raises(tmp_path):
