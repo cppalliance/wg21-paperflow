@@ -2,32 +2,35 @@
 //!
 //! `main` owns the process boundary (argument parsing, signal installation,
 //! exit status). This module owns everything between: it validates the gateway
-//! environment, resolves the prompt source (the embedded vendored prompt by
-//! default, `--prompt` from disk otherwise), loads the paper markdown (from
-//! the SQLite paper store for a paper number, verbatim from disk for
-//! `--file`), seeds a fresh per-run store with the paper under the prompt's
-//! declared `paper.md` input key, runs the prompt against the live model
-//! catalog, and extracts the prompt's declared `report.md` output to
-//! `--output`, or to stdout when no path is given.
+//! environment and model selection, resolves the prompt source (the embedded
+//! vendored prompt by default, `--prompt` from disk otherwise), loads the paper
+//! markdown (from the SQLite paper store for a paper number, verbatim from
+//! disk for `--file`), and runs the prompt as a harness session. The harness
+//! stages the paper at the prompt's declared `paper.md` input and hands back
+//! its declared `report.md` output, which is written to `--output`, or to
+//! stdout when no path is given.
 
+use std::fmt;
+use std::io::{self, Write as _};
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 
 use anyhow::{Context, Result, bail};
 use clap::Parser;
+use harness::cancel::CancelHandle;
+use harness::{
+    CatalogBinding, FailureKind, GatewayBinding, Harness, HarnessConfig, HostSnapshot,
+    LaunchRequest, OutputError, Session, SessionEvent, SessionState,
+};
 use paperstore::{PaperNum, StorageBackend};
 use paperstore_sqlite::SqliteBackend;
-use promptforge_core::CancelHandle;
-use promptforge_core::execute::{self, ResolutionContext, RunConfig};
-use promptforge_core::model::fetch_model_catalog;
-use promptforge_core::observe::{Observation, Observer};
-use promptforge_core::parser::Prompt;
-use promptforge_core::store::{FileStore, StoreError, StoreRef};
-use promptforge_core::tools::ToolCatalog;
-use promptforge_tool_picker::{Catalog, Config as PickerConfig, ToolPicker};
+use tokio::sync::broadcast::error::RecvError;
 
 /// The embedded papergate prompt, vendored from the promptforge prompts.
 const DEFAULT_PROMPT: &str = include_str!("../papergate.md");
+
+/// The agent name the prompt is launched under: the stem of the file the
+/// harness discovers in its agents directory.
+const AGENT: &str = "papergate";
 
 /// The `papergate` command-line interface.
 #[derive(Debug, Parser)]
@@ -49,6 +52,9 @@ pub(crate) struct Cli {
     /// Read the prompt from PATH instead of the embedded papergate prompt.
     #[arg(long, value_name = "PATH")]
     pub(crate) prompt: Option<PathBuf>,
+    /// The gateway model id the prompt's model roles bind to.
+    #[arg(long, value_name = "ID", env = "PAPERGATE_MODEL")]
+    pub(crate) model: Option<String>,
 }
 
 impl Cli {
@@ -85,6 +91,8 @@ pub(crate) struct RunRequest<'a> {
     pub(crate) output: Option<&'a Path>,
     /// An optional prompt file overriding the embedded default.
     pub(crate) prompt: Option<&'a Path>,
+    /// The gateway model id to bind; required, as the harness picks none.
+    pub(crate) model: Option<&'a str>,
     /// The cooperative cancellation handle wired to Ctrl-C.
     pub(crate) cancel: CancelHandle,
 }
@@ -96,32 +104,42 @@ impl std::fmt::Debug for RunRequest<'_> {
             .field("input", &self.input)
             .field("output", &self.output)
             .field("prompt", &self.prompt)
+            .field("model", &self.model)
             .finish_non_exhaustive()
     }
 }
 
+/// The run was closed by Ctrl-C before it completed.
+#[derive(Debug)]
+pub(crate) struct Cancelled;
+
+impl fmt::Display for Cancelled {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("run cancelled")
+    }
+}
+
+impl std::error::Error for Cancelled {}
+
 /// Runs one analysis using the gateway configuration read from the environment.
 ///
 /// # Errors
-/// Returns an error if either gateway variable is unset or blank, the prompt
-/// fails to parse, the paper input cannot be loaded (`WG21_DATA_DIR` unset,
-/// the number missing from the store or without converted markdown, or the
-/// `--file` path unreadable), the model catalog cannot be fetched, execution
-/// fails (including cooperative cancellation), or the prompt did not produce
-/// its declared `report.md` output.
+/// Returns an error if either gateway variable is unset or blank, no model is
+/// selected, the paper input cannot be loaded (`WG21_DATA_DIR` unset, the
+/// number missing from the store or without converted markdown, or the
+/// `--file` path unreadable), the harness refuses the launch, the run fails,
+/// the run is cancelled ([`Cancelled`]), or the prompt did not produce its
+/// declared `report.md` output.
 pub(crate) async fn run(request: RunRequest<'_>) -> Result<()> {
     let RunRequest {
         input,
         output,
         prompt,
+        model,
         cancel,
     } = request;
-    let (endpoint, token) = gateway_from_env()?;
-    let execution = format!(
-        "papergate-{:016x}{:016x}",
-        fastrand::u64(..),
-        fastrand::u64(..)
-    );
+    let (base_url, key) = gateway_from_env()?;
+    let model = selected_model(model)?;
 
     let source = match prompt {
         Some(path) => tokio::fs::read_to_string(path)
@@ -129,52 +147,156 @@ pub(crate) async fn run(request: RunRequest<'_>) -> Result<()> {
             .with_context(|| format!("read prompt file {}", path.display()))?,
         None => DEFAULT_PROMPT.to_owned(),
     };
-    let observer: Arc<dyn Observer> = Arc::new(StderrObserver);
-    let parsed = Prompt::parse(&source, &execution, observer.as_ref())
-        .context("parse the papergate prompt")?;
-
-    // Load before the catalog fetch: a store miss or an unreadable file
-    // fails fast, before any network call.
+    // Load before the launch: a store miss or an unreadable file fails fast,
+    // before any network call.
     let paper_md = load_input_markdown(input).await?;
 
-    let models = fetch_model_catalog(&endpoint, &token)
+    // Removed when `work` drops, whether or not the run succeeds.
+    let work = tempfile::Builder::new()
+        .prefix("papergate-")
+        .tempdir()
+        .context("create the run's scratch directory")?;
+    let agents_path = work.path().join("agents");
+    let state_dir = work.path().join("state");
+    for dir in [&agents_path, &state_dir] {
+        tokio::fs::create_dir_all(dir)
+            .await
+            .with_context(|| format!("create directory {}", dir.display()))?;
+    }
+    let prompt_path = agents_path.join(format!("{AGENT}.md"));
+    tokio::fs::write(&prompt_path, &source)
         .await
-        .context("fetch the model catalog")?;
-    // The prompt defines its own tools via `tools.add_local`, so the picker
-    // indexes an empty catalog and the run receives an empty tool slice.
-    let picker = ToolPicker::build(Catalog::new(Vec::new()), PickerConfig::default())
-        .context("build the tool picker")?;
+        .with_context(|| format!("write the prompt to {}", prompt_path.display()))?;
 
-    let output = output.map(Path::to_owned);
-    let written = output.clone();
-    let execution_id = execution.clone();
-    with_temp_store(&execution, move |store| async move {
-        seed_store(&store, &paper_md)?;
-        let config = RunConfig::new(execution_id.as_str())
-            .observer(observer)
-            .cancel(cancel);
-        execute::run(
-            &parsed,
-            "",
-            ResolutionContext::new(&picker, &models, &ToolCatalog::new(&[])?),
-            &store,
-            config,
-        )
-        .await?;
-        let report = read_report(&store)?;
-        match &output {
-            Some(path) => std::fs::write(path, &report)
-                .with_context(|| format!("write the report to {}", path.display()))?,
-            None => write_stdout(report.as_bytes())?,
+    let harness = Harness::new(HarnessConfig {
+        agents_path,
+        state_dir,
+    });
+    harness.set_gateway(GatewayBinding {
+        base_url,
+        key,
+        generation: 1,
+    });
+    harness.set_catalog(CatalogBinding {
+        generation: 1,
+        models: vec![serde_json::json!({ "id": &model })],
+    });
+    harness.set_host(HostSnapshot {
+        selected_model: Some(model),
+        workspace_roots: Vec::new(),
+    });
+
+    let session = harness
+        .launch(LaunchRequest {
+            agent: AGENT.to_owned(),
+            args: String::new(),
+            input_text: Some(paper_md),
+        })
+        .await
+        .context("launch the papergate session")?;
+    let ending = await_closed(&session, &cancel).await;
+
+    let report = match session.output_text() {
+        Ok(report) => report,
+        Err(OutputError::Unfinished) if ending.cancelled => return Err(Cancelled.into()),
+        Err(OutputError::Unfinished) => match ending.failure {
+            Some(message) => bail!("run failed: {message}"),
+            None => bail!("run did not complete"),
+        },
+        Err(error @ OutputError::Missing { .. }) => {
+            return Err(error).context("the prompt did not produce its declared output");
         }
-        Ok(())
-    })
-    .await?;
-
-    if let Some(path) = &written {
-        println!("{}", path.display());
+        Err(error) => return Err(error).context("read the run's declared output"),
+    };
+    match output {
+        Some(path) => {
+            tokio::fs::write(path, &report)
+                .await
+                .with_context(|| format!("write the report to {}", path.display()))?;
+            println!("{}", path.display());
+        }
+        None => write_stdout(report.as_bytes())?,
     }
     Ok(())
+}
+
+/// How a session ended, as papergate observed it.
+#[derive(Debug, Default)]
+struct Ending {
+    /// Ctrl-C requested the close.
+    cancelled: bool,
+    /// The last run-failure report, when the run ended in error.
+    failure: Option<String>,
+}
+
+/// Prints the session's progress to stderr until it reports `Closed`,
+/// closing it for good when `cancel` fires.
+///
+/// A session closes on its own when its run completes or fails, so this
+/// returns without a Ctrl-C too.
+async fn await_closed(session: &Session, cancel: &CancelHandle) -> Ending {
+    let mut events = session.subscribe_events();
+    let mut errors = session.subscribe_errors();
+    let mut state = session.subscribe_state();
+    let mut ending = Ending::default();
+    let mut events_open = true;
+    let mut errors_open = true;
+    loop {
+        if *state.borrow_and_update() == SessionState::Closed {
+            break;
+        }
+        tokio::select! {
+            changed = state.changed() => {
+                if changed.is_err() {
+                    break;
+                }
+            }
+            event = events.recv(), if events_open => match event {
+                Ok(event) => print_progress(&event),
+                Err(RecvError::Lagged(_)) => {}
+                Err(RecvError::Closed) => events_open = false,
+            },
+            failure = errors.recv(), if errors_open => match failure {
+                Ok(failure) if failure.kind == FailureKind::RunFailed => {
+                    ending.failure = Some(failure.message);
+                }
+                Ok(_) | Err(RecvError::Lagged(_)) => {}
+                Err(RecvError::Closed) => errors_open = false,
+            },
+            () = cancel.cancelled(), if !ending.cancelled => {
+                ending.cancelled = true;
+                session.close();
+            }
+        }
+    }
+    // A failure reported alongside the close may still be queued.
+    while let Ok(failure) = errors.try_recv() {
+        if failure.kind == FailureKind::RunFailed {
+            ending.failure = Some(failure.message);
+        }
+    }
+    ending
+}
+
+/// Writes one progress line for a session event to stderr.
+fn print_progress(event: &SessionEvent) {
+    // Progress is a side channel, so a failed write to stderr is
+    // deliberately dropped rather than surfaced.
+    let _ignored = writeln!(
+        io::stderr(),
+        "[{}] {}: {}",
+        event_field(event, "execution"),
+        event_field(event, "section"),
+        event_field(event, "kind"),
+    );
+}
+
+/// Returns the string field `name` of the event's payload, or `-`.
+fn event_field<'a>(event: &'a SessionEvent, name: &str) -> &'a str {
+    let Some(value) = event.event.get(name) else {
+        return "-";
+    };
+    value.as_str().unwrap_or("-")
 }
 
 /// Writes bytes to stdout verbatim, flushing before return.
@@ -182,8 +304,7 @@ pub(crate) async fn run(request: RunRequest<'_>) -> Result<()> {
 /// Verbatim (no added newline) keeps the output pipe-friendly; the explicit
 /// flush guarantees delivery before the process exits.
 fn write_stdout(bytes: &[u8]) -> Result<()> {
-    use std::io::Write as _;
-    let mut stdout = std::io::stdout().lock();
+    let mut stdout = io::stdout().lock();
     stdout
         .write_all(bytes)
         .and_then(|()| stdout.flush())
@@ -217,15 +338,31 @@ fn load_paper_md(backend: &impl StorageBackend, num: &PaperNum) -> paperstore::R
     backend.paper_md(num)
 }
 
+/// Returns the model id the run binds, trimmed.
+///
+/// The harness binds the prompt's roles to the selected model and picks no
+/// default for an unattended client, so a missing selection is a startup
+/// error.
+fn selected_model(model: Option<&str>) -> Result<String> {
+    let model = model.map_or("", str::trim);
+    if model.is_empty() {
+        bail!(
+            "no model selected: pass --model or set PAPERGATE_MODEL to the gateway model id \
+             the prompt should run on"
+        );
+    }
+    Ok(model.to_owned())
+}
+
 /// Reads the gateway environment, requiring both variables.
 ///
-/// The prompt binds its writer model with `models.default("writer", ...)`, so
-/// there is no local-only mode: a missing credential is a startup error naming
-/// both variables rather than a silent downgrade.
+/// The prompt binds its writer model through the gateway, so there is no
+/// local-only mode: a missing credential is a startup error naming both
+/// variables rather than a silent downgrade.
 fn gateway_from_env() -> Result<(String, String)> {
     let endpoint = env_optional("PROMPTFORGE_GATEWAY_URL")?;
     let token = env_optional("PROMPTFORGE_GATEWAY_API_KEY")?;
-    let endpoint = endpoint.map(|value| value.trim().to_owned());
+    let endpoint = endpoint.map(|value| gateway_origin(&value));
     let token = token.map(|value| value.trim().to_owned());
     match (endpoint, token) {
         (Some(endpoint), Some(token)) if !endpoint.is_empty() && !token.is_empty() => {
@@ -236,6 +373,16 @@ fn gateway_from_env() -> Result<(String, String)> {
              the papergate prompt binds its writer model through the gateway"
         ),
     }
+}
+
+/// Returns the gateway origin for `url`: trimmed, without trailing slashes
+/// or a `/v1` suffix, because the harness appends `/v1` itself.
+fn gateway_origin(url: &str) -> String {
+    let url = url.trim().trim_end_matches('/');
+    url.strip_suffix("/v1")
+        .unwrap_or(url)
+        .trim_end_matches('/')
+        .to_owned()
 }
 
 /// Reads an optional environment variable, distinguishing an absent variable
@@ -253,61 +400,6 @@ fn env_optional(name: &str) -> Result<Option<String>> {
     }
 }
 
-/// Runs `f` with a fresh per-run file store under the system temp dir, then
-/// removes the store directory whether the run succeeded or failed.
-///
-/// The store is per-run scratch: the prompt appends `evidence.md` across its
-/// fanout sections, so a reused directory would leak evidence between runs.
-async fn with_temp_store<F, Fut>(execution: &str, f: F) -> Result<()>
-where
-    F: FnOnce(StoreRef) -> Fut,
-    Fut: std::future::Future<Output = Result<()>>,
-{
-    let dir = std::env::temp_dir().join(execution);
-    let backend = FileStore::new(&dir)
-        .with_context(|| format!("create store directory {}", dir.display()))?;
-    let store = StoreRef::new(Box::new(backend));
-    let result = f(store).await;
-    // Best-effort: a cleanup failure must not mask the run's own outcome.
-    let _ignored = std::fs::remove_dir_all(&dir);
-    result
-}
-
-/// Seeds the run store with the paper under the prompt's declared input key.
-fn seed_store(store: &StoreRef, paper_md: &str) -> Result<()> {
-    store
-        .write("paper.md", paper_md)
-        .context("seed the run store with paper.md")
-}
-
-/// Reads the prompt's declared output from the run store.
-///
-/// A missing `report.md` is an explicit error naming the prompt's output
-/// contract, never an empty write.
-fn read_report(store: &StoreRef) -> Result<String> {
-    match store.read("report.md") {
-        Ok(report) => Ok(report),
-        Err(error @ StoreError::NotFound { .. }) => Err(error).context(
-            "the prompt did not produce its declared output: report.md is missing \
-             from the run store",
-        ),
-        Err(error) => Err(error).context("read report.md from the run store"),
-    }
-}
-
-/// An observer that writes one progress line per event to stderr.
-#[derive(Debug)]
-struct StderrObserver;
-
-impl Observer for StderrObserver {
-    fn observe(&self, execution: &str, section: &str, event: Observation) {
-        use std::io::Write as _;
-        // Observers must not panic and progress is a side channel, so a failed
-        // write to stderr is deliberately dropped rather than surfaced.
-        let _ignored = writeln!(std::io::stderr(), "[{execution}] {section}: {event}");
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use std::path::Path;
@@ -315,19 +407,12 @@ mod tests {
     use clap::Parser;
     use paperstore::PaperNum;
     use paperstore_sqlite::SqliteBackend;
-    use promptforge_core::store::{FileStore, StoreRef};
     use tempfile::TempDir;
 
     use super::{
-        Cli, PaperInput, load_input_markdown, load_paper_md, read_report, seed_store,
-        with_temp_store,
+        Cli, DEFAULT_PROMPT, PaperInput, gateway_origin, load_input_markdown, load_paper_md,
+        selected_model,
     };
-
-    fn file_store(dir: &TempDir) -> StoreRef {
-        let backend =
-            FileStore::new(dir.path()).unwrap_or_else(|e| panic!("create file store: {e}"));
-        StoreRef::new(Box::new(backend))
-    }
 
     fn paper_num() -> PaperNum {
         PaperNum::parse("P4003R2").unwrap_or_else(|e| panic!("parse: {e}"))
@@ -365,7 +450,10 @@ mod tests {
         let cli = Cli::parse_from(["papergate", "p4003r2"]);
         assert_eq!(cli.paper.as_ref().map(PaperNum::as_str), Some("P4003R2"));
         assert_eq!(cli.file, None);
-        assert_eq!(cli.output, None, "no --output means the report goes to stdout");
+        assert_eq!(
+            cli.output, None,
+            "no --output means the report goes to stdout"
+        );
         assert_eq!(cli.prompt, None);
 
         let cli = Cli::parse_from([
@@ -375,9 +463,12 @@ mod tests {
             "out/analysis.md",
             "--prompt",
             "custom.md",
+            "--model",
+            "writer-model",
         ]);
         assert_eq!(cli.output.as_deref(), Some(Path::new("out/analysis.md")));
         assert_eq!(cli.prompt.as_deref(), Some(Path::new("custom.md")));
+        assert_eq!(cli.model.as_deref(), Some("writer-model"));
     }
 
     #[test]
@@ -420,6 +511,33 @@ mod tests {
             "clap must reject a trailing argument instead of silently dropping it",
         );
         assert!(Cli::try_parse_from(["papergate", "--bogus", "P4003R2"]).is_err());
+    }
+
+    #[test]
+    fn a_blank_or_missing_model_is_refused_and_a_set_one_is_trimmed() {
+        assert!(selected_model(None).is_err());
+        assert!(selected_model(Some("  ")).is_err());
+        let model = selected_model(Some(" writer ")).unwrap_or_else(|e| panic!("model: {e}"));
+        assert_eq!(model, "writer");
+    }
+
+    #[test]
+    fn the_gateway_origin_drops_trailing_slashes_and_the_v1_suffix() {
+        for url in [
+            "http://gw:8080",
+            "http://gw:8080/",
+            "http://gw:8080/v1",
+            " http://gw:8080/v1/ ",
+        ] {
+            assert_eq!(gateway_origin(url), "http://gw:8080", "for {url:?}");
+        }
+    }
+
+    #[test]
+    fn the_embedded_prompt_declares_the_supported_version_and_its_files() {
+        assert!(DEFAULT_PROMPT.contains("\npromptforge: 0\n"));
+        assert!(DEFAULT_PROMPT.contains("path: paper.md"));
+        assert!(DEFAULT_PROMPT.contains("path: report.md"));
     }
 
     #[test]
@@ -481,83 +599,5 @@ mod tests {
             .unwrap_or_else(|e| panic!("load: {e}"));
 
         assert_eq!(text, contents);
-    }
-
-    #[test]
-    fn seeding_writes_the_input_verbatim_under_paper_md() {
-        let dir = TempDir::new().unwrap_or_else(|e| panic!("create temp dir: {e}"));
-        let store = file_store(&dir);
-        let contents = "# Paper\n\nunicode \u{201c}quotes\u{201d} and trailing space \n\n";
-
-        seed_store(&store, contents).unwrap_or_else(|e| panic!("seed store: {e}"));
-
-        let readback = store
-            .read("paper.md")
-            .unwrap_or_else(|e| panic!("read paper.md: {e}"));
-        assert_eq!(readback, contents);
-    }
-
-    #[test]
-    fn read_report_returns_the_store_report_verbatim() {
-        let dir = TempDir::new().unwrap_or_else(|e| panic!("create temp dir: {e}"));
-        let store = file_store(&dir);
-        store
-            .write("report.md", "Verdict: Strong\n")
-            .unwrap_or_else(|e| panic!("write report.md: {e}"));
-
-        let report = read_report(&store).unwrap_or_else(|e| panic!("read report: {e}"));
-
-        assert_eq!(report, "Verdict: Strong\n");
-    }
-
-    #[test]
-    fn missing_report_is_an_explicit_contract_error() {
-        let dir = TempDir::new().unwrap_or_else(|e| panic!("create temp dir: {e}"));
-        let store = file_store(&dir);
-
-        let error = match read_report(&store) {
-            Ok(report) => panic!("a missing report.md must fail, got {report:?}"),
-            Err(error) => error.to_string(),
-        };
-
-        assert!(
-            error.contains("declared output") && error.contains("report.md"),
-            "the error must name the prompt's output contract: {error}",
-        );
-    }
-
-    #[tokio::test]
-    async fn temp_store_dir_is_removed_after_a_successful_run() {
-        let execution = format!("papergate-test-{:016x}", fastrand::u64(..));
-        let dir = std::env::temp_dir().join(&execution);
-        let probe = dir.clone();
-
-        let result = with_temp_store(&execution, move |store| async move {
-            assert!(probe.is_dir(), "the store dir must exist during the run");
-            seed_store(&store, "# Paper\n")?;
-            Ok(())
-        })
-        .await;
-
-        result.unwrap_or_else(|e| panic!("run: {e}"));
-        assert!(
-            !dir.exists(),
-            "the store dir must be removed after a successful run",
-        );
-    }
-
-    #[tokio::test]
-    async fn temp_store_dir_is_removed_after_a_failed_run() {
-        let execution = format!("papergate-test-{:016x}", fastrand::u64(..));
-        let dir = std::env::temp_dir().join(&execution);
-
-        let result =
-            with_temp_store(&execution, |_store| async { Err(anyhow::anyhow!("boom")) }).await;
-
-        assert!(result.is_err(), "the run's failure must propagate");
-        assert!(
-            !dir.exists(),
-            "the store dir must be removed after a failed run",
-        );
     }
 }
