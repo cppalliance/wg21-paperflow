@@ -3255,6 +3255,7 @@ dependencies = [
  "harness",
  "paperstore",
  "paperstore-sqlite",
+ "reqwest",
  "rusqlite",
  "serde_json",
  "tempfile",

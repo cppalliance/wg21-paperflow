@@ -52,9 +52,14 @@ pub(crate) struct Cli {
     /// Read the prompt from PATH instead of the embedded papergate prompt.
     #[arg(long, value_name = "PATH")]
     pub(crate) prompt: Option<PathBuf>,
-    /// The gateway model id the prompt's model roles bind to.
+    /// The gateway model id the prompt's model roles bind to; defaults to the
+    /// first chat model the gateway lists.
     #[arg(long, value_name = "ID", env = "PAPERGATE_MODEL")]
     pub(crate) model: Option<String>,
+    /// The prompt's arguments, passed verbatim: a JSON object for a prompt
+    /// that declares `args:`, or plain text.
+    #[arg(long, value_name = "TEXT", default_value = "")]
+    pub(crate) args: String,
 }
 
 impl Cli {
@@ -91,8 +96,11 @@ pub(crate) struct RunRequest<'a> {
     pub(crate) output: Option<&'a Path>,
     /// An optional prompt file overriding the embedded default.
     pub(crate) prompt: Option<&'a Path>,
-    /// The gateway model id to bind; required, as the harness picks none.
+    /// The gateway model id to bind; `None` binds the gateway's first chat
+    /// model.
     pub(crate) model: Option<&'a str>,
+    /// The prompt's arguments, passed verbatim.
+    pub(crate) args: &'a str,
     /// The cooperative cancellation handle wired to Ctrl-C.
     pub(crate) cancel: CancelHandle,
 }
@@ -105,6 +113,7 @@ impl std::fmt::Debug for RunRequest<'_> {
             .field("output", &self.output)
             .field("prompt", &self.prompt)
             .field("model", &self.model)
+            .field("args", &self.args)
             .finish_non_exhaustive()
     }
 }
@@ -124,10 +133,12 @@ impl std::error::Error for Cancelled {}
 /// Runs one analysis using the gateway configuration read from the environment.
 ///
 /// # Errors
-/// Returns an error if either gateway variable is unset or blank, no model is
-/// selected, the paper input cannot be loaded (`WG21_DATA_DIR` unset, the
-/// number missing from the store or without converted markdown, or the
-/// `--file` path unreadable), the harness refuses the launch, the run fails,
+/// Returns an error if either gateway variable is unset or blank, the paper
+/// input cannot be loaded (`WG21_DATA_DIR` unset, the number missing from the
+/// store or without converted markdown, or the `--file` path unreadable), the
+/// gateway model list cannot be fetched or lists no chat model, the harness
+/// refuses the launch (including a selected model the gateway does not list),
+/// the run fails,
 /// the run is cancelled ([`Cancelled`]), or the prompt did not produce its
 /// declared `report.md` output.
 pub(crate) async fn run(request: RunRequest<'_>) -> Result<()> {
@@ -136,10 +147,11 @@ pub(crate) async fn run(request: RunRequest<'_>) -> Result<()> {
         output,
         prompt,
         model,
+        args,
         cancel,
     } = request;
     let (base_url, key) = gateway_from_env()?;
-    let model = selected_model(model)?;
+    let model = selected_model(model);
 
     let source = match prompt {
         Some(path) => tokio::fs::read_to_string(path)
@@ -150,6 +162,10 @@ pub(crate) async fn run(request: RunRequest<'_>) -> Result<()> {
     // Load before the launch: a store miss or an unreadable file fails fast,
     // before any network call.
     let paper_md = load_input_markdown(input).await?;
+    let models = fetch_chat_models(&base_url, &key).await?;
+    if models.is_empty() {
+        bail!("the gateway at {base_url} lists no chat model");
+    }
 
     // Removed when `work` drops, whether or not the run succeeds.
     let work = tempfile::Builder::new()
@@ -179,17 +195,17 @@ pub(crate) async fn run(request: RunRequest<'_>) -> Result<()> {
     });
     harness.set_catalog(CatalogBinding {
         generation: 1,
-        models: vec![serde_json::json!({ "id": &model })],
+        models,
     });
     harness.set_host(HostSnapshot {
-        selected_model: Some(model),
+        selected_model: model,
         workspace_roots: Vec::new(),
     });
 
     let session = harness
         .launch(LaunchRequest {
             agent: AGENT.to_owned(),
-            args: String::new(),
+            args: args.to_owned(),
             input_text: Some(paper_md),
         })
         .await
@@ -338,20 +354,60 @@ fn load_paper_md(backend: &impl StorageBackend, num: &PaperNum) -> paperstore::R
     backend.paper_md(num)
 }
 
-/// Returns the model id the run binds, trimmed.
+/// Returns the explicit model selection, trimmed.
 ///
-/// The harness binds the prompt's roles to the selected model and picks no
-/// default for an unattended client, so a missing selection is a startup
-/// error.
-fn selected_model(model: Option<&str>) -> Result<String> {
-    let model = model.map_or("", str::trim);
-    if model.is_empty() {
-        bail!(
-            "no model selected: pass --model or set PAPERGATE_MODEL to the gateway model id \
-             the prompt should run on"
-        );
-    }
-    Ok(model.to_owned())
+/// A missing or blank selection is `None`, which the harness resolves to the
+/// first model in the catalog binding.
+fn selected_model(model: Option<&str>) -> Option<String> {
+    model
+        .map(str::trim)
+        .filter(|model| !model.is_empty())
+        .map(str::to_owned)
+}
+
+/// Fetches the gateway's model list and returns its chat-capable entries,
+/// in the gateway's order.
+async fn fetch_chat_models(base_url: &str, key: &str) -> Result<Vec<serde_json::Value>> {
+    let url = format!("{base_url}/v1/models");
+    let list: serde_json::Value = reqwest::Client::new()
+        .get(&url)
+        .bearer_auth(key)
+        .send()
+        .await
+        .and_then(reqwest::Response::error_for_status)
+        .with_context(|| format!("fetch the gateway model list from {url}"))?
+        .json()
+        .await
+        .with_context(|| format!("decode the gateway model list from {url}"))?;
+    chat_models(list).with_context(|| format!("read the gateway model list from {url}"))
+}
+
+/// Returns the chat-capable entries of an OpenAI-shape model list.
+///
+/// An entry is chat-capable when it has a non-empty `id` and either no
+/// `kind` or `kind` `"chat"`, the rule the promptforge workshop applies.
+fn chat_models(list: serde_json::Value) -> Result<Vec<serde_json::Value>> {
+    let serde_json::Value::Object(mut list) = list else {
+        bail!("the model list is not a JSON object");
+    };
+    let Some(serde_json::Value::Array(models)) = list.remove("data") else {
+        bail!("the model list has no `data` array");
+    };
+    Ok(models.into_iter().filter(is_chat_capable).collect())
+}
+
+/// Returns whether `model` is a chat model with a usable id.
+fn is_chat_capable(model: &serde_json::Value) -> bool {
+    let has_id = model
+        .get("id")
+        .and_then(serde_json::Value::as_str)
+        .is_some_and(|id| !id.is_empty());
+    let chat_kind = match model.get("kind") {
+        None => true,
+        Some(serde_json::Value::String(kind)) => kind == "chat",
+        Some(_) => false,
+    };
+    has_id && chat_kind
 }
 
 /// Reads the gateway environment, requiring both variables.
@@ -407,11 +463,12 @@ mod tests {
     use clap::Parser;
     use paperstore::PaperNum;
     use paperstore_sqlite::SqliteBackend;
+    use serde_json::json;
     use tempfile::TempDir;
 
     use super::{
-        Cli, DEFAULT_PROMPT, PaperInput, gateway_origin, load_input_markdown, load_paper_md,
-        selected_model,
+        Cli, DEFAULT_PROMPT, PaperInput, chat_models, gateway_origin, load_input_markdown,
+        load_paper_md, selected_model,
     };
 
     fn paper_num() -> PaperNum {
@@ -455,6 +512,7 @@ mod tests {
             "no --output means the report goes to stdout"
         );
         assert_eq!(cli.prompt, None);
+        assert_eq!(cli.args, "", "no --args launches with empty arguments");
 
         let cli = Cli::parse_from([
             "papergate",
@@ -465,7 +523,10 @@ mod tests {
             "custom.md",
             "--model",
             "writer-model",
+            "--args",
+            r#"{"id": "P4003R2"}"#,
         ]);
+        assert_eq!(cli.args, r#"{"id": "P4003R2"}"#);
         assert_eq!(cli.output.as_deref(), Some(Path::new("out/analysis.md")));
         assert_eq!(cli.prompt.as_deref(), Some(Path::new("custom.md")));
         assert_eq!(cli.model.as_deref(), Some("writer-model"));
@@ -514,11 +575,35 @@ mod tests {
     }
 
     #[test]
-    fn a_blank_or_missing_model_is_refused_and_a_set_one_is_trimmed() {
-        assert!(selected_model(None).is_err());
-        assert!(selected_model(Some("  ")).is_err());
-        let model = selected_model(Some(" writer ")).unwrap_or_else(|e| panic!("model: {e}"));
-        assert_eq!(model, "writer");
+    fn a_blank_or_missing_model_defers_to_the_catalog_and_a_set_one_is_trimmed() {
+        assert_eq!(selected_model(None), None);
+        assert_eq!(selected_model(Some("  ")), None);
+        assert_eq!(selected_model(Some(" writer ")).as_deref(), Some("writer"));
+    }
+
+    #[test]
+    fn chat_models_keep_chat_entries_in_gateway_order() {
+        let list = json!({ "object": "list", "data": [
+            { "id": "whisper-base", "kind": "transcription" },
+            { "id": "analyst", "kind": "chat" },
+            { "id": "" },
+            { "id": "plain" },
+            { "id": "odd", "kind": 3 },
+        ]});
+        let models = chat_models(list).unwrap_or_else(|e| panic!("chat models: {e}"));
+        assert_eq!(
+            models,
+            [
+                json!({ "id": "analyst", "kind": "chat" }),
+                json!({ "id": "plain" })
+            ]
+        );
+    }
+
+    #[test]
+    fn a_model_list_without_data_is_an_error() {
+        assert!(chat_models(json!({ "object": "list" })).is_err());
+        assert!(chat_models(json!([])).is_err());
     }
 
     #[test]
