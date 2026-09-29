@@ -2,6 +2,11 @@
 name: papergate
 description: Report on the evidence a WG21 paper provides for its need of standardization
 promptforge: 0
+models:
+  writer:
+    keywords: [no-thinking]
+    min_context: 32768
+    description: A careful analysis model suited to structured reasoning and long-context review
 input:
   path: paper.md
   description: The WG21 paper markdown to analyze
@@ -17,9 +22,7 @@ Keep this section free of prose: prose here would make it a section with a promp
 ---
 
 ```lua
-models.default("writer",
-    "A careful analysis model suited to structured reasoning and long-context review",
-    { thinking = false, temperature = 0.3, context = 32768 })
+models.default("writer")
 ```
 
 ## Assess
@@ -29,6 +32,8 @@ models.default("writer",
 -- PROLOGUE. Self-contained. Splits the paper, publishes the pieces and the
 -- criteria to the store, and hands the head of the paper to the triage turn.
 -- ===========================================================================
+
+models.use("writer", { temperature = 0.3 })
 
 -- --- tunables ---------------------------------------------------------------
 -- SAMPLES must be odd. CHAR_BUDGET must leave room in the context for the
@@ -241,6 +246,8 @@ Answer with exactly one word: `PROPOSAL` or `NOT_PROPOSAL`. No explanation.
 -- and writes the verdict, the model-facing evidence and the host-facing
 -- diagnostics to the store.
 -- ===========================================================================
+
+local reply = models.infer(prose)
 
 local QUOTE_WORDS = 40
 
@@ -508,6 +515,7 @@ store.write("diagnostics.md", table.concat(diag, "\n"))
 ### Grade
 
 ```lua
+models.use("writer", { temperature = 0.3 })
 local c, k = item:match("^(%d+)|(%d+)|%d+$")
 var.criterion = store.read("pg_criterion_" .. c .. ".md")
 var.paper_chunk = untrusted(store.read("pg_chunk_" .. k .. ".md"))
@@ -541,12 +549,14 @@ QUOTE: <verbatim quote, or leave empty when the score is 0>
 ```
 
 ```lua
+local reply = models.infer(prose)
 store.write("pg_reply_" .. item:gsub("|", "_") .. ".md", reply)
 ```
 
 ## Analyze
 
 ```lua
+models.use("writer", { temperature = 0.3 })
 var.evidence = untrusted(store.read("evidence.md"))
 ```
 
@@ -570,6 +580,8 @@ Then between two and four bullets, ordered from the strongest support to the mos
 If the summary above says the document is not a proposal, write instead a single sentence saying what kind of document it appears to be and that the question of standardization does not apply, with no bullets.
 
 ```lua
+local reply = models.infer(prose)
+
 local function read_or_empty(path)
     local ok, value = pcall(store.read, path)
     if ok and value then return value end
