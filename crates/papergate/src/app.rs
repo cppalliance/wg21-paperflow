@@ -1,15 +1,16 @@
-//! Application orchestration for the `papergate` CLI.
+//! Application orchestration for the CLI.
 //!
-//! `main` owns the process boundary (argument parsing, signal installation,
+//! `run_cli` owns the process boundary (argument parsing, signal installation,
 //! exit status). This module owns everything between: it validates the gateway
-//! environment and model selection, resolves the prompt source (the embedded
-//! vendored prompt by default, `--prompt` from disk otherwise), loads the paper
-//! markdown (from the SQLite paper store for a paper number, verbatim from
-//! disk for `--file`), and runs the prompt as a harness session. The harness
-//! stages the paper at the prompt's declared `paper.md` input and hands back
-//! its declared `report.md` output, which is written to `--output`, or to
-//! stdout when no path is given.
+//! environment and model selection, resolves the prompt source and its name
+//! (the embedded papergate prompt by default, `--prompt` from disk otherwise),
+//! loads the paper markdown (from the SQLite paper store for a paper number,
+//! verbatim from disk for `--file`), and runs the prompt as a harness session.
+//! The harness stages the paper at the prompt's declared input and hands back
+//! its declared output, which is written to `--output`, or to stdout when no
+//! path is given.
 
+use std::ffi::OsStr;
 use std::fmt;
 use std::io::{self, Write as _};
 use std::path::{Path, PathBuf};
@@ -28,16 +29,14 @@ use tokio::sync::broadcast::error::RecvError;
 /// The embedded papergate prompt, vendored from the promptforge prompts.
 const DEFAULT_PROMPT: &str = include_str!("../papergate.md");
 
-/// The agent name the prompt is launched under: the stem of the file the
-/// harness discovers in its agents directory.
-const AGENT: &str = "papergate";
+/// The name the embedded prompt runs under.
+const DEFAULT_PROMPT_NAME: &str = "papergate";
 
-/// The `papergate` command-line interface.
+/// The command-line interface; `run_cli` sets the program name.
 #[derive(Debug, Parser)]
 #[command(
-    name = "papergate",
     version,
-    about = "Report on the evidence a WG21 paper provides for its need of standardization",
+    about = "Run a promptforge prompt against a WG21 paper",
     group = clap::ArgGroup::new("input").args(["paper", "file"]).required(true)
 )]
 pub(crate) struct Cli {
@@ -46,7 +45,7 @@ pub(crate) struct Cli {
     /// Analyze the paper markdown file at PATH instead of a store lookup.
     #[arg(long, value_name = "PATH")]
     pub(crate) file: Option<PathBuf>,
-    /// Write the analysis report to PATH instead of stdout.
+    /// Write the prompt's output to PATH instead of stdout.
     #[arg(long, value_name = "PATH")]
     pub(crate) output: Option<PathBuf>,
     /// Read the prompt from PATH instead of the embedded papergate prompt.
@@ -54,7 +53,7 @@ pub(crate) struct Cli {
     pub(crate) prompt: Option<PathBuf>,
     /// The gateway model id the prompt's model roles bind to; defaults to the
     /// first chat model the gateway lists.
-    #[arg(long, value_name = "ID", env = "PAPERGATE_MODEL")]
+    #[arg(long, value_name = "ID")]
     pub(crate) model: Option<String>,
     /// The prompt's arguments, passed verbatim: a JSON object for a prompt
     /// that declares `args:`, or plain text.
@@ -140,7 +139,7 @@ impl std::error::Error for Cancelled {}
 /// refuses the launch (including a selected model the gateway does not list),
 /// the run fails,
 /// the run is cancelled ([`Cancelled`]), or the prompt did not produce its
-/// declared `report.md` output.
+/// declared output, or the `--prompt` path has no usable file name.
 pub(crate) async fn run(request: RunRequest<'_>) -> Result<()> {
     let RunRequest {
         input,
@@ -150,7 +149,8 @@ pub(crate) async fn run(request: RunRequest<'_>) -> Result<()> {
         args,
         cancel,
     } = request;
-    let (base_url, key) = gateway_from_env()?;
+    let name = prompt_name(prompt)?;
+    let (base_url, key) = gateway_from_env(&name)?;
     let model = selected_model(model);
 
     let source = match prompt {
@@ -169,7 +169,7 @@ pub(crate) async fn run(request: RunRequest<'_>) -> Result<()> {
 
     // Removed when `work` drops, whether or not the run succeeds.
     let work = tempfile::Builder::new()
-        .prefix("papergate-")
+        .prefix(&format!("{name}-"))
         .tempdir()
         .context("create the run's scratch directory")?;
     let agents_path = work.path().join("agents");
@@ -179,7 +179,7 @@ pub(crate) async fn run(request: RunRequest<'_>) -> Result<()> {
             .await
             .with_context(|| format!("create directory {}", dir.display()))?;
     }
-    let prompt_path = agents_path.join(format!("{AGENT}.md"));
+    let prompt_path = agents_path.join(format!("{name}.md"));
     tokio::fs::write(&prompt_path, &source)
         .await
         .with_context(|| format!("write the prompt to {}", prompt_path.display()))?;
@@ -204,12 +204,12 @@ pub(crate) async fn run(request: RunRequest<'_>) -> Result<()> {
 
     let session = harness
         .launch(LaunchRequest {
-            agent: AGENT.to_owned(),
+            agent: name.clone(),
             args: args.to_owned(),
             input_text: Some(paper_md),
         })
         .await
-        .context("launch the papergate session")?;
+        .with_context(|| format!("launch the {name} session"))?;
     let ending = await_closed(&session, &cancel).await;
 
     let report = match session.output_text() {
@@ -236,7 +236,7 @@ pub(crate) async fn run(request: RunRequest<'_>) -> Result<()> {
     Ok(())
 }
 
-/// How a session ended, as papergate observed it.
+/// How a session ended, as the CLI observed it.
 #[derive(Debug, Default)]
 struct Ending {
     /// Ctrl-C requested the close.
@@ -410,12 +410,28 @@ fn is_chat_capable(model: &serde_json::Value) -> bool {
     has_id && chat_kind
 }
 
+/// Returns the name the run takes from its prompt: the `--prompt` file stem,
+/// or [`DEFAULT_PROMPT_NAME`] for the embedded prompt.
+///
+/// The harness launches an agent by the stem of its file in the agents
+/// directory, so the prompt is written there under this name.
+fn prompt_name(prompt: Option<&Path>) -> Result<String> {
+    let Some(path) = prompt else {
+        return Ok(DEFAULT_PROMPT_NAME.to_owned());
+    };
+    path.file_stem()
+        .and_then(OsStr::to_str)
+        .filter(|stem| !stem.is_empty())
+        .map(str::to_owned)
+        .with_context(|| format!("the prompt path {} has no usable file name", path.display()))
+}
+
 /// Reads the gateway environment, requiring both variables.
 ///
-/// The prompt binds its writer model through the gateway, so there is no
+/// The prompt `name` binds its models through the gateway, so there is no
 /// local-only mode: a missing credential is a startup error naming both
 /// variables rather than a silent downgrade.
-fn gateway_from_env() -> Result<(String, String)> {
+fn gateway_from_env(name: &str) -> Result<(String, String)> {
     let endpoint = env_optional("PROMPTFORGE_GATEWAY_URL")?;
     let token = env_optional("PROMPTFORGE_GATEWAY_API_KEY")?;
     let endpoint = endpoint.map(|value| gateway_origin(&value));
@@ -426,7 +442,7 @@ fn gateway_from_env() -> Result<(String, String)> {
         }
         _ => bail!(
             "PROMPTFORGE_GATEWAY_URL and PROMPTFORGE_GATEWAY_API_KEY must both be set: \
-             the papergate prompt binds its writer model through the gateway"
+             the {name} prompt binds its models through the gateway"
         ),
     }
 }
@@ -468,7 +484,7 @@ mod tests {
 
     use super::{
         Cli, DEFAULT_PROMPT, PaperInput, chat_models, gateway_origin, load_input_markdown,
-        load_paper_md, selected_model,
+        load_paper_md, prompt_name, selected_model,
     };
 
     fn paper_num() -> PaperNum {
@@ -575,14 +591,32 @@ mod tests {
     }
 
     #[test]
-    fn a_blank_or_missing_model_defers_to_the_catalog_and_a_set_one_is_trimmed() {
+    fn selected_model_trims_or_defers() {
         assert_eq!(selected_model(None), None);
         assert_eq!(selected_model(Some("  ")), None);
         assert_eq!(selected_model(Some(" writer ")).as_deref(), Some("writer"));
     }
 
     #[test]
-    fn chat_models_keep_chat_entries_in_gateway_order() {
+    fn prompt_name_uses_file_stem() {
+        let name = |path: Option<&str>| prompt_name(path.map(Path::new));
+        assert_eq!(name(None).ok().as_deref(), Some("papergate"));
+        assert_eq!(
+            name(Some("/code/prompts/agora-author-advocacy.md"))
+                .ok()
+                .as_deref(),
+            Some("agora-author-advocacy")
+        );
+        assert_eq!(name(Some("hello")).ok().as_deref(), Some("hello"));
+        assert!(
+            name(Some("/")).is_err(),
+            "a path with no file name is refused"
+        );
+        assert!(name(Some("")).is_err(), "an empty path is refused");
+    }
+
+    #[test]
+    fn chat_models_filters_non_chat() {
         let list = json!({ "object": "list", "data": [
             { "id": "whisper-base", "kind": "transcription" },
             { "id": "analyst", "kind": "chat" },
@@ -601,13 +635,13 @@ mod tests {
     }
 
     #[test]
-    fn a_model_list_without_data_is_an_error() {
+    fn chat_models_rejects_missing_data() {
         assert!(chat_models(json!({ "object": "list" })).is_err());
         assert!(chat_models(json!([])).is_err());
     }
 
     #[test]
-    fn the_gateway_origin_drops_trailing_slashes_and_the_v1_suffix() {
+    fn gateway_origin_strips_v1() {
         for url in [
             "http://gw:8080",
             "http://gw:8080/",
@@ -619,7 +653,7 @@ mod tests {
     }
 
     #[test]
-    fn the_embedded_prompt_declares_the_supported_version_and_its_files() {
+    fn embedded_prompt_declares_io() {
         assert!(DEFAULT_PROMPT.contains("\npromptforge: 0\n"));
         assert!(DEFAULT_PROMPT.contains("path: paper.md"));
         assert!(DEFAULT_PROMPT.contains("path: report.md"));
