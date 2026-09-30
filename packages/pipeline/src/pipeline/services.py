@@ -249,6 +249,7 @@ def load_services(path: Path | None = None) -> ServiceRegistry:
             ),
             "chars_per_token": _expand_env_float(svc.get("chars_per_token", 0.0)),
             "token_multiplier": _expand_env_float(svc.get("token_multiplier", 0.0)),
+            "temperature": _expand_env_float(svc.get("temperature", 0.0), default=0.0),
         }
         for k, v in svc.items():
             if k not in init_kwargs and k not in _KNOWN_KEYS:
