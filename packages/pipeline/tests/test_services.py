@@ -170,6 +170,57 @@ max_context_window = "$UNSET_MAX_CTX"
     assert isinstance(svc._max_context_window, int)
 
 
+def test_load_services_explicit_temperature(tmp_path):
+    p = _write_services_toml(tmp_path, """
+[services.s1]
+backend = "vllm_thinking"
+base_url = "https://example.com/v1"
+api_key = "test"
+model = "m1"
+temperature = 0.7
+""")
+    registry = load_services(p)
+    svc = registry.services["s1"]
+    assert svc.temperature == 0.7
+    assert isinstance(svc.temperature, float)
+
+
+def test_load_services_omitted_temperature_defaults_to_zero(tmp_path):
+    p = _write_services_toml(tmp_path, """
+[services.s1]
+backend = "vllm_thinking"
+base_url = "https://example.com/v1"
+api_key = "test"
+model = "m1"
+""")
+    registry = load_services(p)
+    svc = registry.services["s1"]
+    assert svc.temperature == 0.0
+    assert isinstance(svc.temperature, float)
+
+
+def test_load_services_temperature_coercion_and_env_expansion(tmp_path, monkeypatch):
+    monkeypatch.setenv("ENV_TEMP", "0.85")
+    p = _write_services_toml(tmp_path, """
+[services.s1]
+backend = "vllm_thinking"
+base_url = "https://example.com/v1"
+api_key = "test"
+model = "m1"
+temperature = "$ENV_TEMP"
+
+[services.s2]
+backend = "vllm_thinking"
+base_url = "https://example.com/v1"
+api_key = "test"
+model = "m2"
+temperature = "0.6"
+""")
+    registry = load_services(p)
+    assert registry.services["s1"].temperature == 0.85
+    assert registry.services["s2"].temperature == 0.6
+
+
 def test_expand_env_str(monkeypatch):
     assert _expand_env_str("simple") == "simple"
     assert _expand_env_str(None) == ""
