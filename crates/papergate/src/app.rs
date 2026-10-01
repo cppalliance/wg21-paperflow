@@ -59,6 +59,10 @@ pub(crate) struct Cli {
     /// that declares `args:`, or plain text.
     #[arg(long, value_name = "TEXT", default_value = "")]
     pub(crate) args: String,
+    /// Also print every tool call with its arguments, every tool result in
+    /// full, Lua log messages, and model replies to stderr.
+    #[arg(short, long)]
+    pub(crate) verbose: bool,
 }
 
 impl Cli {
@@ -100,6 +104,8 @@ pub(crate) struct RunRequest<'a> {
     pub(crate) model: Option<&'a str>,
     /// The prompt's arguments, passed verbatim.
     pub(crate) args: &'a str,
+    /// Print tool calls, tool results, Lua logs, and replies to stderr.
+    pub(crate) verbose: bool,
     /// The cooperative cancellation handle wired to Ctrl-C.
     pub(crate) cancel: CancelHandle,
 }
@@ -113,6 +119,7 @@ impl std::fmt::Debug for RunRequest<'_> {
             .field("prompt", &self.prompt)
             .field("model", &self.model)
             .field("args", &self.args)
+            .field("verbose", &self.verbose)
             .finish_non_exhaustive()
     }
 }
@@ -147,6 +154,7 @@ pub(crate) async fn run(request: RunRequest<'_>) -> Result<()> {
         prompt,
         model,
         args,
+        verbose,
         cancel,
     } = request;
     let name = prompt_name(prompt)?;
@@ -210,7 +218,7 @@ pub(crate) async fn run(request: RunRequest<'_>) -> Result<()> {
         })
         .await
         .with_context(|| format!("launch the {name} session"))?;
-    let ending = await_closed(&session, &cancel).await;
+    let ending = await_closed(&session, &cancel, verbose).await;
 
     let report = match session.output_text() {
         Ok(report) => report,
@@ -246,11 +254,13 @@ struct Ending {
 }
 
 /// Prints the session's progress to stderr until it reports `Closed`,
-/// closing it for good when `cancel` fires.
+/// closing it for good when `cancel` fires. With `verbose`, each event's
+/// detail lines follow its progress line, and events dropped by a lagging
+/// subscription are reported.
 ///
 /// A session closes on its own when its run completes or fails, so this
 /// returns without a Ctrl-C too.
-async fn await_closed(session: &Session, cancel: &CancelHandle) -> Ending {
+async fn await_closed(session: &Session, cancel: &CancelHandle, verbose: bool) -> Ending {
     let mut events = session.subscribe_events();
     let mut errors = session.subscribe_errors();
     let mut state = session.subscribe_state();
@@ -268,8 +278,15 @@ async fn await_closed(session: &Session, cancel: &CancelHandle) -> Ending {
                 }
             }
             event = events.recv(), if events_open => match event {
-                Ok(event) => print_progress(&event),
-                Err(RecvError::Lagged(_)) => {}
+                Ok(event) => print_progress(&event, verbose),
+                Err(RecvError::Lagged(skipped)) => {
+                    if verbose {
+                        let _ignored = writeln!(
+                            io::stderr(),
+                            "warning: {skipped} events dropped; the output above is incomplete",
+                        );
+                    }
+                }
                 Err(RecvError::Closed) => events_open = false,
             },
             failure = errors.recv(), if errors_open => match failure {
@@ -294,17 +311,82 @@ async fn await_closed(session: &Session, cancel: &CancelHandle) -> Ending {
     ending
 }
 
-/// Writes one progress line for a session event to stderr.
-fn print_progress(event: &SessionEvent) {
+/// Writes one progress line for a session event to stderr, followed by its
+/// [`detail_lines`] when `verbose`.
+fn print_progress(event: &SessionEvent, verbose: bool) {
+    let mut stderr = io::stderr().lock();
     // Progress is a side channel, so a failed write to stderr is
     // deliberately dropped rather than surfaced.
     let _ignored = writeln!(
-        io::stderr(),
+        stderr,
         "[{}] {}: {}",
         event_field(event, "execution"),
         event_field(event, "section"),
         event_field(event, "kind"),
     );
+    if verbose {
+        for line in detail_lines(&event.event) {
+            let _ignored = writeln!(stderr, "{line}");
+        }
+    }
+}
+
+/// Returns the indented detail lines `--verbose` prints for an engine event.
+///
+/// A tool call shows its id, tool name, and JSON arguments; a tool result
+/// shows the id of the call it answers and its full content, which carries
+/// the error text when the call failed. Lua log messages and model replies
+/// are shown too. Every other kind has no detail lines.
+fn detail_lines(event: &serde_json::Value) -> Vec<String> {
+    let text = |name: &str| {
+        event
+            .get(name)
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("")
+    };
+    match text("kind") {
+        "assistant_tool_calls" => event
+            .get("calls")
+            .and_then(serde_json::Value::as_array)
+            .map(|calls| {
+                calls
+                    .iter()
+                    .map(|call| {
+                        let field = |name: &str| {
+                            call.get(name)
+                                .and_then(serde_json::Value::as_str)
+                                .unwrap_or("-")
+                        };
+                        let arguments = call
+                            .get("arguments")
+                            .map_or_else(|| "null".to_owned(), serde_json::Value::to_string);
+                        format!("    -> call {} {} {arguments}", field("id"), field("name"))
+                    })
+                    .collect()
+            })
+            .unwrap_or_default(),
+        "tool_result" => {
+            let mut lines = vec![format!(
+                "    <- result {} {}:",
+                text("tool_call_id"),
+                text("alias")
+            )];
+            lines.extend(indented(text("content")));
+            lines
+        }
+        "lua" => vec![format!("    lua: {}", text("message"))],
+        "assistant_reply" => {
+            let mut lines = vec!["    reply:".to_owned()];
+            lines.extend(indented(text("text")));
+            lines
+        }
+        _ => Vec::new(),
+    }
+}
+
+/// Returns each line of `text` indented under a detail header.
+fn indented(text: &str) -> impl Iterator<Item = String> + '_ {
+    text.lines().map(|line| format!("        {line}"))
 }
 
 /// Returns the string field `name` of the event's payload, or `-`.
@@ -483,8 +565,8 @@ mod tests {
     use tempfile::TempDir;
 
     use super::{
-        Cli, DEFAULT_PROMPT, PaperInput, chat_models, gateway_origin, load_input_markdown,
-        load_paper_md, prompt_name, selected_model,
+        Cli, DEFAULT_PROMPT, PaperInput, chat_models, detail_lines, gateway_origin,
+        load_input_markdown, load_paper_md, prompt_name, selected_model,
     };
 
     fn paper_num() -> PaperNum {
@@ -588,6 +670,49 @@ mod tests {
             "clap must reject a trailing argument instead of silently dropping it",
         );
         assert!(Cli::try_parse_from(["papergate", "--bogus", "P4003R2"]).is_err());
+    }
+
+    #[test]
+    fn verbose_flag_parses() {
+        assert!(!Cli::parse_from(["papergate", "P4003R2"]).verbose);
+        assert!(Cli::parse_from(["papergate", "P4003R2", "--verbose"]).verbose);
+        assert!(Cli::parse_from(["papergate", "P4003R2", "-v"]).verbose);
+    }
+
+    #[test]
+    fn detail_lines_show_tool_calls_and_results() {
+        let calls = json!({
+            "kind": "assistant_tool_calls",
+            "calls": [{ "id": "c1", "name": "search", "arguments": { "query": "Yihe Li" } }],
+        });
+        assert_eq!(
+            detail_lines(&calls),
+            [r#"    -> call c1 search {"query":"Yihe Li"}"#]
+        );
+
+        let result = json!({
+            "kind": "tool_result",
+            "tool_call_id": "c1",
+            "alias": "search",
+            "content": "status 401\nUnauthorized",
+        });
+        assert_eq!(
+            detail_lines(&result),
+            [
+                "    <- result c1 search:",
+                "        status 401",
+                "        Unauthorized"
+            ]
+        );
+
+        assert_eq!(
+            detail_lines(&json!({ "kind": "lua", "message": "hi" })),
+            ["    lua: hi"]
+        );
+        assert_eq!(
+            detail_lines(&json!({ "kind": "tool_call_failed" })),
+            Vec::<String>::new()
+        );
     }
 
     #[test]
