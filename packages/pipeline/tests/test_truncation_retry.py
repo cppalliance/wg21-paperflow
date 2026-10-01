@@ -38,12 +38,18 @@ class _Msg:
 class _Choice:
     def __init__(self, content: str, finish_reason: str | None) -> None:
         self.message = _Msg(content)
+        self.delta = _Msg(content)
         self.finish_reason = finish_reason
 
 
 class _Resp:
     def __init__(self, content: str, finish_reason: str | None) -> None:
         self.choices = [_Choice(content, finish_reason)]
+
+    def __aiter__(self):
+        async def _gen():
+            yield self
+        return _gen()
 
 
 def _fake_openai(monkeypatch, responses: list[tuple[str, str | None]]) -> list[dict]:
@@ -162,3 +168,51 @@ def test_third_attempt_recovers(monkeypatch):
     assert len(call_kwargs) == 3
     # Each malformed attempt appended assistant echo + user nudge (2 msgs each).
     assert len(call_kwargs[2]["messages"]) == 6
+
+
+def test_vllm_backend_passes_configured_temperature_non_streaming(monkeypatch):
+    call_kwargs = _fake_openai(monkeypatch, [("{}", "stop")])
+    backend = VllmThinkingBackend(
+        base_url="http://x", api_key="y", model="z", stream=False,
+        temperature=0.7,
+    )
+    assert backend.temperature == 0.7
+    result = asyncio.run(backend.run("sys", "user", _Empty))
+    assert isinstance(result, _Empty)
+    assert len(call_kwargs) == 1
+    assert call_kwargs[0]["temperature"] == 0.7
+
+
+def test_vllm_backend_passes_configured_temperature_streaming(monkeypatch):
+    call_kwargs = _fake_openai(monkeypatch, [("{}", "stop")])
+    backend = VllmThinkingBackend(
+        base_url="http://x", api_key="y", model="z", stream=True,
+        temperature=0.6,
+    )
+    assert backend.temperature == 0.6
+    result = asyncio.run(backend.run("sys", "user", _Empty))
+    assert isinstance(result, _Empty)
+    assert len(call_kwargs) == 1
+    assert call_kwargs[0]["temperature"] == 0.6
+
+
+def test_vllm_backend_default_temperature_is_zero(monkeypatch):
+    call_kwargs = _fake_openai(monkeypatch, [("{}", "stop")])
+    backend = VllmThinkingBackend(
+        base_url="http://x", api_key="y", model="z", stream=False,
+    )
+    assert backend.temperature == 0.0
+    result = asyncio.run(backend.run("sys", "user", _Empty))
+    assert isinstance(result, _Empty)
+    assert len(call_kwargs) == 1
+    assert call_kwargs[0]["temperature"] == 0.0
+
+
+def test_agent_backend_exposes_model_temperature():
+    from pipeline.agents import AgentBackend
+
+    backend = VllmThinkingBackend(
+        base_url="http://x", api_key="y", model="z", temperature=0.65,
+    )
+    agent = AgentBackend(backend)
+    assert agent.temperature == 0.65
