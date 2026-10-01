@@ -13,7 +13,9 @@ workspace = true
 [dependencies]
 anyhow = "1.0.104"
 clap = { version = "4.6.6", features = ["derive"] }
-harness = { path = "../../../promptforge/crates/harness" }
+# The promptforge harness, vendored through the vendor/promptforge
+# submodule and pinned to the commit the crate is built against.
+harness = { path = "../../vendor/promptforge/crates/harness" }
 paperstore = { version = "0.1.0", path = "../paperstore" }
 paperstore-sqlite = { version = "0.1.0", path = "../paperstore-sqlite" }
 reqwest = { version = "0.13.4", default-features = false, features = ["json", "rustls"] }
