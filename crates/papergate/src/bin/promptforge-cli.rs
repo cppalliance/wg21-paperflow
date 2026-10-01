@@ -1,4 +1,4 @@
-//! The `papergate` command: see the `papergate` library crate.
+//! The `promptforge-cli` command: see the `papergate` library crate.
 
 use std::process::ExitCode;
 
