@@ -45,15 +45,15 @@ Requires Python 3.12+ and [uv](https://docs.astral.sh/uv/). Outside an activated
 
 Set `WG21_DATA_DIR` to point to your workspace directory.
 
-### Run papergate locally
+### Run paperweight locally
 
-`papergate` (in `crates/`) runs the papergate prompt against one paper
+`paperweight` (in `crates/`) runs the paperweight prompt against one paper
 through a [promptforge](https://github.com/cppalliance/promptforge) gateway.
 It needs no Docker, only a gateway to talk to.
 
 Get the binary in one of two ways:
 
-- Download `papergate-<tag>-x86_64-unknown-linux-gnu.tar.gz` from a paperflow
+- Download `paperweight-<tag>-x86_64-unknown-linux-gnu.tar.gz` from a paperflow
   release (x86_64 Linux only).
 - Build it. Install [rustup](https://rustup.rs/); the toolchain pinned in
   `rust-toolchain.toml` installs itself on first use. promptforge is vendored
@@ -61,7 +61,7 @@ Get the binary in one of two ways:
 
   ```bash
   git submodule update --init
-  cargo build --release -p papergate   # target/release/papergate
+  cargo build --release -p paperweight   # target/release/paperweight
   ```
 
 Point it at a gateway and run it on a paper:
@@ -69,7 +69,7 @@ Point it at a gateway and run it on a paper:
 ```bash
 export PROMPTFORGE_GATEWAY_URL=http://127.0.0.1:8085
 export PROMPTFORGE_GATEWAY_API_KEY=...       # the gateway's server.api_key
-papergate --file paper.md                    # or: papergate P4003R2
+paperweight --file paper.md                    # or: paperweight P4003R2
 ```
 
 - The gateway can be one you run yourself (the promptforge release
@@ -77,11 +77,11 @@ papergate --file paper.md                    # or: papergate P4003R2
   for example `ssh -L 8085:127.0.0.1:8085 <user>@stage.wg21.org`.
 - A paper number is looked up in the paper store under `WG21_DATA_DIR`;
   `--file` reads a markdown file and needs no workspace.
-- `--model <id>` picks the gateway model. Without it, papergate uses the
+- `--model <id>` picks the gateway model. Without it, paperweight uses the
   first chat model the gateway lists.
 - The report goes to stdout, or to `--output <path>`. Its first line is the
   `Verdict:`.
-- `papergate --help` lists the rest.
+- `paperweight --help` lists the rest.
 
 To move promptforge, check out the new commit inside `vendor/promptforge`,
 fix the crate against it, and commit both in one PR. The pin must not be
