@@ -3247,22 +3247,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "papergate"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "clap",
- "harness",
- "paperstore",
- "paperstore-sqlite",
- "reqwest",
- "rusqlite",
- "serde_json",
- "tempfile",
- "tokio",
-]
-
-[[package]]
 name = "paperstore"
 version = "0.1.0"
 dependencies = [
@@ -3279,6 +3263,22 @@ dependencies = [
  "rusqlite",
  "temp-env",
  "tempfile",
+]
+
+[[package]]
+name = "paperweight"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "harness",
+ "paperstore",
+ "paperstore-sqlite",
+ "reqwest",
+ "rusqlite",
+ "serde_json",
+ "tempfile",
+ "tokio",
 ]
 
 [[package]]
