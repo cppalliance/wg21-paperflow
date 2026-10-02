@@ -660,6 +660,21 @@ mod tests {
     }
 
     #[test]
+    fn embedded_prompt_declares_weight_output_and_labels() {
+        assert!(DEFAULT_PROMPT.contains("Weight: "));
+        assert!(DEFAULT_PROMPT.contains("Weight: n/a"));
+        assert!(DEFAULT_PROMPT.contains(r#"store.write("weight.md", weight_line)"#));
+        assert!(DEFAULT_PROMPT.contains(r#"read_or_empty("weight.md")"#));
+        assert!(DEFAULT_PROMPT.contains(r#"label = "Weightless""#));
+        assert!(DEFAULT_PROMPT.contains(r#"label = "Light""#));
+        assert!(DEFAULT_PROMPT.contains(r#"label = "Medium""#));
+        assert!(DEFAULT_PROMPT.contains(r#"label = "Heavy""#));
+        assert!(DEFAULT_PROMPT.contains(r#"label = "Supermassive""#));
+        assert!(!DEFAULT_PROMPT.contains("Verdict: "));
+        assert!(!DEFAULT_PROMPT.contains("verdict.md"));
+    }
+
+    #[test]
     fn store_input_loads_the_markdown_verbatim() {
         let fixture = StoreFixture::new();
         let backend = fixture.backend();

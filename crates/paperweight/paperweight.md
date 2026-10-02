@@ -243,7 +243,7 @@ Answer with exactly one word: `PROPOSAL` or `NOT_PROPOSAL`. No explanation.
 ```lua
 -- ===========================================================================
 -- EPILOGUE. Self-contained. Grades every criterion, aggregates in host code,
--- and writes the verdict, the model-facing evidence and the host-facing
+-- and writes the weight, the model-facing evidence and the host-facing
 -- diagnostics to the store.
 -- ===========================================================================
 
@@ -255,11 +255,11 @@ local QUOTE_WORDS = 40
 -- twice the number of criteria. Edit these thresholds to move the label
 -- boundaries; nothing else in the pipeline decides the label.
 local LABELS = {
-    { max = 0,  label = "None" },
-    { max = 3,  label = "Weak" },
-    { max = 7,  label = "Adequate" },
-    { max = 11, label = "Strong" },
-    { max = 14, label = "Excellent" },
+    { max = 0,  label = "Weightless" },
+    { max = 3,  label = "Light" },
+    { max = 7,  label = "Medium" },
+    { max = 11, label = "Heavy" },
+    { max = 14, label = "Supermassive" },
 }
 
 local function normalize(s)
@@ -284,7 +284,7 @@ local function label_for(points)
 end
 
 -- A score one point from a band edge is a coin flip between two labels. Say so
--- on the verdict line rather than letting the label imply false precision.
+-- on the weight line rather than letting the label imply false precision.
 local function edge_note(points)
     for i = 1, #LABELS - 1 do
         if points == LABELS[i].max then
@@ -335,7 +335,7 @@ nchunks, nsamples = tonumber(nchunks) or 1, tonumber(nsamples) or 1
 
 local max_points = 2 * ncrit
 
--- --- triage verdict from this section's own model turn ----------------------
+-- --- triage classification from this section's own model turn -----------------
 
 local is_proposal = not (reply or ""):upper():find("NOT_PROPOSAL", 1, true)
 
@@ -454,15 +454,15 @@ end
 
 -- --- label lookup: a table, not a judgement --------------------------------
 
-local verdict_line
+local weight_line
 if is_proposal then
-    verdict_line = string.format("Verdict: %s (%d/%d%s)",
+    weight_line = string.format("Weight: %s (%d/%d%s)",
         label_for(points), points, max_points, edge_note(points))
 else
-    verdict_line = "Verdict: n/a"
+    weight_line = "Weight: n/a"
 end
 
-store.write("verdict.md", verdict_line)
+store.write("weight.md", weight_line)
 
 -- --- evidence: the ONLY file the next model turn sees ----------------------
 -- Grades are words, not numbers, and nothing internal appears here: no scale,
@@ -491,7 +491,7 @@ store.write("evidence.md", table.concat(evidence, "\n"))
 
 -- --- diagnostics: host-facing only, never interpolated into a prompt -------
 
-local diag = { "# Diagnostics", "", verdict_line, "" }
+local diag = { "# Diagnostics", "", weight_line, "" }
 if is_proposal then
     table.insert(diag, string.format(
         "Criteria addressed: %d of %d. Points: %d of %d. "
@@ -564,7 +564,7 @@ You are writing the prose of a review of a C++ standardization proposal. The ass
 
 {{ var.evidence }}
 
-Write only the commentary. Do not state, restate or recompute a verdict, a score, a count or a ratio — the verdict is added around your text automatically. Do not describe how the assessment was produced or comment on its reliability, and do not repeat the headings above verbatim: write as a reviewer speaking plainly about the paper. Do not comment on the technical merit of the proposal; the subject is only whether the paper itself makes the case for standardizing what it proposes.
+Write only the commentary. Do not state, restate or recompute a weight, a score, a count or a ratio - the weight is added around your text automatically. Do not describe how the assessment was produced or comment on its reliability, and do not repeat the headings above verbatim: write as a reviewer speaking plainly about the paper. Do not comment on the technical merit of the proposal; the subject is only whether the paper itself makes the case for standardizing what it proposes.
 
 Produce exactly this, and nothing else:
 
@@ -589,8 +589,8 @@ local function read_or_empty(path)
 end
 
 local body = (reply or ""):gsub("^%s+", ""):gsub("%s+$", "")
-local verdict_line = read_or_empty("verdict.md")
+local weight_line = read_or_empty("weight.md")
 
-store.write("report.md", verdict_line .. "\n\n" .. body .. "\n")
+store.write("report.md", weight_line .. "\n\n" .. body .. "\n")
 return "Done."
 ```
