@@ -3,7 +3,7 @@
 //! `run_cli` owns the process boundary (argument parsing, signal installation,
 //! exit status). This module owns everything between: it validates the gateway
 //! environment and model selection, resolves the prompt source and its name
-//! (the embedded papergate prompt by default, `--prompt` from disk otherwise),
+//! (the embedded paperweight prompt by default, `--prompt` from disk otherwise),
 //! loads the paper markdown (from the SQLite paper store for a paper number,
 //! verbatim from disk for `--file`), and runs the prompt as a harness session.
 //! The harness stages the paper at the prompt's declared input and hands back
@@ -26,11 +26,11 @@ use paperstore::{PaperNum, StorageBackend};
 use paperstore_sqlite::SqliteBackend;
 use tokio::sync::broadcast::error::RecvError;
 
-/// The embedded papergate prompt, vendored from the promptforge prompts.
-const DEFAULT_PROMPT: &str = include_str!("../papergate.md");
+/// The embedded paperweight prompt, vendored from the promptforge prompts.
+const DEFAULT_PROMPT: &str = include_str!("../paperweight.md");
 
 /// The name the embedded prompt runs under.
-const DEFAULT_PROMPT_NAME: &str = "papergate";
+const DEFAULT_PROMPT_NAME: &str = "paperweight";
 
 /// The command-line interface; `run_cli` sets the program name.
 #[derive(Debug, Parser)]
@@ -48,7 +48,7 @@ pub(crate) struct Cli {
     /// Write the prompt's output to PATH instead of stdout.
     #[arg(long, value_name = "PATH")]
     pub(crate) output: Option<PathBuf>,
-    /// Read the prompt from PATH instead of the embedded papergate prompt.
+    /// Read the prompt from PATH instead of the embedded paperweight prompt.
     #[arg(long, value_name = "PATH")]
     pub(crate) prompt: Option<PathBuf>,
     /// The gateway model id the prompt's model roles bind to; defaults to the
@@ -520,7 +520,7 @@ mod tests {
 
     #[test]
     fn parser_accepts_a_paper_number_and_normalizes_case() {
-        let cli = Cli::parse_from(["papergate", "p4003r2"]);
+        let cli = Cli::parse_from(["paperweight", "p4003r2"]);
         assert_eq!(cli.paper.as_ref().map(PaperNum::as_str), Some("P4003R2"));
         assert_eq!(cli.file, None);
         assert_eq!(
@@ -531,7 +531,7 @@ mod tests {
         assert_eq!(cli.args, "", "no --args launches with empty arguments");
 
         let cli = Cli::parse_from([
-            "papergate",
+            "paperweight",
             "P4003R2",
             "--output",
             "out/analysis.md",
@@ -550,7 +550,7 @@ mod tests {
 
     #[test]
     fn parser_accepts_file_alone() {
-        let cli = Cli::parse_from(["papergate", "--file", "paper.md"]);
+        let cli = Cli::parse_from(["paperweight", "--file", "paper.md"]);
         assert_eq!(cli.paper, None);
         assert_eq!(cli.file.as_deref(), Some(Path::new("paper.md")));
     }
@@ -558,11 +558,11 @@ mod tests {
     #[test]
     fn parser_rejects_both_inputs_and_neither() {
         assert!(
-            Cli::try_parse_from(["papergate", "P4003R2", "--file", "paper.md"]).is_err(),
+            Cli::try_parse_from(["paperweight", "P4003R2", "--file", "paper.md"]).is_err(),
             "the input group must reject a number together with --file",
         );
         assert!(
-            Cli::try_parse_from(["papergate"]).is_err(),
+            Cli::try_parse_from(["paperweight"]).is_err(),
             "the input group must require exactly one input",
         );
     }
@@ -570,9 +570,9 @@ mod tests {
     #[test]
     fn parser_rejects_invalid_paper_numbers() {
         for args in [
-            &["papergate", "4003"][..],
-            &["papergate", "PR2"][..],
-            &["papergate", ""][..],
+            &["paperweight", "4003"][..],
+            &["paperweight", "PR2"][..],
+            &["paperweight", ""][..],
         ] {
             assert!(
                 Cli::try_parse_from(args).is_err(),
@@ -584,10 +584,10 @@ mod tests {
     #[test]
     fn parser_rejects_unknown_flag_and_extras() {
         assert!(
-            Cli::try_parse_from(["papergate", "P4003R2", "N4950"]).is_err(),
+            Cli::try_parse_from(["paperweight", "P4003R2", "N4950"]).is_err(),
             "clap must reject a trailing argument instead of silently dropping it",
         );
-        assert!(Cli::try_parse_from(["papergate", "--bogus", "P4003R2"]).is_err());
+        assert!(Cli::try_parse_from(["paperweight", "--bogus", "P4003R2"]).is_err());
     }
 
     #[test]
@@ -600,7 +600,7 @@ mod tests {
     #[test]
     fn prompt_name_uses_file_stem() {
         let name = |path: Option<&str>| prompt_name(path.map(Path::new));
-        assert_eq!(name(None).ok().as_deref(), Some("papergate"));
+        assert_eq!(name(None).ok().as_deref(), Some("paperweight"));
         assert_eq!(
             name(Some("/code/prompts/agora-author-advocacy.md"))
                 .ok()

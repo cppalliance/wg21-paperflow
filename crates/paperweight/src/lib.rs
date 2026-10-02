@@ -3,9 +3,9 @@
 //! `<bin> [PAPER_NUM] [--file <PATH>] [--output <PATH>] [--prompt <PATH>]
 //! [--model <ID>] [--args <TEXT>]` runs a promptforge prompt against one WG21
 //! paper as a harness session and writes the prompt's declared output to
-//! stdout, or to `--output` when given. The prompt is the embedded papergate
+//! stdout, or to `--output` when given. The prompt is the embedded paperweight
 //! prompt unless `--prompt` names a file; the run takes its name from the
-//! prompt's file stem (`papergate` for the embedded one). Exactly one input is
+//! prompt's file stem (`paperweight` for the embedded one). Exactly one input is
 //! required: a paper number resolved through the SQLite paper store, or
 //! `--file` to read a markdown file verbatim. A paper number needs
 //! `WG21_DATA_DIR` pointing at the paperflow workspace; `--file` never touches
@@ -15,7 +15,7 @@
 //! can only fail. `--model` selects the gateway model; without it, the run
 //! binds the first chat model the gateway lists.
 //!
-//! The crate builds two binaries, `papergate` and `promptforge-cli`, both thin
+//! The crate builds two binaries, `paperweight` and `promptforge-cli`, both thin
 //! wrappers over [`run_cli`].
 
 use std::error::Error;

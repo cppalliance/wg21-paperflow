@@ -1,5 +1,5 @@
 ---
-name: papergate
+name: paperweight
 description: Report on the evidence a WG21 paper provides for its need of standardization
 promptforge: 0
 models:
@@ -15,7 +15,7 @@ output:
   description: The report produced by analysis
 ---
 
-# Papergate
+# Paperweight
 
 Keep this section free of prose: prose here would make it a section with a prompt body, needing a model binding that the next statement is what declares. Globals defined here do NOT survive into any section, so this chunk holds the model binding and nothing else. Every other Lua block in this file is self-contained and passes data through the store.
 
@@ -214,10 +214,10 @@ end
 -- chunks, the criteria and the counts all go through it.
 
 for k, c in ipairs(chunks) do
-    store.write("pg_chunk_" .. k .. ".md", c)
+    store.write("pw_chunk_" .. k .. ".md", c)
 end
 for i, cr in ipairs(CRITERIA) do
-    store.write("pg_criterion_" .. i .. ".md", cr.text)
+    store.write("pw_criterion_" .. i .. ".md", cr.text)
 end
 
 local shorts, labels = {}, {}
@@ -225,9 +225,9 @@ for _, cr in ipairs(CRITERIA) do
     table.insert(shorts, cr.short)
     table.insert(labels, cr.label)
 end
-store.write("pg_shorts.md", table.concat(shorts, ","))
-store.write("pg_labels.md", table.concat(labels, ","))
-store.write("pg_counts.md", #chunks .. "," .. SAMPLES)
+store.write("pw_shorts.md", table.concat(shorts, ","))
+store.write("pw_labels.md", table.concat(labels, ","))
+store.write("pw_counts.md", #chunks .. "," .. SAMPLES)
 
 var.paper_head = untrusted(chunks[1])
 ```
@@ -317,20 +317,20 @@ end
 -- --- recover the prologue's published state ---------------------------------
 
 local shorts = {}
-for w in read_or_empty("pg_shorts.md"):gmatch("[^,]+") do
+for w in read_or_empty("pw_shorts.md"):gmatch("[^,]+") do
     table.insert(shorts, w)
 end
 local ncrit = #shorts
 
 local labels = {}
-for w in read_or_empty("pg_labels.md"):gmatch("[^,]+") do
+for w in read_or_empty("pw_labels.md"):gmatch("[^,]+") do
     table.insert(labels, w)
 end
 for c = 1, ncrit do
     labels[c] = labels[c] or shorts[c]
 end
 
-local nchunks, nsamples = read_or_empty("pg_counts.md"):match("^(%d+),(%d+)$")
+local nchunks, nsamples = read_or_empty("pw_counts.md"):match("^(%d+),(%d+)$")
 nchunks, nsamples = tonumber(nchunks) or 1, tonumber(nsamples) or 1
 
 local max_points = 2 * ncrit
@@ -379,7 +379,7 @@ for i, job in ipairs(jobs) do
     -- Each Grade arm writes its reply to the store, which is the only channel
     -- that reliably carries a plain string back here. The fanout return value
     -- is a host object with no string methods, so it is a fallback only.
-    local text = read_or_empty("pg_reply_" .. job:gsub("|", "_") .. ".md")
+    local text = read_or_empty("pw_reply_" .. job:gsub("|", "_") .. ".md")
     if text == "" then
         text = as_string(replies and replies[i])
     end
@@ -517,8 +517,8 @@ store.write("diagnostics.md", table.concat(diag, "\n"))
 ```lua
 models.use("writer", { temperature = 0.3 })
 local c, k = item:match("^(%d+)|(%d+)|%d+$")
-var.criterion = store.read("pg_criterion_" .. c .. ".md")
-var.paper_chunk = untrusted(store.read("pg_chunk_" .. k .. ".md"))
+var.criterion = store.read("pw_criterion_" .. c .. ".md")
+var.paper_chunk = untrusted(store.read("pw_chunk_" .. k .. ".md"))
 ```
 
 You are a reviewer assessing whether a C++ standardization proposal makes the case for its own standardization. You are judging one specific thing about the paper, described below.
@@ -550,7 +550,7 @@ QUOTE: <verbatim quote, or leave empty when the score is 0>
 
 ```lua
 local reply = models.infer(prose)
-store.write("pg_reply_" .. item:gsub("|", "_") .. ".md", reply)
+store.write("pw_reply_" .. item:gsub("|", "_") .. ".md", reply)
 ```
 
 ## Analyze
