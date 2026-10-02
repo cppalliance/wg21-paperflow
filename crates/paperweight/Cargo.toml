@@ -1,5 +1,5 @@
 [package]
-name = "papergate"
+name = "paperweight"
 description = "Run a promptforge prompt against a WG21 paper"
 version.workspace = true
 edition.workspace = true

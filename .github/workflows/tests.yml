@@ -81,12 +81,12 @@ jobs:
       - name: Run ${{ matrix.package }} tests
         run: uv run pytest packages/${{ matrix.package }}/tests
 
-  papergate:
-    name: papergate (cargo)
+  paperweight:
+    name: paperweight (cargo)
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      # The papergate crate depends on promptforge through the
+      # The paperweight crate depends on promptforge through the
       # vendor/promptforge submodule, so the checkout must be recursive.
       - uses: actions/checkout@v4
         with:
@@ -100,16 +100,16 @@ jobs:
         with:
           workspaces: ". -> target"
 
-      - name: Build papergate
-        run: cargo build --release -p papergate --locked
+      - name: Build paperweight
+        run: cargo build --release -p paperweight --locked
 
-      - name: Test papergate
-        run: cargo test -p papergate --locked
+      - name: Test paperweight
+        run: cargo test -p paperweight --locked
 
       - uses: actions/upload-artifact@v4
         with:
-          name: papergate-linux-x86_64
-          path: target/release/papergate
+          name: paperweight-linux-x86_64
+          path: target/release/paperweight
           if-no-files-found: error
 
   integration-tests:

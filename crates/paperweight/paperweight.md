@@ -1,5 +1,5 @@
 ---
-name: papergate
+name: paperweight
 description: Report on the evidence a WG21 paper provides for its need of standardization
 promptforge: 0
 models:
@@ -15,7 +15,7 @@ output:
   description: The report produced by analysis
 ---
 
-# Papergate
+# Paperweight
 
 Keep this section free of prose: prose here would make it a section with a prompt body, needing a model binding that the next statement is what declares. Globals defined here do NOT survive into any section, so this chunk holds the model binding and nothing else. Every other Lua block in this file is self-contained and passes data through the store.
 
@@ -214,10 +214,10 @@ end
 -- chunks, the criteria and the counts all go through it.
 
 for k, c in ipairs(chunks) do
-    store.write("pg_chunk_" .. k .. ".md", c)
+    store.write("pw_chunk_" .. k .. ".md", c)
 end
 for i, cr in ipairs(CRITERIA) do
-    store.write("pg_criterion_" .. i .. ".md", cr.text)
+    store.write("pw_criterion_" .. i .. ".md", cr.text)
 end
 
 local shorts, labels = {}, {}
@@ -225,9 +225,9 @@ for _, cr in ipairs(CRITERIA) do
     table.insert(shorts, cr.short)
     table.insert(labels, cr.label)
 end
-store.write("pg_shorts.md", table.concat(shorts, ","))
-store.write("pg_labels.md", table.concat(labels, ","))
-store.write("pg_counts.md", #chunks .. "," .. SAMPLES)
+store.write("pw_shorts.md", table.concat(shorts, ","))
+store.write("pw_labels.md", table.concat(labels, ","))
+store.write("pw_counts.md", #chunks .. "," .. SAMPLES)
 
 var.paper_head = untrusted(chunks[1])
 ```
@@ -243,7 +243,7 @@ Answer with exactly one word: `PROPOSAL` or `NOT_PROPOSAL`. No explanation.
 ```lua
 -- ===========================================================================
 -- EPILOGUE. Self-contained. Grades every criterion, aggregates in host code,
--- and writes the verdict, the model-facing evidence and the host-facing
+-- and writes the weight, the model-facing evidence and the host-facing
 -- diagnostics to the store.
 -- ===========================================================================
 
@@ -255,11 +255,11 @@ local QUOTE_WORDS = 40
 -- twice the number of criteria. Edit these thresholds to move the label
 -- boundaries; nothing else in the pipeline decides the label.
 local LABELS = {
-    { max = 0,  label = "None" },
-    { max = 3,  label = "Weak" },
-    { max = 7,  label = "Adequate" },
-    { max = 11, label = "Strong" },
-    { max = 14, label = "Excellent" },
+    { max = 0,  label = "Weightless" },
+    { max = 3,  label = "Light" },
+    { max = 7,  label = "Medium" },
+    { max = 11, label = "Heavy" },
+    { max = 14, label = "Supermassive" },
 }
 
 local function normalize(s)
@@ -284,7 +284,7 @@ local function label_for(points)
 end
 
 -- A score one point from a band edge is a coin flip between two labels. Say so
--- on the verdict line rather than letting the label imply false precision.
+-- on the weight line rather than letting the label imply false precision.
 local function edge_note(points)
     for i = 1, #LABELS - 1 do
         if points == LABELS[i].max then
@@ -317,25 +317,25 @@ end
 -- --- recover the prologue's published state ---------------------------------
 
 local shorts = {}
-for w in read_or_empty("pg_shorts.md"):gmatch("[^,]+") do
+for w in read_or_empty("pw_shorts.md"):gmatch("[^,]+") do
     table.insert(shorts, w)
 end
 local ncrit = #shorts
 
 local labels = {}
-for w in read_or_empty("pg_labels.md"):gmatch("[^,]+") do
+for w in read_or_empty("pw_labels.md"):gmatch("[^,]+") do
     table.insert(labels, w)
 end
 for c = 1, ncrit do
     labels[c] = labels[c] or shorts[c]
 end
 
-local nchunks, nsamples = read_or_empty("pg_counts.md"):match("^(%d+),(%d+)$")
+local nchunks, nsamples = read_or_empty("pw_counts.md"):match("^(%d+),(%d+)$")
 nchunks, nsamples = tonumber(nchunks) or 1, tonumber(nsamples) or 1
 
 local max_points = 2 * ncrit
 
--- --- triage verdict from this section's own model turn ----------------------
+-- --- triage classification from this section's own model turn -----------------
 
 local is_proposal = not (reply or ""):upper():find("NOT_PROPOSAL", 1, true)
 
@@ -379,7 +379,7 @@ for i, job in ipairs(jobs) do
     -- Each Grade arm writes its reply to the store, which is the only channel
     -- that reliably carries a plain string back here. The fanout return value
     -- is a host object with no string methods, so it is a fallback only.
-    local text = read_or_empty("pg_reply_" .. job:gsub("|", "_") .. ".md")
+    local text = read_or_empty("pw_reply_" .. job:gsub("|", "_") .. ".md")
     if text == "" then
         text = as_string(replies and replies[i])
     end
@@ -454,15 +454,15 @@ end
 
 -- --- label lookup: a table, not a judgement --------------------------------
 
-local verdict_line
+local weight_line
 if is_proposal then
-    verdict_line = string.format("Verdict: %s (%d/%d%s)",
+    weight_line = string.format("Weight: %s (%d/%d%s)",
         label_for(points), points, max_points, edge_note(points))
 else
-    verdict_line = "Verdict: n/a"
+    weight_line = "Weight: n/a"
 end
 
-store.write("verdict.md", verdict_line)
+store.write("weight.md", weight_line)
 
 -- --- evidence: the ONLY file the next model turn sees ----------------------
 -- Grades are words, not numbers, and nothing internal appears here: no scale,
@@ -491,7 +491,7 @@ store.write("evidence.md", table.concat(evidence, "\n"))
 
 -- --- diagnostics: host-facing only, never interpolated into a prompt -------
 
-local diag = { "# Diagnostics", "", verdict_line, "" }
+local diag = { "# Diagnostics", "", weight_line, "" }
 if is_proposal then
     table.insert(diag, string.format(
         "Criteria addressed: %d of %d. Points: %d of %d. "
@@ -517,8 +517,8 @@ store.write("diagnostics.md", table.concat(diag, "\n"))
 ```lua
 models.use("writer", { temperature = 0.3 })
 local c, k = item:match("^(%d+)|(%d+)|%d+$")
-var.criterion = store.read("pg_criterion_" .. c .. ".md")
-var.paper_chunk = untrusted(store.read("pg_chunk_" .. k .. ".md"))
+var.criterion = store.read("pw_criterion_" .. c .. ".md")
+var.paper_chunk = untrusted(store.read("pw_chunk_" .. k .. ".md"))
 ```
 
 You are a reviewer assessing whether a C++ standardization proposal makes the case for its own standardization. You are judging one specific thing about the paper, described below.
@@ -550,7 +550,7 @@ QUOTE: <verbatim quote, or leave empty when the score is 0>
 
 ```lua
 local reply = models.infer(prose)
-store.write("pg_reply_" .. item:gsub("|", "_") .. ".md", reply)
+store.write("pw_reply_" .. item:gsub("|", "_") .. ".md", reply)
 ```
 
 ## Analyze
@@ -564,7 +564,7 @@ You are writing the prose of a review of a C++ standardization proposal. The ass
 
 {{ var.evidence }}
 
-Write only the commentary. Do not state, restate or recompute a verdict, a score, a count or a ratio — the verdict is added around your text automatically. Do not describe how the assessment was produced or comment on its reliability, and do not repeat the headings above verbatim: write as a reviewer speaking plainly about the paper. Do not comment on the technical merit of the proposal; the subject is only whether the paper itself makes the case for standardizing what it proposes.
+Write only the commentary. Do not state, restate or recompute a weight, a score, a count or a ratio - the weight is added around your text automatically. Do not describe how the assessment was produced or comment on its reliability, and do not repeat the headings above verbatim: write as a reviewer speaking plainly about the paper. Do not comment on the technical merit of the proposal; the subject is only whether the paper itself makes the case for standardizing what it proposes.
 
 Produce exactly this, and nothing else:
 
@@ -589,8 +589,8 @@ local function read_or_empty(path)
 end
 
 local body = (reply or ""):gsub("^%s+", ""):gsub("%s+$", "")
-local verdict_line = read_or_empty("verdict.md")
+local weight_line = read_or_empty("weight.md")
 
-store.write("report.md", verdict_line .. "\n\n" .. body .. "\n")
+store.write("report.md", weight_line .. "\n\n" .. body .. "\n")
 return "Done."
 ```
