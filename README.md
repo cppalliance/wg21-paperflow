@@ -80,7 +80,7 @@ paperweight --file paper.md                    # or: paperweight P4003R2
 - `--model <id>` picks the gateway model. Without it, paperweight uses the
   first chat model the gateway lists.
 - The report goes to stdout, or to `--output <path>`. Its first line is the
-  `Verdict:`.
+  `Weight:`.
 - `paperweight --help` lists the rest.
 
 To move promptforge, check out the new commit inside `vendor/promptforge`,
