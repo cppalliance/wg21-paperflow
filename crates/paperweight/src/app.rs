@@ -674,9 +674,9 @@ mod tests {
 
     #[test]
     fn verbose_flag_parses() {
-        assert!(!Cli::parse_from(["papergate", "P4003R2"]).verbose);
-        assert!(Cli::parse_from(["papergate", "P4003R2", "--verbose"]).verbose);
-        assert!(Cli::parse_from(["papergate", "P4003R2", "-v"]).verbose);
+        assert!(!Cli::parse_from(["paperweight", "P4003R2"]).verbose);
+        assert!(Cli::parse_from(["paperweight", "P4003R2", "--verbose"]).verbose);
+        assert!(Cli::parse_from(["paperweight", "P4003R2", "-v"]).verbose);
     }
 
     #[test]
