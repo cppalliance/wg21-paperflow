@@ -118,6 +118,43 @@ def _load_config(path: Path | None) -> tuple[Path, dict[str, Any]]:
     return path, config
 
 
+def _expand_env_str(val: Any, default: str = "") -> str:
+    """Expand $ENV_VAR reference if string starts with $, otherwise return string value."""
+    if not isinstance(val, str):
+        return default if val is None else str(val)
+    if val.startswith("$"):
+        return os.environ.get(val[1:], default)
+    return val
+
+
+def _expand_env_int(val: Any, default: int = 0) -> int:
+    """Expand $ENV_VAR reference or coerce string integer to int."""
+    if isinstance(val, (int, float)) and not isinstance(val, bool):
+        return int(val)
+    if isinstance(val, str):
+        if val.startswith("$"):
+            val = os.environ.get(val[1:], "")
+        try:
+            return int(val.strip())
+        except (ValueError, TypeError, AttributeError):
+            return default
+    return default
+
+
+def _expand_env_float(val: Any, default: float = 0.0) -> float:
+    """Expand $ENV_VAR reference or coerce string float to float."""
+    if isinstance(val, (int, float)) and not isinstance(val, bool):
+        return float(val)
+    if isinstance(val, str):
+        if val.startswith("$"):
+            val = os.environ.get(val[1:], "")
+        try:
+            return float(val.strip())
+        except (ValueError, TypeError, AttributeError):
+            return default
+    return default
+
+
 def load_services(path: Path | None = None) -> ServiceRegistry:
     """Parse SERVICES.toml, build ModelBackend instances, return registry.
 
@@ -141,7 +178,9 @@ def load_services(path: Path | None = None) -> ServiceRegistry:
        the framework's :class:`ServiceConfigError` wins over any
        backend ``__init__`` strictness.
     3. Read the env var (may be unset; no error here).
-    4. Construct the backend.
+    4. Construct the backend. Configuration fields (``base_url``,
+       ``model``, ``max_context_window``, etc.) support ``$ENV_VAR``
+       expansion syntax.
     5. Record the env var name in ``api_key_envs``.
 
     Raises ``FileNotFoundError`` if the config file is not found.
@@ -202,15 +241,20 @@ def load_services(path: Path | None = None) -> ServiceRegistry:
         # own config (e.g. stream = true for vLLM behind Cloudflare).
         _KNOWN_KEYS = {"backend", "api_key", "api_key_env"}
         init_kwargs: dict[str, Any] = {
-            "base_url": svc.get("base_url", ""),
+            "base_url": _expand_env_str(svc.get("base_url", "")),
             "api_key": api_key,
-            "model": svc.get("model", ""),
-            "max_context_window": svc.get("max_context_window", 131072),
-            "chars_per_token": svc.get("chars_per_token", 0),
-            "token_multiplier": svc.get("token_multiplier", 0),
+            "model": _expand_env_str(svc.get("model", "")),
+            "max_context_window": _expand_env_int(
+                svc.get("max_context_window", 393216), default=393216
+            ),
+            "chars_per_token": _expand_env_float(svc.get("chars_per_token", 0.0)),
+            "token_multiplier": _expand_env_float(svc.get("token_multiplier", 0.0)),
+            "temperature": _expand_env_float(svc.get("temperature", 0.0), default=0.0),
         }
         for k, v in svc.items():
             if k not in init_kwargs and k not in _KNOWN_KEYS:
+                if isinstance(v, str) and v.startswith("$"):
+                    v = os.environ.get(v[1:], "")
                 init_kwargs[k] = v
         services[name] = backend_cls(**init_kwargs)
 

@@ -35,6 +35,9 @@ from pipeline.errors import ServiceConfigError
 from pipeline.model_backends import BACKEND_REGISTRY, ModelBackend
 from pipeline.services import (
     ServiceRegistry,
+    _expand_env_float,
+    _expand_env_int,
+    _expand_env_str,
     _instantiate_classifier,
     load_services,
     resolve_classifiers,
@@ -92,6 +95,181 @@ def test_load_services_no_auth_styles_pass_empty_string(tmp_path, body):
     p = _write_services_toml(tmp_path, f"[services.s1]\n{body}\n")
     registry = load_services(p)
     assert registry.api_key_envs["s1"] == ""
+
+
+def test_load_services_expands_env_vars_for_config_fields(tmp_path, monkeypatch):
+    monkeypatch.setenv("TEST_BASE_URL", "https://proxy.example.com/v1")
+    monkeypatch.setenv("TEST_MODEL", "custom-llm-v1")
+    monkeypatch.setenv("TEST_MAX_CTX", "262144")
+    monkeypatch.setenv("TEST_KEY", "secret-token")
+    p = _write_services_toml(tmp_path, """
+[services.s1]
+backend = "vllm_thinking"
+base_url = "$TEST_BASE_URL"
+api_key = "$TEST_KEY"
+model = "$TEST_MODEL"
+max_context_window = "$TEST_MAX_CTX"
+chars_per_token = 3.5
+""")
+    registry = load_services(p)
+    svc = registry.services["s1"]
+    assert svc._base_url == "https://proxy.example.com/v1"
+    assert svc._model == "custom-llm-v1"
+    assert svc._max_context_window == 262144
+    assert isinstance(svc._max_context_window, int)
+    assert svc._api_key == "secret-token"
+    assert registry.api_key_envs["s1"] == "TEST_KEY"
+
+
+def test_load_services_coerces_string_int_for_max_context_window(tmp_path):
+    p = _write_services_toml(tmp_path, """
+[services.s1]
+backend = "vllm_thinking"
+base_url = "https://example.com/v1"
+api_key = "test"
+model = "m1"
+max_context_window = "524288"
+""")
+    registry = load_services(p)
+    svc = registry.services["s1"]
+    assert svc._max_context_window == 524288
+    assert isinstance(svc._max_context_window, int)
+
+
+def test_load_services_omitted_max_context_window_defaults_to_393216(tmp_path):
+    p = _write_services_toml(tmp_path, """
+[services.s1]
+backend = "vllm_thinking"
+base_url = "https://example.com/v1"
+api_key = "test"
+model = "m1"
+""")
+    registry = load_services(p)
+    svc = registry.services["s1"]
+    assert svc._max_context_window == 393216
+    assert isinstance(svc._max_context_window, int)
+
+
+def test_load_services_env_var_defaults_when_unset(tmp_path, monkeypatch):
+    monkeypatch.delenv("UNSET_BASE_URL", raising=False)
+    monkeypatch.delenv("UNSET_MODEL", raising=False)
+    monkeypatch.delenv("UNSET_MAX_CTX", raising=False)
+    p = _write_services_toml(tmp_path, """
+[services.s1]
+backend = "vllm_thinking"
+base_url = "$UNSET_BASE_URL"
+api_key = "test"
+model = "$UNSET_MODEL"
+max_context_window = "$UNSET_MAX_CTX"
+""")
+    registry = load_services(p)
+    svc = registry.services["s1"]
+    assert svc._base_url == ""
+    assert svc._model == ""
+    assert svc._max_context_window == 393216
+    assert isinstance(svc._max_context_window, int)
+
+
+def test_load_services_explicit_temperature(tmp_path):
+    p = _write_services_toml(tmp_path, """
+[services.s1]
+backend = "vllm_thinking"
+base_url = "https://example.com/v1"
+api_key = "test"
+model = "m1"
+temperature = 0.7
+""")
+    registry = load_services(p)
+    svc = registry.services["s1"]
+    assert svc.temperature == 0.7
+    assert isinstance(svc.temperature, float)
+
+
+def test_load_services_omitted_temperature_defaults_to_zero(tmp_path):
+    p = _write_services_toml(tmp_path, """
+[services.s1]
+backend = "vllm_thinking"
+base_url = "https://example.com/v1"
+api_key = "test"
+model = "m1"
+""")
+    registry = load_services(p)
+    svc = registry.services["s1"]
+    assert svc.temperature == 0.0
+    assert isinstance(svc.temperature, float)
+
+
+def test_load_services_temperature_coercion_and_env_expansion(tmp_path, monkeypatch):
+    monkeypatch.setenv("ENV_TEMP", "0.85")
+    p = _write_services_toml(tmp_path, """
+[services.s1]
+backend = "vllm_thinking"
+base_url = "https://example.com/v1"
+api_key = "test"
+model = "m1"
+temperature = "$ENV_TEMP"
+
+[services.s2]
+backend = "vllm_thinking"
+base_url = "https://example.com/v1"
+api_key = "test"
+model = "m2"
+temperature = "0.6"
+""")
+    registry = load_services(p)
+    assert registry.services["s1"].temperature == 0.85
+    assert registry.services["s2"].temperature == 0.6
+
+
+def test_expand_env_str(monkeypatch):
+    assert _expand_env_str("simple") == "simple"
+    assert _expand_env_str(None) == ""
+    assert _expand_env_str(None, default="fallback") == "fallback"
+    assert _expand_env_str(123) == "123"
+
+    monkeypatch.setenv("TEST_EXPAND_STR", "expanded_val")
+    assert _expand_env_str("$TEST_EXPAND_STR") == "expanded_val"
+
+    monkeypatch.delenv("TEST_UNSET_STR", raising=False)
+    assert _expand_env_str("$TEST_UNSET_STR") == ""
+    assert _expand_env_str("$TEST_UNSET_STR", default="fallback") == "fallback"
+
+
+def test_expand_env_int(monkeypatch):
+    assert _expand_env_int(42) == 42
+    assert _expand_env_int(42.9) == 42
+    assert _expand_env_int("42") == 42
+    assert _expand_env_int("  42  ") == 42
+    assert _expand_env_int(None) == 0
+    assert _expand_env_int(None, default=393216) == 393216
+    assert _expand_env_int(True) == 0
+    assert _expand_env_int(False, default=10) == 10
+    assert _expand_env_int("not_an_int", default=393216) == 393216
+
+    monkeypatch.setenv("TEST_EXPAND_INT", "1000")
+    assert _expand_env_int("$TEST_EXPAND_INT") == 1000
+
+    monkeypatch.delenv("TEST_UNSET_INT", raising=False)
+    assert _expand_env_int("$TEST_UNSET_INT") == 0
+    assert _expand_env_int("$TEST_UNSET_INT", default=393216) == 393216
+
+
+def test_expand_env_float(monkeypatch):
+    assert _expand_env_float(3.14) == 3.14
+    assert _expand_env_float(42) == 42.0
+    assert _expand_env_float("3.14") == 3.14
+    assert _expand_env_float("  3.14  ") == 3.14
+    assert _expand_env_float(None) == 0.0
+    assert _expand_env_float(None, default=1.5) == 1.5
+    assert _expand_env_float(True) == 0.0
+    assert _expand_env_float("not_a_float", default=1.5) == 1.5
+
+    monkeypatch.setenv("TEST_EXPAND_FLOAT", "2.718")
+    assert _expand_env_float("$TEST_EXPAND_FLOAT") == 2.718
+
+    monkeypatch.delenv("TEST_UNSET_FLOAT", raising=False)
+    assert _expand_env_float("$TEST_UNSET_FLOAT") == 0.0
+    assert _expand_env_float("$TEST_UNSET_FLOAT", default=1.5) == 1.5
 
 
 def test_load_services_required_api_key_env_mismatch_raises(tmp_path):

@@ -81,6 +81,37 @@ jobs:
       - name: Run ${{ matrix.package }} tests
         run: uv run pytest packages/${{ matrix.package }}/tests
 
+  paperweight:
+    name: paperweight (cargo)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      # The paperweight crate depends on promptforge through the
+      # vendor/promptforge submodule, so the checkout must be recursive.
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      # Installs the toolchain pinned in rust-toolchain.toml.
+      - name: Install Rust
+        run: rustup toolchain install
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ". -> target"
+
+      - name: Build paperweight
+        run: cargo build --release -p paperweight --locked
+
+      - name: Test paperweight
+        run: cargo test -p paperweight --locked
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: paperweight-linux-x86_64
+          path: target/release/paperweight
+          if-no-files-found: error
+
   integration-tests:
     name: integration tests
     runs-on: ubuntu-latest

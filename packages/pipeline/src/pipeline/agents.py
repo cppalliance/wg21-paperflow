@@ -104,6 +104,10 @@ class AgentBackend:
         return self._service_name
 
     @property
+    def temperature(self) -> float:
+        return self._model.temperature
+
+    @property
     def backend_class_name(self) -> str:
         return type(self._model).__name__
 
@@ -154,6 +158,7 @@ class AgentBackend:
                 f"<!-- call: {label or 'unlabeled'} | "
                 f"service={self._service_name or 'unknown'} | "
                 f"model={model_name} | "
+                f"temperature={self._model.temperature} | "
                 f"max_tokens={resolved_max_tokens} -->\n"
                 f"<!-- system -->\n{system_prompt.rstrip()}\n"
                 f"<!-- user -->\n{user_message.rstrip()}\n"
