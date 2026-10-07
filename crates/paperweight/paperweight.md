@@ -1,7 +1,12 @@
 ---
-name: papergate
+name: paperweight
 description: Report on the evidence a WG21 paper provides for its need of standardization
-promptforge: 1
+promptforge: 0
+models:
+  writer:
+    keywords: [no-thinking]
+    min_context: 32768
+    description: A careful analysis model suited to structured reasoning and long-context review
 input:
   path: paper.md
   description: The WG21 paper markdown to analyze
@@ -10,7 +15,7 @@ output:
   description: The report produced by analysis
 ---
 
-# Papergate
+# Paperweight
 
 ```lua
 -- Keep this section free of prose: prose here would make it a section with a
@@ -19,9 +24,7 @@ output:
 -- chunk holds the model binding and nothing else. Every other Lua block in
 -- this file is self-contained and passes data through the store.
 
-models.default("writer",
-    "A careful analysis model suited to structured reasoning and long-context review",
-    { thinking = false, temperature = 0.3, context = 32768 })
+models.default("writer")
 ```
 
 ## Assess
@@ -31,6 +34,8 @@ models.default("writer",
 -- PROLOGUE. Self-contained. Splits the paper, publishes the pieces and the
 -- criteria to the store, and hands the head of the paper to the triage turn.
 -- ===========================================================================
+
+models.use("writer", { temperature = 0.3 })
 
 -- --- tunables ---------------------------------------------------------------
 -- SAMPLES must be odd. Units are H2 sections, so SECTION_BUDGET only bites on
@@ -408,6 +413,8 @@ Answer with exactly one word: `PROPOSAL` or `NOT_PROPOSAL`. No explanation.
 -- and writes the verdict, the model-facing evidence and the host-facing
 -- diagnostics to the store.
 -- ===========================================================================
+
+local reply = models.infer(prose)
 
 local QUOTE_WORDS = 40
 
@@ -1078,6 +1085,7 @@ store.write("diagnostics.md", table.concat(diag, "\n"))
 ### Grade
 
 ```lua
+models.use("writer", { temperature = 0.3 })
 local c, k = item:match("^(%d+)|(%d+)|%d+$")
 var.criterion = store.read("pg_criterion_" .. c .. ".md")
 var.guidance = store.read("pg_guidance_" .. c .. ".md")
@@ -1122,12 +1130,14 @@ QUOTE: <verbatim quote, or leave empty when the score is 0>
 ```
 
 ```lua
+local reply = models.infer(prose)
 store.write("pg_reply_" .. item:gsub("|", "_") .. ".md", reply)
 ```
 
 ## Analyze
 
 ```lua
+models.use("writer", { temperature = 0.3 })
 var.findings = untrusted(store.read("findings.md"))
 ```
 
@@ -1156,6 +1166,8 @@ If the assessment above says the document is not a proposal, write instead a sin
 -- all that is left is to wrap the prose in the verdict and attach diagnostics.
 -- ===========================================================================
 
+local reply = models.infer(prose)
+
 local function read_or_empty(path)
     local ok, value = pcall(store.read, path)
     if ok and value then return value end
@@ -1178,7 +1190,7 @@ end
 --
 --   local diag = read_or_empty("diagnostics.md")
 --   local appendix = diag:find("%S")
---       and ("\n\n<!-- papergate-diagnostics\n" .. diag .. "\n-->\n") or ""
+--       and ("\n\n<!-- paperweight-diagnostics\n" .. diag .. "\n-->\n") or ""
 
 store.write("report.md", verdict_line .. "\n\n" .. body .. "\n")
 return "Done."
