@@ -190,7 +190,9 @@ _SAFE_SERVICE_FIELDS = (
 # merged into one pipe row, or a repeated continuation-page header emitted
 # as a data row, is not-llm-readable. The fold keeps that verdict when
 # reasoning names row_loss.
-_LANE_VERSION = 32
+# v33: an empty cell that continues a rowspan, with the text on the first
+# row of the span, is not row_loss.
+_LANE_VERSION = 33
 
 # Fleet LJF: papers are sorted by descending predicted work before dispatch
 # (_predicted_work_seconds: sidecar duration, else PDF page count, else

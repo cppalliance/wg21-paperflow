@@ -830,6 +830,23 @@ def test_row_loss_verdict_is_not_capped():
     assert _fold_monolith_verdict(other, [], 0) == "review"
 
 
+def test_row_loss_excludes_rowspan_continuation():
+    """An empty cell that continues a rowspan is not row_loss in any prompt."""
+    from pathlib import Path
+
+    phrase = (
+        "an empty cell that continues a rowspan, with the text on the "
+        "first row of the span"
+    )
+    llm_md = (
+        Path(__file__).resolve().parents[2]
+        / "src" / "whisker" / "llm" / "llm.md"
+    ).read_text(encoding="utf-8")
+    assert phrase in llm_md
+    assert phrase in CONVERSION_CONTRACT
+    assert "an empty rowspan continuation is not row_loss" in UNIT_CHECK_SYSTEM_PROMPT
+
+
 class TestUnitCheckPromptContainsFlattenedType:
     """UNIT_CHECK_SYSTEM_PROMPT lists table_flattened as a known defect type."""
 
