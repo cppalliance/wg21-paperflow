@@ -1,7 +1,7 @@
 //! Run a promptforge prompt against one WG21 paper from the command line.
 //!
 //! `<bin> [PAPER_NUM] [--file <PATH>] [--output <PATH>] [--prompt <PATH>]
-//! [--model <ID>] [--args <TEXT>]` runs a promptforge prompt against one WG21
+//! [--model <ID>] [--args <TEXT>] [--verbose]` runs a promptforge prompt against one WG21
 //! paper as a harness session and writes the prompt's declared output to
 //! stdout, or to `--output` when given. The prompt is the embedded paperweight
 //! prompt unless `--prompt` names a file; the run takes its name from the
@@ -13,7 +13,9 @@
 //! trailing `/v1` is dropped) and `PROMPTFORGE_GATEWAY_API_KEY` must both be
 //! set: the prompt binds its models through the gateway, so a local-only run
 //! can only fail. `--model` selects the gateway model; without it, the run
-//! binds the first chat model the gateway lists.
+//! binds the first chat model the gateway lists. Progress goes to stderr;
+//! `--verbose` adds every tool call, its full result, Lua log messages, and
+//! model replies.
 //!
 //! The crate builds two binaries, `paperweight` and `promptforge-cli`, both thin
 //! wrappers over [`run_cli`].
@@ -52,6 +54,7 @@ pub async fn run_cli(name: &'static str) -> ExitCode {
         prompt: cli.prompt.as_deref(),
         model: cli.model.as_deref(),
         args: &cli.args,
+        verbose: cli.verbose,
         cancel,
     };
     match app::run(request).await {
