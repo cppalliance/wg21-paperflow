@@ -186,7 +186,11 @@ _SAFE_SERVICE_FIELDS = (
 # v31: raw_html_table. A PDF source with a raw HTML table is a table
 # defect. The mixed-table comment stays sanctioned only for an HTML
 # source. The paper user message states the source format.
-_LANE_VERSION = 31
+# v32: row_loss. PDF rows turned into headings or prose, two source rows
+# merged into one pipe row, or a repeated continuation-page header emitted
+# as a data row, is not-llm-readable. The fold keeps that verdict when
+# reasoning names row_loss.
+_LANE_VERSION = 32
 
 # Fleet LJF: papers are sorted by descending predicted work before dispatch
 # (_predicted_work_seconds: sidecar duration, else PDF page count, else

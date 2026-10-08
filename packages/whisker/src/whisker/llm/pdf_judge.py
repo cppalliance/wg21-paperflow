@@ -548,6 +548,14 @@ def _fold_monolith_verdict(
     unsubstantiated and folds to ``review``. An empty ``missing_content``
     list (independent structure concern) likewise caps at ``review``.
     """
+    # row_loss is a structure defect whose words often survive as headings
+    # or inside a merged cell, so the missing-content fold would drop the
+    # fail. The model must name the signature. Other fails stay capped.
+    if (
+        judgment.verdict == "not-llm-readable"
+        and "row_loss" in judgment.reasoning
+    ):
+        return "not-llm-readable"
     if not judgment.missing_content:
         # No missing-content claims: independent structure concern.
         # Cap at review; fail requires substantiated missing content.

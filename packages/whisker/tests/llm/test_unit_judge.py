@@ -18,6 +18,7 @@ from whisker.llm.models import (
 from whisker.llm.source_router import RiskSignal
 from whisker.llm.unit_judge import (
     _TABLE_SIGNAL_TYPES,
+    CONVERSION_CONTRACT,
     METADATA_CHECK_SYSTEM_PROMPT,
     UNIT_CHECK_SYSTEM_PROMPT,
     UnitJudgeResult,
@@ -786,6 +787,47 @@ class TestTableSignalTypes:
     def test_non_table_excluded(self):
         assert "low_recall" not in _TABLE_SIGNAL_TYPES
         assert "token_delta" not in _TABLE_SIGNAL_TYPES
+
+
+def test_row_loss_signature_in_llm_md():
+    """Signature 7 names row_loss and requires not-llm-readable."""
+    from pathlib import Path
+
+    text = (
+        Path(__file__).resolve().parents[2]
+        / "src" / "whisker" / "llm" / "llm.md"
+    ).read_text(encoding="utf-8")
+    assert "7. **row_loss**" in text
+    assert "Verdict `not-llm-readable`" in text
+    assert "two source rows merged into one pipe row" in text
+
+
+def test_row_loss_rubric_is_not_llm_readable():
+    """The unit rubric counts row_loss toward not-llm-readable."""
+    assert "row_loss" in CONVERSION_CONTRACT
+    assert "Verdict not-llm-readable, not review." in CONVERSION_CONTRACT
+    assert "row_loss" in UNIT_CHECK_SYSTEM_PROMPT
+    assert "verdict not-llm-readable" in UNIT_CHECK_SYSTEM_PROMPT
+
+
+def test_row_loss_verdict_is_not_capped():
+    """A row_loss fail is kept when the lost row text is still in the markdown."""
+    from whisker.llm.pdf_judge import PdfJudgment, _fold_monolith_verdict
+
+    kept = PdfJudgment(
+        verdict="not-llm-readable",
+        missing_content=[],
+        confidence=0.9,
+        reasoning="row_loss: 2026.2 through 2028.2 became headings",
+    )
+    other = PdfJudgment(
+        verdict="not-llm-readable",
+        missing_content=[],
+        confidence=0.9,
+        reasoning="extensive structural reordering",
+    )
+    assert _fold_monolith_verdict(kept, [], 0) == "not-llm-readable"
+    assert _fold_monolith_verdict(other, [], 0) == "review"
 
 
 class TestUnitCheckPromptContainsFlattenedType:
