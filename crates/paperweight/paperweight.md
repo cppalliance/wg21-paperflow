@@ -422,11 +422,11 @@ local QUOTE_WORDS = 40
 -- twice the number of criteria. Edit these thresholds to move the label
 -- boundaries; nothing else in the pipeline decides the label.
 local LABELS = {
-    { max = 0,  label = "None" },
-    { max = 3,  label = "Weak" },
-    { max = 7,  label = "Adequate" },
-    { max = 11, label = "Strong" },
-    { max = 14, label = "Excellent" },
+    { max = 0,  label = "Weightless" },
+    { max = 3,  label = "Light" },
+    { max = 7,  label = "Medium" },
+    { max = 11, label = "Heavy" },
+    { max = 14, label = "Supermassive" },
 }
 
 local function normalize(s)
@@ -912,7 +912,7 @@ local final = {}
 for c = 1, ncrit do final[c] = scores[c] end
 local final_points = points
 
-local verdict_line
+local weight_line
 -- --- the verdict ------------------------------------------------------------
 -- The label carries the claim; the number is detail.
 --
@@ -947,12 +947,12 @@ end
 
 if is_proposal then
     local shown = math.floor(final_points + 0.5)
-    verdict_line = string.format("Verdict: %s (%d/%d)",
+    weight_line = string.format("Weight: %s (%d/%d)",
         band_span(final_points), shown, max_points)
 else
-    verdict_line = "Verdict: n/a"
+    weight_line = "Weight: n/a"
 end
-store.write("verdict.md", verdict_line)
+store.write("weight.md", weight_line)
 
 -- --- findings: the ONLY file the prose turn sees ---------------------------
 -- Passages are shown only for criteria that scored above zero, so the prose
@@ -1176,9 +1176,9 @@ end
 
 local body = (reply or ""):gsub("^%s+", ""):gsub("%s+$", "")
 
-local verdict_line = read_or_empty("verdict.md")
-if not verdict_line:find("%S") then
-    verdict_line = "Verdict: n/a"
+local weight_line = read_or_empty("weight.md")
+if not weight_line:find("%S") then
+    weight_line = "Weight: n/a"
 end
 
 -- The diagnostics are still built in full and left in the store as
@@ -1192,6 +1192,6 @@ end
 --   local appendix = diag:find("%S")
 --       and ("\n\n<!-- paperweight-diagnostics\n" .. diag .. "\n-->\n") or ""
 
-store.write("report.md", verdict_line .. "\n\n" .. body .. "\n")
+store.write("report.md", weight_line .. "\n\n" .. body .. "\n")
 return "Done."
 ```
