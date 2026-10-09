@@ -1,0 +1,113 @@
+C:\Users\sabo2\Desktop\cppalliance\packages\whisker\research\repos\camelot\CODE_OF_CONDUCT.md:68:All complaints will be reviewed and investigated promptly and fairly.
+C:\Users\sabo2\Desktop\cppalliance\packages\whisker\research\repos\camelot\pyproject.toml:54:# HuggingFace transformers). Heavy (pulls torch); opt in explicitly with
+C:\Users\sabo2\Desktop\cppalliance\packages\whisker\research\repos\camelot\pyproject.toml:59:    # <5: transformers v5 strict-validates configs and rejects the TATR
+C:\Users\sabo2\Desktop\cppalliance\packages\whisker\research\repos\camelot\pyproject.toml:62:    "transformers>=4.40,<5",
+C:\Users\sabo2\Desktop\cppalliance\packages\whisker\research\repos\camelot\pyproject.toml:90:    "sphinx-prompt>=1.5.0",
+C:\Users\sabo2\Desktop\cppalliance\packages\whisker\research\repos\camelot\noxfile.py:44:    that environment when invoked from git.
+C:\Users\sabo2\Desktop\cppalliance\packages\whisker\research\repos\camelot\noxfile.py:258:        "sphinx-prompt",
+C:\Users\sabo2\Desktop\cppalliance\packages\whisker\research\repos\camelot\noxfile.py:282:        "sphinx-prompt",
+C:\Users\sabo2\Desktop\cppalliance\packages\whisker\research\repos\camelot\camelot\core.py:597:        Idempotent: callers may invoke this every call (it short-circuits
+C:\Users\sabo2\Desktop\cppalliance\packages\whisker\research\repos\camelot\docs\_themes\flask_theme_support.py:89:        Generic.Prompt: "#745334",  # class: 'gp'
+C:\Users\sabo2\Desktop\cppalliance\packages\whisker\research\repos\camelot\docs\requirements.txt:10:sphinx-prompt==1.10.2
+C:\Users\sabo2\Desktop\cppalliance\packages\whisker\research\repos\camelot\camelot\parsers\stream.py:107:        textedges.generate(textlines)
+C:\Users\sabo2\Desktop\cppalliance\packages\whisker\research\repos\camelot\tests\data.py:4447:    ["GMC", "Total GMC Enrollment", "", "1,091,255"],
+C:\Users\sabo2\Desktop\cppalliance\packages\whisker\research\repos\camelot\tests\data.py:4470:    ["COHS", "Total COHS Enrollment", "", "2,176,064"],
+C:\Users\sabo2\Desktop\cppalliance\packages\whisker\research\repos\camelot\tests\data.py:4474:    ["PCCM", "Total PHP Enrollment", "", "853"],
+C:\Users\sabo2\Desktop\cppalliance\packages\whisker\research\repos\camelot\tests\data.py:4475:    ["All Models Total Enrollments", "", "", "10,132,875"],
+C:\Users\sabo2\Desktop\cppalliance\packages\whisker\research\repos\camelot\tests\data.py:5412:    ["GMC", "Total GMC Enrollment", "", "1,091,255"],
+C:\Users\sabo2\Desktop\cppalliance\packages\whisker\research\repos\camelot\tests\data.py:5435:    ["COHS", "Total COHS Enrollment", "", "2,176,064"],
+C:\Users\sabo2\Desktop\cppalliance\packages\whisker\research\repos\camelot\tests\data.py:5439:    ["PCCM", "Total PHP Enrollment", "", "853"],
+C:\Users\sabo2\Desktop\cppalliance\packages\whisker\research\repos\camelot\tests\data.py:5440:    ["All Models Total Enrollments", "", "", "10,132,875"],
+C:\Users\sabo2\Desktop\cppalliance\packages\whisker\research\repos\camelot\uv.lock:210:    { name = "sphinx-prompt", version = "1.9.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
+C:\Users\sabo2\Desktop\cppalliance\packages\whisker\research\repos\camelot\uv.lock:211:    { name = "sphinx-prompt", version = "1.10.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
+C:\Users\sabo2\Desktop\cppalliance\packages\whisker\research\repos\camelot\uv.lock:223:    { name = "transformers" },
+C:\Users\sabo2\Desktop\cppalliance\packages\whisker\research\repos\camelot\uv.lock:264:    { name = "sphinx-prompt", marker = "extra == 'dev'", specifier = ">=1.5.0" },
+C:\Users\sabo2\Desktop\cppalliance\packages\whisker\research\repos\camelot\uv.lock:268:    { name = "transformers", marker = "extra == 'ml'", specifier = ">=4.40,<5" },
+C:\Users\sabo2\Desktop\cppalliance\packages\whisker\research\repos\camelot\uv.lock:3689:name = "sphinx-prompt"
+C:\Users\sabo2\Desktop\cppalliance\packages\whisker\research\repos\camelot\uv.lock:3705:sdist = { url = "https://files.pythonhosted.org/packages/34/fe/ac4e24f35b5148b31ac717ae7dcc7a2f7ec56eb729e22c7252ed8ad2d9a5/sphinx_prompt-1.9.0.tar.gz", hash = "sha256:471b3c6d466dce780a9b167d9541865fd4e9a80ed46e31b06a52a0529ae995a1", size = 5340, upload-time = "2024-08-07T15:46:51.428Z" }
+C:\Users\sabo2\Desktop\cppalliance\packages\whisker\research\repos\camelot\uv.lock:3707:    { url = "https://files.pythonhosted.org/packages/76/98/e90ca466e0ede452d3e5a8d92b8fb68db6de269856e019ed9cab69440522/sphinx_prompt-1.9.0-py3-none-any.whl", hash = "sha256:fd731446c03f043d1ff6df9f22414495b23067c67011cc21658ea8d36b3575fc", size = 7311, upload-time = "2024-08-07T15:46:50.329Z" },
+C:\Users\sabo2\Desktop\cppalliance\packages\whisker\research\repos\camelot\uv.lock:3711:name = "sphinx-prompt"
+C:\Users\sabo2\Desktop\cppalliance\packages\whisker\research\repos\camelot\uv.lock:3732:sdist = { url = "https://files.pythonhosted.org/packages/d0/a3/91293c0e0f0b76d0697ba7a41541929ca3f5457671d008bd84a9bde17e21/sphinx_prompt-1.10.2.tar.gz", hash = "sha256:47b592ba75caebd044b0eddf7a5a1b6e0aef6df587b034377cd101a999b686ba", size = 5566, upload-time = "2025-11-28T09:23:18.057Z" }
+C:\Users\sabo2\Desktop\cppalliance\packages\whisker\research\repos\camelot\uv.lock:3734:    { url = "https://files.pythonhosted.org/packages/a9/f4/44ce4d0179fb4e9cfe181a8aa281bba23e40158a609fb3680774529acaaa/sphinx_prompt-1.10.2-py3-none-any.whl", hash = "sha256:6594337962c4b1498602e6984634bed4a0dc7955852e3cfc255eb0af766ed859", size = 7474, upload-time = "2025-11-28T09:23:17.154Z" },
+C:\Users\sabo2\Desktop\cppalliance\packages\whisker\research\repos\camelot\uv.lock:4045:name = "transformers"
+C:\Users\sabo2\Desktop\cppalliance\packages\whisker\research\repos\camelot\uv.lock:4061:sdist = { url = "https://files.pythonhosted.org/packages/c4/35/67252acc1b929dc88b6602e8c4a982e64f31e733b804c14bc24b47da35e6/transformers-4.57.6.tar.gz", hash = "sha256:55e44126ece9dc0a291521b7e5492b572e6ef2766338a610b9ab5afbb70689d3", size = 10134912, upload-time = "2026-01-16T10:38:39.284Z" }
+C:\Users\sabo2\Desktop\cppalliance\packages\whisker\research\repos\camelot\uv.lock:4063:    { url = "https://files.pythonhosted.org/packages/03/b8/e484ef633af3887baeeb4b6ad12743363af7cce68ae51e938e00aaa0529d/transformers-4.57.6-py3-none-any.whl", hash = "sha256:4c9e9de11333ddfe5114bc872c9f370509198acf0b87a832a0ab9458e2bd0550", size = 11993498, upload-time = "2026-01-16T10:38:31.289Z" },
+C:\Users\sabo2\Desktop\cppalliance\packages\whisker\research\repos\camelot\camelot\parsers\network.py:925:        text_network.generate(textlines)
+C:\Users\sabo2\Desktop\cppalliance\packages\whisker\research\repos\camelot\docs\conf.py:132:copybutton_prompt_text = r">>> |\.\.\. |\$ |In \[\d*\]: | {2,5}\.\.\.: | {5,8}: "
+C:\Users\sabo2\Desktop\cppalliance\packages\whisker\research\repos\camelot\docs\conf.py:133:copybutton_prompt_is_regexp = True
+C:\Users\sabo2\Desktop\cppalliance\packages\whisker\research\repos\camelot\docs\user\comparison.rst:268:* **When Camelot wins.** Heuristic-first by default (predictable,
+C:\Users\sabo2\Desktop\cppalliance\packages\whisker\research\repos\camelot\docs\user\comparison.rst:285:a document-preprocessing toolkit aimed at the LLM ingestion pipeline
+C:\Users\sabo2\Desktop\cppalliance\packages\whisker\research\repos\camelot\docs\user\faq.rst:130:image-based tool (an ML layout detector such as table-transformers, or
+C:\Users\sabo2\Desktop\cppalliance\packages\whisker\research\repos\camelot\tests\test_ml_backend.py:6:raised when torch/transformers are missing. Live model inference is validated
+C:\Users\sabo2\Desktop\cppalliance\packages\whisker\research\repos\camelot\tests\test_main_module.py:6:def test_main_invokes_cli(monkeypatch):
+C:\Users\sabo2\Desktop\cppalliance\packages\whisker\research\repos\camelot\tests\test_main_module.py:17:def test_run_as_module_invokes_cli(monkeypatch):
+C:\Users\sabo2\Desktop\cppalliance\packages\whisker\research\repos\camelot\tests\test_cli.py:18:    result = runner.invoke(cli, ["--help"])
+C:\Users\sabo2\Desktop\cppalliance\packages\whisker\research\repos\camelot\tests\test_cli.py:37:        result = runner.invoke(
+C:\Users\sabo2\Desktop\cppalliance\packages\whisker\research\repos\camelot\tests\test_cli.py:43:        result = runner.invoke(cli, ["lattice", "--format", "csv", infile])
+C:\Users\sabo2\Desktop\cppalliance\packages\whisker\research\repos\camelot\tests\test_cli.py:50:        result = runner.invoke(cli, ["lattice", "--output", outfile, infile])
+C:\Users\sabo2\Desktop\cppalliance\packages\whisker\research\repos\camelot\tests\test_cli.py:56:        result = runner.invoke(cli, ["lattice", "--output", unknown_out, infile])
+C:\Users\sabo2\Desktop\cppalliance\packages\whisker\research\repos\camelot\tests\test_cli.py:65:        result = runner.invoke(
+C:\Users\sabo2\Desktop\cppalliance\packages\whisker\research\repos\camelot\tests\test_cli.py:71:        result = runner.invoke(cli, ["stream", "--format", "csv", infile])
+C:\Users\sabo2\Desktop\cppalliance\packages\whisker\research\repos\camelot\tests\test_cli.py:76:        result = runner.invoke(cli, ["stream", "--output", outfile, infile])
+C:\Users\sabo2\Desktop\cppalliance\packages\whisker\research\repos\camelot\tests\test_cli.py:80:        result = runner.invoke(
+C:\Users\sabo2\Desktop\cppalliance\packages\whisker\research\repos\camelot\tests\test_cli.py:98:        result = runner.invoke(
+C:\Users\sabo2\Desktop\cppalliance\packages\whisker\research\repos\camelot\tests\test_cli.py:122:        result = runner.invoke(
+C:\Users\sabo2\Desktop\cppalliance\packages\whisker\research\repos\camelot\tests\test_cli.py:145:        result = runner.invoke(
+C:\Users\sabo2\Desktop\cppalliance\packages\whisker\research\repos\camelot\tests\test_cli.py:151:        result = runner.invoke(cli, ["hybrid", "--format", "csv", infile])
+C:\Users\sabo2\Desktop\cppalliance\packages\whisker\research\repos\camelot\tests\test_cli.py:156:        result = runner.invoke(cli, ["hybrid", "--output", outfile, infile])
+C:\Users\sabo2\Desktop\cppalliance\packages\whisker\research\repos\camelot\tests\test_cli.py:166:        result = runner.invoke(
+C:\Users\sabo2\Desktop\cppalliance\packages\whisker\research\repos\camelot\tests\test_cli.py:171:        result = runner.invoke(cli, ["network", "--format", "csv", infile])
+C:\Users\sabo2\Desktop\cppalliance\packages\whisker\research\repos\camelot\tests\test_cli.py:175:        result = runner.invoke(cli, ["network", "--output", outfile, infile])
+C:\Users\sabo2\Desktop\cppalliance\packages\whisker\research\repos\camelot\tests\test_cli.py:185:        result = runner.invoke(
+C:\Users\sabo2\Desktop\cppalliance\packages\whisker\research\repos\camelot\tests\test_cli.py:203:        result = runner.invoke(
+C:\Users\sabo2\Desktop\cppalliance\packages\whisker\research\repos\camelot\tests\test_cli.py:209:        result = runner.invoke(
+C:\Users\sabo2\Desktop\cppalliance\packages\whisker\research\repos\camelot\tests\test_cli.py:233:        result = runner.invoke(
+C:\Users\sabo2\Desktop\cppalliance\packages\whisker\research\repos\camelot\tests\test_cli.py:241:        result = runner.invoke(
+C:\Users\sabo2\Desktop\cppalliance\packages\whisker\research\repos\camelot\tests\test_cli.py:249:        result = runner.invoke(
+C:\Users\sabo2\Desktop\cppalliance\packages\whisker\research\repos\camelot\tests\test_cli.py:257:        result = runner.invoke(
+C:\Users\sabo2\Desktop\cppalliance\packages\whisker\research\repos\camelot\tests\test_cli.py:265:        result = runner.invoke(
+C:\Users\sabo2\Desktop\cppalliance\packages\whisker\research\repos\camelot\tests\test_cli.py:289:                result = runner.invoke(
+C:\Users\sabo2\Desktop\cppalliance\packages\whisker\research\repos\camelot\tests\test_cli.py:310:        result = runner.invoke(
+C:\Users\sabo2\Desktop\cppalliance\packages\whisker\research\repos\camelot\tests\test_cli.py:354:    result = runner.invoke(cli, [flavor, "--plot_type", "text", infile])
+C:\Users\sabo2\Desktop\cppalliance\packages\whisker\research\repos\camelot\tests\test_cli.py:373:def test_cli_group_help_invokes_config():
+C:\Users\sabo2\Desktop\cppalliance\packages\whisker\research\repos\camelot\tests\test_cli.py:380:    # Invoke a real subcommand with --help so we hit the group's body
+C:\Users\sabo2\Desktop\cppalliance\packages\whisker\research\repos\camelot\tests\test_cli.py:382:    result = runner.invoke(cli, ["lattice", "--help"])
+C:\Users\sabo2\Desktop\cppalliance\packages\whisker\research\repos\camelot\tests\files\assam.pdf:614:5Cak+[oP7R2!C$`/U$#rR)fA,:[`AW1\r<6mAS`7NPEtoVlm0]6+Y5j)HCG:bj-/EPk-`.(A,N#
+C:\Users\sabo2\Desktop\cppalliance\packages\whisker\research\repos\camelot\tests\files\assam.pdf:1748:e0IPW"n5@Pl=t,V&-G1HOM_Z&]jpAd)V5Dj-"TBa4[=3HqdCCoM\8f?aX^'mVlm`Tg%MUc&C0R9
+C:\Users\sabo2\Desktop\cppalliance\packages\whisker\research\repos\camelot\tests\files\assam.pdf:1834:.9LIqB/:5ZDmB?"Sp&U*l"-Eg5V=rnYbc6eXsI,#$6uC$@bcVlMHW3l!8omIo\Tjh7fD2_gmBfn
+C:\Users\sabo2\Desktop\cppalliance\packages\whisker\research\repos\camelot\tests\files\assam.pdf:2176:[4,paZU2UeVLmiUPgoiCGdl:IWeC3r9M\RW:oYIb%^.pHO_dYH0ubM_iWq%12@j(O:+InJP<PMq
+C:\Users\sabo2\Desktop\cppalliance\packages\whisker\research\repos\camelot\tests\files\assam.pdf:2424:jlR+ENP'rNBc>n?3EaM0Z3_s;Z241.*0B>,`Vp6.?a?rF!F?$aVlMSh49>NFZeiSg'52B)Lr:\6
+C:\Users\sabo2\Desktop\cppalliance\packages\whisker\research\repos\camelot\tests\files\assam.pdf:3729:-%qdInlLMe6mB3,iTmZ(r])[]lSRa!kW#^Og2Wtl-KBP7"63.[.s;D"%Wlj=[/'P$UVAdbb"`T@
+C:\Users\sabo2\Desktop\cppalliance\packages\whisker\research\repos\camelot\docs\benchmark\lattice\row_span\row_span-data-tabula.csv:11:"",Total GMC Enrollment,"1,091,255",
+C:\Users\sabo2\Desktop\cppalliance\packages\whisker\research\repos\camelot\docs\benchmark\lattice\row_span\row_span-data-tabula.csv:34:"",Total COHS Enrollment,"2,176,064",
+C:\Users\sabo2\Desktop\cppalliance\packages\whisker\research\repos\camelot\docs\benchmark\lattice\row_span\row_span-data-tabula.csv:38:Total PHP Enrollment,853,,
+C:\Users\sabo2\Desktop\cppalliance\packages\whisker\research\repos\camelot\docs\benchmark\lattice\row_span\row_span-data-tabula.csv:39:All Models Total Enrollments,"10,132,875",,
+C:\Users\sabo2\Desktop\cppalliance\packages\whisker\research\repos\camelot\docs\benchmark\lattice\row_span\row_span-data-camelot-page-1-table-1.csv:11:"","Total GMC Enrollment","","1,091,255"
+C:\Users\sabo2\Desktop\cppalliance\packages\whisker\research\repos\camelot\docs\benchmark\lattice\row_span\row_span-data-camelot-page-1-table-1.csv:34:"","Total COHS Enrollment","","2,176,064"
+C:\Users\sabo2\Desktop\cppalliance\packages\whisker\research\repos\camelot\docs\benchmark\lattice\row_span\row_span-data-camelot-page-1-table-1.csv:38:"","Total PHP Enrollment","","853"
+C:\Users\sabo2\Desktop\cppalliance\packages\whisker\research\repos\camelot\docs\benchmark\lattice\row_span\row_span-data-camelot-page-1-table-1.csv:39:"All Models Total Enrollments","","","10,132,875"
+C:\Users\sabo2\Desktop\cppalliance\packages\whisker\research\repos\camelot\tests\files\tabula\icdar2013-dataset\competition-dataset-us\us-002-str.xml:1080:            <content>Highest enrollment after bachelorÔÇÖs
+C:\Users\sabo2\Desktop\cppalliance\packages\whisker\research\repos\camelot\tests\files\tabula\icdar2013-dataset\competition-dataset-us\us-002-str.xml:2580:            <content>Highest enrollment after bachelorÔÇÖs degree by 2003</content>
+C:\Users\sabo2\Desktop\cppalliance\packages\whisker\research\repos\camelot\camelot\parsers\ml.py:15:The heavy dependencies (``torch`` / ``transformers`` / ``timm``) are optional
+C:\Users\sabo2\Desktop\cppalliance\packages\whisker\research\repos\camelot\camelot\parsers\ml.py:68:    downward), matching what ``transformers`` object-detection
+C:\Users\sabo2\Desktop\cppalliance\packages\whisker\research\repos\camelot\camelot\parsers\ml.py:424:        """Import torch/transformers and build the two TATR models once.
+C:\Users\sabo2\Desktop\cppalliance\packages\whisker\research\repos\camelot\camelot\parsers\ml.py:441:            from transformers import AutoImageProcessor
+C:\Users\sabo2\Desktop\cppalliance\packages\whisker\research\repos\camelot\camelot\parsers\ml.py:442:            from transformers import AutoModelForObjectDetection
+C:\Users\sabo2\Desktop\cppalliance\packages\whisker\research\repos\camelot\camelot\parsers\ml.py:451:            AutoModelForObjectDetection.from_pretrained(self.detection_model)
+C:\Users\sabo2\Desktop\cppalliance\packages\whisker\research\repos\camelot\camelot\parsers\ml.py:457:            AutoModelForObjectDetection.from_pretrained(self.structure_model)
+C:\Users\sabo2\Desktop\cppalliance\packages\whisker\research\repos\camelot\camelot\parsers\ml.py:471:        """Make a ``longest_edge``-only resize config transformers accepts.
+C:\Users\sabo2\Desktop\cppalliance\packages\whisker\research\repos\camelot\camelot\parsers\ml.py:474:        max-longest-edge resize), but DETR's image processor in transformers
+C:\Users\sabo2\Desktop\cppalliance\packages\whisker\research\repos\camelot\tests\files\tabula\icdar2013-dataset\competition-dataset-us\us-019-str.xml:203:            <content>PrekindergartenÔÇô12enrollment</content>
+C:\Users\sabo2\Desktop\cppalliance\packages\whisker\research\repos\camelot\tests\files\tabula\icdar2013-dataset\competition-dataset-us\us-019-str.xml:247:            <content>PrekindergartenÔÇô8enrollment</content>
+C:\Users\sabo2\Desktop\cppalliance\packages\whisker\research\repos\camelot\tests\files\tabula\icdar2013-dataset\competition-dataset-us\us-019-str.xml:291:            <content>9ÔÇô12enrollment</content>
+C:\Users\sabo2\Desktop\cppalliance\packages\whisker\research\repos\camelot\tests\files\tabula\icdar2013-dataset\competition-dataset-us\us-019-str.xml:467:            <content>Currentexpendituresperpupilinfallenrollment</content>
+C:\Users\sabo2\Desktop\cppalliance\packages\whisker\research\repos\camelot\tests\files\tabula\icdar2013-dataset\competition-dataset-us\us-019-str.xml:515:            <content>PrekindergartenÔÇô12enrollment</content>
+C:\Users\sabo2\Desktop\cppalliance\packages\whisker\research\repos\camelot\tests\files\tabula\icdar2013-dataset\competition-dataset-us\us-019-str.xml:559:            <content>PrekindergartenÔÇô8enrollment</content>
+C:\Users\sabo2\Desktop\cppalliance\packages\whisker\research\repos\camelot\tests\files\tabula\icdar2013-dataset\competition-dataset-us\us-019-str.xml:603:            <content>9ÔÇô12enrollment</content>
+C:\Users\sabo2\Desktop\cppalliance\packages\whisker\research\repos\camelot\tests\files\tabula\icdar2013-dataset\competition-dataset-us\us-019-str.xml:695:            <content>Totalenrollment</content>
+C:\Users\sabo2\Desktop\cppalliance\packages\whisker\research\repos\camelot\tests\files\tabula\icdar2013-dataset\competition-dataset-us\us-019-str.xml:1207:            <content>Enrollment,inthousands</content>
+C:\Users\sabo2\Desktop\cppalliance\packages\whisker\research\repos\camelot\tests\files\tabula\icdar2013-dataset\competition-dataset-us\us-019-str.xml:1231:            <content>Projectedenrollment,inthousands</content>
+C:\Users\sabo2\Desktop\cppalliance\packages\whisker\research\repos\camelot\tests\files\tabula\icdar2013-dataset\competition-dataset-us\us-018-str.xml:7221:            <content>Fall enrollment
+C:\Users\sabo2\Desktop\cppalliance\packages\whisker\research\repos\camelot\tests\files\tabula\icdar2013-dataset\competition-dataset-us\us-018-str.xml:7232:in fall enrollment</content>
+C:\Users\sabo2\Desktop\cppalliance\packages\whisker\research\repos\camelot\tests\files\tabula\icdar2013-dataset\competition-dataset-us\us-018-str.xml:7242:in fall enrollment</content>
+C:\Users\sabo2\Desktop\cppalliance\packages\whisker\research\repos\camelot\tests\files\tabula\icdar2013-dataset\competition-dataset-us\us-027-str.xml:13:            <content>Enrollment</content>

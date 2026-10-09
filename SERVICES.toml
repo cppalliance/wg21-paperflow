@@ -63,6 +63,23 @@ thinking_capable = true
 tools_capable = true
 stream = true
 
+# Alliance shared pod (Sam). Same model as h200x8-deepseek-v4-pro but a
+# separate running instance. Key lives in the gitignored .env via
+# ALLIANCE_POD_KEY; only the env-var name is committed here.
+# Runs 24/7; billed per hour of uptime, NOT per token, so run size is not a
+# cost question (used as the whisker tapetum_llm advisory lane endpoint).
+[services.alliance-pod]
+backend = "vllm_thinking"
+base_url = "https://sgjy18glyi4blu-8000.proxy.runpod.net/v1"
+api_key = "$ALLIANCE_POD_KEY"
+model = "deepseek-v4-pro"
+max_context_window = 393216
+chars_per_token = 4.0
+token_multiplier = 1.5
+thinking_capable = true
+tools_capable = true
+stream = true
+
 [services.b200-r1]
 backend = "vllm_thinking"
 base_url = "https://hdsfzi29n4xyup-8000.proxy.runpod.net/v1"

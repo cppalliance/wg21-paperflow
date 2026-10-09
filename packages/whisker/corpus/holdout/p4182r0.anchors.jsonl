@@ -1,0 +1,14 @@
+{"anchor_id": "p4182r0-meta-01", "stratum": "metadata", "quote": "A Citable Inventory of Platforms, Operating Systems, and Compiler Toolchains", "source_location": {"page": 1}, "expected_candidate_status": "present_in_candidate", "notes": "Title"}
+{"anchor_id": "p4182r0-meta-02", "stratum": "metadata", "quote": "P4182R0", "source_location": {"page": 1}, "expected_candidate_status": "present_in_candidate", "notes": "Document number"}
+{"anchor_id": "p4182r0-meta-03", "stratum": "metadata", "quote": "2026-04-17", "source_location": {"page": 1}, "expected_candidate_status": "present_in_candidate", "notes": "Date"}
+{"anchor_id": "p4182r0-meta-04", "stratum": "metadata", "quote": "Inform", "source_location": {"page": 1}, "expected_candidate_status": "present_in_candidate", "notes": "Intent"}
+{"anchor_id": "p4182r0-meta-05", "stratum": "metadata", "quote": "SG14, EWG, LEWG", "source_location": {"page": 1}, "expected_candidate_status": "present_in_candidate", "notes": "Audience"}
+{"anchor_id": "p4182r0-meta-06", "stratum": "metadata", "quote": "Mungo Gill", "source_location": {"page": 1}, "expected_candidate_status": "present_in_candidate", "notes": "Reply-to author"}
+{"anchor_id": "p4182r0-heading-01", "stratum": "headings", "quote": "Abstract", "source_location": {"page": 2}, "expected_candidate_status": "present_in_candidate", "notes": "Top-level section"}
+{"anchor_id": "p4182r0-heading-02", "stratum": "headings", "quote": "Revision History", "source_location": {"page": 2}, "expected_candidate_status": "present_in_candidate", "notes": "Top-level section"}
+{"anchor_id": "p4182r0-heading-03", "stratum": "headings", "quote": "3. Platforms", "source_location": {"page": 3}, "expected_candidate_status": "present_in_candidate", "notes": "Numbered top-level section"}
+{"anchor_id": "p4182r0-heading-04", "stratum": "headings", "quote": "3.1 Platform schema", "source_location": {"page": 3}, "expected_candidate_status": "present_in_candidate", "notes": "Numbered subsection"}
+{"anchor_id": "p4182r0-table-01", "stratum": "tables", "quote": "Desktop (Linux, Windows, macOS)", "source_location": {"page": 3}, "expected_candidate_status": "present_in_candidate", "notes": "Platform table row"}
+{"anchor_id": "p4182r0-table-02", "stratum": "tables", "quote": "Lightweight RTOS (FreeRTOS, Pico)", "source_location": {"page": 3}, "expected_candidate_status": "present_in_candidate", "notes": "Platform table row"}
+{"anchor_id": "p4182r0-table-03", "stratum": "tables", "quote": "GPU device code (CUDA, SYCL)", "source_location": {"page": 3}, "expected_candidate_status": "present_in_candidate", "notes": "Platform table row"}
+{"anchor_id": "p4182r0-table-04", "stratum": "tables", "quote": "Table B - Runtime context.", "source_location": {"page": 4}, "expected_candidate_status": "present_in_candidate", "notes": "Runtime-context table caption"}

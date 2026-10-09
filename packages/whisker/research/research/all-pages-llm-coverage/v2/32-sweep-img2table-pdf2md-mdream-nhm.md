@@ -1,0 +1,1073 @@
+# 32 - Sweep: img2table, pdf-to-markdown, mdream, node-html-markdown
+**Claims tested:** C1
+**Exhaustive:** yes (full clone sweep at pinned SHAs; img2table fba4873 per 00-baseline.md)
+
+## Method
+Charter search-floor patterns (case-insensitive) via ripgrep:
+
+```
+rg -i -n --glob '!uv.lock' --glob '!pnpm-lock.yaml' --glob '!yarn.lock' --glob '!*.ipynb' -e 'openai' -e 'anthropic' -e 'claude' -e 'gemini' -e 'google.genai' -e 'genai' -e 'litellm' -e 'vllm' -e 'ollama' -e 'chat.completions' -e 'completions.create' -e 'messages.create' -e 'generate_content' -e 'GenerativeModel' -e 'transformers' -e 'AutoModel' -e '.generate(' -e 'pipeline(' -e 'predict' -e 'invoke' -e 'prompt' -e 'system_prompt' -e 'LLM' -e 'VLM' -e 'gpt-' -e 'llama' -e 'qwen' -e 'ai-sdk' -e '@ai-sdk'
+```
+
+JS/TS repos additionally:
+
+```
+rg -i -n openai|anthropic|@ai-sdk|ai-sdk --glob package.json --glob '*.{js,jsx,ts,tsx,mjs,cjs}'
+```
+
+img2table: excluded uv.lock and *.ipynb (base64 false positives); lockfile hits listed separately from prior full-repo pass.
+pdf-to-markdown: excluded docs/** and package-lock.json (minified bundle/hash noise).
+node-html-markdown: benchmark/files/** HTML fixtures included (full enumeration).
+
+## Inventory
+### img2table
+- `pyproject.toml:94` — [other] Optional Surya OCR dependency pin; not verification path
+- `README.md:201` — [docs] Documentation/example prose; no runtime LLM invocation
+- `README.md:203` — [docs] OCR model inference (extraction); not LLM verification
+- `README.md:507` — [docs] Documentation/example prose; no runtime LLM invocation
+- `tests/conftest.py:195` — [test] Test mock/fixture; not production LLM verification
+- `src/img2table/ocr/doctr.py:21` — [other] OCR model inference (extraction); not LLM verification
+- `src/img2table/ocr/doctr.py:32` — [other] OCR model inference (extraction); not LLM verification
+- `src/img2table/ocr/paddle.py:45` — [other] No LLM/VLM invocation; pattern substring only
+- `src/img2table/ocr/surya.py:21` — [other] OCR model inference (extraction); not LLM verification
+- `src/img2table/ocr/surya.py:22` — [other] No LLM/VLM invocation; pattern substring only
+- `src/img2table/ocr/surya.py:23` — [other] No LLM/VLM invocation; pattern substring only
+- `src/img2table/ocr/surya.py:40` — [other] OCR model inference (extraction); not LLM verification
+- `src/img2table/ocr/surya.py:41` — [other] OCR model inference (extraction); not LLM verification
+- `src/img2table/ocr/surya.py:52` — [other] OCR model inference (extraction); not LLM verification
+- `src/img2table/ocr/surya.py:55` — [other] OCR model inference (extraction); not LLM verification
+
+### pdf-to-markdown
+- `LICENSE:3` — [docs] False positive: surname Zillmann matches llama pattern
+- `package.json:21` — [other] False positive: surname Zillmann matches llama pattern
+- `package.json:25` — [other] False positive: surname Zillmann matches llama pattern
+- `README.md:8` — [docs] False positive: surname Zillmann matches llama pattern
+- `README.md:9` — [docs] False positive: surname Zillmann matches llama pattern
+- `README.md:10` — [docs] False positive: surname Zillmann matches llama pattern
+- `README.md:15` — [docs] False positive: surname Zillmann matches llama pattern
+- `src/javascript/components/FooterBar.jsx:18` — [other] False positive: surname Zillmann matches llama pattern
+- `docs/bundle.worker.js:2` — [other] No LLM/VLM invocation; pattern substring only
+- `src/javascript/components/LoadingView.jsx:102` — [other] False positive: React lifecycle method substring LLM
+- `src/javascript/components/TopBar.jsx:42` — [other] False positive: surname Zillmann matches llama pattern
+- `src/javascript/components/TopBar.jsx:44` — [other] False positive: surname Zillmann matches llama pattern
+- `src/javascript/components/ResultView.jsx:21` — [other] False positive: React lifecycle method substring LLM
+- `docs/bundle.js:2` — [other] False positive: React lifecycle method substring LLM
+
+**JS/TS npm scan (openai/anthropic/ai-sdk):**
+- **0 hits** in package.json and *.{js,jsx,ts,tsx,mjs,cjs}
+
+### mdream
+- `DOCKER.md:8` — [docs] Docs/marketing: LLM-oriented output; no API call
+- `DOCKER.md:39` — [docs] Docs/marketing: LLM-oriented output; no API call
+- `DOCKER.md:41` — [docs] Docs/marketing: LLM-oriented output; no API call
+- `DOCKER.md:83` — [docs] Docs/marketing: LLM-oriented output; no API call
+- `DOCKER.md:136` — [docs] Docs/marketing: LLM-oriented output; no API call
+- `DOCKER.md:137` — [docs] Docs/marketing: LLM-oriented output; no API call
+- `CLAUDE.md:1` — [docs] Documentation/example prose; no runtime LLM invocation
+- `CLAUDE.md:3` — [docs] Documentation/example prose; no runtime LLM invocation
+- `CLAUDE.md:5` — [docs] Documentation/example prose; no runtime LLM invocation
+- `CLAUDE.md:66` — [docs] Docs/marketing: LLM-oriented output; no API call
+- `CLAUDE.md:67` — [docs] Docs/marketing: LLM-oriented output; no API call
+- `CLAUDE.md:252` — [docs] Documentation/example prose; no runtime LLM invocation
+- `pnpm-workspace.yaml:32` — [other] False positive: UI/CLI prompt widget; not LLM prompt
+- `README.md:7` — [docs] Documentation/example prose; no runtime LLM invocation
+- `README.md:35` — [docs] Documentation/example prose; no runtime LLM invocation
+- `README.md:37` — [docs] Docs/marketing: LLM-oriented output; no API call
+- `README.md:46` — [docs] Documentation/example prose; no runtime LLM invocation
+- `README.md:47` — [docs] Docs/marketing: LLM-oriented output; no API call
+- `README.md:50` — [docs] Docs/marketing: LLM-oriented output; no API call
+- `README.md:56` — [docs] Docs/marketing: LLM-oriented output; no API call
+- `README.md:107` — [docs] Documentation/example prose; no runtime LLM invocation
+- `README.md:109` — [docs] Documentation/example prose; no runtime LLM invocation
+- `README.md:112` — [docs] Documentation/example prose; no runtime LLM invocation
+- `README.md:114` — [docs] Documentation/example prose; no runtime LLM invocation
+- `README.md:118` — [docs] Docs/marketing: LLM-oriented output; no API call
+- `README.md:123` — [docs] Documentation/example prose; no runtime LLM invocation
+- `README.md:127` — [docs] Docs/marketing: LLM-oriented output; no API call
+- `README.md:134` — [docs] Docs/marketing: LLM-oriented output; no API call
+- `README.md:145` — [docs] Docs/marketing: LLM-oriented output; no API call
+- `README.md:146` — [docs] Docs/marketing: LLM-oriented output; no API call
+- `README.md:161` — [docs] Documentation/example prose; no runtime LLM invocation
+- `README.md:162` — [docs] Documentation/example prose; no runtime LLM invocation
+- `README.md:298` — [docs] Docs/marketing: LLM-oriented output; no API call
+- `README.md:300` — [docs] Docs/marketing: LLM-oriented output; no API call
+- `README.md:301` — [docs] Docs/marketing: LLM-oriented output; no API call
+- `README.md:325` — [docs] Docs/marketing: LLM-oriented output; no API call
+- `vitest.config.ts:11` — [other] No LLM/VLM invocation; pattern substring only
+- `action.yml:2` — [docs] Docs/marketing: LLM-oriented output; no API call
+- `action.yml:35` — [docs] Documentation/example prose; no runtime LLM invocation
+- `action.yml:36` — [docs] Docs/marketing: LLM-oriented output; no API call
+- `action.yml:37` — [docs] Docs/marketing: LLM-oriented output; no API call
+- `action.yml:38` — [docs] Docs/marketing: LLM-oriented output; no API call
+- `bench/compare.bench.ts:190` — [other] Docs/marketing: LLM-oriented output; no API call
+- `bench/token-usage.ts:5` — [other] No LLM/VLM invocation; pattern substring only
+- `bench/token-usage.ts:10` — [other] No LLM/VLM invocation; pattern substring only
+- `bench/token-usage.ts:19` — [other] No LLM/VLM invocation; pattern substring only
+- `examples/nuxt/README.md:46` — [docs] Docs/marketing: LLM-oriented output; no API call
+- `bench/README.md:77` — [docs] Docs/marketing: LLM-oriented output; no API call
+- `bench/README.md:169` — [docs] Documentation/example prose; no runtime LLM invocation
+- `packages/action/README.md:3` — [docs] Docs/marketing: LLM-oriented output; no API call
+- `packages/action/README.md:23` — [docs] Docs/marketing: LLM-oriented output; no API call
+- `packages/action/README.md:32` — [docs] Docs/marketing: LLM-oriented output; no API call
+- `packages/action/README.md:37` — [docs] Docs/marketing: LLM-oriented output; no API call
+- `packages/action/README.md:46` — [docs] Documentation/example prose; no runtime LLM invocation
+- `packages/action/README.md:64` — [docs] Docs/marketing: LLM-oriented output; no API call
+- `packages/action/README.md:65` — [docs] Documentation/example prose; no runtime LLM invocation
+- `packages/action/README.md:74` — [docs] Docs/marketing: LLM-oriented output; no API call
+- `packages/action/README.md:77` — [docs] Documentation/example prose; no runtime LLM invocation
+- `packages/action/README.md:79` — [docs] Docs/marketing: LLM-oriented output; no API call
+- `packages/action/README.md:80` — [docs] Docs/marketing: LLM-oriented output; no API call
+- `packages/action/README.md:96` — [docs] Docs/marketing: LLM-oriented output; no API call
+- `packages/action/README.md:97` — [docs] Documentation/example prose; no runtime LLM invocation
+- `packages/action/README.md:108` — [docs] Docs/marketing: LLM-oriented output; no API call
+- `packages/action/README.md:109` — [docs] Docs/marketing: LLM-oriented output; no API call
+- `packages/action/README.md:110` — [docs] Documentation/example prose; no runtime LLM invocation
+- `packages/action/README.md:116` — [docs] Docs/marketing: LLM-oriented output; no API call
+- `packages/action/README.md:144` — [docs] Docs/marketing: LLM-oriented output; no API call
+- `packages/action/README.md:145` — [docs] Docs/marketing: LLM-oriented output; no API call
+- `packages/action/README.md:152` — [docs] Docs/marketing: LLM-oriented output; no API call
+- `packages/action/README.md:153` — [docs] Docs/marketing: LLM-oriented output; no API call
+- `packages/action/README.md:176` — [docs] Docs/marketing: LLM-oriented output; no API call
+- `examples/nuxt/pages/noindex.vue:5` — [other] No LLM/VLM invocation; pattern substring only
+- `packages/action/package.json:5` — [other] Docs/marketing: LLM-oriented output; no API call
+- `examples/nuxt/pages/index.vue:5` — [other] No LLM/VLM invocation; pattern substring only
+- `examples/nuxt/pages/index.vue:30` — [other] Docs/marketing: LLM-oriented output; no API call
+- `examples/nuxt/pages/blog.vue:5` — [other] No LLM/VLM invocation; pattern substring only
+- `examples/nuxt/pages/blog.vue:27` — [other] No LLM/VLM invocation; pattern substring only
+- `examples/nuxt/pages/blog.vue:32` — [other] No LLM/VLM invocation; pattern substring only
+- `examples/nuxt/pages/blog.vue:42` — [other] No LLM/VLM invocation; pattern substring only
+- `examples/nuxt/pages/blog.vue:75` — [other] No LLM/VLM invocation; pattern substring only
+- `examples/nuxt/pages/blog.vue:120` — [other] Docs/marketing: LLM-oriented output; no API call
+- `examples/nuxt/pages/about.vue:5` — [other] No LLM/VLM invocation; pattern substring only
+- `examples/nuxt/pages/about.vue:59` — [other] No LLM/VLM invocation; pattern substring only
+- `examples/nuxt/pages/about.vue:60` — [other] Docs/marketing: LLM-oriented output; no API call
+- `packages/action/src/index.ts:1` — [production-source] No LLM/VLM invocation; pattern substring only
+- `packages/action/src/index.ts:5` — [production-source] No LLM/VLM invocation; pattern substring only
+- `packages/action/src/index.ts:106` — [production-source] Docs/marketing: LLM-oriented output; no API call
+- `packages/action/src/index.ts:107` — [production-source] No LLM/VLM invocation; pattern substring only
+- `packages/action/src/index.ts:119` — [production-source] Docs/marketing: LLM-oriented output; no API call
+- `packages/action/src/index.ts:120` — [production-source] Docs/marketing: LLM-oriented output; no API call
+- `packages/action/src/index.ts:121` — [production-source] No LLM/VLM invocation; pattern substring only
+- `packages/action/src/index.ts:122` — [production-source] No LLM/VLM invocation; pattern substring only
+- `packages/action/src/index.ts:124` — [production-source] Docs/marketing: LLM-oriented output; no API call
+- `packages/action/src/index.ts:125` — [production-source] No LLM/VLM invocation; pattern substring only
+- `packages/action/src/index.ts:126` — [production-source] Docs/marketing: LLM-oriented output; no API call
+- `packages/action/src/index.ts:127` — [production-source] No LLM/VLM invocation; pattern substring only
+- `packages/action/src/index.ts:128` — [production-source] Docs/marketing: LLM-oriented output; no API call
+- `packages/action/src/index.ts:146` — [production-source] Docs/marketing: LLM-oriented output; no API call
+- `packages/action/src/index.ts:148` — [production-source] Docs/marketing: LLM-oriented output; no API call
+- `packages/action/src/index.ts:149` — [production-source] No LLM/VLM invocation; pattern substring only
+- `packages/action/src/index.ts:150` — [production-source] Docs/marketing: LLM-oriented output; no API call
+- `examples/nuxt/nuxt.config.ts:7` — [other] Docs/marketing: LLM-oriented output; no API call
+- `packages/vite/test/unit/plugin-simple.test.ts:8` — [test] Test mock/fixture; not production LLM verification
+- `packages/vite/test/unit/accept-header.test.ts:15` — [test] Test mock/fixture; not production LLM verification
+- `packages/vite/test/unit/accept-header.test.ts:23` — [test] Test mock/fixture; not production LLM verification
+- `packages/vite/test/unit/plugin-preview-server.test.ts:142` — [test] Test mock/fixture; not production LLM verification
+- `packages/vite/test/unit/plugin-dev-server.test.ts:7` — [test] Test mock/fixture; not production LLM verification
+- `packages/vite/test/unit/plugin-dev-server.test.ts:196` — [test] Test mock/fixture; not production LLM verification
+- `packages/vite/test/unit/plugin-generatebundle.test.ts:7` — [test] Test mock/fixture; not production LLM verification
+- `packages/vite/package.json:25` — [other] No LLM/VLM invocation; pattern substring only
+- `crates/node/test/unit/__snapshots__/llms-txt.test.ts.snap:3` — [test] Test mock/fixture; not production LLM verification
+- `crates/node/test/unit/__snapshots__/llms-txt.test.ts.snap:8` — [test] Test mock/fixture; not production LLM verification
+- `crates/node/test/unit/__snapshots__/llms-txt.test.ts.snap:10` — [test] Test mock/fixture; not production LLM verification
+- `crates/node/test/unit/__snapshots__/llms-txt.test.ts.snap:11` — [test] Docs/marketing: LLM-oriented output; no API call
+- `bench/bundle/wiki.html:5578` — [other] No LLM/VLM invocation; pattern substring only
+- `bench/bundle/wiki.html:6700` — [other] No LLM/VLM invocation; pattern substring only
+- `bench/bundle/wiki.html:6782` — [other] No LLM/VLM invocation; pattern substring only
+- `bench/bundle/wiki.html:6804` — [other] No LLM/VLM invocation; pattern substring only
+- `bench/bundle/wiki.html:6812` — [other] No LLM/VLM invocation; pattern substring only
+- `bench/bundle/wiki.html:6831` — [other] No LLM/VLM invocation; pattern substring only
+- `bench/bundle/wiki.html:6839` — [other] No LLM/VLM invocation; pattern substring only
+- `bench/bundle/wiki.html:6847` — [other] No LLM/VLM invocation; pattern substring only
+- `bench/bundle/wiki.html:6855` — [other] No LLM/VLM invocation; pattern substring only
+- `bench/bundle/wiki.html:7150` — [other] No LLM/VLM invocation; pattern substring only
+- `bench/bundle/wiki.html:7161` — [other] No LLM/VLM invocation; pattern substring only
+- `bench/bundle/wiki.html:7169` — [other] No LLM/VLM invocation; pattern substring only
+- `bench/bundle/wiki.html:7206` — [other] No LLM/VLM invocation; pattern substring only
+- `bench/bundle/wiki.html:7362` — [other] No LLM/VLM invocation; pattern substring only
+- `bench/bundle/wiki.html:7380` — [other] No LLM/VLM invocation; pattern substring only
+- `bench/bundle/wiki.html:7924` — [other] No LLM/VLM invocation; pattern substring only
+- `bench/bundle/wiki.html:8195` — [other] No LLM/VLM invocation; pattern substring only
+- `bench/bundle/wiki.html:8201` — [other] No LLM/VLM invocation; pattern substring only
+- `bench/bundle/wiki.html:8302` — [other] No LLM/VLM invocation; pattern substring only
+- `bench/bundle/wiki.html:8318` — [other] No LLM/VLM invocation; pattern substring only
+- `bench/bundle/wiki.html:8412` — [other] No LLM/VLM invocation; pattern substring only
+- `bench/bundle/wiki.html:8431` — [other] No LLM/VLM invocation; pattern substring only
+- `bench/bundle/wiki.html:8444` — [other] No LLM/VLM invocation; pattern substring only
+- `crates/node/test/unit/templates/hacker-news.test.ts:38` — [test] Test mock/fixture; not production LLM verification
+- `crates/node/test/unit/templates/hacker-news.test.ts:117` — [test] Fixture/doc URL text mentioning OpenAI; no SDK import
+- `crates/node/test/unit/templates/hacker-news.test.ts:147` — [test] Test mock/fixture; not production LLM verification
+- `crates/node/test/unit/templates/hacker-news.test.ts:180` — [test] Fixture/doc URL text mentioning OpenAI; no SDK import
+- `packages/nuxt/test/unit/hooks.test.ts:2` — [test] Test mock/fixture; not production LLM verification
+- `packages/nuxt/test/unit/hooks.test.ts:168` — [test] Test mock/fixture; not production LLM verification
+- `packages/nuxt/test/unit/hooks.test.ts:170` — [test] Test mock/fixture; not production LLM verification
+- `packages/nuxt/test/unit/hooks.test.ts:171` — [test] Docs/marketing: LLM-oriented output; no API call
+- `packages/nuxt/test/unit/hooks.test.ts:172` — [test] Docs/marketing: LLM-oriented output; no API call
+- `packages/nuxt/test/unit/hooks.test.ts:187` — [test] Docs/marketing: LLM-oriented output; no API call
+- `packages/nuxt/test/unit/hooks.test.ts:188` — [test] Docs/marketing: LLM-oriented output; no API call
+- `packages/nuxt/test/unit/hooks.test.ts:195` — [test] Test mock/fixture; not production LLM verification
+- `packages/nuxt/test/unit/hooks.test.ts:200` — [test] Test mock/fixture; not production LLM verification
+- `packages/nuxt/test/unit/hooks.test.ts:213` — [test] Test mock/fixture; not production LLM verification
+- `packages/nuxt/test/unit/hooks.test.ts:217` — [test] Test mock/fixture; not production LLM verification
+- `packages/nuxt/test/unit/hooks.test.ts:230` — [test] Test mock/fixture; not production LLM verification
+- `packages/nuxt/test/unit/hooks.test.ts:235` — [test] Test mock/fixture; not production LLM verification
+- `packages/nuxt/test/unit/hooks.test.ts:248` — [test] Test mock/fixture; not production LLM verification
+- `packages/nuxt/test/unit/hooks.test.ts:252` — [test] Test mock/fixture; not production LLM verification
+- `packages/nuxt/test/unit/hooks.test.ts:264` — [test] Test mock/fixture; not production LLM verification
+- `packages/nuxt/test/unit/hooks.test.ts:268` — [test] Test mock/fixture; not production LLM verification
+- `packages/nuxt/test/unit/hooks.test.ts:272` — [test] Test mock/fixture; not production LLM verification
+- `crates/core/tests/fixtures/mdn-array.html:1781` — [test] Test mock/fixture; not production LLM verification
+- `crates/core/tests/fixtures/mdn-array.html:1783` — [test] Test mock/fixture; not production LLM verification
+- `crates/core/tests/fixtures/mdn-array.html:2482` — [test] Test mock/fixture; not production LLM verification
+- `packages/nuxt/test/unit/accept-header.test.ts:34` — [test] Test mock/fixture; not production LLM verification
+- `packages/nuxt/test/unit/accept-header.test.ts:42` — [test] Test mock/fixture; not production LLM verification
+- `packages/nuxt/test/unit/accept-header.test.ts:64` — [test] Test mock/fixture; not production LLM verification
+- `packages/js/test/unit/negotiate.test.ts:100` — [test] Test mock/fixture; not production LLM verification
+- `packages/js/test/unit/negotiate.test.ts:113` — [test] Test mock/fixture; not production LLM verification
+- `crates/node/test/fixtures/wikipedia-largest.html:5578` — [test] Test mock/fixture; not production LLM verification
+- `crates/node/test/fixtures/wikipedia-largest.html:6700` — [test] Test mock/fixture; not production LLM verification
+- `crates/node/test/fixtures/wikipedia-largest.html:6782` — [test] Test mock/fixture; not production LLM verification
+- `crates/node/test/fixtures/wikipedia-largest.html:6804` — [test] Test mock/fixture; not production LLM verification
+- `crates/node/test/fixtures/wikipedia-largest.html:6812` — [test] Test mock/fixture; not production LLM verification
+- `crates/node/test/fixtures/wikipedia-largest.html:6831` — [test] Test mock/fixture; not production LLM verification
+- `crates/node/test/fixtures/wikipedia-largest.html:6839` — [test] Test mock/fixture; not production LLM verification
+- `crates/node/test/fixtures/wikipedia-largest.html:6847` — [test] Test mock/fixture; not production LLM verification
+- `crates/node/test/fixtures/wikipedia-largest.html:6855` — [test] Test mock/fixture; not production LLM verification
+- `crates/node/test/fixtures/wikipedia-largest.html:7150` — [test] Test mock/fixture; not production LLM verification
+- `crates/node/test/fixtures/wikipedia-largest.html:7161` — [test] Test mock/fixture; not production LLM verification
+- `crates/node/test/fixtures/wikipedia-largest.html:7169` — [test] Test mock/fixture; not production LLM verification
+- `crates/node/test/fixtures/wikipedia-largest.html:7206` — [test] Test mock/fixture; not production LLM verification
+- `crates/node/test/fixtures/wikipedia-largest.html:7362` — [test] Test mock/fixture; not production LLM verification
+- `crates/node/test/fixtures/wikipedia-largest.html:7380` — [test] Test mock/fixture; not production LLM verification
+- `crates/node/test/fixtures/wikipedia-largest.html:7924` — [test] Test mock/fixture; not production LLM verification
+- `crates/node/test/fixtures/wikipedia-largest.html:8195` — [test] Test mock/fixture; not production LLM verification
+- `crates/node/test/fixtures/wikipedia-largest.html:8201` — [test] Test mock/fixture; not production LLM verification
+- `crates/node/test/fixtures/wikipedia-largest.html:8302` — [test] Test mock/fixture; not production LLM verification
+- `crates/node/test/fixtures/wikipedia-largest.html:8318` — [test] Test mock/fixture; not production LLM verification
+- `crates/node/test/fixtures/wikipedia-largest.html:8412` — [test] Test mock/fixture; not production LLM verification
+- `crates/node/test/fixtures/wikipedia-largest.html:8431` — [test] Test mock/fixture; not production LLM verification
+- `crates/node/test/fixtures/wikipedia-largest.html:8444` — [test] Test mock/fixture; not production LLM verification
+- `packages/js/test/unit/llms-txt.test.ts:1` — [test] Test mock/fixture; not production LLM verification
+- `packages/js/test/unit/llms-txt.test.ts:3` — [test] Test mock/fixture; not production LLM verification
+- `packages/js/test/unit/llms-txt.test.ts:14` — [test] Test mock/fixture; not production LLM verification
+- `packages/js/test/unit/llms-txt.test.ts:15` — [test] Docs/marketing: LLM-oriented output; no API call
+- `packages/js/test/unit/llms-txt.test.ts:16` — [test] Docs/marketing: LLM-oriented output; no API call
+- `packages/js/test/unit/llms-txt.test.ts:17` — [test] Test mock/fixture; not production LLM verification
+- `packages/js/test/unit/llms-txt.test.ts:21` — [test] Test mock/fixture; not production LLM verification
+- `packages/js/test/unit/llms-txt.test.ts:22` — [test] Test mock/fixture; not production LLM verification
+- `packages/js/test/unit/llms-txt.test.ts:23` — [test] Test mock/fixture; not production LLM verification
+- `packages/js/test/unit/llms-txt.test.ts:27` — [test] Test mock/fixture; not production LLM verification
+- `packages/js/test/unit/llms-txt.test.ts:28` — [test] Test mock/fixture; not production LLM verification
+- `packages/js/test/unit/llms-txt.test.ts:32` — [test] Test mock/fixture; not production LLM verification
+- `packages/js/test/unit/llms-txt.test.ts:37` — [test] Test mock/fixture; not production LLM verification
+- `packages/js/test/unit/llms-txt.test.ts:41` — [test] Test mock/fixture; not production LLM verification
+- `packages/js/test/unit/llms-txt.test.ts:45` — [test] Test mock/fixture; not production LLM verification
+- `packages/js/test/unit/llms-txt.test.ts:46` — [test] Test mock/fixture; not production LLM verification
+- `packages/js/test/unit/llms-txt.test.ts:50` — [test] Test mock/fixture; not production LLM verification
+- `packages/js/test/unit/llms-txt.test.ts:54` — [test] Test mock/fixture; not production LLM verification
+- `packages/js/test/unit/llms-txt.test.ts:57` — [test] Docs/marketing: LLM-oriented output; no API call
+- `packages/js/test/unit/llms-txt.test.ts:59` — [test] Test mock/fixture; not production LLM verification
+- `packages/js/test/unit/llms-txt.test.ts:62` — [test] Test mock/fixture; not production LLM verification
+- `packages/js/test/unit/llms-txt.test.ts:66` — [test] Test mock/fixture; not production LLM verification
+- `packages/js/test/unit/llms-txt.test.ts:67` — [test] Test mock/fixture; not production LLM verification
+- `packages/js/test/unit/llms-txt.test.ts:68` — [test] Test mock/fixture; not production LLM verification
+- `packages/js/test/unit/llms-txt.test.ts:72` — [test] Test mock/fixture; not production LLM verification
+- `packages/js/test/unit/llms-txt.test.ts:82` — [test] Test mock/fixture; not production LLM verification
+- `packages/js/test/unit/llms-txt.test.ts:83` — [test] Test mock/fixture; not production LLM verification
+- `packages/js/test/unit/llms-txt.test.ts:84` — [test] Test mock/fixture; not production LLM verification
+- `packages/js/test/unit/llms-txt.test.ts:88` — [test] Test mock/fixture; not production LLM verification
+- `packages/js/test/unit/llms-txt.test.ts:95` — [test] Test mock/fixture; not production LLM verification
+- `packages/js/test/unit/llms-txt.test.ts:99` — [test] Test mock/fixture; not production LLM verification
+- `packages/js/test/unit/llms-txt.test.ts:103` — [test] Test mock/fixture; not production LLM verification
+- `packages/js/test/unit/llms-txt.test.ts:107` — [test] Test mock/fixture; not production LLM verification
+- `packages/js/test/unit/llms-txt.test.ts:111` — [test] Test mock/fixture; not production LLM verification
+- `packages/js/test/unit/llms-txt.test.ts:112` — [test] Test mock/fixture; not production LLM verification
+- `packages/js/test/unit/llms-txt.test.ts:116` — [test] Docs/marketing: LLM-oriented output; no API call
+- `packages/js/test/unit/llms-txt.test.ts:117` — [test] Docs/marketing: LLM-oriented output; no API call
+- `packages/js/test/unit/llms-txt.test.ts:118` — [test] Test mock/fixture; not production LLM verification
+- `packages/js/test/unit/llms-txt.test.ts:119` — [test] Test mock/fixture; not production LLM verification
+- `packages/js/test/unit/llms-txt.test.ts:122` — [test] Docs/marketing: LLM-oriented output; no API call
+- `packages/js/test/unit/llms-txt.test.ts:123` — [test] Test mock/fixture; not production LLM verification
+- `packages/js/test/unit/llms-txt.test.ts:128` — [test] Test mock/fixture; not production LLM verification
+- `packages/js/test/unit/llms-txt.test.ts:129` — [test] Test mock/fixture; not production LLM verification
+- `packages/js/test/unit/llms-txt.test.ts:130` — [test] Test mock/fixture; not production LLM verification
+- `packages/js/test/unit/llms-txt.test.ts:131` — [test] Test mock/fixture; not production LLM verification
+- `packages/js/test/unit/llms-txt.test.ts:134` — [test] Docs/marketing: LLM-oriented output; no API call
+- `packages/js/test/unit/llms-txt.test.ts:135` — [test] Test mock/fixture; not production LLM verification
+- `packages/js/test/unit/llms-txt.test.ts:142` — [test] Test mock/fixture; not production LLM verification
+- `packages/js/test/unit/llms-txt.test.ts:143` — [test] Test mock/fixture; not production LLM verification
+- `packages/js/test/unit/llms-txt.test.ts:144` — [test] Test mock/fixture; not production LLM verification
+- `packages/js/test/unit/llms-txt.test.ts:145` — [test] Test mock/fixture; not production LLM verification
+- `packages/js/test/unit/llms-txt.test.ts:149` — [test] Test mock/fixture; not production LLM verification
+- `packages/js/test/unit/llms-txt.test.ts:156` — [test] Test mock/fixture; not production LLM verification
+- `packages/js/test/unit/llms-txt.test.ts:157` — [test] Test mock/fixture; not production LLM verification
+- `packages/js/test/unit/llms-txt.test.ts:161` — [test] Test mock/fixture; not production LLM verification
+- `packages/js/test/unit/llms-txt.test.ts:169` — [test] Test mock/fixture; not production LLM verification
+- `packages/js/test/unit/llms-txt.test.ts:175` — [test] Test mock/fixture; not production LLM verification
+- `packages/js/test/unit/llms-txt.test.ts:181` — [test] Test mock/fixture; not production LLM verification
+- `packages/js/test/unit/llms-txt.test.ts:182` — [test] Test mock/fixture; not production LLM verification
+- `packages/js/test/unit/llms-txt.test.ts:188` — [test] Test mock/fixture; not production LLM verification
+- `packages/js/test/unit/llms-txt.test.ts:193` — [test] Test mock/fixture; not production LLM verification
+- `packages/js/test/unit/llms-txt.test.ts:207` — [test] Test mock/fixture; not production LLM verification
+- `packages/js/test/unit/llms-txt.test.ts:215` — [test] Test mock/fixture; not production LLM verification
+- `packages/js/test/unit/llms-txt.test.ts:226` — [test] Test mock/fixture; not production LLM verification
+- `crates/node/test/fixtures/llms-cli/about.html:37` — [test] Test mock/fixture; not production LLM verification
+- `crates/node/test/fixtures/llms-cli/about.html:38` — [test] Docs/marketing: LLM-oriented output; no API call
+- `crates/core/tests/fixtures/github-markdown-complete.html:6172` — [test] Test mock/fixture; not production LLM verification
+- `crates/node/test/fixtures/llms-cli/index.html:7` — [test] Docs/marketing: LLM-oriented output; no API call
+- `crates/node/test/fixtures/llms-cli/index.html:9` — [test] Test mock/fixture; not production LLM verification
+- `crates/node/test/fixtures/llms-cli/index.html:29` — [test] Docs/marketing: LLM-oriented output; no API call
+- `packages/js/build.config.ts:7` — [other] No LLM/VLM invocation; pattern substring only
+- `packages/nuxt/test/fixtures/pages/pages/plugins.vue:4` — [test] Test mock/fixture; not production LLM verification
+- `crates/node/test/fixtures/github-markdown-complete.html:6172` — [test] Test mock/fixture; not production LLM verification
+- `bench/bundle/src/string.ts:496` — [production-source] No LLM/VLM invocation; pattern substring only
+- `bench/bundle/src/string.ts:497` — [production-source] Fixture/doc URL text mentioning OpenAI; no SDK import
+- `bench/bundle/src/string.ts:500` — [production-source] No LLM/VLM invocation; pattern substring only
+- `bench/bundle/src/string.ts:504` — [production-source] No LLM/VLM invocation; pattern substring only
+- `bench/bundle/src/string.ts:1001` — [production-source] Fixture/doc URL text mentioning OpenAI; no SDK import
+- `bench/bundle/src/string.ts:1026` — [production-source] Fixture/doc URL text mentioning OpenAI; no SDK import
+- `bench/bundle/src/string.ts:1057` — [production-source] Fixture/doc URL text mentioning OpenAI; no SDK import
+- `bench/bundle/src/string.ts:1059` — [production-source] Fixture/doc URL text mentioning OpenAI; no SDK import
+- `bench/bundle/src/string.ts:1190` — [production-source] Fixture/doc URL text mentioning OpenAI; no SDK import
+- `bench/bundle/src/string.ts:1201` — [production-source] No LLM/VLM invocation; pattern substring only
+- `bench/bundle/src/string.ts:1202` — [production-source] Fixture/doc URL text mentioning OpenAI; no SDK import
+- `bench/bundle/src/string.ts:1203` — [production-source] Fixture/doc URL text mentioning OpenAI; no SDK import
+- `bench/bundle/src/string.ts:1204` — [production-source] Fixture/doc URL text mentioning OpenAI; no SDK import
+- `bench/bundle/src/string.ts:1205` — [production-source] Fixture/doc URL text mentioning OpenAI; no SDK import
+- `bench/bundle/src/string.ts:1272` — [production-source] No LLM/VLM invocation; pattern substring only
+- `bench/bundle/src/string.ts:1354` — [production-source] No LLM/VLM invocation; pattern substring only
+- `bench/bundle/src/string.ts:1366` — [production-source] No LLM/VLM invocation; pattern substring only
+- `bench/bundle/src/string.ts:1843` — [production-source] Fixture/doc URL text mentioning OpenAI; no SDK import
+- `bench/bundle/src/string.ts:1881` — [production-source] Fixture/doc URL text mentioning OpenAI; no SDK import
+- `bench/bundle/src/string.ts:1883` — [production-source] Fixture/doc URL text mentioning OpenAI; no SDK import
+- `bench/bundle/src/string.ts:1885` — [production-source] Fixture/doc URL text mentioning OpenAI; no SDK import
+- `bench/bundle/src/string.ts:1889` — [production-source] Fixture/doc URL text mentioning OpenAI; no SDK import
+- `bench/bundle/src/string.ts:2219` — [production-source] No LLM/VLM invocation; pattern substring only
+- `bench/bundle/src/string.ts:2476` — [production-source] Fixture/doc URL text mentioning OpenAI; no SDK import
+- `bench/bundle/src/string.ts:2918` — [production-source] No LLM/VLM invocation; pattern substring only
+- `bench/bundle/src/string.ts:2991` — [production-source] Fixture/doc URL text mentioning OpenAI; no SDK import
+- `bench/bundle/src/string.ts:3266` — [production-source] No LLM/VLM invocation; pattern substring only
+- `bench/bundle/src/string.ts:3440` — [production-source] No LLM/VLM invocation; pattern substring only
+- `packages/js/README.md:30` — [docs] Docs/marketing: LLM-oriented output; no API call
+- `packages/js/README.md:408` — [docs] Documentation/example prose; no runtime LLM invocation
+- `packages/js/README.md:422` — [docs] Docs/marketing: LLM-oriented output; no API call
+- `packages/js/README.md:424` — [docs] Documentation/example prose; no runtime LLM invocation
+- `packages/js/README.md:426` — [docs] Docs/marketing: LLM-oriented output; no API call
+- `packages/js/README.md:429` — [docs] Documentation/example prose; no runtime LLM invocation
+- `packages/js/README.md:431` — [docs] Documentation/example prose; no runtime LLM invocation
+- `packages/js/README.md:450` — [docs] Documentation/example prose; no runtime LLM invocation
+- `packages/js/README.md:451` — [docs] Documentation/example prose; no runtime LLM invocation
+- `packages/js/README.md:456` — [docs] Documentation/example prose; no runtime LLM invocation
+- `packages/js/README.md:464` — [docs] Docs/marketing: LLM-oriented output; no API call
+- `packages/js/README.md:467` — [docs] Documentation/example prose; no runtime LLM invocation
+- `packages/js/README.md:480` — [docs] Documentation/example prose; no runtime LLM invocation
+- `packages/js/README.md:486` — [docs] Documentation/example prose; no runtime LLM invocation
+- `packages/js/README.md:488` — [docs] Documentation/example prose; no runtime LLM invocation
+- `packages/js/README.md:496` — [docs] Documentation/example prose; no runtime LLM invocation
+- `packages/js/README.md:498` — [docs] Docs/marketing: LLM-oriented output; no API call
+- `packages/js/README.md:501` — [docs] Documentation/example prose; no runtime LLM invocation
+- `packages/js/README.md:503` — [docs] Documentation/example prose; no runtime LLM invocation
+- `packages/js/README.md:514` — [docs] Docs/marketing: LLM-oriented output; no API call
+- `packages/js/README.md:685` — [docs] Documentation/example prose; no runtime LLM invocation
+- `packages/js/README.md:691` — [docs] Documentation/example prose; no runtime LLM invocation
+- `crates/node/test/fixtures/llms-cli/blog/post1.html:47` — [test] Test mock/fixture; not production LLM verification
+- `packages/crawl/package.json:5` — [other] Docs/marketing: LLM-oriented output; no API call
+- `packages/crawl/package.json:65` — [other] False positive: UI/CLI prompt widget; not LLM prompt
+- `packages/js/package.json:66` — [other] No LLM/VLM invocation; pattern substring only
+- `packages/js/package.json:67` — [other] No LLM/VLM invocation; pattern substring only
+- `packages/js/package.json:69` — [other] No LLM/VLM invocation; pattern substring only
+- `packages/js/package.json:70` — [other] No LLM/VLM invocation; pattern substring only
+- `packages/js/package.json:72` — [other] No LLM/VLM invocation; pattern substring only
+- `packages/crawl/README.md:3` — [docs] Docs/marketing: LLM-oriented output; no API call
+- `packages/crawl/README.md:21` — [docs] Documentation/example prose; no runtime LLM invocation
+- `packages/crawl/README.md:29` — [docs] Documentation/example prose; no runtime LLM invocation
+- `packages/crawl/README.md:44` — [docs] Docs/marketing: LLM-oriented output; no API call
+- `packages/crawl/README.md:46` — [docs] Docs/marketing: LLM-oriented output; no API call
+- `packages/crawl/README.md:47` — [docs] Docs/marketing: LLM-oriented output; no API call
+- `packages/crawl/README.md:61` — [docs] Docs/marketing: LLM-oriented output; no API call
+- `packages/crawl/README.md:63` — [docs] Docs/marketing: LLM-oriented output; no API call
+- `packages/crawl/README.md:64` — [docs] Docs/marketing: LLM-oriented output; no API call
+- `packages/crawl/README.md:124` — [docs] Docs/marketing: LLM-oriented output; no API call
+- `packages/crawl/README.md:125` — [docs] Docs/marketing: LLM-oriented output; no API call
+- `packages/crawl/README.md:128` — [docs] Docs/marketing: LLM-oriented output; no API call
+- `packages/crawl/README.md:129` — [docs] Docs/marketing: LLM-oriented output; no API call
+- `packages/crawl/README.md:214` — [docs] Documentation/example prose; no runtime LLM invocation
+- `packages/crawl/README.md:299` — [docs] Docs/marketing: LLM-oriented output; no API call
+- `packages/crawl/README.md:370` — [docs] Docs/marketing: LLM-oriented output; no API call
+- `packages/crawl/README.md:456` — [docs] Docs/marketing: LLM-oriented output; no API call
+- `packages/crawl/README.md:458` — [docs] Docs/marketing: LLM-oriented output; no API call
+- `packages/crawl/README.md:469` — [docs] Docs/marketing: LLM-oriented output; no API call
+- `packages/crawl/README.md:471` — [docs] Docs/marketing: LLM-oriented output; no API call
+- `packages/js/src/llms-txt.ts:11` — [production-source] Docs/marketing: LLM-oriented output; no API call
+- `packages/js/src/llms-txt.ts:13` — [production-source] No LLM/VLM invocation; pattern substring only
+- `packages/js/src/llms-txt.ts:23` — [production-source] Docs/marketing: LLM-oriented output; no API call
+- `packages/js/src/llms-txt.ts:25` — [production-source] No LLM/VLM invocation; pattern substring only
+- `packages/js/src/llms-txt.ts:31` — [production-source] No LLM/VLM invocation; pattern substring only
+- `packages/js/src/llms-txt.ts:34` — [production-source] No LLM/VLM invocation; pattern substring only
+- `packages/js/src/llms-txt.ts:43` — [production-source] No LLM/VLM invocation; pattern substring only
+- `packages/js/src/llms-txt.ts:61` — [production-source] No LLM/VLM invocation; pattern substring only
+- `packages/js/src/llms-txt.ts:62` — [production-source] No LLM/VLM invocation; pattern substring only
+- `packages/js/src/llms-txt.ts:63` — [production-source] No LLM/VLM invocation; pattern substring only
+- `packages/js/src/llms-txt.ts:69` — [production-source] Docs/marketing: LLM-oriented output; no API call
+- `packages/js/src/llms-txt.ts:71` — [production-source] No LLM/VLM invocation; pattern substring only
+- `packages/js/src/llms-txt.ts:162` — [production-source] Docs/marketing: LLM-oriented output; no API call
+- `packages/js/src/llms-txt.ts:164` — [production-source] No LLM/VLM invocation; pattern substring only
+- `packages/js/src/llms-txt.ts:269` — [production-source] Docs/marketing: LLM-oriented output; no API call
+- `packages/js/src/llms-txt.ts:271` — [production-source] No LLM/VLM invocation; pattern substring only
+- `packages/js/src/llms-txt.ts:274` — [production-source] Docs/marketing: LLM-oriented output; no API call
+- `packages/js/src/llms-txt.ts:275` — [production-source] No LLM/VLM invocation; pattern substring only
+- `packages/js/src/llms-txt.ts:277` — [production-source] Docs/marketing: LLM-oriented output; no API call
+- `packages/js/src/llms-txt.ts:278` — [production-source] No LLM/VLM invocation; pattern substring only
+- `packages/js/src/llms-txt.ts:280` — [production-source] No LLM/VLM invocation; pattern substring only
+- `packages/js/src/llms-txt.ts:290` — [production-source] No LLM/VLM invocation; pattern substring only
+- `packages/js/src/llms-txt.ts:291` — [production-source] No LLM/VLM invocation; pattern substring only
+- `packages/js/src/llms-txt.ts:300` — [production-source] No LLM/VLM invocation; pattern substring only
+- `packages/js/src/llms-txt.ts:334` — [production-source] Docs/marketing: LLM-oriented output; no API call
+- `packages/js/src/llms-txt.ts:336` — [production-source] No LLM/VLM invocation; pattern substring only
+- `packages/js/src/llms-txt.ts:345` — [production-source] Docs/marketing: LLM-oriented output; no API call
+- `packages/js/src/llms-txt.ts:348` — [production-source] No LLM/VLM invocation; pattern substring only
+- `packages/js/src/llms-txt.ts:451` — [production-source] Docs/marketing: LLM-oriented output; no API call
+- `packages/js/src/llms-txt.ts:453` — [production-source] Docs/marketing: LLM-oriented output; no API call
+- `packages/js/src/llms-txt.ts:456` — [production-source] No LLM/VLM invocation; pattern substring only
+- `packages/js/src/llms-txt.ts:458` — [production-source] No LLM/VLM invocation; pattern substring only
+- `packages/js/src/llms-txt.ts:459` — [production-source] No LLM/VLM invocation; pattern substring only
+- `packages/js/src/llms-txt.ts:467` — [production-source] Docs/marketing: LLM-oriented output; no API call
+- `packages/js/src/llms-txt.ts:468` — [production-source] Docs/marketing: LLM-oriented output; no API call
+- `packages/js/src/llms-txt.ts:485` — [production-source] No LLM/VLM invocation; pattern substring only
+- `packages/js/src/llms-txt.ts:487` — [production-source] Docs/marketing: LLM-oriented output; no API call
+- `packages/js/src/llms-txt.ts:489` — [production-source] Docs/marketing: LLM-oriented output; no API call
+- `packages/js/src/llms-txt.ts:506` — [production-source] No LLM/VLM invocation; pattern substring only
+- `packages/js/src/llms-txt.ts:511` — [production-source] Docs/marketing: LLM-oriented output; no API call
+- `packages/js/src/llms-txt.ts:520` — [production-source] Docs/marketing: LLM-oriented output; no API call
+- `packages/js/src/llms-txt.ts:521` — [production-source] No LLM/VLM invocation; pattern substring only
+- `packages/js/src/llms-txt.ts:556` — [production-source] No LLM/VLM invocation; pattern substring only
+- `packages/js/src/llms-txt.ts:561` — [production-source] Docs/marketing: LLM-oriented output; no API call
+- `packages/js/src/llms-txt.ts:586` — [production-source] No LLM/VLM invocation; pattern substring only
+- `packages/js/src/llms-txt.ts:618` — [production-source] No LLM/VLM invocation; pattern substring only
+- `packages/js/src/llms-txt.ts:642` — [production-source] No LLM/VLM invocation; pattern substring only
+- `packages/js/src/llms-txt.ts:648` — [production-source] No LLM/VLM invocation; pattern substring only
+- `packages/js/src/llms-txt.ts:649` — [production-source] No LLM/VLM invocation; pattern substring only
+- `packages/js/src/llms-txt.ts:650` — [production-source] No LLM/VLM invocation; pattern substring only
+- `packages/js/src/llms-txt.ts:654` — [production-source] No LLM/VLM invocation; pattern substring only
+- `packages/js/src/llms-txt.ts:655` — [production-source] No LLM/VLM invocation; pattern substring only
+- `packages/js/src/llms-txt.ts:659` — [production-source] No LLM/VLM invocation; pattern substring only
+- `packages/js/src/llms-txt.ts:660` — [production-source] No LLM/VLM invocation; pattern substring only
+- `packages/js/src/types.ts:479` — [production-source] No LLM/VLM invocation; pattern substring only
+- `packages/crawl/src/cli.ts:6` — [production-source] False positive: UI/CLI prompt widget; not LLM prompt
+- `packages/crawl/src/cli.ts:168` — [production-source] Docs/marketing: LLM-oriented output; no API call
+- `packages/crawl/src/cli.ts:169` — [production-source] Docs/marketing: LLM-oriented output; no API call
+- `packages/crawl/src/cli.ts:172` — [production-source] Docs/marketing: LLM-oriented output; no API call
+- `packages/crawl/src/cli.ts:202` — [production-source] Docs/marketing: LLM-oriented output; no API call
+- `packages/crawl/src/cli.ts:203` — [production-source] Docs/marketing: LLM-oriented output; no API call
+- `packages/crawl/src/cli.ts:233` — [production-source] Docs/marketing: LLM-oriented output; no API call
+- `packages/crawl/src/cli.ts:234` — [production-source] Docs/marketing: LLM-oriented output; no API call
+- `packages/crawl/src/cli.ts:272` — [production-source] Docs/marketing: LLM-oriented output; no API call
+- `packages/crawl/src/cli.ts:284` — [production-source] Docs/marketing: LLM-oriented output; no API call
+- `packages/crawl/src/cli.ts:303` — [production-source] Docs/marketing: LLM-oriented output; no API call
+- `packages/crawl/src/cli.ts:304` — [production-source] Docs/marketing: LLM-oriented output; no API call
+- `packages/crawl/src/cli.ts:428` — [production-source] Docs/marketing: LLM-oriented output; no API call
+- `packages/crawl/src/cli.ts:431` — [production-source] Docs/marketing: LLM-oriented output; no API call
+- `packages/crawl/src/cli.ts:495` — [production-source] Docs/marketing: LLM-oriented output; no API call
+- `packages/crawl/src/cli.ts:496` — [production-source] Docs/marketing: LLM-oriented output; no API call
+- `packages/crawl/src/cli.ts:556` — [production-source] No LLM/VLM invocation; pattern substring only
+- `packages/crawl/src/cli.ts:557` — [production-source] Docs/marketing: LLM-oriented output; no API call
+- `packages/crawl/src/cli.ts:558` — [production-source] No LLM/VLM invocation; pattern substring only
+- `packages/crawl/src/cli.ts:559` — [production-source] Docs/marketing: LLM-oriented output; no API call
+- `packages/crawl/src/cli.ts:690` — [production-source] No LLM/VLM invocation; pattern substring only
+- `packages/crawl/src/cli.ts:691` — [production-source] Docs/marketing: LLM-oriented output; no API call
+- `packages/crawl/src/cli.ts:692` — [production-source] No LLM/VLM invocation; pattern substring only
+- `packages/crawl/src/cli.ts:693` — [production-source] Docs/marketing: LLM-oriented output; no API call
+- `packages/crawl/src/crawl.ts:1` — [production-source] No LLM/VLM invocation; pattern substring only
+- `packages/crawl/src/crawl.ts:6` — [production-source] No LLM/VLM invocation; pattern substring only
+- `packages/crawl/src/crawl.ts:280` — [production-source] No LLM/VLM invocation; pattern substring only
+- `packages/crawl/src/crawl.ts:281` — [production-source] No LLM/VLM invocation; pattern substring only
+- `packages/crawl/src/crawl.ts:892` — [production-source] Docs/marketing: LLM-oriented output; no API call
+- `packages/crawl/src/crawl.ts:893` — [production-source] Docs/marketing: LLM-oriented output; no API call
+- `packages/crawl/src/crawl.ts:933` — [production-source] No LLM/VLM invocation; pattern substring only
+- `packages/crawl/src/crawl.ts:934` — [production-source] Docs/marketing: LLM-oriented output; no API call
+- `packages/crawl/src/crawl.ts:961` — [production-source] No LLM/VLM invocation; pattern substring only
+- `packages/crawl/src/crawl.ts:966` — [production-source] No LLM/VLM invocation; pattern substring only
+- `packages/crawl/src/crawl.ts:970` — [production-source] No LLM/VLM invocation; pattern substring only
+- `packages/crawl/src/crawl.ts:971` — [production-source] Docs/marketing: LLM-oriented output; no API call
+- `packages/crawl/src/crawl.ts:973` — [production-source] Docs/marketing: LLM-oriented output; no API call
+- `packages/crawl/src/crawl.ts:976` — [production-source] No LLM/VLM invocation; pattern substring only
+- `packages/crawl/src/crawl.ts:977` — [production-source] Docs/marketing: LLM-oriented output; no API call
+- `packages/crawl/src/crawl.ts:979` — [production-source] Docs/marketing: LLM-oriented output; no API call
+- `packages/crawl/src/logger.ts:1` — [production-source] False positive: UI/CLI prompt widget; not LLM prompt
+- `packages/crawl/src/logger.ts:5` — [production-source] False positive: UI/CLI prompt widget; not LLM prompt
+- `packages/crawl/src/logger.ts:17` — [production-source] No LLM/VLM invocation; pattern substring only
+- `packages/crawl/src/logger.ts:57` — [production-source] False positive: UI/CLI prompt widget; not LLM prompt
+- `packages/crawl/src/types.ts:23` — [production-source] No LLM/VLM invocation; pattern substring only
+- `packages/crawl/src/types.ts:24` — [production-source] No LLM/VLM invocation; pattern substring only
+- `packages/crawl/src/types.ts:42` — [production-source] Docs/marketing: LLM-oriented output; no API call
+- `packages/crawl/src/types.ts:46` — [production-source] Docs/marketing: LLM-oriented output; no API call
+- `packages/crawl/src/types.ts:63` — [production-source] False positive: UI/CLI prompt widget; not LLM prompt
+- `packages/crawl/src/types.ts:85` — [production-source] Docs/marketing: LLM-oriented output; no API call
+- `packages/crawl/src/playwright-utils.ts:2` — [production-source] False positive: UI/CLI prompt widget; not LLM prompt
+- `packages/crawl/src/playwright-utils.ts:17` — [production-source] No LLM/VLM invocation; pattern substring only
+- `packages/crawl/src/playwright-utils.ts:18` — [production-source] No LLM/VLM invocation; pattern substring only
+- `packages/crawl/src/playwright-utils.ts:56` — [production-source] No LLM/VLM invocation; pattern substring only
+- `packages/nuxt/src/types.ts:3` — [production-source] No LLM/VLM invocation; pattern substring only
+- `packages/nuxt/README.md:28` — [docs] Documentation/example prose; no runtime LLM invocation
+- `packages/nuxt/README.md:91` — [docs] Documentation/example prose; no runtime LLM invocation
+- `packages/nuxt/README.md:121` — [docs] Docs/marketing: LLM-oriented output; no API call
+- `packages/nuxt/README.md:122` — [docs] Docs/marketing: LLM-oriented output; no API call
+- `packages/nuxt/README.md:205` — [docs] Documentation/example prose; no runtime LLM invocation
+- `packages/nuxt/README.md:207` — [docs] Documentation/example prose; no runtime LLM invocation
+- `packages/nuxt/README.md:209` — [docs] Docs/marketing: LLM-oriented output; no API call
+- `packages/nuxt/README.md:212` — [docs] Documentation/example prose; no runtime LLM invocation
+- `packages/nuxt/README.md:213` — [docs] Docs/marketing: LLM-oriented output; no API call
+- `packages/nuxt/README.md:214` — [docs] Docs/marketing: LLM-oriented output; no API call
+- `packages/nuxt/README.md:238` — [docs] Documentation/example prose; no runtime LLM invocation
+- `packages/nuxt/README.md:331` — [docs] Documentation/example prose; no runtime LLM invocation
+- `packages/nuxt/README.md:339` — [docs] Documentation/example prose; no runtime LLM invocation
+- `packages/crawl/test/unit/boilerplate-crawl.test.ts:44` — [test] False positive: UI/CLI prompt widget; not LLM prompt
+- `packages/crawl/test/unit/boilerplate-crawl.test.ts:52` — [test] Test mock/fixture; not production LLM verification
+- `packages/crawl/test/unit/boilerplate-crawl.test.ts:73` — [test] Test mock/fixture; not production LLM verification
+- `packages/crawl/test/unit/boilerplate-crawl.test.ts:74` — [test] Test mock/fixture; not production LLM verification
+- `packages/crawl/test/unit/boilerplate-crawl.test.ts:103` — [test] Docs/marketing: LLM-oriented output; no API call
+- `packages/crawl/test/unit/boilerplate-crawl.test.ts:104` — [test] Docs/marketing: LLM-oriented output; no API call
+- `packages/crawl/test/unit/boilerplate-crawl.test.ts:105` — [test] Test mock/fixture; not production LLM verification
+- `packages/crawl/test/unit/boilerplate-crawl.test.ts:106` — [test] Test mock/fixture; not production LLM verification
+- `packages/crawl/test/unit/boilerplate-crawl.test.ts:107` — [test] Test mock/fixture; not production LLM verification
+- `packages/crawl/test/unit/boilerplate-crawl.test.ts:108` — [test] Test mock/fixture; not production LLM verification
+- `packages/crawl/test/unit/boilerplate-crawl.test.ts:110` — [test] Docs/marketing: LLM-oriented output; no API call
+- `packages/crawl/test/unit/boilerplate-crawl.test.ts:111` — [test] Docs/marketing: LLM-oriented output; no API call
+- `packages/crawl/test/unit/boilerplate-crawl.test.ts:112` — [test] Test mock/fixture; not production LLM verification
+- `packages/crawl/test/unit/boilerplate-crawl.test.ts:113` — [test] Test mock/fixture; not production LLM verification
+- `packages/nuxt/src/templates.ts:23` — [production-source] No LLM/VLM invocation; pattern substring only
+- `packages/nuxt/src/prerender.ts:1` — [production-source] No LLM/VLM invocation; pattern substring only
+- `packages/nuxt/src/prerender.ts:3` — [production-source] No LLM/VLM invocation; pattern substring only
+- `packages/nuxt/src/prerender.ts:6` — [production-source] No LLM/VLM invocation; pattern substring only
+- `packages/nuxt/src/prerender.ts:28` — [production-source] Docs/marketing: LLM-oriented output; no API call
+- `packages/nuxt/src/prerender.ts:51` — [production-source] Docs/marketing: LLM-oriented output; no API call
+- `packages/nuxt/src/prerender.ts:52` — [production-source] No LLM/VLM invocation; pattern substring only
+- `packages/nuxt/src/prerender.ts:61` — [production-source] No LLM/VLM invocation; pattern substring only
+- `packages/nuxt/src/prerender.ts:63` — [production-source] No LLM/VLM invocation; pattern substring only
+- `packages/nuxt/src/prerender.ts:64` — [production-source] No LLM/VLM invocation; pattern substring only
+- `packages/nuxt/src/prerender.ts:65` — [production-source] No LLM/VLM invocation; pattern substring only
+- `packages/nuxt/src/prerender.ts:69` — [production-source] No LLM/VLM invocation; pattern substring only
+- `packages/nuxt/src/prerender.ts:72` — [production-source] No LLM/VLM invocation; pattern substring only
+- `packages/nuxt/src/prerender.ts:73` — [production-source] No LLM/VLM invocation; pattern substring only
+- `packages/nuxt/src/prerender.ts:77` — [production-source] Docs/marketing: LLM-oriented output; no API call
+- `packages/nuxt/src/prerender.ts:78` — [production-source] No LLM/VLM invocation; pattern substring only
+- `packages/nuxt/src/prerender.ts:79` — [production-source] Docs/marketing: LLM-oriented output; no API call
+- `packages/nuxt/src/prerender.ts:80` — [production-source] No LLM/VLM invocation; pattern substring only
+- `packages/nuxt/src/prerender.ts:81` — [production-source] No LLM/VLM invocation; pattern substring only
+- `packages/nuxt/src/prerender.ts:82` — [production-source] Docs/marketing: LLM-oriented output; no API call
+- `packages/nuxt/src/prerender.ts:84` — [production-source] Docs/marketing: LLM-oriented output; no API call
+- `packages/nuxt/src/prerender.ts:85` — [production-source] No LLM/VLM invocation; pattern substring only
+- `packages/nuxt/src/prerender.ts:90` — [production-source] Docs/marketing: LLM-oriented output; no API call
+- `packages/nuxt/src/prerender.ts:91` — [production-source] No LLM/VLM invocation; pattern substring only
+- `packages/nuxt/src/prerender.ts:92` — [production-source] Docs/marketing: LLM-oriented output; no API call
+- `packages/nuxt/src/prerender.ts:93` — [production-source] No LLM/VLM invocation; pattern substring only
+- `packages/nuxt/src/prerender.ts:94` — [production-source] No LLM/VLM invocation; pattern substring only
+- `packages/nuxt/src/prerender.ts:95` — [production-source] Docs/marketing: LLM-oriented output; no API call
+- `packages/nuxt/src/prerender.ts:97` — [production-source] Docs/marketing: LLM-oriented output; no API call
+- `packages/nuxt/src/prerender.ts:98` — [production-source] No LLM/VLM invocation; pattern substring only
+- `packages/crawl/test/unit/follow-links.test.ts:49` — [test] Test mock/fixture; not production LLM verification
+- `packages/crawl/test/unit/follow-links.test.ts:50` — [test] Test mock/fixture; not production LLM verification
+- `packages/crawl/test/unit/follow-links.test.ts:51` — [test] Test mock/fixture; not production LLM verification
+- `packages/crawl/test/unit/follow-links.test.ts:52` — [test] Docs/marketing: LLM-oriented output; no API call
+- `packages/crawl/test/unit/follow-links.test.ts:53` — [test] Docs/marketing: LLM-oriented output; no API call
+- `packages/crawl/test/unit/follow-links.test.ts:57` — [test] False positive: UI/CLI prompt widget; not LLM prompt
+- `packages/crawl/test/unit/follow-links.test.ts:58` — [test] False positive: UI/CLI prompt widget; not LLM prompt
+- `packages/crawl/test/unit/follow-links.test.ts:82` — [test] Test mock/fixture; not production LLM verification
+- `packages/crawl/test/unit/follow-links.test.ts:83` — [test] Test mock/fixture; not production LLM verification
+- `packages/crawl/test/unit/follow-links.test.ts:105` — [test] Test mock/fixture; not production LLM verification
+- `packages/crawl/test/unit/follow-links.test.ts:106` — [test] Test mock/fixture; not production LLM verification
+- `packages/crawl/test/unit/follow-links.test.ts:128` — [test] Test mock/fixture; not production LLM verification
+- `packages/crawl/test/unit/follow-links.test.ts:129` — [test] Test mock/fixture; not production LLM verification
+- `packages/crawl/test/unit/follow-links.test.ts:146` — [test] Test mock/fixture; not production LLM verification
+- `packages/crawl/test/unit/follow-links.test.ts:147` — [test] Test mock/fixture; not production LLM verification
+- `packages/crawl/test/unit/follow-links.test.ts:171` — [test] Test mock/fixture; not production LLM verification
+- `packages/crawl/test/unit/follow-links.test.ts:172` — [test] Test mock/fixture; not production LLM verification
+- `packages/nuxt/test/fixtures/hooks/nuxt.config.ts:1` — [test] Test mock/fixture; not production LLM verification
+- `packages/nuxt/test/fixtures/hooks/nuxt.config.ts:18` — [test] Test mock/fixture; not production LLM verification
+- `packages/nuxt/test/fixtures/hooks/nuxt.config.ts:19` — [test] Test mock/fixture; not production LLM verification
+- `packages/nuxt/test/fixtures/hooks/nuxt.config.ts:22` — [test] Docs/marketing: LLM-oriented output; no API call
+- `packages/nuxt/src/runtime/types.ts:53` — [production-source] No LLM/VLM invocation; pattern substring only
+- `packages/nuxt/src/runtime/types.ts:55` — [production-source] No LLM/VLM invocation; pattern substring only
+- `packages/nuxt/src/runtime/types.ts:56` — [production-source] Docs/marketing: LLM-oriented output; no API call
+- `packages/nuxt/src/runtime/types.ts:58` — [production-source] Docs/marketing: LLM-oriented output; no API call
+- `packages/nuxt/src/runtime/types.ts:61` — [production-source] No LLM/VLM invocation; pattern substring only
+- `packages/crawl/test/unit/hooks.test.ts:164` — [test] Docs/marketing: LLM-oriented output; no API call
+- `packages/crawl/test/unit/hooks.test.ts:170` — [test] Docs/marketing: LLM-oriented output; no API call
+- `packages/crawl/test/unit/query-param-loop.test.ts:47` — [test] Test mock/fixture; not production LLM verification
+- `packages/crawl/test/unit/query-param-loop.test.ts:48` — [test] Test mock/fixture; not production LLM verification
+- `packages/crawl/test/unit/query-param-loop.test.ts:49` — [test] Docs/marketing: LLM-oriented output; no API call
+- `packages/crawl/test/unit/query-param-loop.test.ts:50` — [test] Docs/marketing: LLM-oriented output; no API call
+- `packages/crawl/test/unit/query-param-loop.test.ts:54` — [test] False positive: UI/CLI prompt widget; not LLM prompt
+- `packages/crawl/test/unit/query-param-loop.test.ts:78` — [test] Test mock/fixture; not production LLM verification
+- `packages/crawl/test/unit/query-param-loop.test.ts:79` — [test] Test mock/fixture; not production LLM verification
+- `packages/crawl/test/unit/query-param-loop.test.ts:107` — [test] Test mock/fixture; not production LLM verification
+- `packages/crawl/test/unit/query-param-loop.test.ts:108` — [test] Test mock/fixture; not production LLM verification
+- `packages/mdream/package.json:5` — [other] No LLM/VLM invocation; pattern substring only
+- `packages/nuxt/test/e2e/hooks.test.ts:86` — [test] Test mock/fixture; not production LLM verification
+- `packages/nuxt/test/e2e/hooks.test.ts:87` — [test] Docs/marketing: LLM-oriented output; no API call
+- `packages/nuxt/test/e2e/hooks.test.ts:88` — [test] Docs/marketing: LLM-oriented output; no API call
+- `packages/nuxt/test/e2e/hooks.test.ts:89` — [test] Test mock/fixture; not production LLM verification
+- `packages/nuxt/test/e2e/hooks.test.ts:90` — [test] Test mock/fixture; not production LLM verification
+- `packages/nuxt/test/e2e/hooks.test.ts:93` — [test] Test mock/fixture; not production LLM verification
+- `packages/nuxt/test/e2e/hooks.test.ts:94` — [test] Test mock/fixture; not production LLM verification
+- `packages/nuxt/test/e2e/hooks.test.ts:97` — [test] Docs/marketing: LLM-oriented output; no API call
+- `packages/nuxt/test/e2e/hooks.test.ts:98` — [test] Docs/marketing: LLM-oriented output; no API call
+- `packages/nuxt/test/e2e/hooks.test.ts:99` — [test] Test mock/fixture; not production LLM verification
+- `packages/nuxt/test/e2e/hooks.test.ts:100` — [test] Test mock/fixture; not production LLM verification
+- `packages/nuxt/test/e2e/hooks.test.ts:103` — [test] Test mock/fixture; not production LLM verification
+- `packages/nuxt/test/e2e/hooks.test.ts:104` — [test] Test mock/fixture; not production LLM verification
+- `packages/mdream/README.md:85` — [docs] Docs/marketing: LLM-oriented output; no API call
+- `packages/mdream/README.md:362` — [docs] Documentation/example prose; no runtime LLM invocation
+- `packages/mdream/README.md:750` — [docs] Documentation/example prose; no runtime LLM invocation
+- `packages/mdream/README.md:820` — [docs] Documentation/example prose; no runtime LLM invocation
+- `packages/mdream/README.md:995` — [docs] Docs/marketing: LLM-oriented output; no API call
+- `packages/mdream/README.md:997` — [docs] Docs/marketing: LLM-oriented output; no API call
+- `packages/mdream/README.md:1000` — [docs] Documentation/example prose; no runtime LLM invocation
+- `packages/mdream/README.md:1003` — [docs] Documentation/example prose; no runtime LLM invocation
+- `packages/mdream/README.md:1013` — [docs] Docs/marketing: LLM-oriented output; no API call
+- `packages/mdream/README.md:1014` — [docs] Docs/marketing: LLM-oriented output; no API call
+- `packages/mdream/README.md:1023` — [docs] Docs/marketing: LLM-oriented output; no API call
+- `packages/mdream/README.md:1024` — [docs] Docs/marketing: LLM-oriented output; no API call
+- `packages/crawl/test/unit/silent-logging.test.ts:31` — [test] Test mock/fixture; not production LLM verification
+- `packages/crawl/test/unit/silent-logging.test.ts:32` — [test] Docs/marketing: LLM-oriented output; no API call
+- `packages/crawl/test/unit/silent-logging.test.ts:37` — [test] False positive: UI/CLI prompt widget; not LLM prompt
+- `packages/crawl/test/unit/silent-logging.test.ts:72` — [test] Test mock/fixture; not production LLM verification
+- `packages/crawl/test/unit/silent-logging.test.ts:73` — [test] Test mock/fixture; not production LLM verification
+- `packages/crawl/test/unit/silent-logging.test.ts:87` — [test] Test mock/fixture; not production LLM verification
+- `packages/crawl/test/unit/silent-logging.test.ts:88` — [test] Test mock/fixture; not production LLM verification
+- `packages/crawl/test/unit/single-page.test.ts:38` — [test] Test mock/fixture; not production LLM verification
+- `packages/crawl/test/unit/single-page.test.ts:39` — [test] Test mock/fixture; not production LLM verification
+- `packages/crawl/test/unit/single-page.test.ts:40` — [test] Test mock/fixture; not production LLM verification
+- `packages/crawl/test/unit/single-page.test.ts:41` — [test] Docs/marketing: LLM-oriented output; no API call
+- `packages/crawl/test/unit/single-page.test.ts:42` — [test] Docs/marketing: LLM-oriented output; no API call
+- `packages/crawl/test/unit/single-page.test.ts:46` — [test] False positive: UI/CLI prompt widget; not LLM prompt
+- `packages/crawl/test/unit/single-page.test.ts:47` — [test] False positive: UI/CLI prompt widget; not LLM prompt
+- `packages/crawl/test/unit/single-page.test.ts:70` — [test] Test mock/fixture; not production LLM verification
+- `packages/crawl/test/unit/single-page.test.ts:71` — [test] Test mock/fixture; not production LLM verification
+- `packages/crawl/test/unit/single-page.test.ts:91` — [test] Test mock/fixture; not production LLM verification
+- `packages/crawl/test/unit/single-page.test.ts:92` — [test] Test mock/fixture; not production LLM verification
+- `packages/crawl/test/unit/single-page.test.ts:108` — [test] Test mock/fixture; not production LLM verification
+- `packages/crawl/test/unit/single-page.test.ts:109` — [test] Test mock/fixture; not production LLM verification
+- `packages/crawl/test/unit/single-page.test.ts:127` — [test] Test mock/fixture; not production LLM verification
+- `packages/crawl/test/unit/single-page.test.ts:128` — [test] Test mock/fixture; not production LLM verification
+- `packages/crawl/test/unit/single-page.test.ts:146` — [test] Test mock/fixture; not production LLM verification
+- `packages/crawl/test/unit/single-page.test.ts:147` — [test] Test mock/fixture; not production LLM verification
+- `packages/crawl/test/unit/single-page.test.ts:161` — [test] Test mock/fixture; not production LLM verification
+- `packages/crawl/test/unit/single-page.test.ts:162` — [test] Test mock/fixture; not production LLM verification
+- `packages/crawl/test/unit/sitemap-link-skip.test.ts:53` — [test] Test mock/fixture; not production LLM verification
+- `packages/crawl/test/unit/sitemap-link-skip.test.ts:54` — [test] Test mock/fixture; not production LLM verification
+- `packages/crawl/test/unit/sitemap-link-skip.test.ts:55` — [test] Docs/marketing: LLM-oriented output; no API call
+- `packages/crawl/test/unit/sitemap-link-skip.test.ts:56` — [test] Docs/marketing: LLM-oriented output; no API call
+- `packages/crawl/test/unit/sitemap-link-skip.test.ts:60` — [test] False positive: UI/CLI prompt widget; not LLM prompt
+- `packages/crawl/test/unit/sitemap-link-skip.test.ts:85` — [test] Test mock/fixture; not production LLM verification
+- `packages/crawl/test/unit/sitemap-link-skip.test.ts:86` — [test] Test mock/fixture; not production LLM verification
+- `packages/mdream/test/fixtures/github-markdown-complete.html:6172` — [test] Test mock/fixture; not production LLM verification
+- `packages/mdream/test/integration/client-bundle.browser.test.ts:76` — [test] Test mock/fixture; not production LLM verification
+- `packages/mdream/test/integration/client-bundle.browser.test.ts:88` — [test] Test mock/fixture; not production LLM verification
+- `packages/mdream/test/unit/plugins/extraction-declarative.test.ts:224` — [test] Test mock/fixture; not production LLM verification
+- `packages/mdream/test/unit/templates/hacker-news.test.ts:38` — [test] Test mock/fixture; not production LLM verification
+- `packages/mdream/test/unit/templates/hacker-news.test.ts:117` — [test] Fixture/doc URL text mentioning OpenAI; no SDK import
+- `packages/mdream/test/unit/templates/hacker-news.test.ts:147` — [test] Test mock/fixture; not production LLM verification
+- `packages/mdream/test/unit/templates/__snapshots__/hacker-news.test.ts.snap:7` — [test] Fixture/doc URL text mentioning OpenAI; no SDK import
+- `packages/mdream/test/unit/templates/__snapshots__/hacker-news.test.ts.snap:15` — [test] Fixture/doc URL text mentioning OpenAI; no SDK import
+- `packages/mdream/test/fixtures/wikipedia-largest.html:5578` — [test] Test mock/fixture; not production LLM verification
+- `packages/mdream/test/fixtures/wikipedia-largest.html:6700` — [test] Test mock/fixture; not production LLM verification
+- `packages/mdream/test/fixtures/wikipedia-largest.html:6782` — [test] Test mock/fixture; not production LLM verification
+- `packages/mdream/test/fixtures/wikipedia-largest.html:6804` — [test] Test mock/fixture; not production LLM verification
+- `packages/mdream/test/fixtures/wikipedia-largest.html:6812` — [test] Test mock/fixture; not production LLM verification
+- `packages/mdream/test/fixtures/wikipedia-largest.html:6831` — [test] Test mock/fixture; not production LLM verification
+- `packages/mdream/test/fixtures/wikipedia-largest.html:6839` — [test] Test mock/fixture; not production LLM verification
+- `packages/mdream/test/fixtures/wikipedia-largest.html:6847` — [test] Test mock/fixture; not production LLM verification
+- `packages/mdream/test/fixtures/wikipedia-largest.html:6855` — [test] Test mock/fixture; not production LLM verification
+- `packages/mdream/test/fixtures/wikipedia-largest.html:7150` — [test] Test mock/fixture; not production LLM verification
+- `packages/mdream/test/fixtures/wikipedia-largest.html:7161` — [test] Test mock/fixture; not production LLM verification
+- `packages/mdream/test/fixtures/wikipedia-largest.html:7169` — [test] Test mock/fixture; not production LLM verification
+- `packages/mdream/test/fixtures/wikipedia-largest.html:7206` — [test] Test mock/fixture; not production LLM verification
+- `packages/mdream/test/fixtures/wikipedia-largest.html:7362` — [test] Test mock/fixture; not production LLM verification
+- `packages/mdream/test/fixtures/wikipedia-largest.html:7380` — [test] Test mock/fixture; not production LLM verification
+- `packages/mdream/test/fixtures/wikipedia-largest.html:7924` — [test] Test mock/fixture; not production LLM verification
+- `packages/mdream/test/fixtures/wikipedia-largest.html:8195` — [test] Test mock/fixture; not production LLM verification
+- `packages/mdream/test/fixtures/wikipedia-largest.html:8201` — [test] Test mock/fixture; not production LLM verification
+- `packages/mdream/test/fixtures/wikipedia-largest.html:8302` — [test] Test mock/fixture; not production LLM verification
+- `packages/mdream/test/fixtures/wikipedia-largest.html:8318` — [test] Test mock/fixture; not production LLM verification
+- `packages/mdream/test/fixtures/wikipedia-largest.html:8412` — [test] Test mock/fixture; not production LLM verification
+- `packages/mdream/test/fixtures/wikipedia-largest.html:8431` — [test] Test mock/fixture; not production LLM verification
+- `packages/mdream/test/fixtures/wikipedia-largest.html:8444` — [test] Test mock/fixture; not production LLM verification
+
+**JS/TS npm scan (openai/anthropic/ai-sdk):**
+- `bench/bundle/src/string.ts:496` — [npm-scan] no openai/anthropic/ai-sdk import
+- `bench/bundle/src/string.ts:497` — [npm-scan] no openai/anthropic/ai-sdk import
+- `bench/bundle/src/string.ts:500` — [npm-scan] no openai/anthropic/ai-sdk import
+- `bench/bundle/src/string.ts:504` — [npm-scan] no openai/anthropic/ai-sdk import
+- `bench/bundle/src/string.ts:1001` — [npm-scan] no openai/anthropic/ai-sdk import
+- `bench/bundle/src/string.ts:1026` — [npm-scan] no openai/anthropic/ai-sdk import
+- `bench/bundle/src/string.ts:1057` — [npm-scan] no openai/anthropic/ai-sdk import
+- `bench/bundle/src/string.ts:1059` — [npm-scan] no openai/anthropic/ai-sdk import
+- `bench/bundle/src/string.ts:1190` — [npm-scan] no openai/anthropic/ai-sdk import
+- `bench/bundle/src/string.ts:1201` — [npm-scan] no openai/anthropic/ai-sdk import
+- `bench/bundle/src/string.ts:1202` — [npm-scan] no openai/anthropic/ai-sdk import
+- `bench/bundle/src/string.ts:1203` — [npm-scan] no openai/anthropic/ai-sdk import
+- `bench/bundle/src/string.ts:1204` — [npm-scan] no openai/anthropic/ai-sdk import
+- `bench/bundle/src/string.ts:1205` — [npm-scan] no openai/anthropic/ai-sdk import
+- `bench/bundle/src/string.ts:1843` — [npm-scan] no openai/anthropic/ai-sdk import
+- `bench/bundle/src/string.ts:1881` — [npm-scan] no openai/anthropic/ai-sdk import
+- `bench/bundle/src/string.ts:1883` — [npm-scan] no openai/anthropic/ai-sdk import
+- `bench/bundle/src/string.ts:1885` — [npm-scan] no openai/anthropic/ai-sdk import
+- `bench/bundle/src/string.ts:1889` — [npm-scan] no openai/anthropic/ai-sdk import
+- `bench/bundle/src/string.ts:2476` — [npm-scan] no openai/anthropic/ai-sdk import
+- `bench/bundle/src/string.ts:2991` — [npm-scan] no openai/anthropic/ai-sdk import
+- `crates/node/test/unit/templates/hacker-news.test.ts:117` — [npm-scan] no openai/anthropic/ai-sdk import
+- `crates/node/test/unit/templates/hacker-news.test.ts:180` — [npm-scan] no openai/anthropic/ai-sdk import
+- `packages/mdream/test/unit/templates/hacker-news.test.ts:117` — [npm-scan] no openai/anthropic/ai-sdk import
+
+### node-html-markdown
+- `transformer.js:11` — [other] Build script comment about regex; not LLM invoke
+- `README.md:100` — [docs] Documentation/example prose; no runtime LLM invocation
+- `benchmark/files/039c4b966d1f2a0c589ac0aad211fe65500ad1cb58c7f45b34251db7056803ec.html:1057` — [bench/eval-fixture] False positive: UI/CLI prompt widget; not LLM prompt
+- `benchmark/files/0e55dcdbeb54c88ee87942b9fef7ea5398fa9a1e83493d55844b479506a80fd8.html:726` — [bench/eval-fixture] Benchmark HTML/fixture content; not production LLM call
+- `benchmark/files/06ed0a833361190536a4f61888354e07dccaa501bd9a1c0f1c545533bde1650b.html:662` — [bench/eval-fixture] Benchmark HTML/fixture content; not production LLM call
+- `benchmark/files/20f1955819dc2b50d2d10788f73adc72bceb491a03ed608debb72a90bce65c50.html:210` — [bench/eval-fixture] False positive: Google Publisher Tag ad slot id (gpt- substring)
+- `benchmark/files/20f1955819dc2b50d2d10788f73adc72bceb491a03ed608debb72a90bce65c50.html:252` — [bench/eval-fixture] False positive: Google Publisher Tag ad slot id (gpt- substring)
+- `benchmark/files/20f1955819dc2b50d2d10788f73adc72bceb491a03ed608debb72a90bce65c50.html:253` — [bench/eval-fixture] False positive: Google Publisher Tag ad slot id (gpt- substring)
+- `benchmark/files/20f1955819dc2b50d2d10788f73adc72bceb491a03ed608debb72a90bce65c50.html:465` — [bench/eval-fixture] False positive: Google Publisher Tag ad slot id (gpt- substring)
+- `benchmark/files/20f1955819dc2b50d2d10788f73adc72bceb491a03ed608debb72a90bce65c50.html:466` — [bench/eval-fixture] False positive: Google Publisher Tag ad slot id (gpt- substring)
+- `benchmark/files/20f1955819dc2b50d2d10788f73adc72bceb491a03ed608debb72a90bce65c50.html:604` — [bench/eval-fixture] False positive: Google Publisher Tag ad slot id (gpt- substring)
+- `benchmark/files/20f1955819dc2b50d2d10788f73adc72bceb491a03ed608debb72a90bce65c50.html:605` — [bench/eval-fixture] False positive: Google Publisher Tag ad slot id (gpt- substring)
+- `benchmark/files/20f1955819dc2b50d2d10788f73adc72bceb491a03ed608debb72a90bce65c50.html:694` — [bench/eval-fixture] False positive: Google Publisher Tag ad slot id (gpt- substring)
+- `benchmark/files/20f1955819dc2b50d2d10788f73adc72bceb491a03ed608debb72a90bce65c50.html:695` — [bench/eval-fixture] False positive: Google Publisher Tag ad slot id (gpt- substring)
+- `benchmark/files/20f1955819dc2b50d2d10788f73adc72bceb491a03ed608debb72a90bce65c50.html:699` — [bench/eval-fixture] False positive: Google Publisher Tag ad slot id (gpt- substring)
+- `benchmark/files/20f1955819dc2b50d2d10788f73adc72bceb491a03ed608debb72a90bce65c50.html:700` — [bench/eval-fixture] False positive: Google Publisher Tag ad slot id (gpt- substring)
+- `benchmark/files/20f1955819dc2b50d2d10788f73adc72bceb491a03ed608debb72a90bce65c50.html:705` — [bench/eval-fixture] False positive: Google Publisher Tag ad slot id (gpt- substring)
+- `benchmark/files/20f1955819dc2b50d2d10788f73adc72bceb491a03ed608debb72a90bce65c50.html:706` — [bench/eval-fixture] False positive: Google Publisher Tag ad slot id (gpt- substring)
+- `benchmark/files/20f1955819dc2b50d2d10788f73adc72bceb491a03ed608debb72a90bce65c50.html:710` — [bench/eval-fixture] False positive: Google Publisher Tag ad slot id (gpt- substring)
+- `benchmark/files/20f1955819dc2b50d2d10788f73adc72bceb491a03ed608debb72a90bce65c50.html:711` — [bench/eval-fixture] False positive: Google Publisher Tag ad slot id (gpt- substring)
+- `benchmark/files/20f1955819dc2b50d2d10788f73adc72bceb491a03ed608debb72a90bce65c50.html:715` — [bench/eval-fixture] False positive: Google Publisher Tag ad slot id (gpt- substring)
+- `benchmark/files/20f1955819dc2b50d2d10788f73adc72bceb491a03ed608debb72a90bce65c50.html:716` — [bench/eval-fixture] False positive: Google Publisher Tag ad slot id (gpt- substring)
+- `benchmark/files/20f1955819dc2b50d2d10788f73adc72bceb491a03ed608debb72a90bce65c50.html:720` — [bench/eval-fixture] False positive: Google Publisher Tag ad slot id (gpt- substring)
+- `benchmark/files/20f1955819dc2b50d2d10788f73adc72bceb491a03ed608debb72a90bce65c50.html:721` — [bench/eval-fixture] False positive: Google Publisher Tag ad slot id (gpt- substring)
+- `benchmark/files/20f1955819dc2b50d2d10788f73adc72bceb491a03ed608debb72a90bce65c50.html:725` — [bench/eval-fixture] False positive: Google Publisher Tag ad slot id (gpt- substring)
+- `benchmark/files/20f1955819dc2b50d2d10788f73adc72bceb491a03ed608debb72a90bce65c50.html:726` — [bench/eval-fixture] False positive: Google Publisher Tag ad slot id (gpt- substring)
+- `benchmark/files/20f1955819dc2b50d2d10788f73adc72bceb491a03ed608debb72a90bce65c50.html:730` — [bench/eval-fixture] False positive: Google Publisher Tag ad slot id (gpt- substring)
+- `benchmark/files/20f1955819dc2b50d2d10788f73adc72bceb491a03ed608debb72a90bce65c50.html:731` — [bench/eval-fixture] False positive: Google Publisher Tag ad slot id (gpt- substring)
+- `benchmark/files/20f1955819dc2b50d2d10788f73adc72bceb491a03ed608debb72a90bce65c50.html:735` — [bench/eval-fixture] False positive: Google Publisher Tag ad slot id (gpt- substring)
+- `benchmark/files/20f1955819dc2b50d2d10788f73adc72bceb491a03ed608debb72a90bce65c50.html:736` — [bench/eval-fixture] False positive: Google Publisher Tag ad slot id (gpt- substring)
+- `benchmark/files/20f1955819dc2b50d2d10788f73adc72bceb491a03ed608debb72a90bce65c50.html:740` — [bench/eval-fixture] False positive: Google Publisher Tag ad slot id (gpt- substring)
+- `benchmark/files/20f1955819dc2b50d2d10788f73adc72bceb491a03ed608debb72a90bce65c50.html:741` — [bench/eval-fixture] False positive: Google Publisher Tag ad slot id (gpt- substring)
+- `benchmark/files/20f1955819dc2b50d2d10788f73adc72bceb491a03ed608debb72a90bce65c50.html:745` — [bench/eval-fixture] False positive: Google Publisher Tag ad slot id (gpt- substring)
+- `benchmark/files/20f1955819dc2b50d2d10788f73adc72bceb491a03ed608debb72a90bce65c50.html:746` — [bench/eval-fixture] False positive: Google Publisher Tag ad slot id (gpt- substring)
+- `benchmark/files/1d43b4816bdba5825165dc21558d9eafb9f650c67ba048411b04dc77a745dc39.html:1454` — [bench/eval-fixture] Benchmark HTML/fixture content; not production LLM call
+- `benchmark/files/2dbf7cd4444617cc60f0e2d2c95b20a535979a32972f5005e2af577b37980e48.html:362` — [bench/eval-fixture] Benchmark HTML/fixture content; not production LLM call
+- `benchmark/files/2dbf7cd4444617cc60f0e2d2c95b20a535979a32972f5005e2af577b37980e48.html:368` — [bench/eval-fixture] Benchmark HTML/fixture content; not production LLM call
+- `benchmark/files/17ca85324662023ba21666b3ca5d5d37a92b2806bf7a88b906c28b90a635f82a.html:28` — [bench/eval-fixture] False positive: Google Publisher Tag ad slot id (gpt- substring)
+- `benchmark/files/17ca85324662023ba21666b3ca5d5d37a92b2806bf7a88b906c28b90a635f82a.html:31` — [bench/eval-fixture] False positive: Google Publisher Tag ad slot id (gpt- substring)
+- `benchmark/files/17ca85324662023ba21666b3ca5d5d37a92b2806bf7a88b906c28b90a635f82a.html:33` — [bench/eval-fixture] False positive: Google Publisher Tag ad slot id (gpt- substring)
+- `benchmark/files/17ca85324662023ba21666b3ca5d5d37a92b2806bf7a88b906c28b90a635f82a.html:230` — [bench/eval-fixture] False positive: Google Publisher Tag ad slot id (gpt- substring)
+- `benchmark/files/17ca85324662023ba21666b3ca5d5d37a92b2806bf7a88b906c28b90a635f82a.html:231` — [bench/eval-fixture] False positive: Google Publisher Tag ad slot id (gpt- substring)
+- `benchmark/files/17ca85324662023ba21666b3ca5d5d37a92b2806bf7a88b906c28b90a635f82a.html:242` — [bench/eval-fixture] False positive: Google Publisher Tag ad slot id (gpt- substring)
+- `benchmark/files/17ca85324662023ba21666b3ca5d5d37a92b2806bf7a88b906c28b90a635f82a.html:244` — [bench/eval-fixture] False positive: Google Publisher Tag ad slot id (gpt- substring)
+- `benchmark/files/17ca85324662023ba21666b3ca5d5d37a92b2806bf7a88b906c28b90a635f82a.html:715` — [bench/eval-fixture] False positive: Google Publisher Tag ad slot id (gpt- substring)
+- `benchmark/files/17ca85324662023ba21666b3ca5d5d37a92b2806bf7a88b906c28b90a635f82a.html:717` — [bench/eval-fixture] False positive: Google Publisher Tag ad slot id (gpt- substring)
+- `benchmark/files/17ca85324662023ba21666b3ca5d5d37a92b2806bf7a88b906c28b90a635f82a.html:973` — [bench/eval-fixture] False positive: Google Publisher Tag ad slot id (gpt- substring)
+- `benchmark/files/17ca85324662023ba21666b3ca5d5d37a92b2806bf7a88b906c28b90a635f82a.html:975` — [bench/eval-fixture] False positive: Google Publisher Tag ad slot id (gpt- substring)
+- `benchmark/files/17ca85324662023ba21666b3ca5d5d37a92b2806bf7a88b906c28b90a635f82a.html:1024` — [bench/eval-fixture] False positive: Google Publisher Tag ad slot id (gpt- substring)
+- `benchmark/files/17ca85324662023ba21666b3ca5d5d37a92b2806bf7a88b906c28b90a635f82a.html:1026` — [bench/eval-fixture] False positive: Google Publisher Tag ad slot id (gpt- substring)
+- `benchmark/files/17ca85324662023ba21666b3ca5d5d37a92b2806bf7a88b906c28b90a635f82a.html:1103` — [bench/eval-fixture] False positive: Google Publisher Tag ad slot id (gpt- substring)
+- `benchmark/files/22c0f41ae560968de5e6b0ef9ecffffeae3f409aa73d9b82853f65535116f68f.html:105` — [bench/eval-fixture] Benchmark HTML/fixture content; not production LLM call
+- `benchmark/files/35f536ef8c8eba0616f2dc78e6653e1d7d68e3af927b09efad3dae7ce2080567.html:846` — [bench/eval-fixture] Benchmark HTML/fixture content; not production LLM call
+- `benchmark/files/35f536ef8c8eba0616f2dc78e6653e1d7d68e3af927b09efad3dae7ce2080567.html:847` — [bench/eval-fixture] Benchmark HTML/fixture content; not production LLM call
+- `benchmark/files/22c4be85802e9602a344fc2cc704093362b9193523c6e35cfb7dc086c8ef8648.html:1059` — [bench/eval-fixture] False positive: UI/CLI prompt widget; not LLM prompt
+- `benchmark/files/3b27831099c75b36d5978864ec89575c675c963e949cda52147a044bbfa77559.html:60` — [bench/eval-fixture] False positive: Google Publisher Tag ad slot id (gpt- substring)
+- `benchmark/files/3b27831099c75b36d5978864ec89575c675c963e949cda52147a044bbfa77559.html:62` — [bench/eval-fixture] False positive: Google Publisher Tag ad slot id (gpt- substring)
+- `benchmark/files/3b27831099c75b36d5978864ec89575c675c963e949cda52147a044bbfa77559.html:64` — [bench/eval-fixture] False positive: Google Publisher Tag ad slot id (gpt- substring)
+- `benchmark/files/3b27831099c75b36d5978864ec89575c675c963e949cda52147a044bbfa77559.html:66` — [bench/eval-fixture] False positive: Google Publisher Tag ad slot id (gpt- substring)
+- `benchmark/files/3b27831099c75b36d5978864ec89575c675c963e949cda52147a044bbfa77559.html:68` — [bench/eval-fixture] False positive: Google Publisher Tag ad slot id (gpt- substring)
+- `benchmark/files/3b27831099c75b36d5978864ec89575c675c963e949cda52147a044bbfa77559.html:251` — [bench/eval-fixture] Benchmark HTML/fixture content; not production LLM call
+- `benchmark/files/3b27831099c75b36d5978864ec89575c675c963e949cda52147a044bbfa77559.html:253` — [bench/eval-fixture] False positive: Google Publisher Tag ad slot id (gpt- substring)
+- `benchmark/files/3b27831099c75b36d5978864ec89575c675c963e949cda52147a044bbfa77559.html:265` — [bench/eval-fixture] Benchmark HTML/fixture content; not production LLM call
+- `benchmark/files/3b27831099c75b36d5978864ec89575c675c963e949cda52147a044bbfa77559.html:267` — [bench/eval-fixture] False positive: Google Publisher Tag ad slot id (gpt- substring)
+- `benchmark/files/3b27831099c75b36d5978864ec89575c675c963e949cda52147a044bbfa77559.html:665` — [bench/eval-fixture] Benchmark HTML/fixture content; not production LLM call
+- `benchmark/files/3b27831099c75b36d5978864ec89575c675c963e949cda52147a044bbfa77559.html:997` — [bench/eval-fixture] Benchmark HTML/fixture content; not production LLM call
+- `benchmark/files/3b27831099c75b36d5978864ec89575c675c963e949cda52147a044bbfa77559.html:999` — [bench/eval-fixture] False positive: Google Publisher Tag ad slot id (gpt- substring)
+- `benchmark/files/3b27831099c75b36d5978864ec89575c675c963e949cda52147a044bbfa77559.html:1148` — [bench/eval-fixture] Benchmark HTML/fixture content; not production LLM call
+- `benchmark/files/3b27831099c75b36d5978864ec89575c675c963e949cda52147a044bbfa77559.html:1150` — [bench/eval-fixture] False positive: Google Publisher Tag ad slot id (gpt- substring)
+- `benchmark/files/3b27831099c75b36d5978864ec89575c675c963e949cda52147a044bbfa77559.html:1159` — [bench/eval-fixture] Benchmark HTML/fixture content; not production LLM call
+- `benchmark/files/3b27831099c75b36d5978864ec89575c675c963e949cda52147a044bbfa77559.html:1161` — [bench/eval-fixture] False positive: Google Publisher Tag ad slot id (gpt- substring)
+- `benchmark/files/44b21071ae6feede3c36d2ab032cd422eb0c6a0fdfe4da79531931ad93dd4940.html:287` — [bench/eval-fixture] Benchmark HTML/fixture content; not production LLM call
+- `benchmark/files/44f750fab67bb9f54f5b5cc90bc34d55cff06260a3e63245856a6e57fcda5906.html:317` — [bench/eval-fixture] Benchmark HTML/fixture content; not production LLM call
+- `benchmark/files/40d4e50472a8f0d30d68613051be510ed098087679df7e0e564d6dd32152d679.html:2790` — [bench/eval-fixture] False positive: UI/CLI prompt widget; not LLM prompt
+- `benchmark/files/40d4e50472a8f0d30d68613051be510ed098087679df7e0e564d6dd32152d679.html:2846` — [bench/eval-fixture] False positive: UI/CLI prompt widget; not LLM prompt
+- `benchmark/files/40d4e50472a8f0d30d68613051be510ed098087679df7e0e564d6dd32152d679.html:3478` — [bench/eval-fixture] Benchmark HTML/fixture content; not production LLM call
+- `benchmark/files/46ed10778ec7c1292e624e1a72a2a0899f8ab6d8d4db1aa57fa4418b8b7e0a5d.html:332` — [bench/eval-fixture] Benchmark HTML/fixture content; not production LLM call
+- `benchmark/files/4bf8e536214f987f4a0bf6ca7d233619d30bde1e80a816c78d00358eb61e353c.html:973` — [bench/eval-fixture] Benchmark HTML/fixture content; not production LLM call
+- `benchmark/files/4e0e399d24fe145def4817facccb0ff79e305dedb9ece5f8ec66396ea378f723.html:942` — [bench/eval-fixture] Benchmark HTML/fixture content; not production LLM call
+- `benchmark/files/4e0e399d24fe145def4817facccb0ff79e305dedb9ece5f8ec66396ea378f723.html:1044` — [bench/eval-fixture] False positive: UI/CLI prompt widget; not LLM prompt
+- `benchmark/files/4f83531b9fc91fd1e0062e43200669cd82cc36a518caa7f66fc6ba5be4ac545b.html:201` — [bench/eval-fixture] Benchmark HTML/fixture content; not production LLM call
+- `benchmark/files/4f83531b9fc91fd1e0062e43200669cd82cc36a518caa7f66fc6ba5be4ac545b.html:203` — [bench/eval-fixture] Benchmark HTML/fixture content; not production LLM call
+- `benchmark/files/4f83531b9fc91fd1e0062e43200669cd82cc36a518caa7f66fc6ba5be4ac545b.html:204` — [bench/eval-fixture] False positive: Google Publisher Tag ad slot id (gpt- substring)
+- `benchmark/files/4f83531b9fc91fd1e0062e43200669cd82cc36a518caa7f66fc6ba5be4ac545b.html:265` — [bench/eval-fixture] Benchmark HTML/fixture content; not production LLM call
+- `benchmark/files/4f83531b9fc91fd1e0062e43200669cd82cc36a518caa7f66fc6ba5be4ac545b.html:267` — [bench/eval-fixture] Benchmark HTML/fixture content; not production LLM call
+- `benchmark/files/4f83531b9fc91fd1e0062e43200669cd82cc36a518caa7f66fc6ba5be4ac545b.html:268` — [bench/eval-fixture] False positive: Google Publisher Tag ad slot id (gpt- substring)
+- `benchmark/files/4f83531b9fc91fd1e0062e43200669cd82cc36a518caa7f66fc6ba5be4ac545b.html:351` — [bench/eval-fixture] Benchmark HTML/fixture content; not production LLM call
+- `benchmark/files/4f83531b9fc91fd1e0062e43200669cd82cc36a518caa7f66fc6ba5be4ac545b.html:353` — [bench/eval-fixture] Benchmark HTML/fixture content; not production LLM call
+- `benchmark/files/4f83531b9fc91fd1e0062e43200669cd82cc36a518caa7f66fc6ba5be4ac545b.html:354` — [bench/eval-fixture] False positive: Google Publisher Tag ad slot id (gpt- substring)
+- `benchmark/files/4f83531b9fc91fd1e0062e43200669cd82cc36a518caa7f66fc6ba5be4ac545b.html:552` — [bench/eval-fixture] Benchmark HTML/fixture content; not production LLM call
+- `benchmark/files/4f83531b9fc91fd1e0062e43200669cd82cc36a518caa7f66fc6ba5be4ac545b.html:554` — [bench/eval-fixture] Benchmark HTML/fixture content; not production LLM call
+- `benchmark/files/4f83531b9fc91fd1e0062e43200669cd82cc36a518caa7f66fc6ba5be4ac545b.html:555` — [bench/eval-fixture] False positive: Google Publisher Tag ad slot id (gpt- substring)
+- `benchmark/files/4f83531b9fc91fd1e0062e43200669cd82cc36a518caa7f66fc6ba5be4ac545b.html:789` — [bench/eval-fixture] Benchmark HTML/fixture content; not production LLM call
+- `benchmark/files/4f83531b9fc91fd1e0062e43200669cd82cc36a518caa7f66fc6ba5be4ac545b.html:791` — [bench/eval-fixture] Benchmark HTML/fixture content; not production LLM call
+- `benchmark/files/4f83531b9fc91fd1e0062e43200669cd82cc36a518caa7f66fc6ba5be4ac545b.html:792` — [bench/eval-fixture] False positive: Google Publisher Tag ad slot id (gpt- substring)
+- `benchmark/files/4f83531b9fc91fd1e0062e43200669cd82cc36a518caa7f66fc6ba5be4ac545b.html:869` — [bench/eval-fixture] Benchmark HTML/fixture content; not production LLM call
+- `benchmark/files/4f83531b9fc91fd1e0062e43200669cd82cc36a518caa7f66fc6ba5be4ac545b.html:871` — [bench/eval-fixture] Benchmark HTML/fixture content; not production LLM call
+- `benchmark/files/4f83531b9fc91fd1e0062e43200669cd82cc36a518caa7f66fc6ba5be4ac545b.html:872` — [bench/eval-fixture] False positive: Google Publisher Tag ad slot id (gpt- substring)
+- `benchmark/files/4b8debc51d3d9598ad4552cc7a591d200a6c7d545fed2454916bedbb0f666086.html:2783` — [bench/eval-fixture] False positive: UI/CLI prompt widget; not LLM prompt
+- `benchmark/files/4b8debc51d3d9598ad4552cc7a591d200a6c7d545fed2454916bedbb0f666086.html:2839` — [bench/eval-fixture] False positive: UI/CLI prompt widget; not LLM prompt
+- `benchmark/files/46ab324348ca339dba58238e193f794c3309e52c018a8156ef9aedfedf0572e7.html:168` — [bench/eval-fixture] Benchmark HTML/fixture content; not production LLM call
+- `benchmark/files/46ab324348ca339dba58238e193f794c3309e52c018a8156ef9aedfedf0572e7.html:569` — [bench/eval-fixture] False positive: UI/CLI prompt widget; not LLM prompt
+- `benchmark/files/5fbfe3905c71925b1b3a875a3111073e5d0996d3f250a697398477d3642db321.html:1237` — [bench/eval-fixture] Benchmark HTML/fixture content; not production LLM call
+- `benchmark/files/5fbfe3905c71925b1b3a875a3111073e5d0996d3f250a697398477d3642db321.html:1739` — [bench/eval-fixture] Benchmark HTML/fixture content; not production LLM call
+- `benchmark/files/5fbfe3905c71925b1b3a875a3111073e5d0996d3f250a697398477d3642db321.html:1740` — [bench/eval-fixture] Benchmark HTML/fixture content; not production LLM call
+- `benchmark/files/5fbfe3905c71925b1b3a875a3111073e5d0996d3f250a697398477d3642db321.html:1789` — [bench/eval-fixture] Benchmark HTML/fixture content; not production LLM call
+- `benchmark/files/5fbfe3905c71925b1b3a875a3111073e5d0996d3f250a697398477d3642db321.html:1790` — [bench/eval-fixture] Benchmark HTML/fixture content; not production LLM call
+- `benchmark/files/60cc80fb25f0b2ebdb2e6835ab7bfd3d26362971e39fe8838e7ac548ba323cf0.html:97` — [bench/eval-fixture] Benchmark HTML/fixture content; not production LLM call
+- `benchmark/files/60cc80fb25f0b2ebdb2e6835ab7bfd3d26362971e39fe8838e7ac548ba323cf0.html:117` — [bench/eval-fixture] Benchmark HTML/fixture content; not production LLM call
+- `benchmark/files/61d8052b19ed9885651ed1110ddcccc001f9ec2e3b7a77926d350762bcd02400.html:1207` — [bench/eval-fixture] Benchmark HTML/fixture content; not production LLM call
+- `benchmark/files/61d8052b19ed9885651ed1110ddcccc001f9ec2e3b7a77926d350762bcd02400.html:1695` — [bench/eval-fixture] Benchmark HTML/fixture content; not production LLM call
+- `benchmark/files/61d8052b19ed9885651ed1110ddcccc001f9ec2e3b7a77926d350762bcd02400.html:1696` — [bench/eval-fixture] Benchmark HTML/fixture content; not production LLM call
+- `benchmark/files/61d8052b19ed9885651ed1110ddcccc001f9ec2e3b7a77926d350762bcd02400.html:1748` — [bench/eval-fixture] Benchmark HTML/fixture content; not production LLM call
+- `benchmark/files/61d8052b19ed9885651ed1110ddcccc001f9ec2e3b7a77926d350762bcd02400.html:1749` — [bench/eval-fixture] Benchmark HTML/fixture content; not production LLM call
+- `benchmark/files/64bf40da8348d808ef103cc5529fd268fec46fbefa40b486d288d2a07871a527.html:186` — [bench/eval-fixture] False positive: Google Publisher Tag ad slot id (gpt- substring)
+- `benchmark/files/64bf40da8348d808ef103cc5529fd268fec46fbefa40b486d288d2a07871a527.html:190` — [bench/eval-fixture] False positive: Google Publisher Tag ad slot id (gpt- substring)
+- `benchmark/files/64bf40da8348d808ef103cc5529fd268fec46fbefa40b486d288d2a07871a527.html:194` — [bench/eval-fixture] False positive: Google Publisher Tag ad slot id (gpt- substring)
+- `benchmark/files/64bf40da8348d808ef103cc5529fd268fec46fbefa40b486d288d2a07871a527.html:198` — [bench/eval-fixture] False positive: Google Publisher Tag ad slot id (gpt- substring)
+- `benchmark/files/64bf40da8348d808ef103cc5529fd268fec46fbefa40b486d288d2a07871a527.html:202` — [bench/eval-fixture] False positive: Google Publisher Tag ad slot id (gpt- substring)
+- `benchmark/files/64bf40da8348d808ef103cc5529fd268fec46fbefa40b486d288d2a07871a527.html:206` — [bench/eval-fixture] False positive: Google Publisher Tag ad slot id (gpt- substring)
+- `benchmark/files/64bf40da8348d808ef103cc5529fd268fec46fbefa40b486d288d2a07871a527.html:210` — [bench/eval-fixture] False positive: Google Publisher Tag ad slot id (gpt- substring)
+- `benchmark/files/64bf40da8348d808ef103cc5529fd268fec46fbefa40b486d288d2a07871a527.html:214` — [bench/eval-fixture] False positive: Google Publisher Tag ad slot id (gpt- substring)
+- `benchmark/files/64bf40da8348d808ef103cc5529fd268fec46fbefa40b486d288d2a07871a527.html:218` — [bench/eval-fixture] False positive: Google Publisher Tag ad slot id (gpt- substring)
+- `benchmark/files/64bf40da8348d808ef103cc5529fd268fec46fbefa40b486d288d2a07871a527.html:263` — [bench/eval-fixture] False positive: Google Publisher Tag ad slot id (gpt- substring)
+- `benchmark/files/64bf40da8348d808ef103cc5529fd268fec46fbefa40b486d288d2a07871a527.html:264` — [bench/eval-fixture] False positive: Google Publisher Tag ad slot id (gpt- substring)
+- `benchmark/files/64bf40da8348d808ef103cc5529fd268fec46fbefa40b486d288d2a07871a527.html:295` — [bench/eval-fixture] False positive: Google Publisher Tag ad slot id (gpt- substring)
+- `benchmark/files/64bf40da8348d808ef103cc5529fd268fec46fbefa40b486d288d2a07871a527.html:296` — [bench/eval-fixture] False positive: Google Publisher Tag ad slot id (gpt- substring)
+- `benchmark/files/64bf40da8348d808ef103cc5529fd268fec46fbefa40b486d288d2a07871a527.html:370` — [bench/eval-fixture] False positive: Google Publisher Tag ad slot id (gpt- substring)
+- `benchmark/files/64bf40da8348d808ef103cc5529fd268fec46fbefa40b486d288d2a07871a527.html:371` — [bench/eval-fixture] False positive: Google Publisher Tag ad slot id (gpt- substring)
+- `benchmark/files/64bf40da8348d808ef103cc5529fd268fec46fbefa40b486d288d2a07871a527.html:471` — [bench/eval-fixture] False positive: Google Publisher Tag ad slot id (gpt- substring)
+- `benchmark/files/64bf40da8348d808ef103cc5529fd268fec46fbefa40b486d288d2a07871a527.html:472` — [bench/eval-fixture] False positive: Google Publisher Tag ad slot id (gpt- substring)
+- `benchmark/files/64bf40da8348d808ef103cc5529fd268fec46fbefa40b486d288d2a07871a527.html:540` — [bench/eval-fixture] False positive: Google Publisher Tag ad slot id (gpt- substring)
+- `benchmark/files/64bf40da8348d808ef103cc5529fd268fec46fbefa40b486d288d2a07871a527.html:541` — [bench/eval-fixture] False positive: Google Publisher Tag ad slot id (gpt- substring)
+- `benchmark/files/64bf40da8348d808ef103cc5529fd268fec46fbefa40b486d288d2a07871a527.html:800` — [bench/eval-fixture] False positive: Google Publisher Tag ad slot id (gpt- substring)
+- `benchmark/files/64bf40da8348d808ef103cc5529fd268fec46fbefa40b486d288d2a07871a527.html:801` — [bench/eval-fixture] False positive: Google Publisher Tag ad slot id (gpt- substring)
+- `benchmark/files/64bf40da8348d808ef103cc5529fd268fec46fbefa40b486d288d2a07871a527.html:861` — [bench/eval-fixture] False positive: Google Publisher Tag ad slot id (gpt- substring)
+- `benchmark/files/64bf40da8348d808ef103cc5529fd268fec46fbefa40b486d288d2a07871a527.html:862` — [bench/eval-fixture] False positive: Google Publisher Tag ad slot id (gpt- substring)
+- `benchmark/files/64bf40da8348d808ef103cc5529fd268fec46fbefa40b486d288d2a07871a527.html:1113` — [bench/eval-fixture] False positive: Google Publisher Tag ad slot id (gpt- substring)
+- `benchmark/files/64bf40da8348d808ef103cc5529fd268fec46fbefa40b486d288d2a07871a527.html:1114` — [bench/eval-fixture] False positive: Google Publisher Tag ad slot id (gpt- substring)
+- `benchmark/files/64bf40da8348d808ef103cc5529fd268fec46fbefa40b486d288d2a07871a527.html:1122` — [bench/eval-fixture] False positive: Google Publisher Tag ad slot id (gpt- substring)
+- `benchmark/files/64bf40da8348d808ef103cc5529fd268fec46fbefa40b486d288d2a07871a527.html:1123` — [bench/eval-fixture] False positive: Google Publisher Tag ad slot id (gpt- substring)
+- `benchmark/files/5f081a0a9d1a1ce3b0e53603ecd8bde78947841c8fd1ff3c36efa95ee84681f6.html:696` — [bench/eval-fixture] Benchmark HTML/fixture content; not production LLM call
+- `benchmark/files/5f081a0a9d1a1ce3b0e53603ecd8bde78947841c8fd1ff3c36efa95ee84681f6.html:704` — [bench/eval-fixture] Benchmark HTML/fixture content; not production LLM call
+- `benchmark/files/6a59bd96489c98226c72f0245bac98a4b09aa0516ebfe4982233a6c33d129691.html:562` — [bench/eval-fixture] Benchmark HTML/fixture content; not production LLM call
+- `benchmark/files/6a59bd96489c98226c72f0245bac98a4b09aa0516ebfe4982233a6c33d129691.html:564` — [bench/eval-fixture] Benchmark HTML/fixture content; not production LLM call
+- `benchmark/files/5c83c2d71f97e2b5a979f197fbae6773dee6844e28889ae66ccb8d7458a9c5bb.html:18` — [bench/eval-fixture] Benchmark HTML/fixture content; not production LLM call
+- `benchmark/files/5c83c2d71f97e2b5a979f197fbae6773dee6844e28889ae66ccb8d7458a9c5bb.html:24` — [bench/eval-fixture] Benchmark HTML/fixture content; not production LLM call
+- `benchmark/files/5c83c2d71f97e2b5a979f197fbae6773dee6844e28889ae66ccb8d7458a9c5bb.html:28` — [bench/eval-fixture] Benchmark HTML/fixture content; not production LLM call
+- `benchmark/files/5c83c2d71f97e2b5a979f197fbae6773dee6844e28889ae66ccb8d7458a9c5bb.html:30` — [bench/eval-fixture] Benchmark HTML/fixture content; not production LLM call
+- `benchmark/files/5c83c2d71f97e2b5a979f197fbae6773dee6844e28889ae66ccb8d7458a9c5bb.html:31` — [bench/eval-fixture] Benchmark HTML/fixture content; not production LLM call
+- `benchmark/files/5c83c2d71f97e2b5a979f197fbae6773dee6844e28889ae66ccb8d7458a9c5bb.html:32` — [bench/eval-fixture] Benchmark HTML/fixture content; not production LLM call
+- `benchmark/files/5c83c2d71f97e2b5a979f197fbae6773dee6844e28889ae66ccb8d7458a9c5bb.html:34` — [bench/eval-fixture] Benchmark HTML/fixture content; not production LLM call
+- `benchmark/files/5c83c2d71f97e2b5a979f197fbae6773dee6844e28889ae66ccb8d7458a9c5bb.html:53` — [bench/eval-fixture] Benchmark HTML/fixture content; not production LLM call
+- `benchmark/files/5c83c2d71f97e2b5a979f197fbae6773dee6844e28889ae66ccb8d7458a9c5bb.html:79` — [bench/eval-fixture] Benchmark HTML/fixture content; not production LLM call
+- `benchmark/files/5c83c2d71f97e2b5a979f197fbae6773dee6844e28889ae66ccb8d7458a9c5bb.html:84` — [bench/eval-fixture] Benchmark HTML/fixture content; not production LLM call
+- `benchmark/files/5c83c2d71f97e2b5a979f197fbae6773dee6844e28889ae66ccb8d7458a9c5bb.html:85` — [bench/eval-fixture] Benchmark HTML/fixture content; not production LLM call
+- `benchmark/files/5c83c2d71f97e2b5a979f197fbae6773dee6844e28889ae66ccb8d7458a9c5bb.html:285` — [bench/eval-fixture] Benchmark HTML/fixture content; not production LLM call
+- `benchmark/files/5c83c2d71f97e2b5a979f197fbae6773dee6844e28889ae66ccb8d7458a9c5bb.html:301` — [bench/eval-fixture] Benchmark HTML/fixture content; not production LLM call
+- `benchmark/files/5c83c2d71f97e2b5a979f197fbae6773dee6844e28889ae66ccb8d7458a9c5bb.html:307` — [bench/eval-fixture] Benchmark HTML/fixture content; not production LLM call
+- `benchmark/files/5c83c2d71f97e2b5a979f197fbae6773dee6844e28889ae66ccb8d7458a9c5bb.html:308` — [bench/eval-fixture] Benchmark HTML/fixture content; not production LLM call
+- `benchmark/files/5c83c2d71f97e2b5a979f197fbae6773dee6844e28889ae66ccb8d7458a9c5bb.html:309` — [bench/eval-fixture] Benchmark HTML/fixture content; not production LLM call
+- `benchmark/files/5c83c2d71f97e2b5a979f197fbae6773dee6844e28889ae66ccb8d7458a9c5bb.html:310` — [bench/eval-fixture] Benchmark HTML/fixture content; not production LLM call
+- `benchmark/files/5c83c2d71f97e2b5a979f197fbae6773dee6844e28889ae66ccb8d7458a9c5bb.html:311` — [bench/eval-fixture] Benchmark HTML/fixture content; not production LLM call
+- `benchmark/files/5c83c2d71f97e2b5a979f197fbae6773dee6844e28889ae66ccb8d7458a9c5bb.html:312` — [bench/eval-fixture] Benchmark HTML/fixture content; not production LLM call
+- `benchmark/files/5c83c2d71f97e2b5a979f197fbae6773dee6844e28889ae66ccb8d7458a9c5bb.html:317` — [bench/eval-fixture] Benchmark HTML/fixture content; not production LLM call
+- `benchmark/files/5c83c2d71f97e2b5a979f197fbae6773dee6844e28889ae66ccb8d7458a9c5bb.html:323` — [bench/eval-fixture] Benchmark HTML/fixture content; not production LLM call
+- `benchmark/files/5c83c2d71f97e2b5a979f197fbae6773dee6844e28889ae66ccb8d7458a9c5bb.html:324` — [bench/eval-fixture] Benchmark HTML/fixture content; not production LLM call
+- `benchmark/files/5c83c2d71f97e2b5a979f197fbae6773dee6844e28889ae66ccb8d7458a9c5bb.html:326` — [bench/eval-fixture] Benchmark HTML/fixture content; not production LLM call
+- `benchmark/files/5c83c2d71f97e2b5a979f197fbae6773dee6844e28889ae66ccb8d7458a9c5bb.html:331` — [bench/eval-fixture] Benchmark HTML/fixture content; not production LLM call
+- `benchmark/files/5c83c2d71f97e2b5a979f197fbae6773dee6844e28889ae66ccb8d7458a9c5bb.html:333` — [bench/eval-fixture] Benchmark HTML/fixture content; not production LLM call
+- `benchmark/files/5c83c2d71f97e2b5a979f197fbae6773dee6844e28889ae66ccb8d7458a9c5bb.html:339` — [bench/eval-fixture] Benchmark HTML/fixture content; not production LLM call
+- `benchmark/files/5c83c2d71f97e2b5a979f197fbae6773dee6844e28889ae66ccb8d7458a9c5bb.html:344` — [bench/eval-fixture] Benchmark HTML/fixture content; not production LLM call
+- `benchmark/files/5c83c2d71f97e2b5a979f197fbae6773dee6844e28889ae66ccb8d7458a9c5bb.html:345` — [bench/eval-fixture] Benchmark HTML/fixture content; not production LLM call
+- `benchmark/files/5c83c2d71f97e2b5a979f197fbae6773dee6844e28889ae66ccb8d7458a9c5bb.html:350` — [bench/eval-fixture] Benchmark HTML/fixture content; not production LLM call
+- `benchmark/files/5c83c2d71f97e2b5a979f197fbae6773dee6844e28889ae66ccb8d7458a9c5bb.html:358` — [bench/eval-fixture] Benchmark HTML/fixture content; not production LLM call
+- `benchmark/files/5c83c2d71f97e2b5a979f197fbae6773dee6844e28889ae66ccb8d7458a9c5bb.html:378` — [bench/eval-fixture] Benchmark HTML/fixture content; not production LLM call
+- `benchmark/files/5c83c2d71f97e2b5a979f197fbae6773dee6844e28889ae66ccb8d7458a9c5bb.html:381` — [bench/eval-fixture] Benchmark HTML/fixture content; not production LLM call
+- `benchmark/files/5c83c2d71f97e2b5a979f197fbae6773dee6844e28889ae66ccb8d7458a9c5bb.html:386` — [bench/eval-fixture] Benchmark HTML/fixture content; not production LLM call
+- `benchmark/files/5c83c2d71f97e2b5a979f197fbae6773dee6844e28889ae66ccb8d7458a9c5bb.html:439` — [bench/eval-fixture] Benchmark HTML/fixture content; not production LLM call
+- `benchmark/files/5c83c2d71f97e2b5a979f197fbae6773dee6844e28889ae66ccb8d7458a9c5bb.html:646` — [bench/eval-fixture] Benchmark HTML/fixture content; not production LLM call
+- `benchmark/files/5c83c2d71f97e2b5a979f197fbae6773dee6844e28889ae66ccb8d7458a9c5bb.html:647` — [bench/eval-fixture] Benchmark HTML/fixture content; not production LLM call
+- `benchmark/files/5c83c2d71f97e2b5a979f197fbae6773dee6844e28889ae66ccb8d7458a9c5bb.html:652` — [bench/eval-fixture] Benchmark HTML/fixture content; not production LLM call
+- `benchmark/files/5c83c2d71f97e2b5a979f197fbae6773dee6844e28889ae66ccb8d7458a9c5bb.html:654` — [bench/eval-fixture] Benchmark HTML/fixture content; not production LLM call
+- `benchmark/files/71bf3c23c5d3fff9cec67606fde6547c8866ae8aa95f5991651d94c68df4ad1d.html:74` — [bench/eval-fixture] Benchmark HTML/fixture content; not production LLM call
+- `benchmark/files/71bf3c23c5d3fff9cec67606fde6547c8866ae8aa95f5991651d94c68df4ad1d.html:124` — [bench/eval-fixture] Benchmark HTML/fixture content; not production LLM call
+- `benchmark/files/71bf3c23c5d3fff9cec67606fde6547c8866ae8aa95f5991651d94c68df4ad1d.html:146` — [bench/eval-fixture] Benchmark HTML/fixture content; not production LLM call
+- `benchmark/files/71bf3c23c5d3fff9cec67606fde6547c8866ae8aa95f5991651d94c68df4ad1d.html:875` — [bench/eval-fixture] Benchmark HTML/fixture content; not production LLM call
+- `benchmark/files/61adb9c208d9c67253b4413ef7ec2d010edae448b8c832bff2254125e4b51d5f.html:1147` — [bench/eval-fixture] Benchmark HTML/fixture content; not production LLM call
+- `benchmark/files/72ecfb3f60f4e8a6103916f2041ce9a55c4ef1e31477f9a8ffb7f4d3bba8c559.html:96` — [bench/eval-fixture] False positive: Google Publisher Tag ad slot id (gpt- substring)
+- `benchmark/files/72ecfb3f60f4e8a6103916f2041ce9a55c4ef1e31477f9a8ffb7f4d3bba8c559.html:104` — [bench/eval-fixture] False positive: Google Publisher Tag ad slot id (gpt- substring)
+- `benchmark/files/72ecfb3f60f4e8a6103916f2041ce9a55c4ef1e31477f9a8ffb7f4d3bba8c559.html:487` — [bench/eval-fixture] Benchmark HTML/fixture content; not production LLM call
+- `benchmark/files/72ecfb3f60f4e8a6103916f2041ce9a55c4ef1e31477f9a8ffb7f4d3bba8c559.html:917` — [bench/eval-fixture] False positive: Google Publisher Tag ad slot id (gpt- substring)
+- `benchmark/files/72ecfb3f60f4e8a6103916f2041ce9a55c4ef1e31477f9a8ffb7f4d3bba8c559.html:919` — [bench/eval-fixture] False positive: Google Publisher Tag ad slot id (gpt- substring)
+- `benchmark/files/72e78dee157bdf3e8a9a9f07e54a98a3714ea2998e2c2e2a94c46dbe92176feb.html:484` — [bench/eval-fixture] Benchmark HTML/fixture content; not production LLM call
+- `benchmark/files/72e78dee157bdf3e8a9a9f07e54a98a3714ea2998e2c2e2a94c46dbe92176feb.html:489` — [bench/eval-fixture] Benchmark HTML/fixture content; not production LLM call
+- `benchmark/files/72e78dee157bdf3e8a9a9f07e54a98a3714ea2998e2c2e2a94c46dbe92176feb.html:491` — [bench/eval-fixture] Benchmark HTML/fixture content; not production LLM call
+- `benchmark/files/72e78dee157bdf3e8a9a9f07e54a98a3714ea2998e2c2e2a94c46dbe92176feb.html:561` — [bench/eval-fixture] Benchmark HTML/fixture content; not production LLM call
+- `benchmark/files/72e78dee157bdf3e8a9a9f07e54a98a3714ea2998e2c2e2a94c46dbe92176feb.html:563` — [bench/eval-fixture] Benchmark HTML/fixture content; not production LLM call
+- `benchmark/files/72e78dee157bdf3e8a9a9f07e54a98a3714ea2998e2c2e2a94c46dbe92176feb.html:565` — [bench/eval-fixture] Benchmark HTML/fixture content; not production LLM call
+- `benchmark/files/72e78dee157bdf3e8a9a9f07e54a98a3714ea2998e2c2e2a94c46dbe92176feb.html:656` — [bench/eval-fixture] Benchmark HTML/fixture content; not production LLM call
+- `benchmark/files/72e78dee157bdf3e8a9a9f07e54a98a3714ea2998e2c2e2a94c46dbe92176feb.html:658` — [bench/eval-fixture] Benchmark HTML/fixture content; not production LLM call
+- `benchmark/files/72e78dee157bdf3e8a9a9f07e54a98a3714ea2998e2c2e2a94c46dbe92176feb.html:660` — [bench/eval-fixture] Benchmark HTML/fixture content; not production LLM call
+- `benchmark/files/6b817bedb8d6402bab160ed6d2b99256163bd3aef20deae3015f74e5bb253e55.html:2841` — [bench/eval-fixture] False positive: UI/CLI prompt widget; not LLM prompt
+- `benchmark/files/6b817bedb8d6402bab160ed6d2b99256163bd3aef20deae3015f74e5bb253e55.html:2897` — [bench/eval-fixture] False positive: UI/CLI prompt widget; not LLM prompt
+- `benchmark/files/7e2d19ccbb3b4029dddf26557555278babdac18bb78a742052fd946001c28e4e.html:97` — [bench/eval-fixture] False positive: Google Publisher Tag ad slot id (gpt- substring)
+- `benchmark/files/7e2d19ccbb3b4029dddf26557555278babdac18bb78a742052fd946001c28e4e.html:105` — [bench/eval-fixture] False positive: Google Publisher Tag ad slot id (gpt- substring)
+- `benchmark/files/7e2d19ccbb3b4029dddf26557555278babdac18bb78a742052fd946001c28e4e.html:489` — [bench/eval-fixture] Benchmark HTML/fixture content; not production LLM call
+- `benchmark/files/7e2d19ccbb3b4029dddf26557555278babdac18bb78a742052fd946001c28e4e.html:924` — [bench/eval-fixture] False positive: Google Publisher Tag ad slot id (gpt- substring)
+- `benchmark/files/7e2d19ccbb3b4029dddf26557555278babdac18bb78a742052fd946001c28e4e.html:926` — [bench/eval-fixture] False positive: Google Publisher Tag ad slot id (gpt- substring)
+- `benchmark/files/8cfa9d30e2b66b991461423012906121661cd9c8809f564eabb660149577864d.html:7` — [bench/eval-fixture] Benchmark HTML/fixture content; not production LLM call
+- `benchmark/files/8cfa9d30e2b66b991461423012906121661cd9c8809f564eabb660149577864d.html:15` — [bench/eval-fixture] Benchmark HTML/fixture content; not production LLM call
+- `benchmark/files/8cfa9d30e2b66b991461423012906121661cd9c8809f564eabb660149577864d.html:203` — [bench/eval-fixture] Benchmark HTML/fixture content; not production LLM call
+- `benchmark/files/8cfa9d30e2b66b991461423012906121661cd9c8809f564eabb660149577864d.html:205` — [bench/eval-fixture] Benchmark HTML/fixture content; not production LLM call
+- `benchmark/files/8cfa9d30e2b66b991461423012906121661cd9c8809f564eabb660149577864d.html:206` — [bench/eval-fixture] False positive: Google Publisher Tag ad slot id (gpt- substring)
+- `benchmark/files/8cfa9d30e2b66b991461423012906121661cd9c8809f564eabb660149577864d.html:267` — [bench/eval-fixture] Benchmark HTML/fixture content; not production LLM call
+- `benchmark/files/8cfa9d30e2b66b991461423012906121661cd9c8809f564eabb660149577864d.html:269` — [bench/eval-fixture] Benchmark HTML/fixture content; not production LLM call
+- `benchmark/files/8cfa9d30e2b66b991461423012906121661cd9c8809f564eabb660149577864d.html:270` — [bench/eval-fixture] False positive: Google Publisher Tag ad slot id (gpt- substring)
+- `benchmark/files/8cfa9d30e2b66b991461423012906121661cd9c8809f564eabb660149577864d.html:353` — [bench/eval-fixture] Benchmark HTML/fixture content; not production LLM call
+- `benchmark/files/8cfa9d30e2b66b991461423012906121661cd9c8809f564eabb660149577864d.html:355` — [bench/eval-fixture] Benchmark HTML/fixture content; not production LLM call
+- `benchmark/files/8cfa9d30e2b66b991461423012906121661cd9c8809f564eabb660149577864d.html:356` — [bench/eval-fixture] False positive: Google Publisher Tag ad slot id (gpt- substring)
+- `benchmark/files/8cfa9d30e2b66b991461423012906121661cd9c8809f564eabb660149577864d.html:363` — [bench/eval-fixture] Benchmark HTML/fixture content; not production LLM call
+- `benchmark/files/8cfa9d30e2b66b991461423012906121661cd9c8809f564eabb660149577864d.html:406` — [bench/eval-fixture] Benchmark HTML/fixture content; not production LLM call
+- `benchmark/files/8cfa9d30e2b66b991461423012906121661cd9c8809f564eabb660149577864d.html:550` — [bench/eval-fixture] Benchmark HTML/fixture content; not production LLM call
+- `benchmark/files/8cfa9d30e2b66b991461423012906121661cd9c8809f564eabb660149577864d.html:552` — [bench/eval-fixture] Benchmark HTML/fixture content; not production LLM call
+- `benchmark/files/8cfa9d30e2b66b991461423012906121661cd9c8809f564eabb660149577864d.html:553` — [bench/eval-fixture] False positive: Google Publisher Tag ad slot id (gpt- substring)
+- `benchmark/files/8cfa9d30e2b66b991461423012906121661cd9c8809f564eabb660149577864d.html:754` — [bench/eval-fixture] Benchmark HTML/fixture content; not production LLM call
+- `benchmark/files/8cfa9d30e2b66b991461423012906121661cd9c8809f564eabb660149577864d.html:789` — [bench/eval-fixture] Benchmark HTML/fixture content; not production LLM call
+- `benchmark/files/8cfa9d30e2b66b991461423012906121661cd9c8809f564eabb660149577864d.html:791` — [bench/eval-fixture] Benchmark HTML/fixture content; not production LLM call
+- `benchmark/files/8cfa9d30e2b66b991461423012906121661cd9c8809f564eabb660149577864d.html:792` — [bench/eval-fixture] False positive: Google Publisher Tag ad slot id (gpt- substring)
+- `benchmark/files/8cfa9d30e2b66b991461423012906121661cd9c8809f564eabb660149577864d.html:869` — [bench/eval-fixture] Benchmark HTML/fixture content; not production LLM call
+- `benchmark/files/8cfa9d30e2b66b991461423012906121661cd9c8809f564eabb660149577864d.html:871` — [bench/eval-fixture] Benchmark HTML/fixture content; not production LLM call
+- `benchmark/files/8cfa9d30e2b66b991461423012906121661cd9c8809f564eabb660149577864d.html:872` — [bench/eval-fixture] False positive: Google Publisher Tag ad slot id (gpt- substring)
+- `benchmark/files/5de3db78f95172797a51b3b3b2cdc4caeb63a4d7b709e4441510d2c1967e0e6f.html:170` — [bench/eval-fixture] Benchmark HTML/fixture content; not production LLM call
+- `benchmark/files/5de3db78f95172797a51b3b3b2cdc4caeb63a4d7b709e4441510d2c1967e0e6f.html:571` — [bench/eval-fixture] False positive: UI/CLI prompt widget; not LLM prompt
+- `benchmark/files/7e26f2e426fef3c1a370382e7827ef2e530a2ff0c2cea7641ebb596a4a1b8008.html:1044` — [bench/eval-fixture] False positive: UI/CLI prompt widget; not LLM prompt
+- `benchmark/files/74e8bc94abea7c60f022d8d3f672f80e59e3e126735fae0b5ee5914ff2fce48e.html:276` — [bench/eval-fixture] Benchmark HTML/fixture content; not production LLM call
+- `benchmark/files/7b7ffca82db8f721d6e5a8e4e65e60885af5eee4b9f28beb6b8363bb70c820f9.html:320` — [bench/eval-fixture] Benchmark HTML/fixture content; not production LLM call
+- `benchmark/files/7b7ffca82db8f721d6e5a8e4e65e60885af5eee4b9f28beb6b8363bb70c820f9.html:321` — [bench/eval-fixture] Benchmark HTML/fixture content; not production LLM call
+- `benchmark/files/7b7ffca82db8f721d6e5a8e4e65e60885af5eee4b9f28beb6b8363bb70c820f9.html:443` — [bench/eval-fixture] Benchmark HTML/fixture content; not production LLM call
+- `benchmark/files/7b7ffca82db8f721d6e5a8e4e65e60885af5eee4b9f28beb6b8363bb70c820f9.html:444` — [bench/eval-fixture] Benchmark HTML/fixture content; not production LLM call
+- `benchmark/files/7b7ffca82db8f721d6e5a8e4e65e60885af5eee4b9f28beb6b8363bb70c820f9.html:557` — [bench/eval-fixture] Benchmark HTML/fixture content; not production LLM call
+- `benchmark/files/7b7ffca82db8f721d6e5a8e4e65e60885af5eee4b9f28beb6b8363bb70c820f9.html:558` — [bench/eval-fixture] Benchmark HTML/fixture content; not production LLM call
+- `benchmark/files/7b7ffca82db8f721d6e5a8e4e65e60885af5eee4b9f28beb6b8363bb70c820f9.html:655` — [bench/eval-fixture] Benchmark HTML/fixture content; not production LLM call
+- `benchmark/files/7b7ffca82db8f721d6e5a8e4e65e60885af5eee4b9f28beb6b8363bb70c820f9.html:656` — [bench/eval-fixture] Benchmark HTML/fixture content; not production LLM call
+- `benchmark/files/7b7ffca82db8f721d6e5a8e4e65e60885af5eee4b9f28beb6b8363bb70c820f9.html:696` — [bench/eval-fixture] Benchmark HTML/fixture content; not production LLM call
+- `benchmark/files/7b7ffca82db8f721d6e5a8e4e65e60885af5eee4b9f28beb6b8363bb70c820f9.html:759` — [bench/eval-fixture] Benchmark HTML/fixture content; not production LLM call
+- `benchmark/files/7b7ffca82db8f721d6e5a8e4e65e60885af5eee4b9f28beb6b8363bb70c820f9.html:792` — [bench/eval-fixture] Benchmark HTML/fixture content; not production LLM call
+- `benchmark/files/7b7ffca82db8f721d6e5a8e4e65e60885af5eee4b9f28beb6b8363bb70c820f9.html:793` — [bench/eval-fixture] Benchmark HTML/fixture content; not production LLM call
+- `benchmark/files/7b7ffca82db8f721d6e5a8e4e65e60885af5eee4b9f28beb6b8363bb70c820f9.html:908` — [bench/eval-fixture] Benchmark HTML/fixture content; not production LLM call
+- `benchmark/files/7b7ffca82db8f721d6e5a8e4e65e60885af5eee4b9f28beb6b8363bb70c820f9.html:909` — [bench/eval-fixture] Benchmark HTML/fixture content; not production LLM call
+- `benchmark/files/7b7ffca82db8f721d6e5a8e4e65e60885af5eee4b9f28beb6b8363bb70c820f9.html:1038` — [bench/eval-fixture] Benchmark HTML/fixture content; not production LLM call
+- `benchmark/files/7b7ffca82db8f721d6e5a8e4e65e60885af5eee4b9f28beb6b8363bb70c820f9.html:1039` — [bench/eval-fixture] Benchmark HTML/fixture content; not production LLM call
+- `benchmark/files/7b7ffca82db8f721d6e5a8e4e65e60885af5eee4b9f28beb6b8363bb70c820f9.html:1157` — [bench/eval-fixture] Benchmark HTML/fixture content; not production LLM call
+- `benchmark/files/7b7ffca82db8f721d6e5a8e4e65e60885af5eee4b9f28beb6b8363bb70c820f9.html:1158` — [bench/eval-fixture] Benchmark HTML/fixture content; not production LLM call
+- `benchmark/files/7b7ffca82db8f721d6e5a8e4e65e60885af5eee4b9f28beb6b8363bb70c820f9.html:1238` — [bench/eval-fixture] Benchmark HTML/fixture content; not production LLM call
+- `benchmark/files/7b7ffca82db8f721d6e5a8e4e65e60885af5eee4b9f28beb6b8363bb70c820f9.html:1239` — [bench/eval-fixture] Benchmark HTML/fixture content; not production LLM call
+- `benchmark/files/7b7ffca82db8f721d6e5a8e4e65e60885af5eee4b9f28beb6b8363bb70c820f9.html:1350` — [bench/eval-fixture] Benchmark HTML/fixture content; not production LLM call
+- `benchmark/files/7b7ffca82db8f721d6e5a8e4e65e60885af5eee4b9f28beb6b8363bb70c820f9.html:1351` — [bench/eval-fixture] Benchmark HTML/fixture content; not production LLM call
+- `benchmark/files/7b7ffca82db8f721d6e5a8e4e65e60885af5eee4b9f28beb6b8363bb70c820f9.html:1449` — [bench/eval-fixture] Benchmark HTML/fixture content; not production LLM call
+- `benchmark/files/7b7ffca82db8f721d6e5a8e4e65e60885af5eee4b9f28beb6b8363bb70c820f9.html:1450` — [bench/eval-fixture] Benchmark HTML/fixture content; not production LLM call
+- `benchmark/files/7b7ffca82db8f721d6e5a8e4e65e60885af5eee4b9f28beb6b8363bb70c820f9.html:1486` — [bench/eval-fixture] Benchmark HTML/fixture content; not production LLM call
+- `benchmark/files/7b7ffca82db8f721d6e5a8e4e65e60885af5eee4b9f28beb6b8363bb70c820f9.html:1501` — [bench/eval-fixture] Benchmark HTML/fixture content; not production LLM call
+- `benchmark/files/7b7ffca82db8f721d6e5a8e4e65e60885af5eee4b9f28beb6b8363bb70c820f9.html:1502` — [bench/eval-fixture] Benchmark HTML/fixture content; not production LLM call
+- `benchmark/files/7b7ffca82db8f721d6e5a8e4e65e60885af5eee4b9f28beb6b8363bb70c820f9.html:1925` — [bench/eval-fixture] Benchmark HTML/fixture content; not production LLM call
+- `benchmark/files/9fba51a14308353194c537f494ded0ccb27d9f908f252690b083d48db64ea15a.html:195` — [bench/eval-fixture] Benchmark HTML/fixture content; not production LLM call
+- `benchmark/files/9fba51a14308353194c537f494ded0ccb27d9f908f252690b083d48db64ea15a.html:568` — [bench/eval-fixture] False positive: UI/CLI prompt widget; not LLM prompt
+- `benchmark/files/9e04cb267a9b128369a11c7f6e5486d43644955dee7f73cc004b9cf1693a11c1.html:168` — [bench/eval-fixture] Benchmark HTML/fixture content; not production LLM call
+- `benchmark/files/9e04cb267a9b128369a11c7f6e5486d43644955dee7f73cc004b9cf1693a11c1.html:569` — [bench/eval-fixture] False positive: UI/CLI prompt widget; not LLM prompt
+- `benchmark/files/9e3c6d40690c1302613f203db178b23f9f18494d2653a1b547086a3973fff93c.html:168` — [bench/eval-fixture] Benchmark HTML/fixture content; not production LLM call
+- `benchmark/files/9e3c6d40690c1302613f203db178b23f9f18494d2653a1b547086a3973fff93c.html:569` — [bench/eval-fixture] False positive: UI/CLI prompt widget; not LLM prompt
+- `benchmark/files/8a82ce22fec5e3656dad3d55e585727c88c94808ad92e37a0f6e99dcb3888800.html:309` — [bench/eval-fixture] Benchmark HTML/fixture content; not production LLM call
+- `benchmark/files/8a82ce22fec5e3656dad3d55e585727c88c94808ad92e37a0f6e99dcb3888800.html:310` — [bench/eval-fixture] Benchmark HTML/fixture content; not production LLM call
+- `benchmark/files/8a82ce22fec5e3656dad3d55e585727c88c94808ad92e37a0f6e99dcb3888800.html:432` — [bench/eval-fixture] Benchmark HTML/fixture content; not production LLM call
+- `benchmark/files/8a82ce22fec5e3656dad3d55e585727c88c94808ad92e37a0f6e99dcb3888800.html:433` — [bench/eval-fixture] Benchmark HTML/fixture content; not production LLM call
+- `benchmark/files/8a82ce22fec5e3656dad3d55e585727c88c94808ad92e37a0f6e99dcb3888800.html:544` — [bench/eval-fixture] Benchmark HTML/fixture content; not production LLM call
+- `benchmark/files/8a82ce22fec5e3656dad3d55e585727c88c94808ad92e37a0f6e99dcb3888800.html:545` — [bench/eval-fixture] Benchmark HTML/fixture content; not production LLM call
+- `benchmark/files/8a82ce22fec5e3656dad3d55e585727c88c94808ad92e37a0f6e99dcb3888800.html:657` — [bench/eval-fixture] Benchmark HTML/fixture content; not production LLM call
+- `benchmark/files/8a82ce22fec5e3656dad3d55e585727c88c94808ad92e37a0f6e99dcb3888800.html:658` — [bench/eval-fixture] Benchmark HTML/fixture content; not production LLM call
+- `benchmark/files/8a82ce22fec5e3656dad3d55e585727c88c94808ad92e37a0f6e99dcb3888800.html:698` — [bench/eval-fixture] Benchmark HTML/fixture content; not production LLM call
+- `benchmark/files/8a82ce22fec5e3656dad3d55e585727c88c94808ad92e37a0f6e99dcb3888800.html:793` — [bench/eval-fixture] Benchmark HTML/fixture content; not production LLM call
+- `benchmark/files/8a82ce22fec5e3656dad3d55e585727c88c94808ad92e37a0f6e99dcb3888800.html:794` — [bench/eval-fixture] Benchmark HTML/fixture content; not production LLM call
+- `benchmark/files/8a82ce22fec5e3656dad3d55e585727c88c94808ad92e37a0f6e99dcb3888800.html:909` — [bench/eval-fixture] Benchmark HTML/fixture content; not production LLM call
+- `benchmark/files/8a82ce22fec5e3656dad3d55e585727c88c94808ad92e37a0f6e99dcb3888800.html:910` — [bench/eval-fixture] Benchmark HTML/fixture content; not production LLM call
+- `benchmark/files/8a82ce22fec5e3656dad3d55e585727c88c94808ad92e37a0f6e99dcb3888800.html:1039` — [bench/eval-fixture] Benchmark HTML/fixture content; not production LLM call
+- `benchmark/files/8a82ce22fec5e3656dad3d55e585727c88c94808ad92e37a0f6e99dcb3888800.html:1040` — [bench/eval-fixture] Benchmark HTML/fixture content; not production LLM call
+- `benchmark/files/8a82ce22fec5e3656dad3d55e585727c88c94808ad92e37a0f6e99dcb3888800.html:1143` — [bench/eval-fixture] Benchmark HTML/fixture content; not production LLM call
+- `benchmark/files/8a82ce22fec5e3656dad3d55e585727c88c94808ad92e37a0f6e99dcb3888800.html:1144` — [bench/eval-fixture] Benchmark HTML/fixture content; not production LLM call
+- `benchmark/files/8a82ce22fec5e3656dad3d55e585727c88c94808ad92e37a0f6e99dcb3888800.html:1203` — [bench/eval-fixture] Benchmark HTML/fixture content; not production LLM call
+- `benchmark/files/8a82ce22fec5e3656dad3d55e585727c88c94808ad92e37a0f6e99dcb3888800.html:1204` — [bench/eval-fixture] Benchmark HTML/fixture content; not production LLM call
+- `benchmark/files/8a82ce22fec5e3656dad3d55e585727c88c94808ad92e37a0f6e99dcb3888800.html:1317` — [bench/eval-fixture] Benchmark HTML/fixture content; not production LLM call
+- `benchmark/files/8a82ce22fec5e3656dad3d55e585727c88c94808ad92e37a0f6e99dcb3888800.html:1318` — [bench/eval-fixture] Benchmark HTML/fixture content; not production LLM call
+- `benchmark/files/8a82ce22fec5e3656dad3d55e585727c88c94808ad92e37a0f6e99dcb3888800.html:1417` — [bench/eval-fixture] Benchmark HTML/fixture content; not production LLM call
+- `benchmark/files/8a82ce22fec5e3656dad3d55e585727c88c94808ad92e37a0f6e99dcb3888800.html:1418` — [bench/eval-fixture] Benchmark HTML/fixture content; not production LLM call
+- `benchmark/files/8a82ce22fec5e3656dad3d55e585727c88c94808ad92e37a0f6e99dcb3888800.html:1454` — [bench/eval-fixture] Benchmark HTML/fixture content; not production LLM call
+- `benchmark/files/8a82ce22fec5e3656dad3d55e585727c88c94808ad92e37a0f6e99dcb3888800.html:1469` — [bench/eval-fixture] Benchmark HTML/fixture content; not production LLM call
+- `benchmark/files/8a82ce22fec5e3656dad3d55e585727c88c94808ad92e37a0f6e99dcb3888800.html:1470` — [bench/eval-fixture] Benchmark HTML/fixture content; not production LLM call
+- `benchmark/files/8faa3156452fa9d0667617c406eb9b6458b48d7b8c36cf2bf804fba290b302f5.html:1569` — [bench/eval-fixture] Benchmark HTML/fixture content; not production LLM call
+- `benchmark/files/8c1a780dec8c1a5ea0344514524f53b2b580ce87083e0a756ade3d83627d5653.html:308` — [bench/eval-fixture] Benchmark HTML/fixture content; not production LLM call
+- `benchmark/files/8c1a780dec8c1a5ea0344514524f53b2b580ce87083e0a756ade3d83627d5653.html:309` — [bench/eval-fixture] Benchmark HTML/fixture content; not production LLM call
+- `benchmark/files/8c1a780dec8c1a5ea0344514524f53b2b580ce87083e0a756ade3d83627d5653.html:431` — [bench/eval-fixture] Benchmark HTML/fixture content; not production LLM call
+- `benchmark/files/8c1a780dec8c1a5ea0344514524f53b2b580ce87083e0a756ade3d83627d5653.html:432` — [bench/eval-fixture] Benchmark HTML/fixture content; not production LLM call
+- `benchmark/files/8c1a780dec8c1a5ea0344514524f53b2b580ce87083e0a756ade3d83627d5653.html:543` — [bench/eval-fixture] Benchmark HTML/fixture content; not production LLM call
+- `benchmark/files/8c1a780dec8c1a5ea0344514524f53b2b580ce87083e0a756ade3d83627d5653.html:544` — [bench/eval-fixture] Benchmark HTML/fixture content; not production LLM call
+- `benchmark/files/8c1a780dec8c1a5ea0344514524f53b2b580ce87083e0a756ade3d83627d5653.html:656` — [bench/eval-fixture] Benchmark HTML/fixture content; not production LLM call
+- `benchmark/files/8c1a780dec8c1a5ea0344514524f53b2b580ce87083e0a756ade3d83627d5653.html:657` — [bench/eval-fixture] Benchmark HTML/fixture content; not production LLM call
+- `benchmark/files/8c1a780dec8c1a5ea0344514524f53b2b580ce87083e0a756ade3d83627d5653.html:697` — [bench/eval-fixture] Benchmark HTML/fixture content; not production LLM call
+- `benchmark/files/8c1a780dec8c1a5ea0344514524f53b2b580ce87083e0a756ade3d83627d5653.html:792` — [bench/eval-fixture] Benchmark HTML/fixture content; not production LLM call
+- `benchmark/files/8c1a780dec8c1a5ea0344514524f53b2b580ce87083e0a756ade3d83627d5653.html:793` — [bench/eval-fixture] Benchmark HTML/fixture content; not production LLM call
+- `benchmark/files/8c1a780dec8c1a5ea0344514524f53b2b580ce87083e0a756ade3d83627d5653.html:908` — [bench/eval-fixture] Benchmark HTML/fixture content; not production LLM call
+- `benchmark/files/8c1a780dec8c1a5ea0344514524f53b2b580ce87083e0a756ade3d83627d5653.html:909` — [bench/eval-fixture] Benchmark HTML/fixture content; not production LLM call
+- `benchmark/files/8c1a780dec8c1a5ea0344514524f53b2b580ce87083e0a756ade3d83627d5653.html:1038` — [bench/eval-fixture] Benchmark HTML/fixture content; not production LLM call
+- `benchmark/files/8c1a780dec8c1a5ea0344514524f53b2b580ce87083e0a756ade3d83627d5653.html:1039` — [bench/eval-fixture] Benchmark HTML/fixture content; not production LLM call
+- `benchmark/files/8c1a780dec8c1a5ea0344514524f53b2b580ce87083e0a756ade3d83627d5653.html:1142` — [bench/eval-fixture] Benchmark HTML/fixture content; not production LLM call
+- `benchmark/files/8c1a780dec8c1a5ea0344514524f53b2b580ce87083e0a756ade3d83627d5653.html:1143` — [bench/eval-fixture] Benchmark HTML/fixture content; not production LLM call
+- `benchmark/files/8c1a780dec8c1a5ea0344514524f53b2b580ce87083e0a756ade3d83627d5653.html:1202` — [bench/eval-fixture] Benchmark HTML/fixture content; not production LLM call
+- `benchmark/files/8c1a780dec8c1a5ea0344514524f53b2b580ce87083e0a756ade3d83627d5653.html:1203` — [bench/eval-fixture] Benchmark HTML/fixture content; not production LLM call
+- `benchmark/files/8c1a780dec8c1a5ea0344514524f53b2b580ce87083e0a756ade3d83627d5653.html:1316` — [bench/eval-fixture] Benchmark HTML/fixture content; not production LLM call
+- `benchmark/files/8c1a780dec8c1a5ea0344514524f53b2b580ce87083e0a756ade3d83627d5653.html:1317` — [bench/eval-fixture] Benchmark HTML/fixture content; not production LLM call
+- `benchmark/files/8c1a780dec8c1a5ea0344514524f53b2b580ce87083e0a756ade3d83627d5653.html:1416` — [bench/eval-fixture] Benchmark HTML/fixture content; not production LLM call
+- `benchmark/files/8c1a780dec8c1a5ea0344514524f53b2b580ce87083e0a756ade3d83627d5653.html:1417` — [bench/eval-fixture] Benchmark HTML/fixture content; not production LLM call
+- `benchmark/files/8c1a780dec8c1a5ea0344514524f53b2b580ce87083e0a756ade3d83627d5653.html:1453` — [bench/eval-fixture] Benchmark HTML/fixture content; not production LLM call
+- `benchmark/files/8c1a780dec8c1a5ea0344514524f53b2b580ce87083e0a756ade3d83627d5653.html:1468` — [bench/eval-fixture] Benchmark HTML/fixture content; not production LLM call
+- `benchmark/files/8c1a780dec8c1a5ea0344514524f53b2b580ce87083e0a756ade3d83627d5653.html:1469` — [bench/eval-fixture] Benchmark HTML/fixture content; not production LLM call
+- `benchmark/files/8c0dd0456453aeff3f66d053710f18adc1a2fc0f1f3a0c95a3e166e41ffb737d.html:195` — [bench/eval-fixture] Benchmark HTML/fixture content; not production LLM call
+- `benchmark/files/8c0dd0456453aeff3f66d053710f18adc1a2fc0f1f3a0c95a3e166e41ffb737d.html:568` — [bench/eval-fixture] False positive: UI/CLI prompt widget; not LLM prompt
+- `benchmark/files/7e54e701ac39a9046d6eeb0ae75d2138733b66b30b5211e7f3245dd6dc3ca36c.html:168` — [bench/eval-fixture] Benchmark HTML/fixture content; not production LLM call
+- `benchmark/files/7e54e701ac39a9046d6eeb0ae75d2138733b66b30b5211e7f3245dd6dc3ca36c.html:569` — [bench/eval-fixture] False positive: UI/CLI prompt widget; not LLM prompt
+- `benchmark/files/8d612a03fa42a2fb014b59534c46c9590da90fbeb91ac50938cdfa36dd274e23.html:96` — [bench/eval-fixture] False positive: Google Publisher Tag ad slot id (gpt- substring)
+- `benchmark/files/8d612a03fa42a2fb014b59534c46c9590da90fbeb91ac50938cdfa36dd274e23.html:104` — [bench/eval-fixture] False positive: Google Publisher Tag ad slot id (gpt- substring)
+- `benchmark/files/8d612a03fa42a2fb014b59534c46c9590da90fbeb91ac50938cdfa36dd274e23.html:488` — [bench/eval-fixture] Benchmark HTML/fixture content; not production LLM call
+- `benchmark/files/8d612a03fa42a2fb014b59534c46c9590da90fbeb91ac50938cdfa36dd274e23.html:944` — [bench/eval-fixture] False positive: Google Publisher Tag ad slot id (gpt- substring)
+- `benchmark/files/8d612a03fa42a2fb014b59534c46c9590da90fbeb91ac50938cdfa36dd274e23.html:946` — [bench/eval-fixture] False positive: Google Publisher Tag ad slot id (gpt- substring)
+- `benchmark/files/8bd6d9bcba689408767f770d69f12b59c3f092e73cffcc9332261fbab4aa16e1.html:1` — [bench/eval-fixture] Benchmark HTML/fixture content; not production LLM call
+- `benchmark/files/8bd6d9bcba689408767f770d69f12b59c3f092e73cffcc9332261fbab4aa16e1.html:116` — [bench/eval-fixture] Benchmark HTML/fixture content; not production LLM call
+- `benchmark/files/8bd6d9bcba689408767f770d69f12b59c3f092e73cffcc9332261fbab4aa16e1.html:135` — [bench/eval-fixture] Benchmark HTML/fixture content; not production LLM call
+- `benchmark/files/8bd6d9bcba689408767f770d69f12b59c3f092e73cffcc9332261fbab4aa16e1.html:139` — [bench/eval-fixture] Benchmark HTML/fixture content; not production LLM call
+
+**JS/TS npm scan (openai/anthropic/ai-sdk):**
+- **0 hits** in package.json and *.{js,jsx,ts,tsx,mjs,cjs}
+
+## Verdict on the claim(s)
+**C1 CONFIRMED** for all four repos. No production code path invokes an LLM/VLM to judge already-produced conversion output against source per page/chunk/unit. img2table uses deterministic OCR backends (docTR/Paddle/Surya) for table extraction only. pdf-to-markdown, mdream, and node-html-markdown are deterministic HTML/PDF→Markdown converters with zero LLM SDK/API usage.
+
+## Coverage gaps
+None for C1 scope. img2table uv.lock and *.ipynb excluded from primary enumeration (transitive prompt-toolkit/transformers lock metadata; notebook base64). pdf-to-markdown docs/bundle*.js and package-lock.json excluded (minified substring noise only). All production src/ and packages/ paths covered.
+
+## What could still hide a counterexample
+Dynamic import() of an LLM SDK at runtime with a string built outside rg reach; native/Rust edge code calling remote APIs without matching floor patterns (mdream crates/edge uses local conversion only per packages/* sweep). img2table optional Surya path uses vision OCR models for text extraction, not post-hoc output verification.
+
+**Total hits triaged:** 1025

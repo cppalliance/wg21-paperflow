@@ -1,0 +1,14 @@
+{"anchor_id": "p0533r9-meta-01", "stratum": "metadata", "quote": "P0533R9", "source_location": {"page": 1}, "expected_candidate_status": "present_in_candidate", "notes": "Document number"}
+{"anchor_id": "p0533r9-meta-02", "stratum": "metadata", "quote": "constexpr for <cmath> and <cstdlib>", "source_location": {"page": 1}, "expected_candidate_status": "present_in_candidate", "notes": "Paper title"}
+{"anchor_id": "p0533r9-heading-01", "stratum": "headings", "quote": "Proposed Wording", "source_location": {"page": 2, "tag": "h2-equiv"}, "expected_candidate_status": "present_in_candidate", "notes": "Wording section heading"}
+{"anchor_id": "p0533r9-heading-02", "stratum": "headings", "quote": "Header <cmath> synopsis", "source_location": {"page": 3, "tag": "h3-equiv"}, "expected_candidate_status": "present_in_candidate", "notes": "Library reference heading"}
+{"anchor_id": "p0533r9-code-01", "stratum": "code", "quote": "constexpr float logb(float x)", "source_location": {"page": 5}, "expected_candidate_status": "present_in_candidate", "notes": "Function declaration with constexpr"}
+{"anchor_id": "p0533r9-code-02", "stratum": "code", "quote": "constexpr float ceil(float x)", "source_location": {"page": 6}, "expected_candidate_status": "present_in_candidate", "notes": "Another constexpr math function"}
+{"anchor_id": "p0533r9-code-03", "stratum": "code", "quote": "constexpr float modf", "source_location": {"page": 7}, "expected_candidate_status": "present_in_candidate", "notes": "Modf constexpr declaration"}
+{"anchor_id": "p0533r9-code-04", "stratum": "code", "quote": "constexpr float scalbn", "source_location": {"page": 7}, "expected_candidate_status": "present_in_candidate", "notes": "Scale function constexpr"}
+{"anchor_id": "p0533r9-code-05", "stratum": "code", "quote": "see [library.c]", "source_location": {"page": 5}, "expected_candidate_status": "present_in_candidate", "notes": "Cross-reference comment"}
+{"anchor_id": "p0533r9-prose-01", "stratum": "prose", "quote": "constexpr", "source_location": {"page": 3}, "expected_candidate_status": "present_in_candidate", "notes": "151 expected instances keyword"}
+{"anchor_id": "p0533r9-prose-02", "stratum": "prose", "quote": "cmath", "source_location": {"page": 2}, "expected_candidate_status": "present_in_candidate", "notes": "Header name reference"}
+{"anchor_id": "p0533r9-punct-01", "stratum": "punctuation", "quote": "//", "source_location": {"page": 5}, "expected_candidate_status": "present_in_candidate", "notes": "C++ comment marker in code"}
+{"anchor_id": "p0533r9-punct-02", "stratum": "punctuation", "quote": "*", "source_location": {"page": 7}, "expected_candidate_status": "present_in_candidate", "notes": "Pointer operator in declarations"}
+{"anchor_id": "p0533r9-table-01", "stratum": "tables", "quote": "Remarks", "source_location": {"page": 8}, "expected_candidate_status": "present_in_candidate", "notes": "Table content in effects clauses"}

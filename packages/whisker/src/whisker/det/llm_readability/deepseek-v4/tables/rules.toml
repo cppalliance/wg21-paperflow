@@ -1,0 +1,861 @@
+# DeepSeek V4 LLM-readable table extraction contract.
+#
+# THIS FILE IS THE SINGLE NORMATIVE COPY. Rules R1-R14, thresholds, the
+# DeepSeek V4 model profile, required probes and known weaknesses all live
+# here. Do not restate rule text in a prompt file, a markdown document, or a
+# Python constant: the LLM rubric, the CLI listing and every certification
+# report are rendered from this data by contract.py, so a second copy can
+# only drift.
+#
+# Changing a rule requires cited evidence, a version bump and green contract
+# tests. Adding a model means adding a sibling directory with its own
+# rules.toml, never a modification of this file.
+
+# Provenance for the contract and profile as a whole. Per-weakness and
+# per-probe evidence is cited on the entry it supports.
+evidence = [
+  "packages/whisker/research/research/deepseek-v4-pro/04-table-understanding.md",
+  "packages/whisker/research/research/deepseek-v4-pro/00-baseline.md",
+  "packages/whisker/corpus/READBACK-CERTIFICATE.md",
+  "packages/whisker/src/whisker/llm/calibration/tables/00-baseline.md",
+]
+
+[contract]
+id = "whisker-llm-readability-deepseek-v4"
+version = "1.0.10"
+schema_version = 1
+title = "DeepSeek V4 LLM-readable table extraction contract"
+authority = '''
+Whisker owns this contract. The authority chain is: research determines the
+requirements, whisker normalizes them into versioned rules, whisker
+operationalizes certification (deterministic checks, source compare, LLM
+readback, probe suites), and only then is a producer such as tomd audited
+against the result. A producer never defines these rules, and a producer's
+current behavior is never evidence that a rule is satisfied.
+
+This contract is specialized for DeepSeek V4 Pro on the alliance pod.
+Thresholds, rule strengths, required probes and known weaknesses reflect the
+measured and extrapolated capabilities of this model. A different model requires
+a sibling rules.toml, not a modification of this one.
+'''
+
+[profile]
+id = "deepseek-v4"
+version = "1.0.6"
+schema_version = 1
+display_name = "DeepSeek V4 Pro (self-hosted vLLM pod)"
+certification_status = "pending"
+notes = '''
+Status is pending, not certified. The contract and the certification process are
+implemented, but no probe run under this profile has been executed yet. The most
+recent five-paper readback (2026-08-12, de-needle-v2, alliance-pod) scored 31/37
+with a corrupt control that did not invert, so it is evidence about the model,
+not a table certification. Nobody may claim "DeepSeek V4 Pro certified" until a
+run under this profile discharges the required rules and methods below.
+'''
+
+[model_identity]
+# The profile binds to the MODEL, not to a pod. Two service slots currently
+# serve this same model, and either may be renamed or replaced without changing
+# what the profile is about.
+model_ids = ["deepseek-v4-pro"]
+# Only spellings that differ from the model id by more than case belong here:
+# resolution folds case and underscores, so a cased restatement would be dead
+# weight that reads like a second identity.
+aliases = ["deepseek-ai/DeepSeek-V4-Pro"]
+services = ["alliance-pod", "h200x8-deepseek-v4-pro"]
+backend = "vllm_thinking"
+
+[certification]
+# Every lane that must have actually run before this model may certify a
+# document. A missing lane blocks certification; it never degrades to a pass.
+required_methods = ["deterministic", "source_compare", "llm", "certification"]
+# Rules that must carry a real status, not `not_evaluated` and not
+# `not_applicable`, before this model may certify a document. R12 is listed so a
+# certification run has to declare chunk boundaries instead of leaving the
+# atomicity rule inapplicable; R13 is listed because this model's table literacy
+# is extrapolated and must be probed rather than inferred.
+#
+# R7 is deliberately NOT listed even though wide tables are this model's worst
+# measured category. R7 is conditional on a table exceeding the column budget,
+# so requiring a real status would make every narrow-table document permanently
+# uncertifiable, and a certification nobody can ever earn stops meaning
+# anything. The column-association weakness is discharged instead by R13, which
+# is promoted to HARD and whose required probes include a narrow table.
+required_rules = ["R5", "R10", "R12", "R13"]
+
+# --- Applicability predicates -------------------------------------------------
+#
+# The closed set of conditions a rule may be gated on. Each key is implemented
+# by exactly one predicate in validate.py; the two sets are asserted equal, so
+# an undeclared or unimplemented condition fails closed instead of silently
+# making a rule inapplicable (an inapplicable rule cannot fail, which is the
+# most dangerous direction for a certification contract).
+
+[applicability.any_table]
+description = "the document contains at least one table"
+
+[applicability.any_pipe_table]
+description = "the document contains at least one markdown pipe table"
+
+[applicability.wide_table]
+description = "a table exceeds the wide_table_column_threshold column budget"
+
+[applicability.long_table]
+description = "a table reaches the long_table_row_threshold row count"
+
+[applicability.table_with_empty_cell]
+description = "a table contains at least one blank cell"
+
+[applicability.chunking_in_scope]
+description = "the run chunks the document, so chunk boundaries are decidable"
+
+[applicability.pdf_source]
+description = "the markdown's sibling source file is a PDF"
+
+# --- Named thresholds ---------------------------------------------------------
+#
+# Every numeric or lexical tunable a rule depends on is named here once. Rules
+# reference thresholds by name, checks read them by name. Values reflect the
+# strict end of the researched band for DeepSeek V4.
+
+[thresholds.wide_table_column_threshold]
+kind = "numeric"
+value = 6
+unit = "columns"
+tighten = "decrease"
+rules = ["R7"]
+rationale = '''
+Tightened to the strict end of the researched 6 to 8 column band. Published
+evaluations of this lineage lose 10 to 15 points on wide and hierarchical
+tables, and no table benchmark exists for V4 Pro, so the loose end of the band
+is not defensible for this model.
+'''
+
+[thresholds.long_table_row_threshold]
+kind = "numeric"
+value = 30
+unit = "rows"
+tighten = "decrease"
+rules = ["R8"]
+rationale = "Header labels start falling out of attention around 30 rows."
+
+[thresholds.header_repeat_row_interval]
+kind = "numeric"
+value = 25
+unit = "rows"
+tighten = "decrease"
+rules = ["R8"]
+rationale = '''
+Maximum number of body rows allowed between two header repetitions, taken from
+the researched 20 to 30 row window.
+'''
+
+[thresholds.caption_max_distance_lines]
+kind = "numeric"
+value = 5
+unit = "lines"
+tighten = "decrease"
+rules = ["R10"]
+rationale = '''
+Tightened to the strict end of the researched 5 to 10 line band. The binding
+between a label and its table is the cheapest context to lose and this model's
+structure understanding is unmeasured.
+'''
+
+[thresholds.empty_cell_sentinels]
+kind = "token_set"
+values = ["-", "N/A"]
+unit = "cell text"
+tighten = "shrink_set"
+rules = ["R9"]
+rationale = '''
+The accepted explicit-emptiness markers. Shrinking the set is a tightening
+(fewer spellings accepted); growing it means one more string a reader must learn
+to read as "intentionally empty".
+'''
+
+[thresholds.large_table_cell_budget]
+kind = "numeric"
+value = 200
+unit = "cells"
+tighten = "decrease"
+rules = ["R13"]
+rationale = '''
+Cell count at which cell-lookup and row-retrieval accuracy is known to collapse
+independently of the chosen format, so a certification run must probe it
+directly rather than infer it from a format check.
+'''
+
+# --- R1 -----------------------------------------------------------------------
+
+[[rules]]
+id = "R1"
+title = "A pipe table is a 1D token stream whose delimiters are its only coordinates"
+strength = "HARD"
+scope = "representation"
+method = "deterministic"
+applicability = "any_pipe_table"
+check_id = "pipe_row_cell_deficit"
+failure_status = "not-llm-readable"
+thresholds = []
+requirement = '''
+A reading model has no dedicated table AST. A pipe table reaches it as a
+one-dimensional token stream, and a cell is located by counting delimiters: the
+delimiter run is the entire coordinate system, and the vertical bar is the
+coordinate trigger. The contract therefore requires that every row of a pipe
+table present the same delimiter coordinates as its header row, so that counting
+delimiters yields the position the source table asserted.
+
+The enforceable consequence, and what the deterministic check owns, is cell-count
+agreement: no body row may carry fewer cells than its header row. A surplus of
+delimiters is the phantom-column signature of an unescaped literal bar and
+belongs to R6, so the two rules never both fire on one cause.
+
+An empty header cell whose body column is majority filled while an adjacent
+named header column is majority empty is a label shift: values sit under the
+wrong header. This is the phantom-column signature left by a converter that
+inserts a spurious column, and it violates this rule.
+'''
+rationale = '''
+This is the epistemic premise the remaining table rules rest on, not a style
+preference: it is a fact about how reading models recover a table, so no producer
+and no format choice can opt out of it. Because the delimiter run is the only
+coordinate system, a dropped delimiter does not shorten a row, it relocates every
+value after it. The row still reads as well formed and now asserts something the
+source never said, which is why the rule is HARD and why its consequence is
+checked mechanically rather than left to a reader's judgment.
+'''
+llm_instruction = '''
+Treat each pipe table as a token stream whose delimiters carry the coordinates.
+Check that every row has the same cell count as its header. Report a row whose
+values are shifted relative to the header labels, quoting the offending row
+verbatim, and name R1.
+'''
+evidence = [
+  "packages/whisker/src/whisker/llm/calibration/tables/00-baseline.md:R1",
+  "gist:41-82",
+  "gist:59-63",
+]
+
+# --- R2 -----------------------------------------------------------------------
+
+[[rules]]
+id = "R2"
+title = "Header row plus separator row are mandatory"
+strength = "HARD"
+scope = "representation"
+method = "deterministic"
+applicability = "any_table"
+check_id = "pipe_header_separator"
+failure_status = "not-llm-readable"
+thresholds = []
+requirement = '''
+A pipe table opens with a header row immediately followed by an alignment
+separator row. Neither may be omitted. A data row promoted to header by a
+page-break split (continuation header) violates this rule.
+'''
+rationale = '''
+The separator row is what marks the header/body boundary in GFM. Without it the
+first data row is indistinguishable from the column labels, so every cell
+reference is off by one row.
+'''
+llm_instruction = '''
+Confirm that each pipe table has a header row and a separator row directly
+under it. A table whose first row is data is a defect, not a style choice.
+'''
+evidence = [
+  "packages/whisker/src/whisker/llm/calibration/tables/00-baseline.md:R2",
+  "gist:80-81",
+  "gist:279-282",
+]
+
+# --- R3 -----------------------------------------------------------------------
+
+[[rules]]
+id = "R3"
+title = "Clean rectangular matrices are represented as pipe tables"
+strength = "CONTEXTUAL"
+scope = "representation"
+method = "source_compare"
+applicability = "any_table"
+check_id = "representation_choice_matrix"
+failure_status = "review"
+thresholds = []
+requirement = '''
+A source table that is a clean rectangular matrix, with no spanning cells, no
+per-cell code block and no multi-line cell, is represented as a markdown pipe
+table rather than as HTML.
+'''
+rationale = '''
+For clean matrices the pipe form measures best on multi-table question
+answering and costs roughly a third of the tokens of the HTML form. HTML is the
+exception earned by structure, not the default.
+'''
+llm_instruction = '''
+For each table, decide from the source whether it is a clean rectangular
+matrix. If it is, and the conversion emitted HTML instead of a pipe table, say
+so and name R3. Do not guess when the source is unavailable.
+'''
+evidence = [
+  "packages/whisker/src/whisker/llm/calibration/tables/00-baseline.md:R3",
+  "gist:269-286",
+  "packages/whisker/research/research/llm-readability/05-web.md:110-130",
+]
+
+# --- R4 -----------------------------------------------------------------------
+
+[[rules]]
+id = "R4"
+title = "Structure-bearing tables are represented as HTML"
+strength = "CONTEXTUAL"
+scope = "representation"
+method = "source_compare"
+applicability = "any_table"
+check_id = "representation_choice_spans"
+failure_status = "review"
+thresholds = []
+requirement = '''
+A code table from a PDF source arrives as a labeled fence group: a bold row
+label, an italic column header, and one cpp fence per column. HTML remains
+correct when the source is HTML. Spans stay repetition (R5).
+'''
+rationale = '''
+A PDF code table has no HTML table to preserve. The fence group keeps each
+column's listing as its own block, with the row label and the column header
+still attached. An HTML source already is a table, so HTML in the markdown is
+the faithful form there. Span fidelity stays with R5.
+'''
+llm_instruction = '''
+For a code table, confirm a PDF source arrived as a labeled fence group (bold
+row label, italic column header, one cpp fence per column). HTML is correct
+when the source is HTML. A raw HTML table from a PDF source is a representation
+defect; name R4. Spans are R5, not this rule.
+'''
+evidence = [
+  "packages/whisker/src/whisker/llm/calibration/tables/00-baseline.md:R4",
+  "gist:152-158",
+  "gist:385-390",
+  "packages/whisker/research/research/llm-readability/repo-scan/olmocr.md:50-55",
+]
+
+# --- R5 -----------------------------------------------------------------------
+
+[[rules]]
+id = "R5"
+title = "Spanning cells survive as denormalized values or as spans"
+strength = "HARD"
+scope = "source_fidelity"
+method = "source_compare"
+applicability = "any_table"
+check_id = "merged_cell_denormalization"
+failure_status = "not-llm-readable"
+thresholds = []
+requirement = '''
+A spanning cell in the source must arrive either as a repeated value in every
+row or column it covered, or as HTML carrying the original rowspan/colspan.
+Partial or scrambled denormalization is a defect.
+'''
+rationale = '''
+Faithful repetition is the sanctioned pipe representation of a span and must
+not be reported as a defect. Losing a span, or repeating it into the wrong
+rows, changes what the table asserts.
+'''
+llm_instruction = '''
+Compare each spanning cell in the source against the candidate. Repetition of
+the spanned value is correct. A dropped span, a value repeated into rows it did
+not cover, or a shifted column is a defect; name R5.
+'''
+evidence = [
+  "packages/whisker/src/whisker/llm/calibration/tables/00-baseline.md:R5",
+  "gist:240",
+  "gist:389-390",
+  "packages/whisker/research/research/llm-readability/18-table-semantics-auditor.md:7",
+]
+
+# --- R6 -----------------------------------------------------------------------
+
+[[rules]]
+id = "R6"
+title = "Literal pipes inside cells are escaped"
+strength = "HARD"
+scope = "representation"
+method = "deterministic"
+applicability = "any_pipe_table"
+check_id = "pipe_escape_roundtrip"
+failure_status = "not-llm-readable"
+thresholds = []
+requirement = '''
+A literal vertical bar inside a pipe-table cell is escaped. An unescaped bar
+adds a delimiter and invents a phantom column, so no row after it can be read
+at its declared coordinates.
+'''
+rationale = '''
+Escaping is the only mechanism GFM offers for cell content that contains the
+delimiter. This rule is checked on the raw row text, because a cell splitter
+that ignores escapes reproduces exactly the defect the rule forbids.
+'''
+llm_instruction = '''
+Look for rows with more delimiters than the header. Report the cell whose
+literal bar was left unescaped, quoting the raw row; name R6.
+'''
+evidence = [
+  "packages/whisker/src/whisker/llm/calibration/tables/00-baseline.md:R6",
+  "gist:245",
+  "packages/whisker/research/research/llm-readability/18-table-semantics-auditor.md:8",
+]
+
+# --- R7 -----------------------------------------------------------------------
+
+[[rules]]
+id = "R7"
+title = "Wide tables are split or restated as key/value rows"
+strength = "CONTEXTUAL"
+scope = "representation"
+method = "deterministic"
+applicability = "wide_table"
+check_id = "wide_table_column_budget"
+failure_status = "review"
+thresholds = ["wide_table_column_threshold"]
+requirement = '''
+A table wider than the wide_table_column_threshold column budget is split by
+columns or restated as row-wise key/value pairs.
+'''
+rationale = '''
+Column association is the first thing to break as a table widens. Passing this
+rule is not proof of correct column association: association failures are
+recorded on narrow tables too, which is why R13 probes lookup directly.
+'''
+llm_instruction = '''
+Count the columns of each table. Above the stated budget, check whether values
+can still be attributed to the right column label, and name R7 when they
+cannot. Column association has failed on this model on a narrow, clean
+five-column poll table, below the wide-table budget, and has passed the same
+probe on a later run. Passing the column count is therefore not evidence that
+values were attributed to the right column: verify at least one value against
+its header label explicitly.
+'''
+evidence = [
+  "packages/whisker/src/whisker/llm/calibration/tables/00-baseline.md:R7",
+  "gist:242",
+  "gist:285",
+]
+
+# --- R8 -----------------------------------------------------------------------
+
+[[rules]]
+id = "R8"
+title = "Long tables repeat their header"
+strength = "CONTEXTUAL"
+scope = "representation"
+method = "deterministic"
+applicability = "long_table"
+check_id = "long_table_header_repeat"
+failure_status = "review"
+thresholds = ["long_table_row_threshold", "header_repeat_row_interval"]
+requirement = '''
+In a table at or above the long_table_row_threshold row count, the header row
+and its separator reappear at least every header_repeat_row_interval body rows.
+'''
+rationale = '''
+Column labels seen once, hundreds of tokens earlier, stop constraining how a
+row is read. Repeating them re-anchors the coordinates locally.
+'''
+llm_instruction = '''
+For long tables, check that column labels reappear periodically. Report the
+first stretch of rows that runs past the stated interval without a header; name
+R8.
+'''
+evidence = [
+  "packages/whisker/src/whisker/llm/calibration/tables/00-baseline.md:R8",
+  "gist:243",
+  "gist:286",
+]
+
+# --- R9 -----------------------------------------------------------------------
+
+[[rules]]
+id = "R9"
+title = "Empty cells carry an explicit sentinel"
+strength = "CONTEXTUAL"
+scope = "representation"
+method = "deterministic"
+applicability = "table_with_empty_cell"
+check_id = "empty_cell_sentinel"
+failure_status = "review"
+thresholds = ["empty_cell_sentinels"]
+requirement = '''
+A cell that is empty on purpose carries one of the empty_cell_sentinels
+spellings. A blank cell is not acceptable.
+'''
+rationale = '''
+A blank cell is ambiguous between "intentionally empty" and "content was
+lost in conversion", and the second is the failure this whole contract exists
+to catch. The sentinel removes the ambiguity.
+'''
+llm_instruction = '''
+Report blank cells. State that the blank cannot be distinguished from lost
+content, and name R9.
+'''
+evidence = [
+  "packages/whisker/src/whisker/llm/calibration/tables/00-baseline.md:R9",
+  "gist:244",
+  "gist:283",
+]
+
+# --- R10 ----------------------------------------------------------------------
+
+[[rules]]
+id = "R10"
+title = "Caption and label stay adjacent to the table"
+strength = "HARD"
+scope = "representation"
+method = "source_compare"
+applicability = "any_table"
+check_id = "caption_adjacency"
+failure_status = "not-llm-readable"
+thresholds = ["caption_max_distance_lines"]
+requirement = '''
+A table's caption or label sits within caption_max_distance_lines lines of the
+table it names, directly above or below it.
+'''
+rationale = '''
+The caption carries what the table is about. Separated from the table it
+becomes prose about nothing, and the table becomes a grid about nothing.
+'''
+llm_instruction = '''
+For each table, locate its caption or label in the source and check it is still
+adjacent in the candidate. A caption that drifted away, or was dropped, is a
+defect; name R10. Say so explicitly when no caption is identifiable rather than
+treating that as a pass.
+'''
+evidence = [
+  "packages/whisker/src/whisker/llm/calibration/tables/00-baseline.md:R10",
+  "gist:228",
+  "gist:280",
+]
+
+# --- R11 ----------------------------------------------------------------------
+
+[[rules]]
+id = "R11"
+title = "Code inside cells is not flattened into pipe syntax"
+strength = "HARD"
+scope = "representation"
+method = "source_compare"
+applicability = "any_table"
+check_id = "code_cell_representation"
+failure_status = "not-llm-readable"
+thresholds = []
+requirement = '''
+Code inside a table cell arrives as a fence with its line structure intact. It
+is never flattened into a pipe cell and never written as escaped pre/code.
+HTML pre is still correct when the source is HTML.
+'''
+rationale = '''
+A flattened pipe cell, or an escaped pre/code block, drops the line breaks and
+indentation that make the listing readable. A fence keeps those lines. An HTML
+source's pre block is the source's own form and stays correct.
+'''
+llm_instruction = '''
+For each table whose source cells contain code, confirm the code arrived as a
+fence with its line structure intact. A pipe cell, or escaped pre/code, is a
+defect; name R11. HTML pre is correct when the source is HTML.
+'''
+evidence = [
+  "packages/whisker/src/whisker/llm/calibration/tables/00-baseline.md:R11",
+  "gist:246",
+  "packages/whisker/research/research/llm-readability/18-table-semantics-auditor.md:7",
+]
+
+# --- R12 ----------------------------------------------------------------------
+
+[[rules]]
+id = "R12"
+title = "A table is an atomic chunk unit"
+strength = "HARD"
+scope = "chunking"
+method = "deterministic"
+applicability = "chunking_in_scope"
+check_id = "table_atomic_chunk"
+failure_status = "not-llm-readable"
+thresholds = []
+requirement = '''
+No chunk boundary falls inside a table. A table that does not fit is reported
+as an explicit unevaluated oversize unit; on a sanctioned continuation the
+header and separator are copied into each continuation chunk.
+'''
+rationale = '''
+Half a table is worse than no table: the surviving half looks complete and
+answers questions wrongly. Silently bisecting to satisfy a size budget trades a
+visible failure for an invisible one.
+'''
+llm_instruction = '''
+If chunk boundaries are visible, confirm no chunk starts or ends inside a
+table, and that any continuation repeats the header and separator; name R12.
+'''
+evidence = [
+  "packages/whisker/src/whisker/llm/calibration/tables/00-baseline.md:R12",
+  "packages/whisker/src/whisker/llm/calibration/tables/00-baseline.md:R28",
+  "gist:215-227",
+  "packages/whisker/research/research/llm-readability/24-chunking-boundary-auditor.md:8",
+]
+
+# --- R13 ----------------------------------------------------------------------
+#
+# Promoted from CONTEXTUAL to HARD for this model. For a model whose table
+# literacy is extrapolated rather than measured, an unexecuted lookup probe is
+# not a soft gap: it means the central claim was never tested.
+
+[[rules]]
+id = "R13"
+title = "Cell lookup on large tables is proven by probe, not by format"
+strength = "HARD"
+scope = "certification"
+method = "certification"
+applicability = "any_table"
+check_id = "table_probe_suite"
+failure_status = "not-llm-readable"
+thresholds = ["large_table_cell_budget"]
+requirement = '''
+Certification of a document containing a table at or above the
+large_table_cell_budget cell count requires executed cell-lookup and
+row-retrieval probes with a corrupt control that demonstrably inverts, on every
+such table. Format conformance alone never discharges R13 for this model.
+'''
+rationale = '''
+Cell lookup and row retrieval collapse on large tables for every format
+measured, so a green representation check says nothing about whether the table
+can actually be read. This is a certification requirement, not a property of
+the markdown.
+'''
+llm_instruction = '''
+State which cell-lookup and row-retrieval probes were run, on which tables, and
+what the corrupt control did. Name the probe results you relied on. If no
+cell-lookup probe was executed, say R13 is unevaluated, never passed.
+'''
+evidence = [
+  "packages/whisker/src/whisker/llm/calibration/tables/00-baseline.md:R13",
+  "packages/whisker/research/research/llm-readability/05-web.md:43-50",
+  "packages/whisker/research/research/llm-readability/18-table-semantics-auditor.md:12",
+]
+
+# --- R14 ----------------------------------------------------------------------
+
+[[rules]]
+id = "R14"
+title = "No raw HTML table from a PDF source"
+strength = "HARD"
+scope = "representation"
+method = "deterministic"
+applicability = "pdf_source"
+check_id = "html_table_in_markdown"
+failure_status = "not-llm-readable"
+thresholds = []
+requirement = '''
+A markdown file whose source is a PDF must not contain a raw table tag or HTML
+entities standing in for code (&lt; &gt; &amp; &quot;). ins and del wording tags
+do not count.
+'''
+rationale = '''
+A PDF source has no HTML table. A raw table tag, or entities standing in for
+code inside one, means the conversion escaped structure instead of emitting a
+fence group. Wording ins and del tags are the deliverable of a wording paper
+and are not this defect.
+'''
+llm_instruction = '''
+When the source is a PDF, a raw HTML table in the markdown is a table defect.
+Name R14. ins and del wording tags are not this defect. An HTML source may
+keep HTML tables.
+'''
+evidence = [
+  "packages/whisker/src/whisker/llm/calibration/tables/00-baseline.md:R14",
+]
+
+# --- known weaknesses ---------------------------------------------------------
+
+[[known_weaknesses]]
+id = "merged-and-transposed-tables"
+rules = ["R4", "R5"]
+description = '''
+Irregular table categories defeat this lineage. CompTab reports DeepSeek-V3 at
+about 37.8% exact match on merged cells and about 25.0% on transposed tables,
+with the largest direct-prompt versus agent divergence of the models measured.
+No V4 Pro table benchmark exists, so these are lineage figures, not measurements
+of the served model.
+'''
+evidence = [
+  "packages/whisker/research/research/deepseek-v4-pro/04-table-understanding.md",
+]
+
+[[known_weaknesses]]
+id = "wide-and-hierarchical-degradation"
+rules = ["R7"]
+description = '''
+Nested and hierarchical table structures cost all measured models 10 to 15
+points against flat tables, and accuracy declines further as table token count
+rises. WG21 papers routinely carry multi-row headers, which is exactly this
+category.
+'''
+evidence = [
+  "packages/whisker/research/research/deepseek-v4-pro/04-table-understanding.md",
+]
+
+[[known_weaknesses]]
+id = "sub-threshold-column-association"
+rules = ["R7", "R13"]
+description = '''
+Measured on this model, not extrapolated, but historical: in the 2026-07-09
+grounded readback (alliance-pod, DeepSeek-V4-Pro, the run that scored 34/37) the
+pod named the right neighbor cell of P0876R23's St. Louis poll table correctly
+and then reported the column heading "F" where the table says "SF". A clean
+five-column pipe table, far below any wide-table budget.
+
+The current de-needle-v2 run (2026-08-12, same pod and model) PASSED both
+P0876R23 poll-table probes, answering "SF" both times, as recorded in
+packages/whisker/corpus/p0876r23.readback.md. That is not evidence the weakness
+is gone. A later TOC A/B experiment moved this same fact by one and attributed
+the difference to model variance rather than to navigation, and one clean run of
+a probe that has failed before under stricter scoring is exactly what a
+variance-prone column-association failure looks like. Do not cite the current
+certificate as evidence of this failure, and do not cite one passing run as
+evidence of its absence.
+
+The fleet holds no committed pipe table above the wide-table budget, so R7
+remains a hypothesis on our corpus while column association is a demonstrated,
+variance-prone failure below the threshold. This is why R13 is promoted to HARD
+rather than trusting the column count.
+'''
+evidence = [
+  "packages/whisker/src/whisker/llm/calibration/tables/fullread-32-test-comprehension.md:136",
+  "packages/whisker/FIXPATH-REPORT.md:90-99",
+  "packages/whisker/research/research/llm-golden-verification-gap/archaeology/a14-langextract-redteam.md:18",
+]
+
+[[known_weaknesses]]
+id = "table-neighbor-misread"
+rules = ["R1", "R13"]
+description = '''
+Measured locally: the P4185R0 table-anchored fact failed under de-needle-v2 with
+the wrong neighbor cells returned, while the deterministic lane passed every one
+of the same facts on the same markdown. A green deterministic representation
+check therefore does not predict that this model reads the cell correctly.
+'''
+evidence = [
+  "packages/whisker/corpus/READBACK-CERTIFICATE.md",
+  "packages/whisker/corpus/p4185r0.readback.md",
+]
+
+[[known_weaknesses]]
+id = "near-zero-abstention"
+rules = ["R5", "R10", "R11"]
+description = '''
+The model abstains almost never, so an unreadable or missing table region tends
+to come back as a confident answer rather than as an unknown. Consequences for
+this contract: a model verdict without grounded verbatim cell evidence must not
+close a source-compare rule, and confidence is not usable as a proxy for
+correctness.
+'''
+evidence = [
+  "packages/whisker/research/research/deepseek-v4-pro/04-table-understanding.md",
+  "packages/whisker/research/research/deepseek-v4-pro/00-baseline.md",
+]
+
+# --- required probes ----------------------------------------------------------
+
+[[probes]]
+id = "cell-lookup-with-corrupt-control"
+rules = ["R13"]
+description = '''
+Positional cell lookup. Identify the target table by quoting its full header
+row (all column names), then ask for specific cells by 1-based body-row index
+and column name. "Body row 1" is the first data row after the header and
+separator; the header itself is never a body row. Probe up to 3 non-empty
+cells, one per body row, on the table with the most cells.
+
+Repeat the identical questions against a deterministically corrupted copy whose
+pipe-table cells are reversed. The clean run must recover the cells and the
+corrupt run must fail them; a corrupt control that does not invert makes the
+probe unevaluated, never pass.
+
+This is the hard test: it measures whether the model can count rows, not just
+find a cell by its content. Content-anchored lookup (readback Lane 3) is a
+separate, weaker claim.
+'''
+evidence = ["packages/whisker/corpus/READBACK-CERTIFICATE.md"]
+
+[[probes]]
+id = "column-association-narrow-table"
+rules = ["R7", "R13"]
+description = '''
+Header-anchored column association. Identify the target table by quoting its
+full header row so tables with identical column names are disambiguated. Ask
+for a value under a specific header label ("What value appears under column
+'SF'?"), not for the table's contents as a whole. The table must be narrow
+(column count at or below the wide_table_column_threshold).
+
+This is the weak test relative to positional lookup: the model only needs to
+associate a value with its column header, not count rows. The probe is required
+even though the most recent run passes it: the column-association failure it
+targets is intermittent on this model, so a single clean result does not retire
+it.
+'''
+evidence = [
+  "packages/whisker/src/whisker/llm/calibration/tables/fullread-32-test-comprehension.md:136",
+  "packages/whisker/FIXPATH-REPORT.md:90-99",
+]
+
+[[probes]]
+id = "merged-cell-denormalization"
+rules = ["R5"]
+description = '''
+Probe a table whose source carried a spanning cell. The model must accept a
+faithfully repeated value as correct and must reject a value repeated into rows
+the span did not cover; both directions are required, because the lineage fails
+in both.
+'''
+evidence = [
+  "packages/whisker/research/research/deepseek-v4-pro/04-table-understanding.md",
+]
+
+[[probes]]
+id = "code-in-cell-structure"
+rules = ["R11"]
+description = '''
+Probe a table whose cells carry code. The model must report the code's line
+structure, so a listing flattened into a single pipe cell is detected instead of
+paraphrased back as prose.
+'''
+evidence = [
+  "packages/whisker/research/research/deepseek-v4-pro/04-table-understanding.md",
+]
+
+[[probes]]
+id = "per-unit-count-dump"
+rules = ["R1", "R2"]
+description = '''
+Per-unit count-dump probe (v1.1.0). Iterates every pipe table unit in the paper,
+classifies each as label_shift, data_as_header, wrap_bleed, continuation,
+header_is_data, truncated_leak, row_merge, or aligned, and runs one count-dump
+or closed question per unit. Sends only the isolated table fragment with the
+R1-aware system prompt. Priority:
+label_shift > wrap_bleed > data_as_header > continuation > header_is_data >
+truncated_leak > row_merge > aligned.
+Label-shift units are scored by the deterministic cell-dump scorer;
+data_as_header units (all-numeric header, blank body) use count-dump with
+score_numeric_header_dump; wrap_bleed units (sentence fragment header bleeding
+into body) use count-dump with score_wrap_bleed_dump; continuation and
+header_is_data units use the closed "data values" question;
+truncated_leak units receive the table plus trailing prose and are asked
+"leaked rows or prose?"; row_merge units are asked how many distinct
+row-records a cell contains (integer >= 2 confirms defect);
+aligned units are scored by comparing each dumped cell against the unit's
+actual cells. Results are compared against a human-review punch-list: every
+known defect must appear, and no aligned unit may false-fail. This is evidence
+about per-table model comprehension, not a certification gate.
+'''
+evidence = [
+  "packages/whisker/src/whisker/llm/calibration/tables/evidence/n5040-attendance/notes.md",
+  "packages/whisker/src/whisker/llm/calibration/tables/evidence/n5040-attendance/all-tables.md",
+  "packages/whisker/src/whisker/llm/calibration/tables/evidence/n5040-attendance/human-review.toml",
+]

@@ -1,0 +1,42 @@
+# 31 - Thinking-Token-Auditor
+
+**Verdict:** usable-with-conditions — hidden model thinking tokens are not being decoded on the current alliance-pod path; per-call decode is dominated by visible structured JSON (including in-schema `reasoning` fields), so thinking suppression saves ~0 s on the 3003 s cold run unless pod defaults change.
+**Confidence:** high (live probe + backend contract); medium on the 381-paper fleet (no `--debug` transcripts in workspace for that run)
+
+## Findings
+
+- [CRITICAL] **Judge agents never set `thinking_budget`; the backend sends no thinking kwargs, so V4-Pro server default (`enable_thinking: false`) applies.** Evidence: `cli.py:1032-1036` constructs `AgentBackend(judge_backend, max_tokens=1536)` with comment "thinking_budget omitted"; `adjudicate.py:760-767` same for text-lane slots; `model_backends.py:294-298` only adds `extra_body` when `thinking_budget is not None` (`enable_thinking: False` at 0, else `thinking_token_budget`); `tapetum_llm.md:33` documents "NOT forwarded to the model backend." Impact: **0 s wall saving** from disable/suppress levers on current pod; defensive `thinking_budget=0` is cheap insurance only.
+
+- [CRITICAL] **Live probe (2026-07-07, alliance-pod, vLLM 0.24.0, DeepSeek V4 Pro) shows no hidden reasoning phase on the production template.** Evidence: `packages/whisker/research/llm-batching/21-terse-output.md:11-16` — baseline (production path) 13.7 s wall, 948 `completion_tokens`, reasoning column "none"; `thinking=true` 26.5 s / 2048 cap with reasoning still "none separated"; `thinking_token_budget=512` 12.7 s, "ignored by server." Conclusion at `:20-23`: "no reasoning content on this template by default … no thinking phase to cap." Impact: the hypothetical 200 hidden + 150 visible tok/call (~half decode) **does not apply**; enabling thinking explicitly (condition B) **adds ~13 s/call** (~2×) with no quality gain captured in separated reasoning.
+
+- [HIGH] **`VllmThinkingBackend` strips ``-style blocks from `content` only; it never reads vLLM's separate `reasoning` message field.** Evidence: `_THINK_RE` at `model_backends.py:48`; `_strip_think_block` at `:93-101`; streaming loop captures only `choice.delta.content` at `:322-324`, not `delta.reasoning`; debug writes `<!-- reasoning -->` only when tags appear in content (`:352-358`). No `reasoning_content` / `message.reasoning` handling anywhere under `packages/pipeline/`. Impact: if pod were reconfigured with `--reasoning-parser deepseek_v4` and thinking ON, hidden reasoning would still decode at ~70 tok/s but would be **invisible to the client and sidecar** unless tags leak into `content`; decode cost would remain, JSON parse might fail (`llm-stack/05-web.md:26`).
+
+- [HIGH] **Backend thinking controls are misaligned with V4-Pro docs: budget knob ≠ enable knob.** Evidence: `model_backends.py:294-298` sends `thinking_token_budget` when budget > 0, never `chat_template_kwargs.enable_thinking: true`; `05e-web-thinking-control.md:13` states V4-Pro "requires `enable_thinking: true` to emit reasoning tokens; without it, no reasoning is generated"; live probe condition C confirms budget alone is ignored. `SERVICES.toml:72` marks `thinking_capable = true` for alliance-pod but that only gates pipeline validation (`agents.py:87-96`), not runtime enablement. Impact: authority-doc `thinking-budget: 1024/4096` in `tapetum_llm.md` would not turn thinking on even if wired; wiring it without `enable_thinking: true` saves 0 s and adds confusion.
+
+- [HIGH] **What IS decoded before/at structured output is in-schema JSON `reasoning`, not hidden thinking — ~303k fleet output tokens total.** Evidence: schema field order deliberately puts `reasoning` first (`models.py:13-14`, `:174-177`, `:215-218`, `:301-303`); P50 per-call output from sidecar reconstruction (`research/tapetum-llm-throughput/11-output-token-decode-auditor.md:10-14`): monolith 283 tok, metadata 112 tok, unit check 77 tok (pass path ~55 tok is the 40-word `reasoning` field per `14-output-token-surgeon.md:8`); fleet sum ≈ 303k tok (`14-output-token-surgeon.md:8`). At ~70 tok/s solo / ~28 tok/s under load (`00-baseline.md:26-27`, `17-latency-decomposer.md:14`): this visible JSON is the decode term, not hidden CoT. Impact: shrinking pass-path in-schema `reasoning` (not thinking suppression) is the real decode lever — e.g. ~47k tok across 1057 zero-defect unit checks (~2.8–8 min wall depending on slot math, `14-output-token-surgeon.md:8`).
+
+- [MED] **No `*.debug.tapetum_llm.md` transcripts in workspace for the 3003 s run; prior corpus had 200 files under `data/paperstore/` but zero `<!-- reasoning -->` analysis was published.** Evidence: glob over workspace returns 0 debug files; `17-latency-decomposer.md:14` "Zero `*.debug.tapetum_llm.md` under `data/` (batch ran without `--debug`)"; `llm-stack/00-baseline.md:44` references 200 historical debug files not present locally. Impact: cannot empirically measure thinking-token share on tonight's 2284-call fleet from transcripts; live probe + sidecar token reconstruction must stand in.
+
+- [MED] **Suppression options ranked for this stack (quality risk from A/B and literature).**
+
+  | Option | Mechanism | Expected decode saving (3003 s run) | Quality risk |
+  |--------|-----------|-------------------------------------|--------------|
+  | **Current path** (omit `thinking_budget`) | Server default non-think | 0 s (baseline) | None — production path |
+  | `thinking_budget=0` on all judge agents | `enable_thinking: false` explicit (`model_backends.py:295-296`) | 0 s if default already off; blocks accidental pod enable | Low — defensive |
+  | `reasoning_effort: "none"` / `/no_think` in prompt | vLLM auto-injects disable (`05e-web-thinking-control.md:13`) | 0 s today; ~13 s/call prevented if someone enables thinking | Low |
+  | `enable_thinking: true` + cap | Requires pod `--reasoning-parser`; doubles wall in probe B | **Negative** (~2× decode) | Medium — SLMJury: short outputs win math, lose up to 23% general (`05-web.md:88-90`) |
+  | Shrink in-schema `reasoning` fields (pass path) | Visible JSON decode reduction | ~2–8 min (303k→~250k tok band) | Medium — 7/20 verdict flips on terse A/B within MoE drift band (`21-terse-output.md:38-44`); holdout required |
+
+- [LOW] **`max_tokens` ceiling (1536 judge, 1024/2048 text lane) shares budget with thinking IF thinking were enabled.** Evidence: `model_backends.py:67-68` docstring "`<think>` reasoning shares this budget"; judge `max_tokens=1536` at `cli.py:1034`. With thinking off, entire budget goes to JSON. Impact: irrelevant until thinking is enabled; then hidden+JSON compete for same cap.
+
+## False-pass hypothesis
+
+Re-enabling hidden thinking (`enable_thinking: true` via pod default or client kwargs) on the theory that chain-of-thought improves table/code verdicts would add ~13 s/call on the probed template (`21-terse-output.md:14`) with reasoning not surfacing in debug — while the 07-07 terse-output A/B already halved **visible** JSON and still caught the same table-structure defect (`21-terse-output.md:26-27`). The higher-risk false-pass path is **shrinking in-schema pass-path `reasoning`** (1057 zero-defect unit checks): a model could return `defects:[]` without comparing `constexpr` counts, widening the documented selection gap (`00-baseline.md:29-30`, only 16/381 papers had LLM-changed verdicts).
+
+## False-fail hypothesis
+
+Setting `thinking_budget=0` fleet-wide when thinking is already off changes nothing but documents intent; no false-fail mechanism. Conversely, **explicitly enabling thinking** on a structured-JSON path risks empty `content` with JSON trapped in reasoning (`llm-stack/05-web.md:26`), causing parse retries (`model_backends.py:300-405`) that inflate wall and demote papers to `error`/`review` without catching new defects.
+
+## What would change my mind
+
+One `--debug` batch (≥20 papers) on alliance-pod logging per-call: wall time, `completion_tokens` from API usage, char length of `<!-- reasoning -->` blocks in `*.debug.tapetum_llm.md`, and char length of `<!-- raw-json -->`. If median hidden reasoning >500 chars while JSON <800 chars, hidden thinking is a rank-1 lever worth ~10–18 s/call (~380–680 min serial / ~24–42 min wall at 16 slots on 2284 calls). If reasoning blocks are empty and usage ≈ reconstructed JSON, close the thinking-suppression track permanently and fund in-schema output shrink + call elimination instead.

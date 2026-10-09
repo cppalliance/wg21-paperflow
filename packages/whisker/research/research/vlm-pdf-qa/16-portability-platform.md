@@ -1,0 +1,32 @@
+# 16 - Portability-Platform
+
+**Verdict:** usable-with-conditions (PyMuPDF in-process raster + a dedicated RunPod VLM service is portable; porting olmocr's poppler subprocess or colocating a VLM on today's alliance-pod is not)
+**Confidence:** high
+
+## Findings
+
+- [CRITICAL] olmocr's raster path hard-depends on poppler CLI (`pdfinfo` + `pdftoppm`) via `subprocess.run`, not a Python wheel. Evidence: `packages/whisker/research/repos/olmocr/olmocr/data/renderpdf.py:18-21,43-60`; 00-baseline §2 olmocr bullet (lines 14-15). Impact: On this Windows dev box, `pdftoppm`/`pdfinfo` are absent from PATH (runtime check 2026-07-07); Chocolatey/MSYS poppler is fragile and untested in our CI. **Do not port `renderpdf.py`.** PyMuPDF is already a workspace dep (`packages/tomd/pyproject.toml:10`; 00-baseline §3 line 75, §4 line 82) and rasterizes WG21 PDFs here (`fitz.open` + `page.get_pixmap(dpi=150)` on `n5035.pdf` → 1242×1755 PNG, 183643 bytes).
+
+- [HIGH] No vision-capable service exists in production config; alliance-pod runs text-only `deepseek-v4-pro`. Evidence: 00-baseline §3 lines 73-74; `SERVICES.toml:64-74` (`backend = "vllm_thinking"`, no vision flag, model `deepseek-v4-pro`). Impact: A Qwen2.5-VL / olmOCR-class VLM cannot ride on the 24/7 whisker advisory endpoint; it needs a **new** `[services.*]` entry and GPU pod. olmOCR self-host floor is ≥12 GB VRAM with OOM at 12 GB under defaults (05-web.md Q2, `https://github.com/allenai/olmocr/issues/424`). H200-class pods in `SERVICES.toml` have headroom for a 7B VLM **only as a separate vLLM process**, not alongside an loaded text model on the same 12 GB card.
+
+- [HIGH] The pipeline framework is text-only end-to-end; a VLM QA lane needs new multimodal plumbing before any raster code matters. Evidence: 00-baseline §3 lines 72-73; `packages/pipeline/src/pipeline/model_backends.py:191-203` (`user_message: str`, no image/content-parts). Impact: Portable image packaging from surveyed repos (docling/marker base64 data URIs) still requires a new backend method and `StepContext` path; copying olmocr's OpenAI payload shape (`pipeline.py:133-146`) without that infrastructure does not run.
+
+- [MED] Prefer PyMuPDF page raster over pypdfium2 or pdftoppm for fidelity **with our converter**. Evidence: marker renders via pypdfium2 `page.render(scale=dpi/72).to_pil()` — `packages/whisker/research/repos/marker-v1.10.2/marker/providers/pdf.py:411`; nougat uses pypdfium2 `PdfBitmap.to_pil` at `scale=dpi/72` — `packages/whisker/research/repos/nougat/nougat/dataset/rasterize.py:46-49`; tomd already rasterises via `page.get_pixmap(..., dpi=_RASTERISE_DPI)` — `packages/tomd/src/tomd/lib/pdf/vector_images.py:1522-1535` (`_RASTERISE_DPI = 150` at line 281). Impact: MuPDF is the engine behind tomd text extraction; QA page images from the same engine minimise cross-renderer diffs (anti-aliasing, font hinting) that would false-fail or false-pass against markdown produced by MuPDF-path logic. marker's LLM crops use 192 DPI high-res (`marker/marker/builders/document.py:22-25,41-42`); docling VLM defaults `scale=2.0` (~144 DPI) — `docling/docling/datamodel/vlm_model_specs.py:50,90`; olmocr longest side 1288 px — `olmocr/olmocr/pipeline.py:1229`. Pick one DPI/longest-side policy and pin it; per-request pixel limits do not work under vLLM (05-web.md Q3, `https://github.com/QwenLM/Qwen3-VL/issues/1434`).
+
+- [MED] Font availability is a cross-OS raster variance class, mitigated for WG21 but not zero. Evidence: 00-baseline §4 (189 small WG21 PDFs, typically LaTeX/mpark with embedded fonts); MuPDF font store is process-global — `packages/tomd/src/tomd/lib/pdf/_fitz_lock.py:9-10`; camelot documents poppler/Ghostscript platform-specific goldens and Windows skips — `packages/whisker/research/redteam/camelot.md:63`. Impact: Missing embedded fonts can substitute differently across OS installs; QA comparing page image to markdown may disagree on rare papers. Same-engine (PyMuPDF) + embedded-font corpus keeps risk low; cross-engine port (olmocr poppler vs tomd MuPDF) amplifies it.
+
+- [MED] Portable base64/image_url packaging is in-memory (BytesIO → `data:image/png;base64,...`); avoid olmocr's subprocess stdout capture and temp-file path assumptions. Evidence: docling — `docling/docling/utils/api_image_request.py:176-199`; marker — `marker/marker/services/__init__.py:22-25` (WEBP in memory; Gemini wraps bytes — `marker/marker/services/gemini.py:28-31`). olmocr encodes `pdftoppm_result.stdout` — `renderpdf.py:59-60` without an explicit output prefix or `-singlefile -` stdout mode, coupling to poppler CLI semantics and cwd side effects. Impact: Port docling/marker's in-process encode pattern with PyMuPDF `pix.tobytes("png")`; do not port olmocr's render subprocess.
+
+- [LOW] Windows dev loop (PowerShell + `uv`) is compatible with the proposed port; no bash is required in whisker tapetum code. Evidence: `packages/whisker/pyproject.toml:20` (depends on `tomd` → PyMuPDF); `packages/paperstore/src/paperstore/factory.py:61-64` (`url2pathname` for Windows `file://` URIs); `packages/paperstore/src/paperstore/sqlite_backend.py:1119-1135` (`Path` for `get_source_path`). Minor bash-ism: unset-`WG21_DATA_DIR` error suggests `export ...` — `factory.py:34`. Impact: Dev can rasterize and base64-encode locally; production Linux/RunPod path is unchanged. New fitz callers in whisker must acquire `_FITZ_LOCK` if they share a process with tomd conversion — `_fitz_lock.py:13-16`.
+
+## False-pass hypothesis
+
+VLM QA passes on Windows-dev PyMuPDF rasters but would fail if production accidentally used olmocr poppler or marker pypdfium2 rasters of the same page (sub-pixel layout / font-substitution differences hide or invent conversion defects), or if the VLM hallucinates agreement despite OCR-category error rates ~60% (05-web.md Q4, `https://arxiv.org/html/2406.17115v1`).
+
+## False-fail hypothesis
+
+A conversion is faithful in markdown but the VLM flags failure because raster DPI/longest-side differs between dev tuning and RunPod vLLM `--mm-processor-kwargs` (server-side resize only; per-request `max_pixels` ignored — 05-web.md Q3), or because a rare non-embedded-font paper substitutes glyphs differently on the pod's fontconfig than on the dev laptop.
+
+## What would change my mind
+
+Committed golden PNG hashes (or perceptual hash band) for 3+ WG21 PDF pages rasterised with the chosen PyMuPDF DPI on **both** this Windows dev box and Linux CI, showing ≤ agreed pixel delta before trusting cross-environment VLM QA verdicts.

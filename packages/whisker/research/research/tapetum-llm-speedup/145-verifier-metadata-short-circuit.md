@@ -1,0 +1,34 @@
+# 145 - Verifier-A (Metadata Short-Circuit Independent Verification)
+
+**Verdict:** usable-with-conditions — independent sidecar replay confirms 232/378 metadata non-pass papers ran 1047 unit checks with **zero** `suggested_verdict` or `combined_verdict` drift when units are stripped; savings denominator is **2345** fleet LLM calls (**1341 s**, not 2362/**1331 s**); real cost is **35 defect groups** on **30 papers** in `--inspect`, not verdicts.
+**Confidence:** high
+
+## Findings
+
+- [CRITICAL] **Sidecar counts match personas 17 and 34 on every material integer.** Independent script `_scratch/research-tapetum-llm-speedup/verify_metadata_short_circuit.py` over `data/whisker/llm/*.whisker.tapetum.json` (381 files, 2026-07-23 v10 fleet): **378 ok / 3 error** tombstones. `metadata_outline_check.verdict`: **32 fail**, **200 review**, **146 pass** (3 error lack metadata). Metadata non-pass subset: **232 papers**, **1047 unit checks**, avg **4.51**/paper, median **5**, **181/232** at `MAX_UNIT_CHECKS=5`, **0/232** with zero units. Zero-defect unit checks on that subset: **692/1047 (66.1%)**. Impact: core population counts are exact, not estimated. Quality risk: none on counting.
+
+- [CRITICAL] **Call-fraction and wall savings are slightly overstated in persona 17's 2362 denominator.** Same replay: **2345** sidecar-counted LLM calls = 378 monolith + 378 metadata + 1570 unit + 18 page escalation + 1 ideal (matches persona **34**). Skipping all 1047 metadata-non-pass unit checks saves **1047/2345 (44.6%)** of fleet LLM calls and **1047/1570 (66.7%)** of unit calls. Linear wall model (`00-baseline.md:17-18`): **3003.4 × 1047/2345 ≈ 1341 s** (~22.4 min saved), residual **~1662 s (~28 min)** — not persona 17's **1047/2362 (44.3%)** / **~1331 s** / **~1672 s**. Persona **34** already reconciled to **1341 s**. Impact: direction and lever rank unchanged; use **2345** and **1341 s** in synthesis. Quality risk: none.
+
+- [CRITICAL] **Code paths confirm units cannot lift metadata-capped LLM or fusion verdicts.** PDF lane folds metadata before page escalations and units (`pdf_judge.py:711-714`); units only demote `pass → review` (`pdf_judge.py:927-928`), never `fail → pass` or `review → fail`. Text/HTML lane mirrors in `_custom_decide` (`adjudicate.py:371-381`): metadata `fail` overwrites to `fail`; metadata `review` demotes `pass → review`; units only demote `pass → review`. Fusion `_source_aware_requires_review` returns **True immediately** when `metadata_outline_check.verdict != pass` (`fusion.py:187-189`), before unit defects or coverage checks (`fusion.py:191-227`); cap applies at `fuse_verdicts` **before** clear/rescue rules (`fusion.py:410-423` vs `477-519`). Impact: metadata non-pass makes unit findings fusion-dead for verdict promotion. Quality risk: none on merged verdict.
+
+- [CRITICAL] **Empirical counterfactual: zero verdict drift on 232 metadata-non-pass papers.** Replay imported `fuse_verdicts` from production code, paired each tapetum sidecar with `data/whisker/det/<pid>.whisker.json`, stripped `unit_checks`, `defect_groups`, and unit dispositions, set `unit_coverage.coverage_complete=True`. Results: **`suggested_verdict` drift 0/232**, **`combined_verdict` drift 0/232**, **`combined_rule` drift 0/232**. Fail-only tier: **32 papers**, **141 unit calls**, est. **3003.4×141/2345 ≈ 181 s**. Impact: confirms "ZERO merged-verdict drift" claim for the measured fleet. Quality risk: none on verdict; inspect detail still lost (below).
+
+- [HIGH] **Both lanes participate; savings are not PDF-only.** Lane detection (`page_screen` present → PDF, else text/HTML with `axis_findings`): metadata non-pass **132 PDF / 589 unit checks**, **100 text / 458 unit checks** (589+458=1047). PDF metadata fail **31**, text **1**; review split **101 PDF / 99 text**. Impact: short-circuit guard must sit in both `pdf_judge.py:870+` and `adjudicate.py` HTML unit path (`_run_html_unit_checks`), not PDF-only. Quality risk: none.
+
+- [HIGH] **Short-circuit real cost is inspect completeness, quantified.** On metadata non-pass papers, sidecars carry **35 defect groups** across **30 papers** (`inspect_report.py:419-444` renders these; page table uses `unit_checks` at `182-232`). Metadata-`fail` subset: **16 defect groups** on **11 papers** (persona 17: 11/32 — confirmed). Metadata-`review` papers with accepted exact+cnf unit evidence: **19 papers** (persona 17 count — confirmed); **10/19** are high/critical severity in `defect_groups`; remaining 9 are medium/low accepted unit defects. Skipping units removes all **35 groups** from sidecar/`--inspect`; merged verdict unchanged. Impact: MEDIUM human triage completeness per `whisker/CLAUDE.md` inspect contract; not a silent pass. Quality risk: MEDIUM on inspect only.
+
+- [HIGH] **`verify_unit_evidence` and `verify_defect_counts` consume zero LLM calls.** Post-unit pipeline (`unit_judge.py:425-448`): `verify_unit_evidence` calls deterministic `ground_spans` + `classify_candidate_evidence` (`unit_judge.py:681-753`); `verify_defect_counts` runs mechanical keyword counts (`unit_judge.py:604-658`). Module docstring: "no writes, no LLM, no network" (`grounding.py:8-12`). Monolith/page grounding in `pdf_judge.py:696-697` uses the same `ground_spans` path. Impact: short-circuit savings are purely LLM call elimination; no hidden grounding spend. Quality risk: none.
+
+- [MED] **Persona 17's "19 accepted high/critical" wording is imprecise.** Independent count: **19** metadata-`review` papers have at least one accepted (`source_status=exact`, `candidate_status=candidate_not_found`) unit finding in sidecar; **10/19** carry high/critical severity in aggregated `defect_groups`; **9** are medium/low at unit-defect level only. Impact: inspect-loss population is 19 papers, not 10; severity mix matters for triage UX, not fusion. Quality risk: MEDIUM on inspect for all 19.
+
+## False-pass hypothesis
+
+Skip all unit checks on metadata-`review` while trusting metadata summary alone: **P1000R8** retains merged `review` but loses the only page-scoped critical `defect_groups` row in `--inspect`. A human clears on metadata heading drift without seeing table-corruption evidence. Verdict unchanged; localized false-clear risk is inspect-channel only (confirmed in 19-paper set above).
+
+## False-fail hypothesis
+
+None found on verdict path for metadata non-pass short-circuit. Tier-A fail-only skip (**141 calls**) is verdict-identical on all **32** metadata-fail papers (`suggested_verdict=fail` for 32/32 in sidecars).
+
+## What would change my mind
+
+Any v10 sidecar where `metadata_outline_check.verdict ∈ {fail, review}`, stripping `unit_checks`/`defect_groups` changes `suggested_verdict` or `fuse_verdicts(...).combined_verdict` when replayed against the paired whisker sidecar — current independent count: **0**.

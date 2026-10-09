@@ -2,6 +2,6 @@
 {"id": "abstract-term-fuzzy", "type": "present", "text": "polymorphic allocater", "max_diffs": 1, "checked": "verified"}
 {"id": "no-page-furniture", "type": "absent", "text": "Page 1 of 12", "checked": "verified"}
 {"id": "section-flow", "type": "order", "sequence": ["Motivation", "Design", "Wording"], "checked": "verified"}
-{"id": "results-cell", "type": "table", "cell": "executors", "neighbors": {"right": "wip", "up": "coroutines", "heading": "Feature"}, "checked": "verified"}
+{"id": "results-cell", "type": "table", "cell": "executors", "neighbors": {"right": "wip", "up": "coroutines", "heading": "Feature"}, "table_heading": "Feature", "checked": "verified"}
 {"id": "mass-energy", "type": "math", "text": "E = mc^2", "checked": "verified"}
 {"id": "draft-not-yet-checked", "type": "present", "text": "claim a human has not verified yet", "checked": "draft"}

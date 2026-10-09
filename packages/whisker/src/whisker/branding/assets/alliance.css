@@ -1,0 +1,322 @@
+/*
+ * Copyright (c) 2026 Vinnie Falco (vinnie.falco@gmail.com)
+ *
+ * Distributed under the Boost Software License, Version 1.0. (See accompanying
+ * file LICENSE_1_0.txt or copy at http://www.boost.org/LICENSE_1_0.txt)
+ *
+ * C++ Alliance report theme.
+ *
+ * Derived by measurement from assets/LAYOUT-REFERENCE.pdf, not by taste. Every
+ * colour and size below was read out of that document with
+ * benchmark/tools/extract_pdf_design.py. If the reference changes, re-run that
+ * tool and update these values rather than adjusting them by eye.
+ */
+
+:root {
+  --brand-red: #a81c21;
+  --brand-red-dark: #8e1519;
+  --code-red: #aa3344;
+
+  --ink: #000000;
+  --ink-soft: #333333;
+  --ink-muted: #4a4a4a;
+  --ink-faint: #6b6b6b;
+
+  --rule: #dfddd8;
+  --panel: #f5f4f1;
+  --panel-edge: #e8e6e1;
+
+  --body-size: 10pt;
+  --code-size: 8.2pt;
+  --h1-size: 16pt;
+  --h2-size: 13pt;
+  --h3-size: 11.5pt;
+  --h4-size: 9.5pt;
+
+  --line-height: 1.75;
+  --font-body: "Source Sans Pro", "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+  --font-code: "Cascadia Mono", "Consolas", "SF Mono", "DejaVu Sans Mono", monospace;
+}
+
+/* ------------------------------------------------------------------ page */
+
+@page {
+  size: A4;
+  /* Room for the running footer; the first page's masthead is in the flow. */
+  margin: 18mm 17mm 20mm 17mm;
+}
+
+html {
+  font-size: var(--body-size);
+}
+
+body {
+  font-family: var(--font-body);
+  font-size: var(--body-size);
+  line-height: var(--line-height);
+  color: var(--ink);
+  margin: 0;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/* ------------------------------------------------------- masthead + logo */
+
+.report-masthead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18pt;
+  border-bottom: 1.5pt solid var(--rule);
+  padding-bottom: 10pt;
+  margin-bottom: 26pt;
+}
+
+.report-masthead h1 {
+  font-size: var(--h1-size);
+  font-weight: 600;
+  color: var(--ink);
+  margin: 0;
+  line-height: 1.3;
+  border: 0;
+  padding: 0;
+}
+
+.report-masthead .report-logo {
+  flex: 0 0 auto;
+  width: 41pt;
+  height: auto;
+}
+
+.report-meta {
+  font-size: 8.5pt;
+  color: var(--ink-muted);
+  margin: -18pt 0 24pt 0;
+  line-height: 1.6;
+}
+
+.report-meta strong {
+  color: var(--ink-soft);
+  font-weight: 600;
+}
+
+/* --------------------------------------------------------------- headings */
+
+h1, h2, h3, h4, h5, h6 {
+  font-family: var(--font-body);
+  font-weight: 600;
+  color: var(--ink);
+  line-height: 1.35;
+  page-break-after: avoid;
+  break-after: avoid;
+}
+
+/* An in-flow H1 (a report without a masthead) still gets the brand rule. */
+h1 {
+  font-size: var(--h1-size);
+  margin: 0 0 14pt 0;
+  padding-bottom: 8pt;
+  border-bottom: 1.5pt solid var(--rule);
+}
+
+h2 {
+  font-size: var(--h2-size);
+  margin: 26pt 0 9pt 0;
+}
+
+h3 {
+  font-size: var(--h3-size);
+  margin: 19pt 0 7pt 0;
+}
+
+h4 {
+  font-size: var(--h4-size);
+  margin: 15pt 0 5pt 0;
+  color: var(--ink-soft);
+}
+
+h5, h6 {
+  font-size: var(--body-size);
+  margin: 13pt 0 4pt 0;
+  color: var(--ink-muted);
+}
+
+/* ------------------------------------------------------------------ text */
+
+p {
+  margin: 0 0 10pt 0;
+  orphans: 2;
+  widows: 2;
+}
+
+a {
+  color: var(--brand-red);
+  text-decoration: none;
+  border-bottom: 0.5pt solid rgba(168, 28, 33, 0.32);
+}
+
+strong {
+  font-weight: 600;
+  color: var(--ink);
+}
+
+em {
+  font-style: italic;
+}
+
+hr {
+  border: 0;
+  border-top: 1pt solid var(--rule);
+  margin: 20pt 0;
+}
+
+ul, ol {
+  margin: 0 0 10pt 0;
+  padding-left: 17pt;
+}
+
+li {
+  margin-bottom: 4pt;
+}
+
+li > p {
+  margin-bottom: 4pt;
+}
+
+/* ------------------------------------------------------------------ code */
+
+code {
+  font-family: var(--font-code);
+  font-size: var(--code-size);
+  color: var(--code-red);
+  /* The reference sets inline code in colour with no box; a background here
+     turns dense technical prose into a field of grey rectangles. */
+  background: none;
+  padding: 0;
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+}
+
+pre {
+  background: var(--panel);
+  border: 0.75pt solid var(--panel-edge);
+  border-left: 2.5pt solid var(--brand-red);
+  border-radius: 2pt;
+  padding: 9pt 11pt;
+  margin: 0 0 12pt 0;
+  overflow-x: auto;
+  page-break-inside: avoid;
+  break-inside: avoid;
+}
+
+pre code {
+  color: var(--ink-soft);
+  font-size: var(--code-size);
+  line-height: 1.5;
+  white-space: pre;
+}
+
+/* ------------------------------------------------------------ blockquote */
+
+blockquote {
+  margin: 0 0 12pt 0;
+  padding: 9pt 13pt;
+  background: var(--panel);
+  border-left: 2.5pt solid var(--brand-red);
+  color: var(--ink-muted);
+  font-style: italic;
+  page-break-inside: avoid;
+  break-inside: avoid;
+}
+
+blockquote p:last-child {
+  margin-bottom: 0;
+}
+
+/* ---------------------------------------------------------------- tables */
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 4pt 0 14pt 0;
+  font-size: 9pt;
+  page-break-inside: avoid;
+  break-inside: avoid;
+}
+
+thead th {
+  background: var(--panel);
+  font-weight: 600;
+  color: var(--ink);
+  text-align: left;
+  padding: 7pt 9pt;
+  border-bottom: 1pt solid var(--rule);
+  /* No vertical rules: the reference separates columns by whitespace only. */
+}
+
+tbody td {
+  padding: 6pt 9pt;
+  border-bottom: 0.5pt solid var(--rule);
+  vertical-align: top;
+}
+
+tbody tr:last-child td {
+  border-bottom: 1pt solid var(--rule);
+}
+
+/* Markdown alignment syntax maps onto these. */
+th[align="right"], td[align="right"] { text-align: right; }
+th[align="center"], td[align="center"] { text-align: center; }
+
+table code {
+  font-size: 7.8pt;
+}
+
+/* --------------------------------------------------------------- figures */
+
+img {
+  max-width: 100%;
+  height: auto;
+}
+
+figure {
+  margin: 0 0 14pt 0;
+  page-break-inside: avoid;
+  break-inside: avoid;
+}
+
+figcaption, .caption {
+  font-size: 8.5pt;
+  color: var(--ink-muted);
+  margin-top: 5pt;
+}
+
+/* ---------------------------------------------------------------- footer */
+
+.report-footer {
+  margin-top: 30pt;
+  padding-top: 9pt;
+  border-top: 1pt solid var(--rule);
+  font-size: 8pt;
+  color: var(--ink-faint);
+  display: flex;
+  justify-content: space-between;
+  gap: 12pt;
+}
+
+/* Utility for renderers that emit an explicit page-break marker. */
+.page-break {
+  page-break-after: always;
+  break-after: page;
+}
+
+@media print {
+  body {
+    margin: 0;
+  }
+
+  a {
+    /* Keep link colour in print: these reports are read on screen as PDFs. */
+    color: var(--brand-red);
+  }
+}
