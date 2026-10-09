@@ -1,0 +1,42 @@
+# 21 - Error handling
+
+**Verdict:** usable-with-conditions   (both lanes survive per-paper failures, but an errored adjudication leaves NO on-disk marker and neither sidecar carries run identity, so a merged record built from disk cannot distinguish error/absent/stale without new explicit status fields.)
+**Confidence:** high
+
+## Findings
+
+- [CRITICAL] An adjudication exception writes NO tapetum artifact at all: absence is indistinguishable from "never selected". Evidence: `packages/whisker/src/whisker/tapetum_llm/cli.py:334-346` — the per-paper firewall in `_adjudicate_one` catches `Exception`, logs one line, and returns `verdict_str=None`; `_persist_result` (cli.py:207-217) is only reached on success, and no stub/error sidecar is written on the except path. Baseline: 6 papers errored in the 2026-07-06 run (P2728R11/12, P3568R2, P3904R1, P3951R1, P4233R0). On-disk confirmation: all six DO have `<pid>.whisker.tapetum.json` today, but only because of a later rerun — whisker sidecars are timestamped 07/06 16:46 while their tapetum sidecars are 07/07 01:46-13:44 (e.g. `data/whisker/p2728r11.whisker.tapetum.json`, 3315 bytes, 07/07 13:44). During the error window those pids had nothing.
+  Impact: goal 3 directly. A merge that reads sidecars from disk sees "file missing" for both an errored paper and a paper tapetum never selected. C5 (never a partial result mistakable for complete) forces the merged record to carry an explicit LLM-lane status (`error` vs `not_selected` vs `adjudicated`); it cannot be inferred from file absence.
+
+- [HIGH] There are TWO inconsistent failure shapes, and the second one masquerades as a real verdict. Evidence: `packages/whisker/src/whisker/tapetum_llm/adjudicate.py:489-501` — when the pipeline dispatch completes but produces no `_result`, `adjudicate_paper` returns a stub `TapetumResult` with `suggested_verdict=review`, `confidence=0.0`, `primary_concern="pipeline did not produce a result"`. The CLI persists this as a normal sidecar and counts it as `review`, not `error` (cli.py:360-364 counts `error` only when `verdict_str is None`, i.e. only on exception). The sidecar schema (`models.py:114-136` `to_dict`) has no status field, so this stub is a full-looking record.
+  Impact: goals 2 and 3. A merged score would fuse a fabricated `review` (confidence 0.0) as if the LLM actually judged the paper. The merged record needs `status: error` for this shape too, or the stub must stop being persisted as a verdict.
+
+- [HIGH] Sidecar writes are non-atomic `write_text`, and downstream readers silently swallow corrupt JSON. Evidence: tapetum write at `cli.py:213-216`, whisker sidecar write at `packages/whisker/src/whisker/__main__.py:246-249`, report.json/report.md at `__main__.py:250-255` — all plain `Path.write_text`, no temp-file + `os.replace`. A crash mid-batch (or mid-file on Windows) leaves truncated JSON. `_collect_sidecar_dicts` (cli.py:196-202) catches `json.JSONDecodeError` and `continue`s, so a corrupt whisker sidecar silently drops that paper from candidate selection; `_read_whisker_sidecar` (cli.py:220-228) degrades to a `{"pid", "verdict": "?"}` stub.
+  Impact: goal 2's "persist in data/whisker/" and goal 3's merge both inherit this: a merge reader that copies the existing swallow-and-skip pattern converts a partial write into a silently absent lane, violating C5. Atomic replace + an explicit `unreadable` status on the merge side are both needed.
+
+- [HIGH] Neither sidecar carries run identity (timestamp, run id, or paper.md hash), so lane staleness is undetectable. Evidence: `TapetumResult.to_dict` (`models.py:114-136`) has no timestamp, no `schema_version` (the whisker sidecar has `schema_version: 3` per baseline; the tapetum one has neither). On-disk observation: whisker sidecars for the six errored pids are dated 07/06 16:46, their tapetum sidecars 07/07 01:46-13:44 — the two lanes were written up to 21 hours apart with no recorded correlation. The deterministic lane compounds this: an errored paper in `whisker --all` is logged and skipped (`__main__.py:218-232`) and its OLD sidecar from a previous run stays on disk, while `report.json` is rebuilt without it.
+  Impact: goal 3's merged artifact can silently fuse verdicts about two different versions of the markdown. The merged record needs each lane's provenance (at minimum a paper.md content hash or the source mtime) so a rerun of one lane marks the other `stale` instead of merging it.
+
+- [MED] The LLM retry budget is a hardcoded 2 attempts in the model backend, and the D10 `output_retries`/`ModelRetry` mechanism is unused. Evidence: `packages/pipeline/src/pipeline/model_backends.py:300` (`max_attempts = min(2, request_limit)`), truncation-growth retry at :376-396; `rg output_retries|ModelRetry` over `packages/whisker/src/whisker/tapetum_llm/` and `packages/pipeline/src/pipeline/` returns no matches. Baseline: 118 model retries and 6 exhaustions (truncated/invalid JSON) in 194 adjudications, a ~3% terminal-failure rate.
+  Impact: goal 1. Errors are frequent enough that the merge WILL see them routinely; and the on-disk evidence (all six errored papers adjudicated cleanly on rerun, e.g. p2728r11 -> pass at confidence 0.98) shows they are transient, so an explicit `error` status that a rerun can heal is the right model, not a permanent verdict.
+
+- [MED] `inspect_report.py` already models "LLM lane absent" and is the template the merge should generalize — but it conflates errored with never-adjudicated. Evidence: `packages/whisker/src/whisker/tapetum_llm/inspect_report.py:51-53` renders `- **whisker:** \`verdict\` (no advisory result)` when tapetum is `None`; verified it is fed `None` by the exception path (`cli.py:344-345` builds `(_read_whisker_sidecar(pid), None)` on failure). Chunking failures are pre-shaped the same way: `chunk_markdown` partial reads set `state.partial` and `_custom_decide` demotes pass->review with disclosure (`adjudicate.py:288-291`, `chunking.py:129-164`), never an error.
+  Impact: goal 3. The merged equivalent of "(no advisory result)" must split into at least `error` (ran, failed) and `not_selected` (select_candidates skipped it), because the operator action differs: rerun vs nothing.
+
+Recommended minimal status vocabulary for the merged per-paper record, forced by C5 and the findings above:
+
+- `llm.status: adjudicated | error | not_selected | unreadable` (with `stale` derivable from per-lane provenance rather than stored).
+- `det.status: scored | error` (the deterministic lane's `__main__.py:218-232` skip path needs the same explicit marker; today it leaves a stale sidecar).
+- `merged.status: complete | det_only` — `det_only` whenever `llm.status != adjudicated`, so a merged verdict is never presented as two-lane when one lane is missing. Plus one provenance field per lane (paper.md hash) to detect cross-lane staleness.
+
+## False-pass hypothesis
+
+Paper is reconverted after a tomd fix regresses tables; `whisker --all` reruns and says `pass`, but the paper's `<pid>.whisker.tapetum.json` from the previous conversion (which judged the OLD, good markdown as `pass`) is still on disk — the 21-hour lane gap observed on p2728r11 (whisker 07/06 16:46 vs tapetum 07/07 13:44) shows nothing prevents this. A merge reading both sidecars fuses pass+pass into a confident merged `pass`, but the LLM never saw the regressed markdown. Without a paper.md hash in the tapetum sidecar (`models.py:114-136` has none), the merge cannot detect it.
+
+## False-fail hypothesis
+
+The `adjudicate_paper` no-result stub (`adjudicate.py:489-501`): a transient pod outage makes the pipeline complete without a `_result`, persisting `suggested_verdict=review, confidence=0.0` as a normal-looking sidecar. A merged score that treats any non-pass LLM verdict as a demotion signal drags a clean deterministic `pass` down to merged `review`/`fail` on the strength of a verdict the model never actually rendered. The six errored papers all adjudicating `pass` at 0.98 confidence on rerun shows how wrong that fabricated `review` would have been.
+
+## What would change my mind
+
+Evidence that the exception path in `_adjudicate_one` (or the dispatch layer beneath it) already persists a machine-readable error artifact somewhere I did not find (e.g. a debug/trace sidecar written unconditionally with a status field), making file absence reliably mean "never selected" — that would demote the CRITICAL finding to a documentation issue and the verdict to plain usable.

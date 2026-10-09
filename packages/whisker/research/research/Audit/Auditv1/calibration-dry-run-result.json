@@ -1,0 +1,252 @@
+{
+  "schema_version": 4,
+  "kind": "whisker-calibration",
+  "n": 9,
+  "edge_ordering_ok": true,
+  "current": {
+    "unigram_coverage_fail_edge": 0.85,
+    "unigram_coverage_review_edge": 0.95
+  },
+  "fitted": {
+    "unigram_coverage_fail_edge": {
+      "name": "unigram_coverage_fail_edge",
+      "chosen": {
+        "threshold": 0.9706,
+        "tpr": 0.25,
+        "fpr": 0.0,
+        "precision": 1.0,
+        "tp": 1,
+        "fp": 0,
+        "tn": 5,
+        "fn": 3
+      },
+      "target_fpr": 0.05,
+      "method": "max_tpr_at_fpr",
+      "n_pos": 4,
+      "n_neg": 5,
+      "n": 9,
+      "curve": [
+        {
+          "threshold": 0.9628,
+          "tpr": 0.0,
+          "fpr": 0.0,
+          "precision": 0.0,
+          "tp": 0,
+          "fp": 0,
+          "tn": 5,
+          "fn": 4
+        },
+        {
+          "threshold": 0.9706,
+          "tpr": 0.25,
+          "fpr": 0.0,
+          "precision": 1.0,
+          "tp": 1,
+          "fp": 0,
+          "tn": 5,
+          "fn": 3
+        },
+        {
+          "threshold": 0.9712,
+          "tpr": 0.25,
+          "fpr": 0.2,
+          "precision": 0.5,
+          "tp": 1,
+          "fp": 1,
+          "tn": 4,
+          "fn": 3
+        },
+        {
+          "threshold": 0.9716,
+          "tpr": 0.5,
+          "fpr": 0.2,
+          "precision": 0.6667,
+          "tp": 2,
+          "fp": 1,
+          "tn": 4,
+          "fn": 2
+        },
+        {
+          "threshold": 0.9828,
+          "tpr": 0.75,
+          "fpr": 0.2,
+          "precision": 0.75,
+          "tp": 3,
+          "fp": 1,
+          "tn": 4,
+          "fn": 1
+        },
+        {
+          "threshold": 0.9886,
+          "tpr": 0.75,
+          "fpr": 0.4,
+          "precision": 0.6,
+          "tp": 3,
+          "fp": 2,
+          "tn": 3,
+          "fn": 1
+        },
+        {
+          "threshold": 0.9897,
+          "tpr": 0.75,
+          "fpr": 0.6,
+          "precision": 0.5,
+          "tp": 3,
+          "fp": 3,
+          "tn": 2,
+          "fn": 1
+        },
+        {
+          "threshold": 0.9944,
+          "tpr": 1.0,
+          "fpr": 0.6,
+          "precision": 0.5714,
+          "tp": 4,
+          "fp": 3,
+          "tn": 2,
+          "fn": 0
+        },
+        {
+          "threshold": 0.9999,
+          "tpr": 1.0,
+          "fpr": 0.8,
+          "precision": 0.5,
+          "tp": 4,
+          "fp": 4,
+          "tn": 1,
+          "fn": 0
+        },
+        {
+          "threshold": 1.9999,
+          "tpr": 1.0,
+          "fpr": 1.0,
+          "precision": 0.4444,
+          "tp": 4,
+          "fp": 5,
+          "tn": 0,
+          "fn": 0
+        }
+      ]
+    },
+    "unigram_coverage_review_edge": {
+      "name": "unigram_coverage_review_edge",
+      "chosen": {
+        "threshold": 0.9828,
+        "tpr": 0.5714,
+        "fpr": 0.0,
+        "precision": 1.0,
+        "tp": 4,
+        "fp": 0,
+        "tn": 2,
+        "fn": 3
+      },
+      "target_fpr": 0.05,
+      "method": "max_tpr_at_fpr",
+      "n_pos": 7,
+      "n_neg": 2,
+      "n": 9,
+      "curve": [
+        {
+          "threshold": 0.9628,
+          "tpr": 0.0,
+          "fpr": 0.0,
+          "precision": 0.0,
+          "tp": 0,
+          "fp": 0,
+          "tn": 2,
+          "fn": 7
+        },
+        {
+          "threshold": 0.9706,
+          "tpr": 0.1429,
+          "fpr": 0.0,
+          "precision": 1.0,
+          "tp": 1,
+          "fp": 0,
+          "tn": 2,
+          "fn": 6
+        },
+        {
+          "threshold": 0.9712,
+          "tpr": 0.2857,
+          "fpr": 0.0,
+          "precision": 1.0,
+          "tp": 2,
+          "fp": 0,
+          "tn": 2,
+          "fn": 5
+        },
+        {
+          "threshold": 0.9716,
+          "tpr": 0.4286,
+          "fpr": 0.0,
+          "precision": 1.0,
+          "tp": 3,
+          "fp": 0,
+          "tn": 2,
+          "fn": 4
+        },
+        {
+          "threshold": 0.9828,
+          "tpr": 0.5714,
+          "fpr": 0.0,
+          "precision": 1.0,
+          "tp": 4,
+          "fp": 0,
+          "tn": 2,
+          "fn": 3
+        },
+        {
+          "threshold": 0.9886,
+          "tpr": 0.5714,
+          "fpr": 0.5,
+          "precision": 0.8,
+          "tp": 4,
+          "fp": 1,
+          "tn": 1,
+          "fn": 3
+        },
+        {
+          "threshold": 0.9897,
+          "tpr": 0.5714,
+          "fpr": 1.0,
+          "precision": 0.6667,
+          "tp": 4,
+          "fp": 2,
+          "tn": 0,
+          "fn": 3
+        },
+        {
+          "threshold": 0.9944,
+          "tpr": 0.7143,
+          "fpr": 1.0,
+          "precision": 0.7143,
+          "tp": 5,
+          "fp": 2,
+          "tn": 0,
+          "fn": 2
+        },
+        {
+          "threshold": 0.9999,
+          "tpr": 0.8571,
+          "fpr": 1.0,
+          "precision": 0.75,
+          "tp": 6,
+          "fp": 2,
+          "tn": 0,
+          "fn": 1
+        },
+        {
+          "threshold": 1.9999,
+          "tpr": 1.0,
+          "fpr": 1.0,
+          "precision": 0.7778,
+          "tp": 7,
+          "fp": 2,
+          "tn": 0,
+          "fn": 0
+        }
+      ]
+    }
+  }
+}

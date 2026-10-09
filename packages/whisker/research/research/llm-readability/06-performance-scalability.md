@@ -1,0 +1,34 @@
+# 06 - Performance-Scalability
+
+**Verdict:** usable-with-conditions (+ Lane 3 and tapetum paths are deterministic and fine at corpus scale today, but hot loops scale O(facts × doc_size) and the default oracle batch path has no size budget on full-document edit distance)
+**Confidence:** high
+
+## Findings
+
+- [CRITICAL] `check_facts` re-normalizes the entire markdown once per `present`/`absent` fact via `normalized_text(md)`, which runs `textblock2unicode` (pylatexenc per inline `$...$`) then `clean_string` over the whole document. Evidence: `facts.py:343-347` (`normalized_text(fact.text), normalized_text(md)` inside `_evaluate`); `metrics.py:314-340` (`textblock2unicode` + `clean_string` chain). Baseline: papers **>1 MB** markdown exist (`tapetum_llm/constants.py:38-43`, `chunking.py:11`). Impact: **50 facts × 1 MB** is ~50 full-document normalize passes before any matching; this dominates CPU and allocations and makes Lane 3 guard impractical at olmOCR-scale fact counts (olmOCR-Bench: **7,010** tests over 1,403 PDFs per `05-web.md` Q1).
+
+- [HIGH] Each `table` fact rescans the full document with `_parse_pipe_tables(md)`; there is no cross-fact cache. Evidence: `facts.py:312` (`tables = _parse_pipe_tables(md)` inside `_check_table`, called from `_evaluate` per fact at `facts.py:366-367`). Impact: **N table facts** on a long paper with many pipe tables repeat O(lines) fence-aware parsing; pairs with TabVerse evidence that table structural tasks collapse at scale (`05-web.md` Q2: mean cell lookup **9.9%**, log(rows)/log(cols) covary with hardness).
+
+- [HIGH] Fuzzy presence uses a pure-Python free-start/free-end Levenshtein DP `_substring_edit_distance` at **O(len(needle) × len(region))** with per-row list allocation, while the rest of whisker documents rapidfuzz as the production Levenshtein path because pure Python "would hang for minutes" on full-document compares. Evidence: `facts.py:191-211` (nested loops, `prev`/`cur` lists); `metrics.py:67-72` (rapidfuzz "milliseconds instead of the minutes a pure-Python DP would take"). Impact: every `max_diffs > 0` present/absent/order item pays rapidfuzz `partial_ratio_alignment` on the haystack (`facts.py:229`) plus a Python DP window; at 1 MB normalized haystack this is the second explosion after repeated `normalized_text`.
+
+- [HIGH] Default `whisker --all` runs the markitdown oracle per paper: a second full conversion plus whole-document `text_nid(normalized_text(...), normalized_text(...))`, `table_score` (double `_extract_md_tables` + APTED TEDS per table pair), and `mhs` APTED on heading trees, with **no** `BLOCK_MATRIX_CELL_BUDGET` guard on the oracle nid path. Evidence: `__main__.py:212` (`score_paper` in batch loop); `score.py:283-284,212-214` (oracle + metrics); `match.py:253-255` vs `score.py:212` (budget exists only for bench block matching, not oracle). Baseline: sighting run scored **196/201** papers (`00-baseline.md:65-67`); corpus **~200** converted papers vs **2** with facts (`00-baseline.md:77-78`). Impact: **~200 papers × (convert + 2× normalize + Levenshtein + TEDS + MHS)** is the production batch cost; constants comment notes **~25 s** for a **1700-block** NED matrix before fallback (`constants.py:123-124`), but oracle never takes that fallback.
+
+- [MED] `order` facts normalize the haystack once but call `_position_within` → `_best_match` → `fuzz.partial_ratio_alignment(needle, haystack)` once per sequence item on the full normalized document. Evidence: `facts.py:354-358,229`. Impact: an order fact with **K** items on a 1 MB haystack triggers **K** full-document alignment scans in the worst case (after the per-fact `normalized_text(md)` if mixed with other types).
+
+- [MED] `math` facts run `_math_surface(md)` = `textblock2unicode` over the **entire** markdown per math fact. Evidence: `facts.py:351` (`_present_within(_math_surface(fact.text), _math_surface(md), ...)`). Impact: **4 math facts** (P4185R0 baseline count, `00-baseline.md:54-57`) on a formula-heavy arXiv-class paper means **4×** full-doc pylatexenc walks; olmOCR's math class is **3,385** tests (`05-web.md` Q1).
+
+- [MED] tapetum_llm oversize handling splits at `MAX_PAPER_MD_CHARS = 500_000` and triages chunks **serially** (one in-flight LLM request), with chunked papers skipping tier-2 escalation. Evidence: `tapetum_llm/constants.py:44`; `tapetum_llm/adjudicate.py:178-191,203-204`. Baseline sighting: **196** papers adjudicated (`00-baseline.md:65-67`); comment: **~6** corpus papers exceed the budget, a **2.5 MB** paper yields **~5-6** serial chunks (`constants.py:42-43`). Impact: wall-clock scales linearly with chunk count × model latency; HiChunk/MDKeyChunker validate H2-boundary chunking as structurally sound (`05-web.md` Q5) but serial triage makes a full sighting rerun on the largest papers the slow tail.
+
+- [LOW] Bench block matching is budgeted (`BLOCK_MATRIX_CELL_BUDGET = 400_000` cells) and fuzzy rescue is capped (`BLOCK_FUZZY_MAX_PRED_LEN = 2000`), but above budget the fallback still runs whole-document `text_nid` (rapidfuzz Levenshtein on both sides). Evidence: `match.py:253-255`; `constants.py:128,133`. Impact: large labeled bench pairs degrade to the same unbounded whole-doc path the oracle always uses; `_sub_gt_fuzzy_matching` remains **O(pred_len × gt_len)** per unmatched pair within the cap (`match.py:131-132`).
+
+## False-pass hypothesis
+
+An operator runs `whisker --all` (default oracle on **~200** papers, `00-baseline.md:65-78`) and never runs `whisker guard`/`whisker facts` because Lane 3 at **50 facts × 1 MB** would be prohibitively slow (`facts.py:343-347,312`); **163+** papers pass the reference-free hard gate with **zero** enforced comprehension facts (downstream-consumer persona pattern), so performance-induced omission of Lane 3 leaves token-preserving semantic corruption undetected while the batch completes in acceptable wall-clock.
+
+## False-fail hypothesis
+
+On a **1 MB** paper, repeated `normalized_text(md)` (`facts.py:343-347`) plus `fuzz.partial_ratio_alignment` on the full haystack (`facts.py:229`) could spuriously match a short `present` needle against unrelated prose in a megabyte of normalized alnum soup, causing a verified fact to pass when the intended locus is wrong; that is an evasion/correctness failure, but the same hot path makes adding enough distinct facts to disambiguate economically unrealistic, so teams shrink fact counts and leave blind spots.
+
+## What would change my mind
+
+A profile or benchmark showing `check_facts(md, facts)` on **1 MB** markdown with **50** verified facts (mix of present/table/order) completes in **<30 s** on CI hardware without changing asymptotics, or a patch that memoizes `normalized_text(md)`, `_math_surface(md)`, and `_parse_pipe_tables(md)` once per `check_facts` call reduces measured time by **≥10×** on that fixture.
