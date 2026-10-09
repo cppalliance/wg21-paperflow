@@ -1,0 +1,5 @@
+# TOC-stripping regression guard, total-loss bug paper: the body must
+# survive (p4004r1 is the partial-loss one).
+# Also issue-180 affected: header/footer detection counts distinct pages
+# (not doubled dual-path occurrences), so p4174r0 keeps its recovered
+# "There isn't a standard library tool ... any_of" body line.

@@ -11,9 +11,11 @@ golden/
   sources/     <stem>.pdf | <stem>.html        inputs to both nets
   snapshots/   <stem>.md (+ <stem>.prompts.json, + <stem>-figN.png)
   ideals/      <stem>.md
+  stems/       <stem>.txt                      PDF snapshot registry
   baselines.json
 ```
 
+- **Stem** (`stems/<stem>.txt`): registers one PDF paper for `test_pdf_golden`. The filename is the key: the test globs `stems/*.txt` and runs one byte-exact snapshot test per stem, so a golden without a stem file is not tested. The body is a free-form note about the paper and is never read. A new paper is a new file. Family-pin tests live in `packages/tomd/tests/pdf_pins/`, one module per paper.
 - **Source** (`sources/<stem>.{pdf,html}`): the paper, input to both nets.
 - **Snapshot** (`snapshots/<stem>.md`): a byte-exact lock on tomd's *current*
   output. Guarded by `test_pdf_golden` / `test_html_golden`. Answers "did the
@@ -40,7 +42,7 @@ Selected for structural diversity:
 | p4004r1 | TOC-strip regression (#122): small partial-loss paper; mid-body sections must survive |
 | p4100r1 | leaked heading-kind TOC (#122 pt2): empty duplicate-heading TOC block removed; one heading per section |
 | p3968r0 | promotion-dedup guard (pt3): confident page doubled by a neighbour's promotion; each section must appear exactly once |
-| p4096r0 | shattered tables (#380): Google Docs export, every wrapped cell line its own block; four tables pinned by family in `test_p4096r0_table_family_pins` |
+| p4096r0 | shattered tables (#380): Google Docs export, every wrapped cell line its own block; four tables pinned by family in `pdf_pins/test_p4096r0.py` |
 
 ## Refreshing HTML baselines
 

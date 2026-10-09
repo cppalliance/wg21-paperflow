@@ -1,0 +1,11 @@
+# Header-grid guard (#414): P4098R1's six Claim | Source | Year |
+# Evidence tables (§2.1 to §2.6, tomd pages 2 to 7) are Google-Docs
+# exports whose Year column is never a block x0 (fused into the Source
+# block) and sits 39pt before Evidence, so the body's block x0s cluster
+# into three columns. The header row block knows four; the side-by-side
+# detector adopts the header's grid when every body line sits on it.
+# Pages 4 and 5 additionally arrive in two-column reading order (every
+# Claim block before the right-hand blocks); the detector regroups the
+# body by y on pages the pipeline did not classify as two-column. The
+# golden pins the four-column cells; pdf_pins/test_p4098r1.py pins the
+# routing.

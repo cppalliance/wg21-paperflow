@@ -195,6 +195,13 @@ class ModelBackend(ABC):
         """Words-to-tokens multiplier used by batching."""
         return self._token_multiplier if self._token_multiplier > 0 else 1.3
 
+    _temperature: float = 0.0
+
+    @property
+    def temperature(self) -> float:
+        """Sampling temperature for this model (default 0.0 for deterministic decode)."""
+        return self._temperature
+
     @abstractmethod
     async def run(
         self,
@@ -249,6 +256,7 @@ class VllmThinkingBackend(ModelBackend):
                  max_context_window: int = 131072,
                  chars_per_token: float = 0,
                  token_multiplier: float = 0,
+                 temperature: float = 0.0,
                  stream: bool = True,
                  tools_capable: bool = False, **kwargs: Any) -> None:
         self._base_url = base_url
@@ -257,6 +265,7 @@ class VllmThinkingBackend(ModelBackend):
         self._max_context_window = max_context_window
         self._chars_per_token = chars_per_token
         self._token_multiplier = token_multiplier
+        self._temperature = float(temperature)
         self._stream = stream
         self.tools_capable = tools_capable
 
@@ -315,7 +324,7 @@ class VllmThinkingBackend(ModelBackend):
                     stream = await client.chat.completions.create(
                         model=self._model,
                         messages=messages,
-                        temperature=0.0,
+                        temperature=self._temperature,
                         top_p=1.0,
                         seed=0,
                         max_tokens=effective_max,
@@ -338,7 +347,7 @@ class VllmThinkingBackend(ModelBackend):
                     response = await client.chat.completions.create(
                         model=self._model,
                         messages=messages,
-                        temperature=0.0,
+                        temperature=self._temperature,
                         top_p=1.0,
                         seed=0,
                         max_tokens=effective_max,
@@ -453,7 +462,7 @@ class VllmThinkingBackend(ModelBackend):
         model = OpenAIChatModel(self._model, provider=provider)
 
         settings = ModelSettings(
-            temperature=0.0,
+            temperature=self._temperature,
             top_p=1.0,
             seed=0,
             parallel_tool_calls=False,
@@ -511,13 +520,15 @@ class Llama3Backend(ModelBackend):
     def __init__(self, *, base_url: str, api_key: str, model: str,
                  max_context_window: int = 131072,
                  chars_per_token: float = 0,
-                 token_multiplier: float = 0, **kwargs: Any) -> None:
+                 token_multiplier: float = 0,
+                 temperature: float = 0.0, **kwargs: Any) -> None:
         self._base_url = base_url
         self._api_key = api_key
         self._model_name = model
         self._max_context_window = max_context_window
         self._chars_per_token = chars_per_token
         self._token_multiplier = token_multiplier
+        self._temperature = float(temperature)
 
     async def run(
         self,
@@ -545,7 +556,7 @@ class Llama3Backend(ModelBackend):
         model = OpenAIChatModel(self._model_name, provider=provider)
 
         settings = ModelSettings(
-            temperature=0.0,
+            temperature=self._temperature,
             top_p=1.0,
             seed=0,
             parallel_tool_calls=False,
@@ -603,13 +614,15 @@ class Qwen3Backend(ModelBackend):
     def __init__(self, *, base_url: str, api_key: str, model: str,
                  max_context_window: int = 131072,
                  chars_per_token: float = 0,
-                 token_multiplier: float = 0, **kwargs: Any) -> None:
+                 token_multiplier: float = 0,
+                 temperature: float = 0.0, **kwargs: Any) -> None:
         self._base_url = base_url
         self._api_key = api_key
         self._model_name = model
         self._max_context_window = max_context_window
         self._chars_per_token = chars_per_token
         self._token_multiplier = token_multiplier
+        self._temperature = float(temperature)
 
     async def run(
         self,
@@ -639,7 +652,7 @@ class Qwen3Backend(ModelBackend):
         extra: dict[str, Any] = {"top_k": 1}
 
         settings = ModelSettings(
-            temperature=0.0,
+            temperature=self._temperature,
             top_p=1.0,
             seed=0,
             parallel_tool_calls=False,
@@ -695,11 +708,13 @@ class AnthropicBackend(ModelBackend):
 
     def __init__(self, *, model: str, max_context_window: int = 200000,
                  chars_per_token: float = 0,
-                 token_multiplier: float = 0, **kwargs: Any) -> None:
+                 token_multiplier: float = 0,
+                 temperature: float = 0.0, **kwargs: Any) -> None:
         self._model_name = model
         self._max_context_window = max_context_window
         self._chars_per_token = chars_per_token
         self._token_multiplier = token_multiplier
+        self._temperature = float(temperature)
 
     async def run(
         self,
@@ -720,7 +735,7 @@ class AnthropicBackend(ModelBackend):
         from pydantic_ai.usage import UsageLimits
 
         settings = ModelSettings(
-            temperature=0.0,
+            temperature=self._temperature,
             parallel_tool_calls=False,
             max_tokens=max_tokens,
         )

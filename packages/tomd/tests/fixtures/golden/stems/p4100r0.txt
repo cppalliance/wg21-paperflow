@@ -1,0 +1,5 @@
+# Protocol-header guard (#438): P4100R0 section 7.1 (tomd page 8) kept
+# the first data row as its header and leaked "# Paper Abstraction" as
+# a heading. A second spanning-header look prepends that line when the
+# absorbed header cell is a bare integer. The numbered row stays a body
+# row. Page 9 stage two was already headed "# | Paper | Abstraction".

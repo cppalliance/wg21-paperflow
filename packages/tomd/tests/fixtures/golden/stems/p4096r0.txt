@@ -1,0 +1,8 @@
+# Shattered-table guard (#380): P4096R0 is a Google-Docs export whose
+# tables arrive as one block per wrapped line. §5.1 and §5.4 are claimed
+# by the side-by-side pre-scanner (atomized header over a shattered
+# body), the two §5.2 tables stay with Pass 1 (row blocks with col-1+
+# wrapped tails merged backward, a trailing continuation absorbed
+# in-loop so the partial third row still joins). The golden pins all
+# four tables plus the prose and headings around them;
+# pdf_pins/test_p4096r0.py guards the routing itself.

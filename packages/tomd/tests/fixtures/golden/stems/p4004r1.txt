@@ -1,0 +1,10 @@
+# TOC-stripping regression guard, partial-loss bug paper (sensitive
+# mid-body guard; p4174r0 is the total-loss one). The "TOC stays
+# stripped" direction is covered by the synthetic test_toc.py cases, not
+# a golden: no corpus paper cleanly strips its visible (space-separated
+# dot-leader) TOC, so a golden would only enshrine a pre-existing leak.
+# Also issue-180 affected: header/footer detection counts distinct pages
+# (not doubled dual-path occurrences), so p4004r1 keeps its two bare
+# "- N -" page-number lines. The page numbers are an accepted chrome
+# residual (another ticket should track the per-item page-number strip
+# that will remove them); they are never body.

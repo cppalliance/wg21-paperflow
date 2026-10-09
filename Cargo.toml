@@ -1,6 +1,10 @@
 [workspace]
 resolver = "3"
 members = ["crates/*"]
+# Path dependencies inside the workspace directory would otherwise be
+# adopted as members and inherit *this* root's workspace tables; the nested
+# promptforge checkout is its own workspace.
+exclude = ["vendor/promptforge"]
 
 [workspace.package]
 version = "0.1.0"

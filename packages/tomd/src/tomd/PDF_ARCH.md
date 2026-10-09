@@ -288,6 +288,10 @@ Tightening similarity without prompts; loosening TOC detection; aggressive parag
 
 - After standard columnar detection, scan remaining blocks for **side-by-side tables** where each cell is a separate MuPDF block (e.g. "Tony Tables" with multi-line code cells). Cluster body block x-positions into columns, group by y-overlap into rows, require **at least two** valid data rows ([`_detect_side_by_side_tables`](lib/pdf/table.py)).
 
+**Horizontal-row tables (Pass 3)**
+
+- Narrow poll and vote grids arrive as blocks whose lines sit **side by side on one y-level** (`_block_horizontal_row`); adjacent such blocks with the same cell count form the rows ([`_detect_horizontal_row_tables`](lib/pdf/table.py)). A **lone vote header** (every cell in `_VOTE_HEADER_CELLS`, no horizontal-row block within `_PARTIAL_ROW_MAX_Y_GAP` below it, `_is_lone_vote_header`) is a suggested poll not yet taken and forms a 2-row table with a **synthesized empty body row**; without it, three consecutive poll headers and the captions between them were fused by Pass 4 into one table (P3978R0 §2.1).
+
 **Post-passes (pass-agnostic)**
 
 - **Header cluster absorption:** free blocks directly above a table whose lines each sit on a table column become the header row; stacked short lines in one column join with a space (`_collect_header_cluster`). Prose above the table (a line not on any column, or two lines on one baseline) ends the cluster.

@@ -1,0 +1,2 @@
+# Code-block extraction regression guard (issue #128): the only gutter
+# golden (left source-line-number column inside the fence).

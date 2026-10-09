@@ -35,9 +35,12 @@ from tomd.lib.pdf.table import (
     _detect_banded_rotated_tables,
 )
 from tomd.lib.pdf.pipeline import (
+    _column_of,
     _column_aware_sort,
     _detect_column_split,
     _detect_drawing_grids,
+    _drop_leading_contents,
+    _insert_table_sections,
 )
 
 # Page height of a 595x842 portrait page (P3100R6 geometry), shared by
@@ -2159,6 +2162,791 @@ class TestHeaderGridPrepass:
             "2.3 Networking Dependency (2018-2021)"]
 
 
+def _citation_comparison_blocks(
+    *,
+    left_header: tuple[str, ...],
+    right_header: str,
+    left_body: tuple[str, ...],
+    right_body: tuple[str, ...],
+    atomized_body: bool = True,
+    populate_right: bool = True,
+    inflate_xs: tuple[float, ...] = (180.0, 480.0),
+    y_hdr: float = 100.0,
+    page: int = 0,
+) -> list[Block]:
+    """Two-column citation comparison box plus later x-cluster inflators.
+
+    Seed is a regular two-line header block (left first line + right).
+    Extra *left_header* lines are stacked blocks in column 0, as when
+    the section number wraps off `P... Section` (#427 printed p.7).
+    The quoted body is either one block per wrapped line or one
+    multi-line row block (T1 / Pass 1). Inflators at other x-positions
+    reproduce later prose/boxes that push body x-clusters above 2.
+    """
+    P = page
+    H = 13.0
+    c0, c1 = 70.0, 300.0
+    blocks = [
+        _geo_block(P, (left_header[0], c0, y_hdr, c0 + 140.0, y_hdr + H),
+                   (right_header, c1, y_hdr, c1 + 150.0, y_hdr + H)),
+    ]
+    y_next = y_hdr + H + 1.0
+    for extra in left_header[1:]:
+        blocks.append(_geo_block(
+            P, (extra, c0, y_next, c0 + 40.0, y_next + H)))
+        y_next += H + 1.0
+    y_body = y_next + 14.0
+    if atomized_body:
+        for k, left in enumerate(left_body):
+            yy = y_body + k * (H + 4.0)
+            blocks.append(_geo_block(
+                P, (left, c0, yy, c0 + 120.0, yy + H)))
+            if populate_right:
+                blocks.append(_geo_block(
+                    P, (right_body[k], c1, yy, c1 + 120.0, yy + H)))
+        y_last = y_body + (len(left_body) - 1) * (H + 4.0) + H
+    else:
+        lines = [
+            (left_body[0], c0, y_body, c0 + 120.0, y_body + H),
+            (right_body[0], c1, y_body, c1 + 120.0, y_body + H),
+        ]
+        blocks.append(_geo_block(P, *lines))
+        y_last = y_body + H
+    for n, x in enumerate(inflate_xs):
+        yy = y_last + 60.0 + n * 20.0
+        blocks.append(_geo_block(
+            P, (f"Later boxed note {n + 1}.", x, yy, x + 80.0, yy + H)))
+    blocks.sort(key=lambda b: ((b.bbox[1] + b.bbox[3]) / 2, b.bbox[0]))
+    return blocks
+
+
+def _stacked_citation_comparison_blocks() -> list[Block]:
+    """Two citation boxes on one page, full-width heading between them.
+
+    The heading spills both columns so the first scan stops; the
+    pre-scanner must resume after the first box instead of jumping to
+    the page end (i = j).
+    """
+    first = _citation_comparison_blocks(
+        left_header=("P2300R10 Section 4.16",),
+        right_header="P2300R10 Section 4.15",
+        left_body=('"it is sensible to pass', "both the error channel"),
+        right_body=('"In other cases, the', "partial success is kept"),
+        inflate_xs=(),
+        y_hdr=100.0,
+    )
+    heading = _geo_block(
+        0, ("Dismiss, Then Adopt", 56.7, 200.0, 420.0, 214.0))
+    second = _citation_comparison_blocks(
+        left_header=("P2300R10 Section 4.17",),
+        right_header="N5000R1 Section 2.1",
+        left_body=('"Many senders can be', "made awaitable"),
+        right_body=('"Only some senders can', "be made awaitable"),
+        inflate_xs=(180.0, 480.0),
+        y_hdr=230.0,
+    )
+    blocks = first + [heading] + second
+    blocks.sort(key=lambda b: ((b.bbox[1] + b.bbox[3]) / 2, b.bbox[0]))
+    return blocks
+
+
+def _abutting_citation_boxes(n: int, gap: float = 30.0) -> list[Block]:
+    """N citation boxes on one page, *gap* pt apart, no heading between.
+
+    The next header sits inside the aligned scan gap and outside the
+    row band, so a scan that keeps walking treats it as body.
+    """
+    blocks: list[Block] = []
+    y = 100.0
+    for k in range(n):
+        blocks.extend(_citation_comparison_blocks(
+            left_header=(f"P2300R10 Section 4.{16 + k}",),
+            right_header=f"N5000R1 Section {k + 1}.1",
+            left_body=('"left quote line', f"continues {k}"),
+            right_body=('"right quote line', f"continues {k}"),
+            inflate_xs=(),
+            y_hdr=y,
+        ))
+        # Header height 13, pad 1, body offset 14, two lines pitched 17,
+        # last line height 13: bottom is y + 58.
+        y = y + 58.0 + gap
+    blocks.sort(key=lambda b: ((b.bbox[1] + b.bbox[3]) / 2, b.bbox[0]))
+    return blocks
+
+
+def _ordinary_atomized_five_row(y_hdr: float, tag: str) -> list[Block]:
+    """Non-citation 2-col atomized table with five body rows (min_rows=5)."""
+    H = 13.0
+    c0, c1 = 70.0, 300.0
+    blocks = [
+        _geo_block(0, (f"Left {tag}", c0, y_hdr, c0 + 80.0, y_hdr + H),
+                   (f"Right {tag}", c1, y_hdr, c1 + 80.0, y_hdr + H)),
+    ]
+    for r in range(5):
+        # Pitch > _SBS_ROW_Y_BAND so each pair is its own body row.
+        yy = y_hdr + 24.0 + r * 28.0
+        blocks.append(_geo_block(
+            0, (f"{tag} a{r}", c0, yy, c0 + 80.0, yy + H)))
+        blocks.append(_geo_block(
+            0, (f"{tag} b{r}", c1, yy, c1 + 80.0, yy + H)))
+    return blocks
+
+
+def _stacked_ordinary_atomized_tables() -> list[Block]:
+    """Two ordinary atomized tables plus a full-width heading.
+
+    Current scan jumps to page end after the first claim (i = j), so
+    the pre-pass emits only the first table.
+    """
+    first = _ordinary_atomized_five_row(100.0, "one")
+    heading = _geo_block(
+        0, ("A full width heading between tables", 56.7, 320.0, 500.0, 334.0))
+    second = _ordinary_atomized_five_row(350.0, "two")
+    blocks = first + [heading] + second
+    blocks.sort(key=lambda b: ((b.bbox[1] + b.bbox[3]) / 2, b.bbox[0]))
+    return blocks
+
+
+def _two_line_citation_blocks(**kwargs) -> list[Block]:
+    """Regular two-line 2-col citation header, wrapped atomized body."""
+    return _citation_comparison_blocks(
+        left_header=("P2300R10 Section 1.2",),
+        right_header="P2300R10 Section 4.16",
+        left_body=('"senders are not a', "good model for this"),
+        right_body=('"coroutines are not a', "good model either"),
+        **kwargs)
+
+
+def _wrapped_citation_header_blocks(**kwargs) -> list[Block]:
+    """Atomized header: left `P... Section` + stacked `4.8`, right citation."""
+    return _citation_comparison_blocks(
+        left_header=("P2300R10 Section", "4.8"),
+        right_header="P2300R10 Section 4.7",
+        left_body=('"first yes then no', "is not a protocol"),
+        right_body=('"stop token is the', "cancellation model"),
+        **kwargs)
+
+
+def _split_citation_header_blocks(
+    *,
+    column_first: bool = True,
+    inflate_xs: tuple[float, ...] = (400.0,),
+) -> list[Block]:
+    """Printed p.7 4.8/4.7 box: three separate header blocks.
+
+    Left `P2300R10 Section` and stacked `4.8` at x=66.7, right
+    `P2300R10 Section 4.7` at x=169.3. Each header cell is its own
+    single-line block, so `_block_column_positions` is None. Body gap
+    after `4.8` is > `_ATOMIZED_HDR_MAX_LINE_GAP` (real: 14.9pt).
+    *column_first* matches MuPDF extraction order (left column, then
+    right). The y-mid sort is the other legal reading order.
+    """
+    P = 0
+    H = 13.6
+    c0, c1 = 66.7, 169.3
+    y_hdr, y_wrap, y_body = 247.2, 265.7, 294.2
+    header = [
+        _geo_block(P, ("P2300R10 Section", c0, y_hdr, c0 + 80.0, y_hdr + H)),
+        _geo_block(P, ("4.8", c0, y_wrap, c0 + 20.0, y_wrap + H)),
+        _geo_block(P, ("P2300R10 Section 4.7", c1, y_hdr, c1 + 140.0, y_hdr + H)),
+    ]
+    if not column_first:
+        header = sorted(header, key=lambda b: ((b.bbox[1] + b.bbox[3]) / 2,
+                                               b.bbox[0]))
+    y_wrap2 = 312.7
+    body = [
+        _geo_block(P, ('"Senders are', c0, y_body, c0 + 80.0, y_body + H)),
+        _geo_block(P, ('forkable"', c0, y_wrap2, c0 + 50.0, y_wrap2 + H)),
+        _geo_block(P, (
+            '"A single-shot sender can only be connected once."',
+            c1, y_body, c1 + 200.0, y_body + H)),
+    ]
+    heading = _geo_block(
+        P, ("4. Example Code", 56.7, 423.5, 160.0, 441.2))
+    blocks = header + body + [heading]
+    y_last = y_wrap2 + H
+    for n, x in enumerate(inflate_xs):
+        yy = y_last + 60.0 + n * 20.0
+        blocks.append(_geo_block(
+            P, (f"Later boxed note {n + 1}.", x, yy, x + 80.0, yy + H)))
+    return blocks
+
+
+def _split_header_pair(
+    left: str,
+    right: str,
+    *,
+    wrap: str | None = None,
+    x0: float = 66.7,
+    x1: float = 169.3,
+    extra_col: tuple[str, float] | None = None,
+    populate_right: bool = True,
+) -> list[Block]:
+    """Two (or three) separate header blocks plus one atomized body row."""
+    P = 0
+    H = 13.6
+    y_hdr, y_wrap, y_body = 247.2, 265.7, 294.2
+    blocks = [
+        _geo_block(P, (left, x0, y_hdr, x0 + 80.0, y_hdr + H)),
+        _geo_block(P, (right, x1, y_hdr, x1 + 140.0, y_hdr + H)),
+    ]
+    if wrap is not None:
+        blocks.append(_geo_block(
+            P, (wrap, x0, y_wrap, x0 + 20.0, y_wrap + H)))
+    if extra_col is not None:
+        text, x2 = extra_col
+        blocks.append(_geo_block(
+            P, (text, x2, y_hdr, x2 + 80.0, y_hdr + H)))
+        blocks.append(_geo_block(
+            P, ('"third quote"', x2, y_body, x2 + 80.0, y_body + H)))
+    blocks.append(_geo_block(
+        P, ('"left quote"', x0, y_body, x0 + 80.0, y_body + H)))
+    if populate_right:
+        blocks.append(_geo_block(
+            P, ('"right quote"', x1, y_body, x1 + 80.0, y_body + H)))
+    return blocks
+
+
+class TestCitationSectionHeaderPrepass:
+    """Two-column WG21 citation-section headers over one atomized quoted
+    row (#427 comparison boxes). Later prose inflates body x-clusters;
+    the pre-scanner adopts the recovered two-column grid only for this
+    family, and only then accepts min_rows=1. T1-shaped one-block bodies
+    stay with Pass 1."""
+
+    def test_two_line_citation_header_one_atomized_row(self):
+        sections, used = _detect_side_by_side_tables(
+            _two_line_citation_blocks(), atomized_only=True)
+        assert len(sections) == 1
+        sec = sections[0]
+        assert sec.table_source == "side_by_side_prepass"
+        assert len(sec.columns) == 2
+        assert all(len(row) == 2 for row in sec.columns)
+        assert [_cell_text(c) for c in sec.columns[0]] == [
+            "P2300R10 Section 1.2", "P2300R10 Section 4.16"]
+        assert [_cell_text(c) for c in sec.columns[1]] == [
+            '"senders are not a good model for this',
+            '"coroutines are not a good model either']
+        assert len(used) == 5  # header + 4 body line blocks; inflators out
+
+    def test_wrapped_citation_header_stacked_section_number(self):
+        sections, _ = _detect_side_by_side_tables(
+            _wrapped_citation_header_blocks(), atomized_only=True)
+        assert len(sections) == 1
+        sec = sections[0]
+        assert sec.table_source == "side_by_side_prepass"
+        assert [_cell_text(c) for c in sec.columns[0]] == [
+            "P2300R10 Section 4.8", "P2300R10 Section 4.7"]
+        assert [_cell_text(c) for c in sec.columns[1]] == [
+            '"first yes then no is not a protocol',
+            '"stop token is the cancellation model']
+
+    def test_end_to_end_citation_headers_are_2x2_prepass(self):
+        for blocks in (_two_line_citation_blocks(),
+                       _wrapped_citation_header_blocks()):
+            sections, remaining = detect_tables(blocks)
+            assert len(sections) == 1
+            sec = sections[0]
+            assert sec.table_source == "side_by_side_prepass"
+            assert len(sec.columns) == 2
+            assert all(len(row) == 2 for row in sec.columns)
+            assert [b.lines[0].spans[0].text for b in remaining] == [
+                "Later boxed note 1.", "Later boxed note 2."]
+
+    def test_split_citation_header_three_separate_blocks(self):
+        """#427 printed p.7: three one-line header blocks, not a fused seed."""
+        for column_first in (True, False):
+            blocks = _split_citation_header_blocks(column_first=column_first)
+            assert all(
+                _block_column_positions(b) is None
+                for b in blocks[:3])
+            sections, used = _detect_side_by_side_tables(
+                blocks, atomized_only=True)
+            assert len(sections) == 1
+            sec = sections[0]
+            assert sec.table_source == "side_by_side_prepass"
+            assert len(sec.columns) == 2
+            assert all(len(row) == 2 for row in sec.columns)
+            assert [_cell_text(c) for c in sec.columns[0]] == [
+                "P2300R10 Section 4.8", "P2300R10 Section 4.7"]
+            assert [_cell_text(c) for c in sec.columns[1]] == [
+                '"Senders are forkable"',
+                '"A single-shot sender can only be connected once."']
+            heading = next(
+                b for b in blocks
+                if b.lines[0].spans[0].text == "4. Example Code")
+            assert blocks.index(heading) not in used
+            # Pass 2 must not use this seed; the pre-pass owns it.
+            assert _detect_side_by_side_tables(blocks) == ([], set())
+
+    def test_end_to_end_split_citation_header_is_2x2_prepass(self):
+        blocks = _split_citation_header_blocks()
+        sections, remaining = detect_tables(blocks)
+        assert len(sections) == 1
+        sec = sections[0]
+        assert sec.table_source == "side_by_side_prepass"
+        assert len(sec.columns) == 2
+        assert all(len(row) == 2 for row in sec.columns)
+        assert [_cell_text(c) for c in sec.columns[0]] == [
+            "P2300R10 Section 4.8", "P2300R10 Section 4.7"]
+        assert [b.lines[0].spans[0].text for b in remaining] == [
+            "4. Example Code", "Later boxed note 1."]
+
+    def test_ordinary_split_headers_rejected(self):
+        blocks = _split_header_pair("Before", "After")
+        assert _detect_side_by_side_tables(
+            blocks, atomized_only=True)[0] == []
+
+    def test_one_column_citation_split_rejected(self):
+        blocks = _split_header_pair(
+            "P2300R10 Section", "orphan",
+            wrap="4.8", populate_right=False)
+        # Drop the non-citation right header so the cluster is 1-col.
+        blocks = [b for b in blocks
+                  if b.lines[0].spans[0].text != "orphan"]
+        assert _detect_side_by_side_tables(
+            blocks, atomized_only=True)[0] == []
+
+    def test_three_column_citation_split_rejected(self):
+        blocks = _split_header_pair(
+            "P2300R10 Section 1.0",
+            "P2300R10 Section 2.0",
+            extra_col=("P2300R10 Section 3.0", 360.0))
+        assert _detect_side_by_side_tables(
+            blocks, atomized_only=True)[0] == []
+
+    def test_non_citation_two_col_split_cluster_rejected(self):
+        blocks = _split_header_pair("Claim", "Source")
+        assert _detect_side_by_side_tables(
+            blocks, atomized_only=True)[0] == []
+
+    def test_non_citation_headers_same_geometry_rejected(self):
+        blocks = _citation_comparison_blocks(
+            left_header=("Before",),
+            right_header="After",
+            left_body=('"senders are not a', "good model for this"),
+            right_body=('"coroutines are not a', "good model either"),
+        )
+        sections, _ = _detect_side_by_side_tables(
+            blocks, atomized_only=True)
+        assert sections == []
+
+    def test_citation_header_one_block_body_stays_with_pass1(self):
+        """T1 geometry: citation header over one multi-line row block.
+        Not atomized; the pre-pass must not steal it at min_rows=1."""
+        blocks = _two_line_citation_blocks(atomized_body=False)
+        sections, _ = _detect_side_by_side_tables(
+            blocks, atomized_only=True)
+        assert sections == []
+        sections, remaining = detect_tables(blocks)
+        assert len(sections) == 1
+        assert sections[0].table_source == "horizontal_rows"
+        assert len(sections[0].columns) == 2
+        assert [_cell_text(c) for c in sections[0].columns[0]] == [
+            "P2300R10 Section 1.2", "P2300R10 Section 4.16"]
+        assert [_cell_text(c) for c in sections[0].columns[1]] == [
+            '"senders are not a', '"coroutines are not a']
+        assert [b.lines[0].spans[0].text for b in remaining] == [
+            "Later boxed note 1.", "Later boxed note 2."]
+
+    def test_body_populating_only_one_header_column_rejected(self):
+        blocks = _two_line_citation_blocks(populate_right=False)
+        sections, _ = _detect_side_by_side_tables(
+            blocks, atomized_only=True)
+        assert sections == []
+
+    def test_stacked_citation_boxes_both_claimed(self):
+        """Two citation boxes separated by full-width prose: both 2x2,
+        heading unconsumed. Resume is citation-prepass only."""
+        blocks = _stacked_citation_comparison_blocks()
+        sections, used = _detect_side_by_side_tables(
+            blocks, atomized_only=True)
+        assert len(sections) == 2
+        assert all(s.table_source == "side_by_side_prepass" for s in sections)
+        assert all(len(s.columns) == 2 and all(len(r) == 2 for r in s.columns)
+                   for s in sections)
+        assert [_cell_text(c) for c in sections[0].columns[0]] == [
+            "P2300R10 Section 4.16", "P2300R10 Section 4.15"]
+        assert [_cell_text(c) for c in sections[1].columns[0]] == [
+            "P2300R10 Section 4.17", "N5000R1 Section 2.1"]
+        heading = next(b for b in blocks
+                       if b.lines[0].spans[0].text == "Dismiss, Then Adopt")
+        assert blocks.index(heading) not in used
+        sections_e2e, remaining = detect_tables(blocks)
+        assert len(sections_e2e) == 2
+        assert [b.lines[0].spans[0].text for b in remaining] == [
+            "Dismiss, Then Adopt",
+            "Later boxed note 1.",
+            "Later boxed note 2.",
+        ]
+
+    def test_value_column_line_after_the_row_stays_out(self):
+        """A same-column sentence 30pt under the quote is not a wrap.
+
+        30pt is inside the aligned scan gap (50pt) and outside the row
+        band (10pt). The line must stay prose.
+        """
+        blocks = _two_line_citation_blocks(inflate_xs=())
+        last_y1 = max(b.bbox[3] for b in blocks)
+        y = last_y1 + 30.0
+        prose = _geo_block(
+            0, ("A later sentence on the value column.",
+                300.0, y, 480.0, y + 13.0))
+        blocks.append(prose)
+        blocks.sort(key=lambda b: ((b.bbox[1] + b.bbox[3]) / 2, b.bbox[0]))
+        sections, used = _detect_side_by_side_tables(
+            blocks, atomized_only=True)
+        assert len(sections) == 1
+        assert len(sections[0].columns) == 2
+        body = " ".join(_cell_text(c) for row in sections[0].columns for c in row)
+        assert "later sentence" not in body
+        assert blocks.index(prose) not in used
+
+    def test_lowercase_quote_tail_stays_in_the_cell(self):
+        """P4178 Section 1.2/4.9.3: ``data-races`` continues the quote.
+
+        The tail sits past the row band and inside the aligned scan
+        gap. A sentence-initial line at the same gap does not.
+        """
+        blocks = _two_line_citation_blocks(inflate_xs=())
+        last_y1 = max(b.bbox[3] for b in blocks)
+        y = last_y1 + 30.0
+        tail = _geo_block(0, ("data-races", 300.0, y, 380.0, y + 13.0))
+        blocks.append(tail)
+        blocks.sort(key=lambda b: ((b.bbox[1] + b.bbox[3]) / 2, b.bbox[0]))
+        sections, used = _detect_side_by_side_tables(
+            blocks, atomized_only=True)
+        assert len(sections) == 1
+        right = _cell_text(sections[0].columns[1][1])
+        assert right.endswith("data-races")
+        assert blocks.index(tail) in used
+
+    def test_lowercase_prose_after_closed_quote_stays_out(self):
+        """A lowercase sentence after a finished quote is not a wrap."""
+        blocks = _citation_comparison_blocks(
+            left_header=("P2300R10 Section 1.2",),
+            right_header="P2300R10 Section 4.16",
+            left_body=('"left quote', 'ends here."'),
+            right_body=('"right quote', 'ends here."'),
+            inflate_xs=(),
+        )
+        last_y1 = max(b.bbox[3] for b in blocks)
+        y = last_y1 + 30.0
+        prose = _geo_block(
+            0, ("this is a later prose sentence.",
+                300.0, y, 480.0, y + 13.0))
+        blocks.append(prose)
+        blocks.sort(key=lambda b: ((b.bbox[1] + b.bbox[3]) / 2, b.bbox[0]))
+        sections, used = _detect_side_by_side_tables(
+            blocks, atomized_only=True)
+        assert len(sections) == 1
+        right = _cell_text(sections[0].columns[1][1])
+        assert right.endswith('ends here."')
+        assert "later prose" not in right
+        assert blocks.index(prose) not in used
+
+    def test_abutting_citation_boxes_stay_separate(self):
+        """Two and three boxes 30pt apart, no spilling heading.
+
+        Each box is its own 2x2. A later citation header is not a body
+        row of the first box.
+        """
+        for n in (2, 3):
+            blocks = _abutting_citation_boxes(n)
+            sections, _used = _detect_side_by_side_tables(
+                blocks, atomized_only=True)
+            assert len(sections) == n
+            assert all(len(s.columns) == 2 for s in sections)
+            headers = [_cell_text(s.columns[0][0]) for s in sections]
+            assert headers == [f"P2300R10 Section 4.{16 + k}" for k in range(n)]
+            for sec in sections:
+                flat = " ".join(
+                    _cell_text(c) for row in sec.columns for c in row)
+                assert flat.count("P2300R10 Section") == 1
+                assert flat.count("N5000R1 Section") == 1
+
+    def test_stacked_ordinary_atomized_tables_both_claimed(self):
+        """Pre-pass resumes after a claimed table, so a second ordinary
+        atomized table on the same page is claimed too. The heading
+        between them stays prose."""
+        blocks = _stacked_ordinary_atomized_tables()
+        sections, used = _detect_side_by_side_tables(
+            blocks, atomized_only=True)
+        assert len(sections) == 2
+        assert all(s.table_source == "side_by_side_prepass" for s in sections)
+        assert [_cell_text(c) for c in sections[0].columns[0]] == [
+            "Left one", "Right one"]
+        assert [_cell_text(c) for c in sections[1].columns[0]] == [
+            "Left two", "Right two"]
+        heading = next(
+            b for b in blocks
+            if b.lines[0].spans[0].text.startswith("A full width heading"))
+        assert blocks.index(heading) not in used
+
+    def test_mixed_citation_and_short_label_header(self):
+        """#427: one citation cell plus a short context label, 2x2."""
+        for right in ("The receiver concept", "Context"):
+            blocks = _citation_comparison_blocks(
+                left_header=("P2300R10 Section 1.9.3",),
+                right_header=right,
+                left_body=('"The lack of a standard', "callback shape"),
+                right_body=("set_value, set_error", "with cancellation"),
+            )
+            sections, _ = _detect_side_by_side_tables(
+                blocks, atomized_only=True)
+            assert len(sections) == 1
+            sec = sections[0]
+            assert sec.table_source == "side_by_side_prepass"
+            assert len(sec.columns) == 2
+            assert all(len(row) == 2 for row in sec.columns)
+            assert [_cell_text(c) for c in sec.columns[0]] == [
+                "P2300R10 Section 1.9.3", right]
+
+    def test_end_to_end_mixed_citation_label_is_2x2_prepass(self):
+        blocks = _citation_comparison_blocks(
+            left_header=("P2300R10 Section 4.9.4",),
+            right_header="Context",
+            left_body=('"these concerns are still', "being investigated"),
+            right_body=("This is R10, the revision", "that became C++26."),
+        )
+        sections, remaining = detect_tables(blocks)
+        assert len(sections) == 1
+        assert sections[0].table_source == "side_by_side_prepass"
+        assert [_cell_text(c) for c in sections[0].columns[0]] == [
+            "P2300R10 Section 4.9.4", "Context"]
+        assert [b.lines[0].spans[0].text for b in remaining] == [
+            "Later boxed note 1.", "Later boxed note 2."]
+
+    def test_long_non_citation_sibling_rejected(self):
+        blocks = _citation_comparison_blocks(
+            left_header=("P2300R10 Section 1.2",),
+            right_header=(
+                "This long prose sentence is not a short header label"),
+            left_body=('"senders are not a', "good model for this"),
+            right_body=('"coroutines are not a', "good model either"),
+        )
+        assert _detect_side_by_side_tables(
+            blocks, atomized_only=True)[0] == []
+
+
+def _yba_row(page: int, y: float, label: str, value: str,
+             *, c0: float = 66.7, c1: float = 116.4, h: float = 13.6
+             ) -> Block:
+    """One Yes/But/Actually row: two lines, gap 49.7pt (under 50)."""
+    return _geo_block(
+        page,
+        (label, c0, y, c0 + 20.0, y + h),
+        (value, c1, y, c1 + 200.0, y + h),
+    )
+
+
+def _yba_table_blocks(
+    *,
+    page: int = 0,
+    y_title: float = 119.3,
+    section: str = "4.14",
+    values: tuple[str, str, str] = (
+        '"it is sensible to pass both channels"',
+        '"partial success is more of a partial failure."',
+        '"sending the error through the value channel"',
+    ),
+    wrap: str | None = None,
+    commentary: str | None = "The section may be exploring a genuine tension.",
+    title: str | None = None,
+    labels: tuple[str, str, str] = ("Yes", "But", "Actually"),
+    extra_row: tuple[str, str] | None = None,
+    value_xs: tuple[float, float, float] | None = None,
+    drop_last: bool = False,
+    title_gap: float = 14.9,
+) -> list[Block]:
+    """Printed pp.3-4 Yes/But/Actually box: citation title over col-1."""
+    H = 13.6
+    c0, c1 = 66.7, 116.4
+    title_text = title if title is not None else f"P2300R10 Section {section}"
+    blocks = [_geo_block(
+        page, (title_text, c1, y_title, c1 + 90.0, y_title + H))]
+    y = y_title + H + title_gap
+    n_rows = 2 if drop_last else 3
+    xs = value_xs or (c1, c1, c1)
+    for i, label in enumerate(labels[:n_rows]):
+        blocks.append(_yba_row(
+            page, y, label, values[i], c0=c0, c1=xs[i], h=H))
+        y += H + 14.9
+    if wrap is not None:
+        blocks.append(_geo_block(
+            page, (wrap, c1, y - 10.0, c1 + 80.0, y - 10.0 + H)))
+        y += 8.0
+    if extra_row is not None:
+        blocks.append(_yba_row(page, y, extra_row[0], extra_row[1]))
+        y += H + 14.9
+    if commentary is not None:
+        blocks.append(_geo_block(
+            page, (commentary, 56.7, y + 20.0, 520.0, y + 20.0 + H)))
+    return blocks
+
+
+def _stacked_yba_tables() -> list[Block]:
+    """Four Yes/But/Actually boxes on one page, commentary between."""
+    blocks: list[Block] = []
+    y = 80.0
+    for n, sec in enumerate(("4.14", "4.16", "4.15", "4.17")):
+        chunk = _yba_table_blocks(
+            y_title=y,
+            section=sec,
+            values=(
+                f'"yes quote {sec}"',
+                f'"but quote {sec}"',
+                f'"actually quote {sec}"',
+            ),
+            commentary=f"Commentary after {sec}.",
+            wrap='"tail wrap."' if sec == "4.16" else None,
+        )
+        blocks.extend(chunk)
+        y += 160.0
+    return blocks
+
+
+class TestCitationYesButActuallyPrepass:
+    """Citation title over the value column plus Yes/But/Actually rows
+    (#427 printed pp.3-4). Gap 49.7pt misses `_block_column_positions`."""
+
+    def test_real_shape_is_4x2_prepass(self):
+        blocks = _yba_table_blocks()
+        assert _block_column_positions(blocks[1]) is None
+        sections, used = _detect_side_by_side_tables(
+            blocks, atomized_only=True)
+        assert len(sections) == 1
+        sec = sections[0]
+        assert sec.table_source == "side_by_side_prepass"
+        assert len(sec.columns) == 4
+        assert all(len(row) == 2 for row in sec.columns)
+        assert [_cell_text(c) for c in sec.columns[0]] == [
+            "", "P2300R10 Section 4.14"]
+        assert [_cell_text(r[0]) for r in sec.columns[1:]] == [
+            "Yes", "But", "Actually"]
+        comment = next(
+            b for b in blocks
+            if b.lines[0].spans[0].text.startswith("The section may"))
+        assert blocks.index(comment) not in used
+        assert _detect_side_by_side_tables(blocks) == ([], set())
+
+    def test_end_to_end_yba_is_4x2_prepass(self):
+        blocks = _yba_table_blocks(wrap='"than coroutines."')
+        sections, remaining = detect_tables(blocks)
+        assert len(sections) == 1
+        sec = sections[0]
+        assert sec.table_source == "side_by_side_prepass"
+        assert len(sec.columns) == 4
+        assert _cell_text(sec.columns[3][1]).endswith('than coroutines."')
+        assert [b.lines[0].spans[0].text for b in remaining] == [
+            "The section may be exploring a genuine tension."]
+
+    def test_stacked_four_yba_all_claimed(self):
+        blocks = _stacked_yba_tables()
+        sections, used = _detect_side_by_side_tables(
+            blocks, atomized_only=True)
+        assert len(sections) == 4
+        assert all(s.table_source == "side_by_side_prepass" for s in sections)
+        assert all(len(s.columns) == 4 for s in sections)
+        headers = [_cell_text(s.columns[0][1]) for s in sections]
+        assert headers == [
+            "P2300R10 Section 4.14",
+            "P2300R10 Section 4.16",
+            "P2300R10 Section 4.15",
+            "P2300R10 Section 4.17",
+        ]
+        comments = [
+            b.lines[0].spans[0].text for b in blocks
+            if b.lines[0].spans[0].text.startswith("Commentary after")]
+        assert len(comments) == 4
+        for b in blocks:
+            if b.lines[0].spans[0].text.startswith("Commentary after"):
+                assert blocks.index(b) not in used
+        sections_e2e, remaining = detect_tables(blocks)
+        assert len(sections_e2e) == 4
+        assert all(
+            t.startswith("Commentary after")
+            for t in (b.lines[0].spans[0].text for b in remaining))
+
+    def test_wrong_labels_rejected(self):
+        blocks = _yba_table_blocks(labels=("Yeah", "But", "Actually"))
+        assert _detect_side_by_side_tables(
+            blocks, atomized_only=True)[0] == []
+
+    def test_reordered_labels_rejected(self):
+        blocks = _yba_table_blocks(labels=("But", "Yes", "Actually"))
+        assert _detect_side_by_side_tables(
+            blocks, atomized_only=True)[0] == []
+
+    def test_missing_row_rejected(self):
+        blocks = _yba_table_blocks(drop_last=True)
+        assert _detect_side_by_side_tables(
+            blocks, atomized_only=True)[0] == []
+
+    def test_extra_row_rejected(self):
+        blocks = _yba_table_blocks(extra_row=("Maybe", '"a fourth row"'))
+        assert _detect_side_by_side_tables(
+            blocks, atomized_only=True)[0] == []
+
+    def test_title_gap_inside_header_band_stays_4x2(self):
+        """Yes 8pt under the title is still a row, not part of the header.
+
+        8pt is inside _ATOMIZED_HDR_MAX_LINE_GAP, so the split-header
+        seed would absorb the Yes row if it ran first.
+        """
+        blocks = _yba_table_blocks(title_gap=8.0)
+        sections, _used = _detect_side_by_side_tables(
+            blocks, atomized_only=True)
+        assert len(sections) == 1
+        sec = sections[0]
+        assert sec.table_source == "side_by_side_prepass"
+        assert len(sec.columns) == 4
+        assert [_cell_text(c) for c in sec.columns[0]] == [
+            "", "P2300R10 Section 4.14"]
+        assert [_cell_text(r[0]) for r in sec.columns[1:]] == [
+            "Yes", "But", "Actually"]
+
+    def test_second_actually_line_stays_out(self):
+        """One Actually continuation joins. The next sentence does not."""
+        blocks = _yba_table_blocks(
+            wrap='"than coroutines."', commentary=None)
+        wrap_blk = next(
+            b for b in blocks
+            if "than coroutines" in b.lines[0].spans[0].text)
+        x0, _y0, _x1, y1 = wrap_blk.bbox
+        sentence = _geo_block(
+            0, ("This is the next sentence.",
+                x0, y1 + 8.0, x0 + 160.0, y1 + 8.0 + 13.6))
+        blocks = [*blocks, sentence]
+        sections, used = _detect_side_by_side_tables(
+            blocks, atomized_only=True)
+        assert len(sections) == 1
+        actually = _cell_text(sections[0].columns[3][1])
+        assert actually.endswith('than coroutines."')
+        assert "next sentence" not in actually
+        assert blocks.index(sentence) not in used
+
+    def test_non_citation_title_rejected(self):
+        blocks = _yba_table_blocks(title="Introduction")
+        assert _detect_side_by_side_tables(
+            blocks, atomized_only=True)[0] == []
+
+    def test_unstable_columns_rejected(self):
+        blocks = _yba_table_blocks(value_xs=(116.4, 116.4, 220.0))
+        assert _detect_side_by_side_tables(
+            blocks, atomized_only=True)[0] == []
+
+    def test_t1_one_block_body_still_pass1(self):
+        """T1 stays with Pass 1 after the mixed-header generalization."""
+        blocks = _two_line_citation_blocks(atomized_body=False)
+        sections, _ = _detect_side_by_side_tables(
+            blocks, atomized_only=True)
+        assert sections == []
+        sections, _ = detect_tables(blocks)
+        assert len(sections) == 1
+        assert sections[0].table_source == "horizontal_rows"
+
+
 class TestColumnSplitOnTablePage:
     """p4098r1 p.4: a table page with one wide Claim column beside three
     narrow ones must not pass for two text columns. Two things went wrong
@@ -2785,3 +3573,637 @@ class TestPass1SplitRow:
         assert not any(
             _cell_text(r[0]) == "Determinism"
             for s in sections for r in s.columns)
+
+
+def _vote_header(page: int, y0: float) -> Block:
+    """A one-block SF/F/N/A/SA poll header, P3978R0 tomd page 1 geometry."""
+    return _grid_row(page, y0, [
+        ("SF", 79.7, 91.4), ("F", 103.5, 109.6), ("N", 121.7, 129.7),
+        ("A", 141.7, 148.7), ("SA", 160.7, 173.3)])
+
+
+def _caption(page: int, y0: float, text: str) -> Block:
+    return Block(
+        lines=[Line(spans=[Span(text=text, font_size=10.0)],
+                    bbox=(73.7, y0, 216.1, y0 + 10.6), page_num=page)],
+        bbox=(73.7, y0, 216.1, y0 + 10.6), page_num=page)
+
+
+class TestPass3EmptyVoteGrid:
+    """A suggested poll is a lone SF/F/N/A/SA header block with empty
+    cells below it (P3978R0 §2.1, #422). Pass 3 used to need two blocks
+    per run, so three such headers and their captions fell to Pass 4,
+    which fused them into one table. A lone vote header now forms a
+    2-row table with a synthesized empty body row, the shape Pass 3a
+    emits for P4012R0 §2.2.
+    """
+
+    _PAGE = 1
+
+    def _p3978_blocks(self) -> list[Block]:
+        return [
+            _caption(self._PAGE, 207.9, "Poll: Adopt P3978R0 for C++26"),
+            _vote_header(self._PAGE, 224.7),
+            _caption(self._PAGE, 269.3, "Poll: Adopt P3978R0 for C++29"),
+            _vote_header(self._PAGE, 286.2),
+            _caption(self._PAGE, 330.8,
+                     "Poll: Adopt P3978R0 for C++29 and apply as a DR"),
+            _vote_header(self._PAGE, 347.7),
+        ]
+
+    def test_fixture_is_faithful(self):
+        blocks = self._p3978_blocks()
+        assert _block_horizontal_row(blocks[1]) is not None
+        assert _block_horizontal_row(blocks[0]) is None
+
+    def test_each_header_is_its_own_table(self):
+        blocks = self._p3978_blocks()
+        tables, used = _detect_horizontal_row_tables(
+            blocks, rotated_pages=frozenset())
+        assert len(tables) == 3
+        assert used == {1, 3, 5}
+        for t in tables:
+            assert len(t.columns) == 2
+            assert [_cell_text(c) for c in t.columns[0]] == [
+                "SF", "F", "N", "A", "SA"]
+            assert [_cell_text(c) for c in t.columns[1]] == [""] * 5
+            assert t.table_kind == "clean_matrix"
+
+    def test_captions_stay_prose_through_detect_tables(self):
+        blocks = self._p3978_blocks()
+        sections, remaining = detect_tables(blocks)
+        tables = [s for s in sections if s.kind == SectionKind.TABLE]
+        assert len(tables) == 3
+        assert [b.lines[0].text for b in remaining] == [
+            "Poll: Adopt P3978R0 for C++26",
+            "Poll: Adopt P3978R0 for C++29",
+            "Poll: Adopt P3978R0 for C++29 and apply as a DR"]
+
+    def test_header_with_number_row_below_is_one_filled_table(self):
+        # The taken-poll shape (p2728r11, p3290r4): the number row sits
+        # 12pt under the header and joins the run; no empty row appears.
+        header = _vote_header(self._PAGE, 224.7)
+        numbers = _grid_row(self._PAGE, 236.7, [
+            ("8", 82.0, 88.0), ("3", 104.0, 110.0), ("1", 123.0, 129.0),
+            ("0", 142.0, 148.0), ("0", 164.0, 170.0)])
+        tables, used = _detect_horizontal_row_tables(
+            [header, numbers], rotated_pages=frozenset())
+        assert len(tables) == 1
+        assert used == {0, 1}
+        assert [_cell_text(c) for c in tables[0].columns[1]] == [
+            "8", "3", "1", "0", "0"]
+
+    def test_lone_dash_row_is_not_a_vote_header(self):
+        # p1068r11's rendered separator row has the geometry but not the
+        # vocabulary; it must not become a header-only table.
+        dashes = _grid_row(self._PAGE, 224.7, [
+            ("-", 82.0, 88.0), ("-", 104.0, 110.0), ("-", 123.0, 129.0),
+            ("-", 142.0, 148.0), ("-", 164.0, 170.0)])
+        tables, used = _detect_horizontal_row_tables(
+            [dashes], rotated_pages=frozenset())
+        assert tables == [] and used == set()
+
+    def test_lone_non_vote_row_is_not_claimed(self):
+        row = _grid_row(self._PAGE, 224.7, [
+            ("Name", 79.7, 100.0), ("Type", 121.7, 140.0),
+            ("Note", 160.7, 180.0)])
+        tables, used = _detect_horizontal_row_tables(
+            [row], rotated_pages=frozenset())
+        assert tables == [] and used == set()
+
+
+def _cell_line(text: str, x0: float, x1: float, y0: float, y1: float) -> Line:
+    return Line(
+        spans=[Span(text=text, font_size=10.0, bbox=(x0, y0, x1, y1))],
+        bbox=(x0, y0, x1, y1),
+    )
+
+
+def _spans_line(parts: list[tuple[str, float, float]], y0: float, y1: float) -> Line:
+    spans = [
+        Span(text=text, font_size=10.0, bbox=(x0, y0, x1, y1))
+        for text, x0, x1 in parts
+    ]
+    return Line(
+        spans=spans,
+        bbox=(parts[0][1], y0, parts[-1][2], y1),
+    )
+
+
+class TestMultiRowBodyBlock:
+    """One header row plus one block of data rows (P0533R9 Tables II-V).
+
+    MuPDF puts every data row in a single block. Each row is sibling
+    lines that return to column 0, so _block_column_positions gives up
+    and Pass 1 used to keep only the header.
+    """
+
+    def _header(self) -> Block:
+        lines = [
+            _cell_line("Function", 322.3, 370.0, 221.8, 230.8),
+            _spans_line(
+                [("Pass", 495.8, 515.0), ("Comment", 517.6, 556.8)],
+                221.8, 230.8),
+        ]
+        return _block_from_lines(lines)
+
+    def _body(self) -> Block:
+        lines = [
+            _spans_line(
+                [("float", 322.3, 345.8), ("frexp(float", 350.6, 402.3),
+                 ("value,", 407.0, 435.3), ("int*", 440.0, 458.8),
+                 ("exp)", 463.5, 482.4)],
+                237.4, 246.4),
+            _cell_line("Yes", 497.8, 516.0, 237.0, 246.0),
+            _cell_line("w", 533.9, 542.0, 237.0, 246.0),
+            _spans_line(
+                [("int", 322.3, 339.0), ("ilogb(float", 341.1, 395.0),
+                 ("arg)", 397.6, 420.0)],
+                250.6, 259.6),
+            _cell_line("Yes", 497.8, 516.0, 250.2, 259.2),
+            _cell_line("G", 533.6, 541.0, 250.2, 259.2),
+            _spans_line(
+                [("float", 322.3, 345.8), ("modf(float", 350.6, 397.6),
+                 ("value,", 402.3, 430.6), ("float*", 435.3, 463.5),
+                 ("iptr)", 468.2, 490.0), ("Yes", 497.8, 516.0)],
+                289.8, 299.2),
+        ]
+        return _block_from_lines(lines)
+
+    def test_header_and_body_become_one_clean_matrix(self):
+        tables, remaining = detect_tables([self._header(), self._body()])
+        assert len(tables) == 1
+        table = tables[0]
+        assert table.table_kind == "clean_matrix"
+        assert table.table_source == "multirow_body"
+        assert table.table_strategy == "pipe_table"
+        cells = [
+            ["".join(sp.text for sp in cell).strip() for cell in row]
+            for row in table.columns
+        ]
+        assert cells[0] == ["Function", "Pass", "Comment"]
+        assert cells[1] == [
+            "float frexp(float value, int* exp)", "Yes", "w"]
+        assert cells[2][1:] == ["Yes", "G"]
+        assert cells[3] == [
+            "float modf(float value, float* iptr)", "Yes", ""]
+        assert "iptr)" in cells[3][0]
+        assert "Yes" not in cells[3][0]
+        assert remaining == []
+
+    def test_styled_header_fragments_do_not_create_a_column(self):
+        header = _block_from_lines([
+            _spans_line(
+                [("Func", 322.3, 340.0), ("tion", 350.6, 370.0)],
+                221.8, 230.8),
+            _spans_line(
+                [("Pass", 495.8, 515.0), ("Comment", 517.6, 556.8)],
+                221.8, 230.8),
+        ])
+        tables, _remaining = detect_tables([header, self._body()])
+        assert len(tables) == 1
+        assert len(tables[0].columns[0]) == 3
+        text = "".join(sp.text for sp in tables[0].columns[0][0])
+        assert text.replace(" ", "") == "Function"
+
+    def test_contiguous_styled_header_fragments_are_one_cell(self):
+        header = _block_from_lines([
+            _spans_line(
+                [("Func", 322.3, 340.0), ("tion", 340.0, 370.0)],
+                221.8, 230.8),
+            _spans_line(
+                [("Pass", 495.8, 515.0), ("Comment", 517.6, 556.8)],
+                221.8, 230.8),
+        ])
+        tables, _remaining = detect_tables([header, self._body()])
+        assert len(tables) == 1
+        assert len(tables[0].columns[0]) == 3
+        assert "".join(
+            sp.text for sp in tables[0].columns[0][0]
+        ) == "Function"
+
+    def test_rotated_page_defers_the_multirow_family(self):
+        fragment = _banded_frag([(50.0, 60.0), (60.0, 70.0)])
+        tables, _remaining = detect_tables(
+            [self._header(), self._body()],
+            page_mupdf_tables={0: [fragment]},
+        )
+        assert all(table.table_source != "multirow_body" for table in tables)
+
+    def test_prose_under_a_wide_header_is_not_a_table(self):
+        header = self._header()
+        prose = _block_from_lines([
+            _cell_line(text, 322.3, 520.0, 240.0 + i * 14, 250.0 + i * 14)
+            for i, text in enumerate(
+                ("The functions listed below", "close on the rationals",
+                 "and do not set a flag"))
+        ])
+        tables, _remaining = detect_tables([header, prose])
+        assert tables == []
+
+    def test_body_starting_far_above_header_is_not_claimed(self):
+        header = self._header()
+        body = self._body()
+        shift = -200.0
+        for line in body.lines:
+            line.bbox = (
+                line.bbox[0], line.bbox[1] + shift,
+                line.bbox[2], line.bbox[3] + shift)
+            for span in line.spans:
+                span.bbox = (
+                    span.bbox[0], span.bbox[1] + shift,
+                    span.bbox[2], span.bbox[3] + shift)
+        body.bbox = (
+            body.bbox[0], body.bbox[1] + shift,
+            body.bbox[2], body.bbox[3] + shift)
+        tables, _remaining = detect_tables([header, body])
+        assert tables == []
+
+    def test_trailing_prose_in_body_block_stays_prose(self):
+        body = self._body()
+        prose = _cell_line(
+            "Following discussion continues here.",
+            322.3, 520.0, 310.0, 320.0)
+        body.lines.append(prose)
+        body.bbox = (
+            body.bbox[0], body.bbox[1],
+            max(body.bbox[2], prose.bbox[2]), prose.bbox[3])
+        tables, remaining = detect_tables([self._header(), body])
+        assert len(tables) == 1
+        assert len(tables[0].columns) == 4
+        assert len(remaining) == 1
+        assert remaining[0].text == "Following discussion continues here."
+        assert all(
+            "Following discussion" not in line.text
+            for line in tables[0].lines
+        )
+
+    def test_contents_page_numbers_are_not_a_table(self):
+        header = _block_from_lines([
+            _cell_line("1. Introduction", 72, 180, 356, 366),
+            _cell_line("3", 533.9, 545, 356, 366),
+        ])
+        body_lines = []
+        for title, page, y in (
+            ("2. History/Changes from Previous Release", "3", 379),
+            ("2020-08-28 [D1122R3] after virtual LWG meeting", "3", 392),
+            ("2020-08-25 [D1122R3] preparation for virtual LWG meeting", "4", 405),
+        ):
+            body_lines.append(_cell_line(title, 72, 400, y, y + 9))
+            body_lines.append(_cell_line(page, 533.9, 545, y, y + 9))
+        tables, remaining = detect_tables([header, _block_from_lines(body_lines)])
+        assert tables == []
+        assert len(remaining) == 2
+
+    def _page_number_rows(self) -> list[Block]:
+        rows = []
+        entries = (
+            ("I. Revision History", "1", 80),
+            ("II. Introduction", "1", 100),
+            ("III. Motivation & Scope", "1", 120),
+            ("IV. State of the Art", "3", 140),
+        )
+        for title, page, y in entries:
+            rows.append(_block_from_lines([
+                _cell_line(title, 54, 220, y, y + 10),
+                _cell_line(page, 400, 420, y, y + 10),
+            ]))
+        return rows
+
+    def test_labeled_contents_without_dot_leaders_is_not_a_table(self):
+        contents = _block_from_lines([
+            _cell_line("CONTENTS", 54, 130, 40, 52),
+        ])
+        tables, remaining = detect_tables([contents, *self._page_number_rows()])
+        assert tables == []
+        assert len(remaining) == 5
+
+    def test_page_numbers_without_contents_label_stay_a_table(self):
+        tables, remaining = detect_tables(self._page_number_rows())
+        assert len(tables) == 1
+        assert tables[0].table_source == "horizontal_rows"
+        assert len(tables[0].columns) == 4
+        assert remaining == []
+
+    def test_contents_prefix_is_removed_from_paragraph_lines(self):
+        lines = []
+        y = 10.0
+        for text in (
+            "CONTENTS",
+            "I. Revision History", "1",
+            "II. Introduction", "1",
+            "III. Motivation", "1",
+            "R1 Includes discussion",
+        ):
+            lines.append(Line(
+                spans=[Span(text=text, font_size=10.0, bbox=(54, y, 220, y + 10))],
+                bbox=(54, y, 220, y + 10),
+                page_num=0,
+            ))
+            y += 14
+        sec = Section(
+            kind=SectionKind.HEADING,
+            text="\n".join(ln.text for ln in lines),
+            heading_level=3,
+            lines=lines,
+            page_num=0,
+            mupdf_text="\n".join(ln.text for ln in lines),
+            spatial_text=(
+                "CONTENTS R6 interleaved\n"
+                "I. Revision History 1\n"
+                "other spatial evidence\n"
+                "II. Introduction 1\n"
+                "III. Motivation 1\n"
+                "stale spatial source"
+            ),
+            columns=[[[Span(text="stale")]]],
+            indent_level=2,
+            table_kind="clean_matrix",
+            table_strategy="pipe_table",
+            table_source="horizontal_rows",
+            table_continuation=True,
+        )
+        _drop_leading_contents(sec)
+        assert [ln.text for ln in sec.lines] == ["R1 Includes discussion"]
+        assert sec.text == "R1 Includes discussion"
+        assert sec.mupdf_text == "R1 Includes discussion"
+        assert "CONTENTS" not in sec.spatial_text
+        assert "Revision History" not in sec.spatial_text
+        assert "other spatial evidence" in sec.spatial_text
+        assert "stale spatial source" in sec.spatial_text
+        assert sec.spatial_text != sec.text
+        assert sec.kind == SectionKind.PARAGRAPH
+        assert sec.heading_level == 0
+        assert sec.columns == []
+        assert sec.indent_level == 0
+        assert sec.table_kind is None
+        assert sec.table_strategy is None
+        assert sec.table_source is None
+        assert not sec.table_continuation
+
+
+def _placed(text, x0, y0, x1, y1, page=4, kind=SectionKind.PARAGRAPH):
+    line = Line(
+        spans=[Span(text=text, font_size=10.0)],
+        bbox=(x0, y0, x1, y1),
+        page_num=page,
+    )
+    return Section(kind=kind, text=text, lines=[line], page_num=page)
+
+
+class TestTwoColumnTableInsert:
+    """A table goes back where the column sort put its blocks.
+
+    Raw y would put a right-column table (small y) ahead of the whole
+    left column. The split keeps each column together.
+    """
+
+    def test_right_column_table_stays_after_the_left_column(self):
+        sections = [
+            _placed("REFERENCES", 54, 55, 160, 64),
+            _placed("body of the references", 54, 80, 250, 160),
+            _placed("proposed wording", 54, 539, 250, 700),
+            _placed("TABLE V caption", 317, 235, 520, 255),
+        ]
+        table = _placed(
+            "Function", 322, 54, 540, 64, kind=SectionKind.TABLE)
+        _insert_table_sections(sections, [table], {}, {4: 300.0})
+        assert [s.text for s in sections] == [
+            "REFERENCES",
+            "body of the references",
+            "proposed wording",
+            "Function",
+            "TABLE V caption",
+        ]
+
+    def test_left_column_table_stays_inside_its_column(self):
+        sections = [
+            _placed("REFERENCES", 54, 55, 160, 64),
+            _placed("caption IV", 54, 470, 250, 490),
+            _placed("right column prose", 317, 54, 520, 80),
+        ]
+        table = _placed("ceil", 56, 184, 280, 194, kind=SectionKind.TABLE)
+        _insert_table_sections(sections, [table], {}, {4: 300.0})
+        assert [s.text for s in sections] == [
+            "REFERENCES",
+            "ceil",
+            "caption IV",
+            "right column prose",
+        ]
+
+    def test_narrow_header_word_stays_in_the_right_column(self):
+        # Page 4's split is 362, inside the right column. The header
+        # word "Function" is only x=322-358; the row reaches Comment.
+        sections = [
+            _placed("REFERENCES", 140, 55, 213, 64),
+            _placed("TABLE V caption", 317, 235, 540, 255),
+        ]
+        table = _placed(
+            "Function", 322, 54, 358, 64, kind=SectionKind.TABLE)
+        table.lines.append(Line(
+            spans=[Span(text="Comment", font_size=10.0)],
+            bbox=(517, 54, 560, 64),
+            page_num=4,
+        ))
+        _insert_table_sections(sections, [table], {}, {4: 362.5})
+        assert [s.text for s in sections] == [
+            "REFERENCES",
+            "Function",
+            "TABLE V caption",
+        ]
+
+    def test_cross_page_tail_does_not_choose_the_column(self):
+        section = _placed("left-column start", 54, 100, 250, 120)
+        section.lines.append(Line(
+            spans=[Span(text="right-column continuation", font_size=10.0)],
+            bbox=(400, 50, 560, 70),
+            page_num=5,
+        ))
+        assert _column_of(section, 300.0, None) == 0
+
+    def test_single_column_still_inserts_by_y(self):
+        sections = [
+            _placed("above", 54, 40, 400, 50, page=1),
+            _placed("below", 54, 200, 400, 220, page=1),
+        ]
+        table = _placed(
+            "grid", 54, 100, 400, 110, page=1, kind=SectionKind.TABLE)
+        _insert_table_sections(sections, [table], {}, {})
+        assert [s.text for s in sections] == ["above", "grid", "below"]
+
+
+def _multirow(text, x0, y0, x1, y1, page=4):
+    sec = _placed(text, x0, y0, x1, y1, page=page, kind=SectionKind.TABLE)
+    sec.table_source = "multirow_body"
+    return sec
+
+
+class TestSideBySideMultirowOrder:
+    """Overlapping multirow tables read left, then right, then continue."""
+
+    def _column_major(self):
+        return [
+            _placed("REFERENCES", 54, 55, 160, 64),
+            _multirow("ceil", 56, 184, 280, 450),
+            _placed("TABLE IV caption", 54, 460, 250, 480),
+            _placed("VIII. PROPOSED WORDING", 54, 514, 250, 530),
+            _multirow("fpclassify", 322, 54, 540, 224),
+            _placed("TABLE V caption", 317, 235, 520, 255),
+        ]
+
+    def test_overlapping_pair_reads_left_then_right(self):
+        sections = self._column_major()
+        _insert_table_sections(sections, [], {}, {4: 300.0})
+        assert [s.text for s in sections] == [
+            "REFERENCES",
+            "ceil",
+            "TABLE IV caption",
+            "fpclassify",
+            "TABLE V caption",
+            "VIII. PROPOSED WORDING",
+        ]
+
+    def test_non_overlapping_right_table_stays_after_the_left_column(self):
+        sections = [
+            _multirow("ceil", 56, 184, 280, 300),
+            _placed("VIII. PROPOSED WORDING", 54, 320, 250, 340),
+            _multirow("later", 322, 420, 540, 500),
+        ]
+        _insert_table_sections(sections, [], {}, {4: 300.0})
+        assert [s.text for s in sections] == [
+            "ceil",
+            "VIII. PROPOSED WORDING",
+            "later",
+        ]
+
+    def test_other_family_is_not_hoisted(self):
+        sections = self._column_major()
+        sections[4].table_source = "horizontal_rows"
+        _insert_table_sections(sections, [], {}, {4: 300.0})
+        assert [s.text for s in sections][3] == "VIII. PROPOSED WORDING"
+
+    def test_single_column_does_not_hoist(self):
+        sections = []
+        _insert_table_sections(sections, [
+            _multirow("fpclassify", 322, 54, 540, 224),
+            _multirow("ceil", 56, 184, 280, 450),
+        ], {}, {})
+        assert [s.text for s in sections] == ["fpclassify", "ceil"]
+
+    def test_rotated_page_does_not_hoist(self):
+        sections = self._column_major()
+        _insert_table_sections(sections, [], {4: _ROT90}, {4: 300.0})
+        assert [s.text for s in sections][3] == "VIII. PROPOSED WORDING"
+
+    def test_text_above_the_right_table_blocks_the_hoist(self):
+        sections = [
+            _multirow("ceil", 56, 200, 280, 400),
+            _placed("TABLE IV caption", 54, 410, 250, 430),
+            _placed("VIII. PROPOSED WORDING", 54, 450, 250, 470),
+            _placed("right prologue", 317, 50, 520, 80),
+            _multirow("fpclassify", 322, 220, 540, 320),
+            _placed("TABLE V caption", 317, 330, 520, 350),
+        ]
+        _insert_table_sections(sections, [], {}, {4: 300.0})
+        assert [s.text for s in sections] == [
+            "ceil",
+            "TABLE IV caption",
+            "VIII. PROPOSED WORDING",
+            "right prologue",
+            "fpclassify",
+            "TABLE V caption",
+        ]
+
+    def test_plain_paragraph_below_table_is_not_its_caption(self):
+        sections = [
+            _multirow("ceil", 56, 200, 280, 400),
+            _placed("TABLE IV caption", 54, 410, 250, 430),
+            _placed("VIII. PROPOSED WORDING", 54, 450, 250, 470),
+            _multirow("fpclassify", 322, 220, 540, 320),
+            _placed("ordinary paragraph", 317, 330, 520, 350),
+        ]
+        _insert_table_sections(sections, [], {}, {4: 300.0})
+        assert [s.text for s in sections] == [
+            "ceil",
+            "TABLE IV caption",
+            "fpclassify",
+            "VIII. PROPOSED WORDING",
+            "ordinary paragraph",
+        ]
+
+
+class TestRunningHeaderGrid:
+    """A document-id column is page furniture, not a table (P3978R3)."""
+
+    def test_paper_id_beside_section_titles_is_not_a_table(self):
+        blocks = [
+            _geo_block(0, ("P3978R3", 40, 100, 90, 112),
+                       ("3 Motivation", 200, 100, 320, 112)),
+            _geo_block(0, ("3.2", 40, 120, 70, 132),
+                       ("status quo examples", 200, 120, 340, 132)),
+        ]
+        tables, remaining = detect_tables(blocks)
+        assert tables == []
+        assert remaining == []
+
+    def test_two_column_comparison_with_real_header_stays(self):
+        blocks = [
+            _geo_block(0, ("Library", 40, 100, 100, 112),
+                       ("Status", 200, 100, 260, 112)),
+            _geo_block(0, ("Capy", 40, 120, 80, 132),
+                       ("Published", 200, 120, 280, 132)),
+            _geo_block(0, ("Corosio", 40, 140, 90, 152),
+                       ("Published", 200, 140, 280, 152)),
+        ]
+        tables, _ = detect_tables(blocks)
+        assert len(tables) == 1
+        assert _cell_text(tables[0].columns[0][0]) == "Library"
+
+    def test_a_later_paper_id_is_not_furniture(self):
+        blocks = [
+            _geo_block(0, ("P3978R3", 40, 100, 100, 112),
+                       ("3 Motivation", 200, 100, 320, 112)),
+            _geo_block(0, ("P1234R0", 40, 120, 100, 132),
+                       ("Other paper", 200, 120, 320, 132)),
+        ]
+        tables, remaining = detect_tables(blocks)
+        assert tables or remaining
+
+
+class TestHashHeaderAboveNumberedRow:
+    """`# | Paper | Abstraction` joins above row 1 (P4100R0 section 7.1)."""
+
+    def _numbered_rows(self):
+        rows = [
+            _geo_block(0, ("#", 66, 80, 74, 92),
+                       ("Paper", 94, 80, 130, 92),
+                       ("Abstraction", 196, 80, 260, 92)),
+        ]
+        labels = [
+            ("1", "IoAwaitable Protocol", "Coroutine execution protocol"),
+            ("2", "Coroutine Task", "task and launch functions"),
+            ("3", "Executor Utilities", "strand and any_executor"),
+            ("4", "Buffer Ranges", "scatter and gather"),
+            ("5", "Stream Concepts", "async byte IO"),
+        ]
+        y = 110
+        for a, b, c in labels:
+            rows.append(_geo_block(
+                0, (a, 66, y, 74, y + 12),
+                (b, 94, y, 160, y + 12),
+                (c, 196, y, 360, y + 12)))
+            y += 20
+        return rows
+
+    def test_hash_line_becomes_the_header(self):
+        tables, _ = detect_tables(self._numbered_rows())
+        assert len(tables) == 1
+        assert _cell_text(tables[0].columns[0][0]) == "#"
+        assert _cell_text(tables[0].columns[0][1]) == "Paper"
+        assert _cell_text(tables[0].columns[1][0]) == "1"
+
+    def test_numbered_header_without_hash_line_stays(self):
+        rows = self._numbered_rows()[1:]
+        tables, _ = detect_tables(rows)
+        assert len(tables) == 1
+        assert _cell_text(tables[0].columns[0][0]) == "1"

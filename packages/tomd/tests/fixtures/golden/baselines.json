@@ -20,15 +20,15 @@
     "frontmatter": 1.0,
     "heading": 0.34,
     "list": 0.83,
-    "table": 0.0,
-    "text": 0.64
+    "table": 1.0,
+    "text": 0.66
   },
   "p0957r8": {
     "code": 0.82,
     "frontmatter": 1.0,
     "heading": 0.97,
     "list": 1.0,
-    "table": 0.6,
+    "table": 0.67,
     "text": 0.86
   },
   "p1068r11": {
@@ -55,6 +55,14 @@
     "table": 1.0,
     "text": 0.95
   },
+  "p3290r4": {
+    "code": 0.9,
+    "frontmatter": 1.0,
+    "heading": 1.0,
+    "list": 0.51,
+    "table": 1.0,
+    "text": 0.66
+  },
   "p3411r5": {
     "code": 1.0,
     "frontmatter": 1.0,
@@ -79,6 +87,14 @@
     "table": 1.0,
     "text": 0.93
   },
+  "p3978r0": {
+    "code": 0.35,
+    "frontmatter": 1.0,
+    "heading": 0.81,
+    "list": 1.0,
+    "table": 0.75,
+    "text": 0.69
+  },
   "p4020r0": {
     "code": 1.0,
     "frontmatter": 1.0,
@@ -86,6 +102,22 @@
     "list": 1.0,
     "table": 1.0,
     "text": 1.0
+  },
+  "p4047r0": {
+    "code": 1.0,
+    "frontmatter": 1.0,
+    "heading": 1.0,
+    "list": 1.0,
+    "table": 0.89,
+    "text": 0.87
+  },
+  "p4178r0": {
+    "code": 1.0,
+    "frontmatter": 1.0,
+    "heading": 0.9,
+    "list": 1.0,
+    "table": 1.0,
+    "text": 0.97
   },
   "p4182r0": {
     "code": 1.0,
