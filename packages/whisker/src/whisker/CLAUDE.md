@@ -60,9 +60,8 @@ Reading order for a new agent, from contract to detail:
 11. **Greppable conventions**: `shortcut:` (deliberate simplification + its
     ceiling), `golden-hook:` (where the future golden-file layer plugs in).
     Harvest with `rg -n "shortcut:|golden-hook:"`.
-12. **History**: `CHANGELOG.md` (what changed and why), `FIXPATH-REPORT.md`
-    (the 2026-07 hardening pass: design rationale, verification evidence,
-    golden-file outlook; its paths predate this tree).
+12. **History**: git log, plus `FIXPATH-REPORT.md` for the 2026-07 hardening
+    pass. The package does not ship a changelog.
 
 ## What this is
 
@@ -1146,15 +1145,14 @@ P4182R0, now generalized and tool-supported). Never gates, never runs in CI
   (2026-07-08): P4182R0 8/8, P4185R0 9/9 (17/17 total) after closing three
   bugs this run surfaced: the service-resolution bug above, the Windows
   console encoding crash above, and two `_math_surface` folding gaps
-  (`\[...\]` display math, doubled `\\command` backslashes; both documented
-  in the Fixed section of `CHANGELOG.md`).
+  (`\[...\]` display math, doubled `\\command` backslashes).
 - Rerun under the stricter grounded scoring over all 5 papers (2026-07-09):
   **34/37 pass, 3 fail, 0 error**. The 3 fails are pod column-alignment
   misreads of clean tables (advisory findings about the MODEL; the
   deterministic gate passes all 37 facts on the same markdown). Pass rates
   are NOT comparable across scoring versions: the earlier 100% numbers were
   produced by the sycophancy-prone scorer (bare YES sufficed for half the
-  fact types). Details in `FIXPATH-REPORT.md`.
+  fact types).
 
 ## Golden ideals and golden-QA ownership
 

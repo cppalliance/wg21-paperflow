@@ -297,7 +297,7 @@ REGION_SNIPPET_CHARS = 60
 # shift ``mhs`` on affected papers. A stale baseline at the old schema
 # hard-fails and must be regenerated with ``whisker guard --update``. The same
 # global version stamps every whisker artifact (sidecar, report, bench
-# leaderboard, guard baseline, calibration). See CHANGELOG.md.
+# leaderboard, guard baseline, calibration).
 # Bumped 3 -> 4 for the golden-ideal panel: sidecars gain five nullable
 # ``ideal_*`` fields and papers with a human-blessed ideal can pick up new
 # advisory ``ideal <axis> ... (advisory)`` soft flags, which may move a

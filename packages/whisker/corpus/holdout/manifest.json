@@ -14,7 +14,7 @@
       "source_path": "packages/tomd/tests/fixtures/golden/sources/p1112r4.pdf",
       "source_sha256": "204c13312a5c5f09ccd446826f98e2d4379f9aa8742413281b89a24bd5860fdd",
       "candidate_path": "packages/tomd/tests/fixtures/golden/snapshots/p1112r4.md",
-      "candidate_sha256": "5472e9c0e2344367c7cfd84a278caa84d901824523978d672f1c15b19eb3e3c0",
+      "candidate_sha256": "13168e8a8bf2fc6f118017c20c5fa34364fb3b1235a3cf4ea2265e8e4078a2b3",
       "candidate_kind": "tomd_byte_exact_snapshot"
     },
     "p3714r0": {
@@ -28,7 +28,7 @@
       "source_path": "packages/tomd/tests/fixtures/golden/sources/p4182r0.pdf",
       "source_sha256": "4a40e2d50354f9b03d98662844db5e579a9ec60816e6881d165e677bfd04f9bb",
       "candidate_path": "packages/tomd/tests/fixtures/golden/ideals/p4182r0.md",
-      "candidate_sha256": "6b3593e09b28ea7ef0e976b0da87fc01442c301f0ee4a0316d7193a8f8244b71",
+      "candidate_sha256": "a40999d6855f0d8abab5d7994ad0f27088957ec37bcc8cafb837c19b8252893e",
       "candidate_kind": "human_blessed_tomd_ideal"
     }
   },
@@ -36,8 +36,8 @@
     "p0533r9": "Dev-replay PR #293 contamination; excluded from every holdout metric."
   },
   "repinned": {
-    "p1112r4": "2026-08-05: candidate_sha256 recomputed under the new line-ending-normalized fingerprint method (H5 audit finding). File content unchanged; all 18 anchor dispositions re-verified against expected_candidate_status before repinning. See test_dev_replay_schema.py::TestHoldoutAnchors::test_locked_candidate_dispositions.",
+    "p1112r4": "2026-10-09: candidate_sha256 repinned after the upstream tomd golden snapshot changed. Source PDF hash unchanged. Anchor dispositions re-checked against expected_candidate_status in test_locked_candidate_dispositions.",
     "p3714r0": "2026-08-05: candidate_sha256 recomputed under the new line-ending-normalized fingerprint method (H5 audit finding). File content unchanged; all 16 anchor dispositions re-verified against expected_candidate_status before repinning. See test_dev_replay_schema.py::TestHoldoutAnchors::test_locked_candidate_dispositions.",
-    "p4182r0": "2026-08-05: candidate_sha256 repinned for two reasons: (1) the new line-ending-normalized fingerprint method (H5 audit finding), and (2) PR #311 (commit b7d3d48, 2026-07-31) corrected two heading levels in the blessed ideal packages/tomd/tests/fixtures/golden/ideals/p4182r0.md after the original 2026-07-17 lock (commit c59139c). The source PDF hash is unchanged and still verified authentic (source_sha256 unmodified). All 14 anchor dispositions were re-verified against the corrected ideal and still match their expected_candidate_status; see test_dev_replay_schema.py::TestHoldoutAnchors::test_locked_candidate_dispositions and test_candidate_fingerprint_tripwire_detects_content_drift. p4182r0 remains an active, non-quarantined holdout member."
+    "p4182r0": "2026-10-09: candidate_sha256 repinned after the upstream tomd ideal changed. Source PDF hash unchanged. Anchor dispositions re-checked against expected_candidate_status in test_locked_candidate_dispositions. p4182r0 remains an active holdout member."
   }
 }

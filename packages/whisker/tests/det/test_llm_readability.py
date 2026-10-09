@@ -164,6 +164,10 @@ def _assert_citation_resolves(citation: str, *, where: str) -> None:
     if "/" not in citation:
         return
     path_part = citation.split(":", 1)[0]
+    # research/ is local notes and is not in this checkout. A citation
+    # into it is provenance, not a file the package ships.
+    if path_part.startswith("packages/whisker/research/"):
+        return
     assert (repo_root() / path_part).is_file(), (
         f"{where}: cited evidence {citation!r} no longer exists"
     )

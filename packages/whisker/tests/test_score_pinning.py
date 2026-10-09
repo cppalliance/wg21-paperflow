@@ -150,9 +150,7 @@ def baseline():
 # fails, forcing the author to either fix the golden or explicitly acknowledge
 # the known failure (pandoc --accept discipline).
 _EXPECTED_GATE_FAILURES: dict[str, set[str]] = {
-    "p0533r9": {"no_toc_leak"},
     "p1122r3": {"no_toc_leak"},
-    "p3968r0": {"no_toc_leak"},
     "p2040r0": {"heading_monotone"},
     "p3556r0": {"heading_monotone"},
 }

@@ -6,19 +6,19 @@
       "heading_monotone": true,
       "no_empty_code": true,
       "no_empty_table": true,
-      "no_toc_leak": false
+      "no_toc_leak": true
     },
-    "qa_score": 82,
+    "qa_score": 95,
     "heading_count": 16,
     "max_heading_level": 3,
-    "code_block_count": 18,
-    "table_count": 8,
+    "code_block_count": 20,
+    "table_count": 4,
     "front_matter_count": 5,
-    "uncertain_count": 2,
+    "uncertain_count": 1,
     "mojibake_count": 0,
     "table_parse_errors": 0,
     "lossy_table_count": 0,
-    "paragraph_count": 73,
+    "paragraph_count": 56,
     "heading_level_skips": 0,
     "wording_section_count": 0
   },
@@ -31,17 +31,17 @@
       "no_empty_table": true,
       "no_toc_leak": true
     },
-    "qa_score": 95,
-    "heading_count": 67,
+    "qa_score": 100,
+    "heading_count": 69,
     "max_heading_level": 5,
-    "code_block_count": 67,
+    "code_block_count": 64,
     "table_count": 3,
     "front_matter_count": 5,
-    "uncertain_count": 1,
+    "uncertain_count": 0,
     "mojibake_count": 0,
     "table_parse_errors": 0,
     "lossy_table_count": 0,
-    "paragraph_count": 252,
+    "paragraph_count": 236,
     "heading_level_skips": 0,
     "wording_section_count": 0
   },
@@ -54,19 +54,19 @@
       "no_empty_table": true,
       "no_toc_leak": true
     },
-    "qa_score": 95,
-    "heading_count": 17,
+    "qa_score": 100,
+    "heading_count": 21,
     "max_heading_level": 4,
-    "code_block_count": 20,
+    "code_block_count": 21,
     "table_count": 6,
     "front_matter_count": 5,
-    "uncertain_count": 1,
+    "uncertain_count": 0,
     "mojibake_count": 0,
     "table_parse_errors": 0,
     "lossy_table_count": 0,
-    "paragraph_count": 183,
+    "paragraph_count": 120,
     "heading_level_skips": 0,
-    "wording_section_count": 26
+    "wording_section_count": 6
   },
   "p3556r0": {
     "gates": {
@@ -77,17 +77,17 @@
       "no_empty_table": true,
       "no_toc_leak": true
     },
-    "qa_score": 95,
+    "qa_score": 100,
     "heading_count": 25,
     "max_heading_level": 4,
     "code_block_count": 6,
     "table_count": 0,
     "front_matter_count": 5,
     "uncertain_count": 0,
-    "mojibake_count": 1,
+    "mojibake_count": 0,
     "table_parse_errors": 0,
     "lossy_table_count": 0,
-    "paragraph_count": 127,
+    "paragraph_count": 92,
     "heading_level_skips": 0,
     "wording_section_count": 17
   },
@@ -124,7 +124,7 @@
       "no_toc_leak": true
     },
     "qa_score": 100,
-    "heading_count": 17,
+    "heading_count": 18,
     "max_heading_level": 3,
     "code_block_count": 23,
     "table_count": 0,
@@ -133,9 +133,9 @@
     "mojibake_count": 0,
     "table_parse_errors": 0,
     "lossy_table_count": 0,
-    "paragraph_count": 90,
+    "paragraph_count": 66,
     "heading_level_skips": 0,
-    "wording_section_count": 12
+    "wording_section_count": 0
   },
   "p3714r0": {
     "gates": {
@@ -239,16 +239,16 @@
       "no_toc_leak": true
     },
     "qa_score": 100,
-    "heading_count": 61,
+    "heading_count": 58,
     "max_heading_level": 4,
     "code_block_count": 2,
-    "table_count": 12,
+    "table_count": 13,
     "front_matter_count": 6,
     "uncertain_count": 0,
     "mojibake_count": 0,
     "table_parse_errors": 0,
     "lossy_table_count": 0,
-    "paragraph_count": 166,
+    "paragraph_count": 154,
     "heading_level_skips": 0,
     "wording_section_count": 0
   },
@@ -259,19 +259,19 @@
       "heading_monotone": true,
       "no_empty_code": true,
       "no_empty_table": true,
-      "no_toc_leak": false
+      "no_toc_leak": true
     },
-    "qa_score": 95,
+    "qa_score": 100,
     "heading_count": 22,
     "max_heading_level": 4,
     "code_block_count": 8,
     "table_count": 0,
     "front_matter_count": 5,
-    "uncertain_count": 1,
+    "uncertain_count": 0,
     "mojibake_count": 0,
     "table_parse_errors": 0,
     "lossy_table_count": 0,
-    "paragraph_count": 96,
+    "paragraph_count": 85,
     "heading_level_skips": 0,
     "wording_section_count": 0
   },
@@ -284,17 +284,17 @@
       "no_empty_table": true,
       "no_toc_leak": true
     },
-    "qa_score": 95,
-    "heading_count": 49,
+    "qa_score": 100,
+    "heading_count": 50,
     "max_heading_level": 4,
     "code_block_count": 0,
-    "table_count": 6,
+    "table_count": 5,
     "front_matter_count": 6,
-    "uncertain_count": 1,
+    "uncertain_count": 0,
     "mojibake_count": 0,
     "table_parse_errors": 0,
     "lossy_table_count": 0,
-    "paragraph_count": 207,
+    "paragraph_count": 191,
     "heading_level_skips": 0,
     "wording_section_count": 0
   },
@@ -307,19 +307,19 @@
       "no_empty_table": true,
       "no_toc_leak": true
     },
-    "qa_score": 95,
-    "heading_count": 193,
+    "qa_score": 100,
+    "heading_count": 189,
     "max_heading_level": 5,
     "code_block_count": 70,
     "table_count": 18,
     "front_matter_count": 5,
-    "uncertain_count": 1,
+    "uncertain_count": 0,
     "mojibake_count": 0,
     "table_parse_errors": 0,
     "lossy_table_count": 0,
-    "paragraph_count": 781,
+    "paragraph_count": 701,
     "heading_level_skips": 0,
-    "wording_section_count": 5
+    "wording_section_count": 0
   },
   "p4024r0": {
     "gates": {
@@ -363,9 +363,9 @@
     "mojibake_count": 0,
     "table_parse_errors": 0,
     "lossy_table_count": 0,
-    "paragraph_count": 29,
+    "paragraph_count": 11,
     "heading_level_skips": 0,
-    "wording_section_count": 9
+    "wording_section_count": 2
   },
   "p4012r0-page-10": {
     "gates": {
@@ -386,9 +386,9 @@
     "mojibake_count": 0,
     "table_parse_errors": 0,
     "lossy_table_count": 0,
-    "paragraph_count": 35,
+    "paragraph_count": 11,
     "heading_level_skips": 0,
-    "wording_section_count": 12
+    "wording_section_count": 3
   },
   "p4012r0-page-6": {
     "gates": {
