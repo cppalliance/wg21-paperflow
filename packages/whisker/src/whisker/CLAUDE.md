@@ -294,7 +294,7 @@ Flags: `--all` (score everything; **two dashes**, not `-all`), `-v/--verbose`,
 `-q/--quiet`, `--stats`, `--json`, `--no-write`, `--report-dir DIR`,
 `--reference {markitdown}` (oracle engine, default markitdown),
 `--no-reference` (reference-free fallback),
-`--gate {pass,review,fail}`, `--workspace DIR` (overrides `$WG21_DATA_DIR`).
+`--gate {pass,review,not-llm-readable}`, `--workspace DIR` (overrides `$WG21_DATA_DIR`).
 The oracle runs a second full conversion per paper, so `--all` is slower than
 the reference-free path (seconds per paper); `--no-reference` is the fast path.
 A live progress bar prints to stderr on a real terminal; it is suppressed
@@ -322,8 +322,8 @@ progress and log lines. The default is a triaged summary, not a per-paper dump.
   category (values stripped so "coverage 0.53 < 0.85" and "0.78 < 0.85"
   aggregate into one `coverage <` row).
 - **`--json`:** the JSON array on stdout, unchanged; no human text leaks in.
-- **Footer (always last):** `=== F failed, R review, P passed (N scored[, S
-  skipped]) in Ts ===`, colored by the worst verdict present. In default and
+- **Footer (always last):** `=== N failed, N review, N passed (N scored[, S
+  skipped][, E errored]) in T.Ts ===`, colored by the worst verdict present. In default and
   verbose modes, a qualifier line follows: `"passed" means no gate fired, not
   that the conversion is correct.` This line is suppressed in `--quiet` mode,
   where the footer is the sole output.
@@ -611,8 +611,10 @@ llm/ (opt-in advisory lane, extra `tapetum-llm`, never in CI):
 
 ## Verdict model
 
-Three outcomes: `pass`, `review`, `fail`. The hard gate is the same whether or
-not the oracle ran; the oracle only adds an advisory review overlay.
+Three outcomes: `pass`, `review`, `not-llm-readable`. The stored hard-fail
+token is `not-llm-readable` (human lines print it as FAIL). There is no
+verdict named `fail`. The hard gate is the same whether or not the oracle
+ran; the oracle only adds an advisory review overlay.
 
 **Hard fails (the only ways to fail):**
 
@@ -736,8 +738,9 @@ advisory LLM artifacts (tapetum sidecars, merged reports, inspect report) under
 
 ## Exit codes (CI contract)
 
-`0` ok, `1` error, `3` review, `5` fail. `--gate {pass,review,fail}` sets the
-lowest verdict still considered acceptable for exit 0 (default `review`).
+`0` ok, `1` error, `3` review, `5` fail. `--gate {pass,review,not-llm-readable}`
+sets the lowest verdict still considered acceptable for exit 0 (default
+`review`). `--gate not-llm-readable` accepts every verdict.
 
 `whisker-tapetum-llm` uses a separate, simpler contract: advisory verdicts
 (pass/review/fail) always exit 0; operational errors (exception, timeout,
@@ -865,10 +868,13 @@ The advisory-only architecture is a deliberate, evidence-based decision:
    Their output is less stable than cloud-API models (no server-side
    batch-invariant kernels). Deterministic-first is necessary, not just
    convenient.
-5. **Fusion asymmetry.** The LLM can demote (pass -> review, fail -> review via
-   RESCUE) but can never hard-fail, and can never override a deterministic
-   `fail` into a `pass`. This one-way ratchet is the architectural consequence
-   of the instability above.
+5. **Fusion asymmetry.** The merged view can demote a pass to review, rescue a
+   heading-monotone-only `not-llm-readable` down to review (never up to pass),
+   and clear a soft-flag-only review to pass when the advisory verdict is a
+   grounded pass. A present oracle `ref_nid` below `0.10` blocks that clear.
+   The merge can never hard-fail, and it can never turn `not-llm-readable`
+   into `pass`. `whisker --gate` does not read it. This bound is the
+   architectural consequence of the instability above.
 
 Full evidence: `research/research/llm-qa-integration/SYNTHESIS.md`.
 
@@ -1291,11 +1297,12 @@ acting; this section describes the state as of 2026-07-22.
    absent. A typed confirmation can confirm the defect; reject-and-keep classes
    such as `flattened` abstain when the typed answer does not confirm. Aligned
    units still skip rather than self-judge, and a class with no typed question
-   still skips.    Since v27, `header_is_data` confirms only the exact answer `body row`,
+   still skips. Since v27, `header_is_data` confirms only the exact answer `body row`,
    and only when the PDF shows a different header above the markdown
    header. A section reference that opens the table is the top row.
    `data values` abstains. The typed fallback sends the paired text-layer
-   page along.
+   page along. Since v28, a pipe table that continues an HTML table across
+   a page break is marked and asked against the row above it.
 8. **Defect groups express scale, not exhaustive evidence.** A defect group
    reports the LLM's `affected_count` plus representative examples. Countable
    keyword groups replace that estimate with document-wide `source_count`,
