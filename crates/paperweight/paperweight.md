@@ -531,7 +531,7 @@ end
 
 local replies = nil
 if #jobs > 0 then
-    replies = fanout("### Grade", jobs)
+    replies = tasks.fanout("### Grade", jobs)
 end
 
 -- --- parse, validate, aggregate --------------------------------------------
