@@ -194,19 +194,45 @@ def _yaml_value(key: str, val) -> str:
     return f"{key}: {val}"
 
 
+def is_blank_value(value: object) -> bool:
+    """True for ``None``, empty or whitespace-only text, and lists with no non-blank item.
+
+    A blank front-matter value counts as missing: it is never emitted, and the
+    mailing fallback fills it.
+    """
+    if value is None:
+        return True
+    if isinstance(value, (list, tuple)):
+        return all(is_blank_value(item) for item in value)
+    return not str(value).strip()
+
+
+def _without_blanks(metadata: dict) -> dict:
+    """Return ``metadata`` without blank values; list values lose their blank items."""
+    kept: dict = {}
+    for key, value in metadata.items():
+        if is_blank_value(value):
+            continue
+        if isinstance(value, (list, tuple)):
+            value = [item for item in value if not is_blank_value(item)]
+        kept[key] = value
+    return kept
+
+
 def format_front_matter(metadata: dict) -> str:
     """Format metadata dict as YAML front matter in strict canonical order.
 
     Strict-order contract: keys are emitted exactly in the order
-    ``title, document, date, intent, audience, reply-to``. Missing keys
-    are skipped (no placeholders, no blank lines). Unknown keys appear
+    ``title, document, date, intent, audience, reply-to``. Missing and
+    blank keys are skipped (no placeholders, no blank lines); a list value
+    drops its blank items. Unknown keys appear
     after ``audience`` so ``reply-to`` is always last. Callers and
     downstream tools may rely on this ordering for diffs and parsing.
 
     Title and values containing YAML-special characters are double-quoted
     with backslash-escaping for embedded quotes, backslashes, and newlines.
     Reply-to is a YAML list of double-quoted strings. Returns the empty
-    string when ``metadata`` is empty.
+    string when no non-blank value remains.
     """
     if not metadata:
         return ""
@@ -216,6 +242,10 @@ def format_front_matter(metadata: dict) -> str:
         title = re.sub(r"\s*::\s*", "::", title)
         title = re.sub(r"  +", " ", title).strip()
         metadata["title"] = title
+
+    metadata = _without_blanks(metadata)
+    if not metadata:
+        return ""
 
     if "intent" not in metadata:
         title = metadata.get("title", "")

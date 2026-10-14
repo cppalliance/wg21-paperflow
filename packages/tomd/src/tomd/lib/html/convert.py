@@ -10,6 +10,7 @@ from .. import (
     apply_strip_leading_h1,
     dedup_paragraphs,
     format_front_matter,
+    is_blank_value,
     override_revision_from_filename,
     strip_orphan_toc_list,
     strip_redundant_body_meta,
@@ -77,14 +78,15 @@ def convert_html(
             )
         )
 
-    if metadata and "title" not in metadata:
+    if metadata and is_blank_value(metadata.get("title")):
         h_match = re.search(r"^##\s+(.+)$", body_md, re.MULTILINE)
         if h_match:
             metadata["title"] = h_match.group(1).strip()
 
     parts = []
-    if metadata:
-        parts.append(format_front_matter(metadata))
+    front_matter = format_front_matter(metadata)
+    if front_matter:
+        parts.append(front_matter)
 
     body_stripped = body_md.strip()
     while body_stripped.startswith("---") and (

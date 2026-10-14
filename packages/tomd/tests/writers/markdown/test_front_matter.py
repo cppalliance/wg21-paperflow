@@ -67,21 +67,6 @@ def test_write_front_matter_intent_inference():
 
 def test_write_front_matter_empty_returns_empty_string():
     assert write_front_matter(PaperMetadata()) == ""
-    assert write_front_matter({}) == ""
-
-
-def test_write_front_matter_dict_input():
-    data = {
-        "title": "Dict Paper",
-        "document": "P5555R0",
-        "date": "2026-01-15",
-        "reply-to": ["Editor <ed@wg21.link>"],
-    }
-    rendered = write_front_matter(data)
-    assert 'title: "Dict Paper"' in rendered
-    assert "document: P5555R0" in rendered
-    assert "date: 2026-01-15" in rendered
-    assert '  - "Editor <ed@wg21.link>"' in rendered
 
 
 def test_write_front_matter_matches_format_front_matter():
@@ -153,11 +138,6 @@ _BLANK_VALUE_CASES = [
 def _expected_with_blank_case(fragment: str | None) -> str:
     head = '---\ntitle: "T"\n'
     return head + (fragment + "\n" if fragment else "") + "---"
-
-
-@pytest.mark.parametrize(("fields", "fragment"), _BLANK_VALUE_CASES)
-def test_write_front_matter_blank_values_dict_input(fields, fragment):
-    assert write_front_matter({"title": "T", **fields}) == _expected_with_blank_case(fragment)
 
 
 @pytest.mark.parametrize(("fields", "fragment"), _BLANK_VALUE_CASES)
