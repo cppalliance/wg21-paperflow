@@ -1,0 +1,333 @@
+{
+  "kind": "whisker-table-readability",
+  "schema_version": 1,
+  "contract_id": "whisker-llm-readability-deepseek-v4",
+  "contract_version": "1.0.2",
+  "contract_hash": "8c4f3b5a1b7c986801fae2d2a712d629bff945296f5c3de5f5cbc2ef03875ee2",
+  "profile_id": "deepseek-v4",
+  "profile_version": "1.0.2",
+  "profile_hash": "8c4f3b5a1b7c986801fae2d2a712d629bff945296f5c3de5f5cbc2ef03875ee2",
+  "model_identity": "deepseek-v4-pro",
+  "methods_executed": [
+    "deterministic"
+  ],
+  "table_count": 9,
+  "vacuous": false,
+  "verdict": "fail",
+  "document_deterministic_ok": false,
+  "model_certified": false,
+  "certified": false,
+  "blocking_reasons": [
+    "hard_rule_not_evaluated:R10",
+    "hard_rule_not_evaluated:R11",
+    "hard_rule_not_evaluated:R13",
+    "hard_rule_not_evaluated:R5",
+    "required_method_not_executed:certification",
+    "required_method_not_executed:llm",
+    "required_method_not_executed:source_compare",
+    "required_rule_not_evaluated:R10",
+    "required_rule_not_evaluated:R12",
+    "required_rule_not_evaluated:R13",
+    "required_rule_not_evaluated:R5",
+    "rule_failed:R2",
+    "rule_review:R8",
+    "rule_review:R9"
+  ],
+  "status_counts": {
+    "pass": 2,
+    "fail": 1,
+    "review": 2,
+    "not_applicable": 2,
+    "not_evaluated": 6
+  },
+  "rules": [
+    {
+      "id": "R1",
+      "strength": "HARD",
+      "scope": "representation",
+      "method": "deterministic",
+      "check_id": "pipe_row_cell_deficit",
+      "status": "pass",
+      "reason": "",
+      "findings": []
+    },
+    {
+      "id": "R2",
+      "strength": "HARD",
+      "scope": "representation",
+      "method": "deterministic",
+      "check_id": "pipe_header_separator",
+      "status": "fail",
+      "reason": "",
+      "findings": [
+        {
+          "locus": "pipe table 4",
+          "message": "continuation row used as header (follows pipe table 3)",
+          "evidence": "de Wever, Mark | ANSI"
+        },
+        {
+          "locus": "pipe table 5",
+          "message": "continuation row used as header (follows pipe table 4)",
+          "evidence": "Kawulak, Robert | PKN"
+        },
+        {
+          "locus": "pipe table 6",
+          "message": "continuation row used as header (follows pipe table 5)",
+          "evidence": "Nash, Phil | BSI"
+        },
+        {
+          "locus": "pipe table 7",
+          "message": "continuation row used as header (follows pipe table 6)",
+          "evidence": "Tanwar Preeti | ANSI"
+        },
+        {
+          "locus": "pipe table 8",
+          "message": "continuation row used as header (follows pipe table 7)",
+          "evidence": "Mara Bos | NEN"
+        }
+      ]
+    },
+    {
+      "id": "R3",
+      "strength": "CONTEXTUAL",
+      "scope": "representation",
+      "method": "source_compare",
+      "check_id": "representation_choice_matrix",
+      "status": "not_evaluated",
+      "reason": "method_not_executed:source_compare",
+      "findings": []
+    },
+    {
+      "id": "R4",
+      "strength": "CONTEXTUAL",
+      "scope": "representation",
+      "method": "source_compare",
+      "check_id": "representation_choice_spans",
+      "status": "not_evaluated",
+      "reason": "method_not_executed:source_compare",
+      "findings": []
+    },
+    {
+      "id": "R5",
+      "strength": "HARD",
+      "scope": "source_fidelity",
+      "method": "source_compare",
+      "check_id": "merged_cell_denormalization",
+      "status": "not_evaluated",
+      "reason": "method_not_executed:source_compare",
+      "findings": []
+    },
+    {
+      "id": "R6",
+      "strength": "HARD",
+      "scope": "representation",
+      "method": "deterministic",
+      "check_id": "pipe_escape_roundtrip",
+      "status": "pass",
+      "reason": "",
+      "findings": []
+    },
+    {
+      "id": "R7",
+      "strength": "CONTEXTUAL",
+      "scope": "representation",
+      "method": "deterministic",
+      "check_id": "wide_table_column_budget",
+      "status": "not_applicable",
+      "reason": "wide_table",
+      "findings": []
+    },
+    {
+      "id": "R8",
+      "strength": "CONTEXTUAL",
+      "scope": "representation",
+      "method": "deterministic",
+      "check_id": "long_table_header_repeat",
+      "status": "review",
+      "reason": "",
+      "findings": [
+        {
+          "locus": "pipe table 3 rows 2-39",
+          "message": "38 body rows run without a repeated header, past the 25-row interval",
+          "evidence": ""
+        },
+        {
+          "locus": "pipe table 4 rows 2-41",
+          "message": "40 body rows run without a repeated header, past the 25-row interval",
+          "evidence": ""
+        },
+        {
+          "locus": "pipe table 5 rows 2-41",
+          "message": "40 body rows run without a repeated header, past the 25-row interval",
+          "evidence": ""
+        },
+        {
+          "locus": "pipe table 6 rows 2-41",
+          "message": "40 body rows run without a repeated header, past the 25-row interval",
+          "evidence": ""
+        },
+        {
+          "locus": "pipe table 7 rows 2-41",
+          "message": "40 body rows run without a repeated header, past the 25-row interval",
+          "evidence": ""
+        },
+        {
+          "locus": "html table 9 rows 2-88",
+          "message": "87 body rows run without a repeated header, past the 25-row interval",
+          "evidence": ""
+        }
+      ]
+    },
+    {
+      "id": "R9",
+      "strength": "CONTEXTUAL",
+      "scope": "representation",
+      "method": "deterministic",
+      "check_id": "empty_cell_sentinel",
+      "status": "review",
+      "reason": "",
+      "findings": [
+        {
+          "locus": "pipe table 3 row 1 column 1",
+          "message": "blank cell cannot be told apart from lost content; expected one of -, N/A",
+          "evidence": ""
+        },
+        {
+          "locus": "pipe table 3 row 2 column 2",
+          "message": "blank cell cannot be told apart from lost content; expected one of -, N/A",
+          "evidence": ""
+        },
+        {
+          "locus": "pipe table 3 row 3 column 2",
+          "message": "blank cell cannot be told apart from lost content; expected one of -, N/A",
+          "evidence": ""
+        },
+        {
+          "locus": "pipe table 3 row 4 column 2",
+          "message": "blank cell cannot be told apart from lost content; expected one of -, N/A",
+          "evidence": ""
+        },
+        {
+          "locus": "pipe table 3 row 5 column 2",
+          "message": "blank cell cannot be told apart from lost content; expected one of -, N/A",
+          "evidence": ""
+        },
+        {
+          "locus": "pipe table 3 row 6 column 2",
+          "message": "blank cell cannot be told apart from lost content; expected one of -, N/A",
+          "evidence": ""
+        },
+        {
+          "locus": "pipe table 3 row 7 column 2",
+          "message": "blank cell cannot be told apart from lost content; expected one of -, N/A",
+          "evidence": ""
+        },
+        {
+          "locus": "pipe table 3 row 8 column 2",
+          "message": "blank cell cannot be told apart from lost content; expected one of -, N/A",
+          "evidence": ""
+        },
+        {
+          "locus": "pipe table 3 row 9 column 2",
+          "message": "blank cell cannot be told apart from lost content; expected one of -, N/A",
+          "evidence": ""
+        },
+        {
+          "locus": "pipe table 3 row 10 column 2",
+          "message": "blank cell cannot be told apart from lost content; expected one of -, N/A",
+          "evidence": ""
+        },
+        {
+          "locus": "pipe table 3 row 11 column 2",
+          "message": "blank cell cannot be told apart from lost content; expected one of -, N/A",
+          "evidence": ""
+        },
+        {
+          "locus": "pipe table 3 row 12 column 2",
+          "message": "blank cell cannot be told apart from lost content; expected one of -, N/A",
+          "evidence": ""
+        },
+        {
+          "locus": "pipe table 3 row 13 column 2",
+          "message": "blank cell cannot be told apart from lost content; expected one of -, N/A",
+          "evidence": ""
+        },
+        {
+          "locus": "pipe table 3 row 14 column 2",
+          "message": "blank cell cannot be told apart from lost content; expected one of -, N/A",
+          "evidence": ""
+        },
+        {
+          "locus": "pipe table 3 row 15 column 2",
+          "message": "blank cell cannot be told apart from lost content; expected one of -, N/A",
+          "evidence": ""
+        },
+        {
+          "locus": "pipe table 3 row 16 column 2",
+          "message": "blank cell cannot be told apart from lost content; expected one of -, N/A",
+          "evidence": ""
+        },
+        {
+          "locus": "pipe table 3 row 17 column 2",
+          "message": "blank cell cannot be told apart from lost content; expected one of -, N/A",
+          "evidence": ""
+        },
+        {
+          "locus": "pipe table 3 row 18 column 2",
+          "message": "blank cell cannot be told apart from lost content; expected one of -, N/A",
+          "evidence": ""
+        },
+        {
+          "locus": "pipe table 3 row 19 column 2",
+          "message": "blank cell cannot be told apart from lost content; expected one of -, N/A",
+          "evidence": ""
+        },
+        {
+          "locus": "pipe table 3 row 20 column 2",
+          "message": "blank cell cannot be told apart from lost content; expected one of -, N/A",
+          "evidence": ""
+        }
+      ]
+    },
+    {
+      "id": "R10",
+      "strength": "HARD",
+      "scope": "representation",
+      "method": "source_compare",
+      "check_id": "caption_adjacency",
+      "status": "not_evaluated",
+      "reason": "method_not_executed:source_compare",
+      "findings": []
+    },
+    {
+      "id": "R11",
+      "strength": "HARD",
+      "scope": "representation",
+      "method": "source_compare",
+      "check_id": "code_cell_representation",
+      "status": "not_evaluated",
+      "reason": "method_not_executed:source_compare",
+      "findings": []
+    },
+    {
+      "id": "R12",
+      "strength": "HARD",
+      "scope": "chunking",
+      "method": "deterministic",
+      "check_id": "table_atomic_chunk",
+      "status": "not_applicable",
+      "reason": "chunking_in_scope",
+      "findings": []
+    },
+    {
+      "id": "R13",
+      "strength": "HARD",
+      "scope": "certification",
+      "method": "certification",
+      "check_id": "table_probe_suite",
+      "status": "not_evaluated",
+      "reason": "method_not_executed:certification",
+      "findings": []
+    }
+  ]
+}

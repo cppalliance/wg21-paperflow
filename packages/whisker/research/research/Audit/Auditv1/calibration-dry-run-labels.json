@@ -1,0 +1,74 @@
+[
+  {
+    "pid": "P4020R0",
+    "label": "review",
+    "unigram_coverage": 0.994362,
+    "human_verdict": "request_changes",
+    "max_defect_severity": "high",
+    "label_basis": "request_changes without a critical defect"
+  },
+  {
+    "pid": "P2040R0",
+    "label": "pass",
+    "unigram_coverage": 0.982840,
+    "human_verdict": "merge",
+    "max_defect_severity": null,
+    "label_basis": "merge"
+  },
+  {
+    "pid": "P0957R8",
+    "label": "fail",
+    "unigram_coverage": 0.962822,
+    "human_verdict": "request_changes",
+    "max_defect_severity": "critical",
+    "label_basis": "request_changes with a critical defect"
+  },
+  {
+    "pid": "P3556R0",
+    "label": "review",
+    "unigram_coverage": 0.970632,
+    "human_verdict": "request_changes",
+    "max_defect_severity": "medium",
+    "label_basis": "request_changes without a critical defect"
+  },
+  {
+    "pid": "P1068R11",
+    "label": "fail",
+    "unigram_coverage": 0.971221,
+    "human_verdict": "request_changes",
+    "max_defect_severity": "critical",
+    "label_basis": "request_changes with a critical defect"
+  },
+  {
+    "pid": "P1122R3",
+    "label": "fail",
+    "unigram_coverage": 0.971646,
+    "human_verdict": "request_changes",
+    "max_defect_severity": "critical",
+    "label_basis": "request_changes with a critical defect"
+  },
+  {
+    "pid": "P0533R9",
+    "label": "fail",
+    "unigram_coverage": 0.989669,
+    "human_verdict": "request_changes",
+    "max_defect_severity": "critical",
+    "label_basis": "request_changes with a critical defect"
+  },
+  {
+    "pid": "P3411R5",
+    "label": "review",
+    "unigram_coverage": 0.999860,
+    "human_verdict": "request_changes",
+    "max_defect_severity": "low",
+    "label_basis": "request_changes without a critical defect"
+  },
+  {
+    "pid": "P3953R0",
+    "label": "pass",
+    "unigram_coverage": 0.988571,
+    "human_verdict": "merge",
+    "max_defect_severity": null,
+    "label_basis": "merge"
+  }
+]

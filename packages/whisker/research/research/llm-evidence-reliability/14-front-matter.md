@@ -1,0 +1,34 @@
+# 14 - Front-Matter Migration Specialist
+
+**Verdict:** usable-with-conditions (+ title-block → YAML is a sanctioned, field-structured migration with a fixed key order and date normalization, but evidence verification must be field-aware and two-sided; one-sided source grounding on raw label text is the dominant false-evidence path for this exception class)
+**Confidence:** high
+
+## Findings
+
+- [CRITICAL] **PR #290 reproduced the front-matter migration false-evidence class: 0/5 judge quotes were genuinely absent; all were date/title-block lines already present in YAML (some twice).** Evidence: `00-baseline.md:16-19` (PR #290: "all quoted date lines already present, some twice"; aggregate candidate-absence precision 8/20 = 40%). Impact: the PDF judge's missing-content quotes for page-1 furniture are structurally untrustworthy until candidate-side verification understands YAML field migration, not raw body substring search.
+
+- [CRITICAL] **Post-hoc evidence proves source presence only; sidecars overstate absence.** Evidence: `pdf_judge.py:513-520` (`ground_spans(spans, pdf_text)` — PDF text layer only); `pdf_judge.py:401-404` (every retained quote labeled `"present in PDF text layer, absent from markdown"`). Impact: for title-block quotes, the sidecar asserts a fact the code never checks; this is the direct mechanism behind PR #290 date-line false positives.
+
+- [HIGH] **tomd defines a strict, skip-if-missing YAML contract that IS the migration target, not the source layout.** Evidence: `FRONT_MATTER_ORDER = ("title", "document", "date", "intent", "audience", "reply-to")` at `format.py:30`; emit rules at `format.py:197-245` (canonical order, unknown keys before `reply-to`, double-quoted title/reply-to list items); `tomd/CLAUDE.md:147-182` (page-0 WG21 block → YAML, body starts at H2). Impact: candidate presence for a source `Date:` label must match `date:` scalar (often ISO-normalized), not the label line verbatim; absence oracle must parse YAML first.
+
+- [HIGH] **Date normalization is deliberate reformatting, not loss.** Evidence: `normalize_date()` at `shared.py:940-975` (ISO `YYYY-MM-DD` from slash, natural "Month DD, YYYY", European "DD Month YYYY"); wired from PDF extraction in `wg21.py:130,289,448`. Impact: a quote `"Date: February 22, 2026"` from the PDF text layer can be **present** as `date: 2026-02-22` in YAML; normalized or field-key-aware matching is required or evidence precision stays ~40% on this class (`00-baseline.md:21`).
+
+- [HIGH] **`reply-to` is a list of paired `"Name <email>"` strings, not mirrored source label blocks.** Evidence: `format.py:186-190,236-245` (YAML list emission); `sanitize_metadata()` at `format.py:163-176` (de-obfuscates `<<email>>`, drops non-author lines); `wg21.py:89-98,167-215` (`parse_author_lines`, continuation blocks after Reply-to label); HTML synonym map at `extract.py:538-539` ("author"/"editor" → `reply-to`). Impact: candidate-side checks must compare multiset of author/email pairs, not count list entries or match `"Reply to:"` label text in the body; MC1's 18-entry reply-to inflation (`golden-qa-gap/00-baseline.md:27-34`) is a value-truth defect invisible to key-presence gates.
+
+- [HIGH] **Whisker prompts correctly SANCTION migration but do not enable mechanical field verification.** Evidence: `_CONVERSION_CONTRACT` at `pdf_judge.py:129-136` ("title block … converted into the YAML front-matter block … If those values appear in the YAML block, they are NOT missing"); parallel rule at `pdf_judge.py:191,228-229`; text-lane contract at `tapetum_llm.md:45-46` (exact key order, wrong order/corrupted document = defect). Impact: prompts reduce false **verdicts** on title-block quotes but post-hoc grounding still treats YAML and label text as unrelated surfaces; policy and verification are misaligned.
+
+- [MED] **Deterministic gates check key presence, not migration fidelity.** Evidence: `_REQUIRED_FRONT_MATTER_KEYS = ("title", "document")` at `gates.py:34`; `_gate_front_matter()` at `gates.py:60-75` (parseable block + key set only); MC1 anchor `golden-qa-gap/00-baseline.md:25-34` (wrong title value, missing `date`, bloated `reply-to` all pass). Impact: neither det gate nor current LLM evidence path catches title-block mis-migration; field-aware facts or a two-sided verifier are the adoptable fix.
+
+- [MED] **Comparison corpus: only tomd + mdream emit YAML front matter; generic HTML converters do not model WG21 title-block migration.** Evidence: `html-to-markdown-go` — no metadata/YAML paths in repo scan (goldies are `.in.html`/`.out.md` body markdown only); `html2text` — 74 byte-exact goldies, no front matter (`whisker/research/redteam/html2text.md:18-24`); `html-to-markdown-py` — `Permutation::NoMetadata` sets `extract_metadata: false` (`oracle.rs:62-64`), treating metadata as an optional strip axis, not a WG21 field contract; `mdream` `frontmatterPlugin()` (`frontmatter.ts:26-198`) emits `title` + nested `meta:` from `<head>` tags with **title-first, then alphabetical** ordering — incompatible with tomd's flat six-key order and unsuitable as a WG21 oracle. Impact: portable pattern is olmOCR-style **bidirectional locate on the candidate YAML surface** (`05-web.md:14-18`), not borrowing mdream/html2text schemas.
+
+## False-pass hypothesis
+
+The judge quotes `"Document Number: P1122R3"` from the PDF text layer, `ground_spans` confirms it in the source, and the sidecar labels it absent — but `document: P1122R3` is in YAML and the label string was intentionally consumed. Without a candidate-side check that maps label → field (or ISO-normalized date), the false quote survives and depresses evidence precision exactly as in PR #290 (`00-baseline.md:18`).
+
+## False-fail hypothesis
+
+A field-aware verifier naively requires the raw PDF date string in the markdown body and marks a **genuine** `date:` omission as `present` because `"February 22, 2026"` still appears leaked in the body abstract after incomplete `strip.py` dedup — or conversely marks a correct ISO migration as `absent` because it searches the body instead of `parse_front_matter()`. Either direction fails if verification does not use `strip_front_matter` + per-field equality/normalized-date compare (`format.py:107-116`, `shared.py:940-975`).
+
+## What would change my mind
+
+A labeled replay of the nine-PR set (or ≥20 front-matter quotes) where a two-sided verifier — source label/field extract → `parse_front_matter(candidate)` with ISO date normalization and reply-to pair multiset — achieves ≥90% evidence precision on title-block quotes **without** suppressing genuine body leaks (e.g. bare `"Document Number:"` label in H2 body per comprehension fact `docnumber-label-consumed`). Until that replay exists, treat front-matter migration as a **mandatory exception class** in candidate absence checking, not a free-text substring problem.

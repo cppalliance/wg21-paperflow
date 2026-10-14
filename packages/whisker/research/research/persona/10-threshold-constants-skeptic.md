@@ -1,0 +1,34 @@
+# 10 - The Threshold / Constants Skeptic
+
+**Verdict:** usable-with-conditions — the constants are honestly labeled PROVISIONAL and named, but the live verdict on 382 papers is shaped mostly by three uncited or mis-transplanted operating points (`REGION_SOFT_COUNT=1`, `DRIFT_SOFT_EDGE=0.10`, `REF_NID_ADVISORY_EDGE=0.85`) that were never fitted on WG21 outcomes; borrowing edgeparse/OmniDocBench/DP-Bench numbers is documentation theater until `calibrate` runs on labels.
+**Confidence:** high
+
+## Findings
+
+- [CRITICAL] **`REGION_SOFT_COUNT = 1` is the single largest verdict distorter** and has no external-repo citation — only an in-spec claim that furniture stripping makes regions "expected." Evidence: ref-free `--stats` rollup **186** papers flag `misaligned region(s)` vs **205** total review (`00-EVIDENCE-BASELINE.md` §3a); `constants.py:43-47` (`REGION_SOFT_COUNT = 1`); `score.py:164-166` (`region_total >= 1` → soft review); `CLAUDE.md:233-236` ("expected on clean papers"). Impact: **~91% of the dominant soft-flag category** fires on a single missing/extra region; triage treats benign header/footer/TOC stripping as indistinguishable from content misalignment, so the review tier (53.7%) is mostly noise unless humans learn to ignore this flag.
+
+- [HIGH] **`REF_NID_ADVISORY_EDGE = 0.85` is borrowed from edgeparse's NID CI floor but sits below the corpus mean**, so the default oracle path flags "look" on papers that are statistically normal. Evidence: `constants.py:85-87` (edgeparse `benchmark/thresholds.json` citation); stale run `ref_nid` mean **0.836**, **147/382** below 0.85 (`00` §3b); `score.py:175-178` (advisory review only). Impact: cross-converter NID on academic-benchmark leaderboards (human GT, block-matched, same task) is **not transferable** to markitdown-vs-tomd on WG21 PDFs/HTML without recalibration; ~38% of papers get an extra review signal with **no measured precision**, and the edge is **above** typical agreement, not below it.
+
+- [HIGH] **`DRIFT_SOFT_EDGE = 0.10` has no repo citation and trips 88 ref-free papers** — it is the second-largest soft driver after regions. Evidence: ref-free soft rollup **unigram drift > 88** (`00` §3a); `constants.py:40-41` (no external provenance comment, unlike unigram band); `score.py:168-169` (`unigram_drift > DRIFT_SOFT_EDGE` → review). Impact: 10% injected-token share is an **unvalidated** operating point; on a corpus where mean `unigram_coverage` is **0.966** (`00` §3b), drift may track front-matter normalization, wording markup, or oracle-unrelated tokenization — not human-verified "bad conversion."
+
+- [HIGH] **UNIGRAM band edges (0.85 fail / 0.95 review) cite DP-Bench/Docling clean-recall norms but misfit this corpus on the fail side** — the borrowed floor is too loose for hard-fail, too tight for pass. Evidence: `constants.py:34-38` (DP-Bench/Docling citation); ref-free hard flags **3** papers on `unigram coverage < 0.85` vs **9** on `heading_monotone` (`00` §3a); mean coverage **0.966**, **64** in 0.85–0.95 review band (`00` §3b); `score.py:156-162`. Impact: **content-loss hard-fail sensitivity is ~0.8%** (3/382) while structural pedantry drives 64% of hard fails (9/14); the borrowed 0.85 fail edge optimizes for a different metric population (labeled GT recall) than reference-free multiset recall on already-high-quality tomd output.
+
+- [MED] **Bench/guard floors (`TEDS/MHS/NID/CONTENT_RECALL` 0.80/0.80/0.90/0.90) cite OmniDocBench/DP-Bench but do not affect the only operational path.** Evidence: `constants.py:53-67`; `bench.py:288-291`, `guard.py:105-110`; corpus lane errors — zero real `<pid>.gt.md` (`00` §4). Impact: the cited external norms are **inert on 382 real papers**; auditors who read constants.py assume these floors gate production, but only ref-free `_decide` + optional oracle run; mis-borrowing is latent until someone commits a guard baseline without relabeling.
+
+- [MED] **`BLOCK_LOCK_NED = 0.25` is documented as OmniDocBench verbatim but is dead code** — the port is incomplete. Evidence: `constants.py:111-117` ("match_quick.py: a < 0.25 NED pre-locks"); grep shows **zero uses** outside `constants.py`; `match.py:165-174` only applies `BLOCK_ACCEPT_NED` (0.70) post-Hungarian. Impact: bench `block_text_nid` scores may **diverge from OmniDocBench** on near-exact block pairs the upstream pre-lock would have pinned; the constant file overclaims parity with published leaderboards.
+
+- [MED] **`GUARD_AXIS_SLACK = 0.02` (opendataloader) vs `BENCH_REGRESSION_SLACK = 0.03` is internally inconsistent** and the 0.02 transplant is for **corpus-mean** regression, not per-paper axis drops. Evidence: `constants.py:89-103`; `redteam-synthesis.md:58` (opendataloader `mean >= threshold - 0.02`); `guard.py:370-378` (per-paper per-axis drop > slack). Impact: when guard eventually runs, 0.02 may be **too tight** (false regression on benign formatting) or **too loose** vs mean slack 0.03; neither value was validated on WG21 bench rows.
+
+- [LOW] **`QA_SCORE_SOFT_EDGE = 70` mirrors tomd (`tomd/lib/pdf/qa.py:196`) — valid internal alignment, not external calibration.** Evidence: `constants.py:49-51`; `score.py:170-171`; only **6** papers trip qa soft flag in ref-free stats (`00` §3a). Impact: low distortion today, but both tools share the same uncalibrated heuristic; agreement is not evidence the threshold is right.
+
+## False-pass hypothesis
+
+A table-heavy paper that **loses one column's cell text** but keeps global unigram multiset recall above **0.85** (easy when the dropped column repeats boilerplate tokens) passes the hard gate with `uni ≥ 0.85`, no region flag if alignment still maps other regions, and `drift ≤ 0.10`. Evidence: only **3/382** ref-free fails on unigram floor (`00` §3a); `_decide` has no table-cell or Lane 3 fact gate (`score.py:156-184`); bench `CONTENT_RECALL_FLOOR` never runs without GT (`00` §4).
+
+## False-fail hypothesis
+
+Any paper with **one misaligned region** from intentional furniture stripping goes to **review** despite `uni=0.999` and `drift=0.001` — e.g. the P3941R2/R3/R4 family fails on **`heading_monotone`** alone (`00` §3c, `gates.py:105-109`), and separately any clean paper with a single header/footer region trips **`REGION_SOFT_COUNT=1`** (`score.py:164-166`, **186** occurrences `00` §3a). Both are good conversions wrongly burdening triage (fail vs review tier).
+
+## What would change my mind
+
+Side-by-side **sensitivity tables** on the 382-paper corpus: for each verdict-affecting constant (`REGION_SOFT_COUNT`, `DRIFT_SOFT_EDGE`, `UNIGRAM_*`, `REF_NID_ADVISORY_EDGE`), sweep ± plausible values and report how pass/review/fail counts move **with human spot-checks on 20 flagged papers per bucket** — or, equivalently, one committed `calibrate --labels` run plus a holdout set that includes region-count and drift in the objective, not unigram alone.

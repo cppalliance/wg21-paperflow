@@ -1,0 +1,344 @@
+[
+  {
+    "pid": "P1000R7",
+    "label": "review",
+    "unigram_coverage": 0.9865,
+    "coverage_band": "high",
+    "rater_a_label": "pass",
+    "rater_b_label": "review",
+    "resolution_rule": "adjacent_disagreement_more_severe_wins",
+    "split": "calibration"
+  },
+  {
+    "pid": "P2583R0",
+    "label": "pass",
+    "unigram_coverage": 0.9504,
+    "coverage_band": "high",
+    "rater_a_label": "pass",
+    "rater_b_label": "pass",
+    "resolution_rule": "agree",
+    "split": "holdout"
+  },
+  {
+    "pid": "P3039R1",
+    "label": "review",
+    "unigram_coverage": 0.9231,
+    "coverage_band": "mid",
+    "rater_a_label": "pass",
+    "rater_b_label": "review",
+    "resolution_rule": "adjacent_disagreement_more_severe_wins",
+    "split": "calibration"
+  },
+  {
+    "pid": "P3045R7",
+    "label": "pass",
+    "unigram_coverage": 0.9993,
+    "coverage_band": "high",
+    "rater_a_label": "pass",
+    "rater_b_label": "pass",
+    "resolution_rule": "agree",
+    "split": "calibration"
+  },
+  {
+    "pid": "P3666R3",
+    "label": "pass",
+    "unigram_coverage": 0.9944,
+    "coverage_band": "high",
+    "rater_a_label": "pass",
+    "rater_b_label": "pass",
+    "resolution_rule": "agree",
+    "split": "calibration"
+  },
+  {
+    "pid": "P3688R6",
+    "label": "review",
+    "unigram_coverage": 0.9935,
+    "coverage_band": "high",
+    "rater_a_label": "pass",
+    "rater_b_label": "review",
+    "resolution_rule": "adjacent_disagreement_more_severe_wins",
+    "split": "holdout"
+  },
+  {
+    "pid": "P3833R2",
+    "label": "pass",
+    "unigram_coverage": 0.9728,
+    "coverage_band": "high",
+    "rater_a_label": "pass",
+    "rater_b_label": "pass",
+    "resolution_rule": "agree",
+    "split": "calibration"
+  },
+  {
+    "pid": "P3842R2",
+    "label": "pass",
+    "unigram_coverage": 0.9531,
+    "coverage_band": "high",
+    "rater_a_label": "pass",
+    "rater_b_label": "pass",
+    "resolution_rule": "agree",
+    "split": "holdout"
+  },
+  {
+    "pid": "P3911R1",
+    "label": "pass",
+    "unigram_coverage": 0.9293,
+    "coverage_band": "mid",
+    "rater_a_label": "pass",
+    "rater_b_label": "pass",
+    "resolution_rule": "agree",
+    "split": "holdout"
+  },
+  {
+    "pid": "P3932R0",
+    "label": "review",
+    "unigram_coverage": 0.923,
+    "coverage_band": "mid",
+    "rater_a_label": "pass",
+    "rater_b_label": "review",
+    "resolution_rule": "adjacent_disagreement_more_severe_wins",
+    "split": "holdout"
+  },
+  {
+    "pid": "P3935R1",
+    "label": "review",
+    "unigram_coverage": 0.8661,
+    "coverage_band": "mid",
+    "rater_a_label": "pass",
+    "rater_b_label": "review",
+    "resolution_rule": "adjacent_disagreement_more_severe_wins",
+    "split": "calibration"
+  },
+  {
+    "pid": "P3953R3",
+    "label": "pass",
+    "unigram_coverage": 0.9476,
+    "coverage_band": "mid",
+    "rater_a_label": "pass",
+    "rater_b_label": "pass",
+    "resolution_rule": "agree",
+    "split": "holdout"
+  },
+  {
+    "pid": "P3978R0",
+    "label": "not-llm-readable",
+    "unigram_coverage": 0.7951,
+    "coverage_band": "low",
+    "rater_a_label": "not-llm-readable",
+    "rater_b_label": "not-llm-readable",
+    "resolution_rule": "agree",
+    "split": "holdout"
+  },
+  {
+    "pid": "P3982R2",
+    "label": "pass",
+    "unigram_coverage": 0.9978,
+    "coverage_band": "high",
+    "rater_a_label": "not-llm-readable",
+    "rater_b_label": "pass",
+    "resolution_rule": "maximal_disagreement_manual_adjudication",
+    "adjudication_note": "Maximal disagreement (A=fail, B=pass). Adjudicated PASS: grep of the candidate worksheet confirms all three passages Rater A called missing (the 'Proposed polls' wording in 4.1, and 'Poland'/'Tomasz Kaminski' in the References) are verbatim present. Rater A's fail rationale is factually incorrect.",
+    "split": "holdout"
+  },
+  {
+    "pid": "P3985R0",
+    "label": "pass",
+    "unigram_coverage": 0.9971,
+    "coverage_band": "high",
+    "rater_a_label": "pass",
+    "rater_b_label": "pass",
+    "resolution_rule": "agree",
+    "split": "calibration"
+  },
+  {
+    "pid": "P3986R1",
+    "label": "pass",
+    "unigram_coverage": 0.9826,
+    "coverage_band": "high",
+    "rater_a_label": "pass",
+    "rater_b_label": "pass",
+    "resolution_rule": "agree",
+    "split": "calibration"
+  },
+  {
+    "pid": "P4012R0",
+    "label": "not-llm-readable",
+    "unigram_coverage": 0.8389,
+    "coverage_band": "low",
+    "rater_a_label": "not-llm-readable",
+    "rater_b_label": "not-llm-readable",
+    "resolution_rule": "agree",
+    "split": "calibration"
+  },
+  {
+    "pid": "P4012R1",
+    "label": "pass",
+    "unigram_coverage": 0.909,
+    "coverage_band": "mid",
+    "rater_a_label": "pass",
+    "rater_b_label": "pass",
+    "resolution_rule": "agree",
+    "split": "calibration"
+  },
+  {
+    "pid": "P4019R0",
+    "label": "pass",
+    "unigram_coverage": 0.941,
+    "coverage_band": "mid",
+    "rater_a_label": "pass",
+    "rater_b_label": "pass",
+    "resolution_rule": "agree",
+    "split": "calibration"
+  },
+  {
+    "pid": "P4036R0",
+    "label": "pass",
+    "unigram_coverage": 0.9341,
+    "coverage_band": "mid",
+    "rater_a_label": "pass",
+    "rater_b_label": "pass",
+    "resolution_rule": "agree",
+    "split": "calibration"
+  },
+  {
+    "pid": "P4040R0",
+    "label": "pass",
+    "unigram_coverage": 0.9957,
+    "coverage_band": "high",
+    "rater_a_label": "pass",
+    "rater_b_label": "pass",
+    "resolution_rule": "agree",
+    "split": "holdout"
+  },
+  {
+    "pid": "P4089R0",
+    "label": "pass",
+    "unigram_coverage": 0.9641,
+    "coverage_band": "high",
+    "rater_a_label": "pass",
+    "rater_b_label": "pass",
+    "resolution_rule": "agree",
+    "split": "calibration"
+  },
+  {
+    "pid": "P4092R1",
+    "label": "pass",
+    "unigram_coverage": 0.9495,
+    "coverage_band": "mid",
+    "rater_a_label": "pass",
+    "rater_b_label": "pass",
+    "resolution_rule": "agree",
+    "split": "calibration"
+  },
+  {
+    "pid": "P4094R0",
+    "label": "pass",
+    "unigram_coverage": 0.9596,
+    "coverage_band": "high",
+    "rater_a_label": "pass",
+    "rater_b_label": "pass",
+    "resolution_rule": "agree",
+    "split": "holdout"
+  },
+  {
+    "pid": "P4095R0",
+    "label": "pass",
+    "unigram_coverage": 0.9485,
+    "coverage_band": "mid",
+    "rater_a_label": "pass",
+    "rater_b_label": "pass",
+    "resolution_rule": "agree",
+    "split": "calibration"
+  },
+  {
+    "pid": "P4099R0",
+    "label": "pass",
+    "unigram_coverage": 0.9628,
+    "coverage_band": "high",
+    "rater_a_label": "pass",
+    "rater_b_label": "pass",
+    "resolution_rule": "agree",
+    "split": "calibration"
+  },
+  {
+    "pid": "P4124R0",
+    "label": "pass",
+    "unigram_coverage": 0.9404,
+    "coverage_band": "mid",
+    "rater_a_label": "pass",
+    "rater_b_label": "pass",
+    "resolution_rule": "agree",
+    "split": "calibration"
+  },
+  {
+    "pid": "P4126R1",
+    "label": "pass",
+    "unigram_coverage": 0.9614,
+    "coverage_band": "high",
+    "rater_a_label": "pass",
+    "rater_b_label": "pass",
+    "resolution_rule": "agree",
+    "split": "calibration"
+  },
+  {
+    "pid": "P4159R0",
+    "label": "review",
+    "unigram_coverage": 0.9114,
+    "coverage_band": "mid",
+    "rater_a_label": "pass",
+    "rater_b_label": "review",
+    "resolution_rule": "adjacent_disagreement_more_severe_wins",
+    "split": "holdout"
+  },
+  {
+    "pid": "P4167R0",
+    "label": "not-llm-readable",
+    "unigram_coverage": 0.8393,
+    "coverage_band": "low",
+    "rater_a_label": "pass",
+    "rater_b_label": "not-llm-readable",
+    "resolution_rule": "maximal_disagreement_manual_adjudication",
+    "adjudication_note": "Maximal disagreement (A=pass, B=fail). Adjudicated FAIL: source text contains a 3-translation-unit module/ADL worked example (TU #1/#2/#3, with make(), apply(), test(), struct Z). Candidate worksheet retains only TU #1 then jumps to an unrelated smaller example; TU #2 and #3 are verifiably absent from the candidate. Rater B's fail rationale is factually correct.",
+    "split": "holdout"
+  },
+  {
+    "pid": "P4170R0",
+    "label": "pass",
+    "unigram_coverage": 0.9458,
+    "coverage_band": "mid",
+    "rater_a_label": "pass",
+    "rater_b_label": "pass",
+    "resolution_rule": "agree",
+    "split": "holdout"
+  },
+  {
+    "pid": "P4217R0",
+    "label": "pass",
+    "unigram_coverage": 0.9336,
+    "coverage_band": "mid",
+    "rater_a_label": "pass",
+    "rater_b_label": "pass",
+    "resolution_rule": "agree",
+    "split": "holdout"
+  },
+  {
+    "pid": "P4227R0",
+    "label": "pass",
+    "unigram_coverage": 0.9354,
+    "coverage_band": "mid",
+    "rater_a_label": "pass",
+    "rater_b_label": "pass",
+    "resolution_rule": "agree",
+    "split": "calibration"
+  },
+  {
+    "pid": "P4231R0",
+    "label": "not-llm-readable",
+    "unigram_coverage": 0.8427,
+    "coverage_band": "low",
+    "rater_a_label": "not-llm-readable",
+    "rater_b_label": "not-llm-readable",
+    "resolution_rule": "agree",
+    "split": "calibration"
+  }
+]

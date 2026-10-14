@@ -16,7 +16,6 @@ no extra dependency is needed.
 """
 
 import pytest
-
 from whisker.metrics import mhs, normalized_edit_distance, teds, text_nid
 
 _TEXTS = [

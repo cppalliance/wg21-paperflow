@@ -27,11 +27,14 @@ jobs:
       - name: Set up Python
         run: uv python install 3.12
 
-      - name: Sync workspace
-        run: uv sync --all-packages --group dev
+      - name: Sync workspace (all extras for import-linter graph)
+        run: uv sync --all-packages --all-extras --group dev
 
       - name: Run ruff
         run: uv run ruff check packages tests
+
+      - name: Run import-linter
+        run: uv run lint-imports
 
   typecheck:
     name: pyright

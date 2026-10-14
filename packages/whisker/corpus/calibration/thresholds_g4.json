@@ -1,0 +1,266 @@
+{
+  "schema_version": 2,
+  "kind": "whisker-calibration",
+  "n": 34,
+  "edge_ordering_ok": null,
+  "calibrator_version": 2,
+  "calibration_timestamp": "2026-08-05T18:14:33.391171+00:00",
+  "labels_file_sha256": "a2d51883ef953969a02448c5531c493180963cce65cbaf55c650f433ee9926d1",
+  "split_assignment_source": "frozen 'split' field in the labels input file",
+  "current": {
+    "unigram_coverage_fail_edge": 0.85,
+    "unigram_coverage_review_edge": 0.95
+  },
+  "fitted": {
+    "unigram_coverage_fail_edge": null,
+    "unigram_coverage_review_edge": {
+      "name": "unigram_coverage_review_edge",
+      "calibration": {
+        "name": "unigram_coverage_review_edge",
+        "chosen": {
+          "threshold": 0.9341,
+          "tpr": 0.8,
+          "fpr": 0.0667,
+          "precision": 0.8,
+          "tp": 4,
+          "fp": 1,
+          "tn": 14,
+          "fn": 1
+        },
+        "target_fpr": 0.1,
+        "method": "max_tpr_at_fpr",
+        "n_pos": 5,
+        "n_neg": 15,
+        "n": 20,
+        "curve": [
+          {
+            "threshold": 0.8389,
+            "tpr": 0.0,
+            "fpr": 0.0,
+            "precision": 0.0,
+            "tp": 0,
+            "fp": 0,
+            "tn": 15,
+            "fn": 5
+          },
+          {
+            "threshold": 0.8427,
+            "tpr": 0.2,
+            "fpr": 0.0,
+            "precision": 1.0,
+            "tp": 1,
+            "fp": 0,
+            "tn": 15,
+            "fn": 4
+          },
+          {
+            "threshold": 0.8661,
+            "tpr": 0.4,
+            "fpr": 0.0,
+            "precision": 1.0,
+            "tp": 2,
+            "fp": 0,
+            "tn": 15,
+            "fn": 3
+          },
+          {
+            "threshold": 0.909,
+            "tpr": 0.6,
+            "fpr": 0.0,
+            "precision": 1.0,
+            "tp": 3,
+            "fp": 0,
+            "tn": 15,
+            "fn": 2
+          },
+          {
+            "threshold": 0.9231,
+            "tpr": 0.6,
+            "fpr": 0.0667,
+            "precision": 0.75,
+            "tp": 3,
+            "fp": 1,
+            "tn": 14,
+            "fn": 2
+          },
+          {
+            "threshold": 0.9341,
+            "tpr": 0.8,
+            "fpr": 0.0667,
+            "precision": 0.8,
+            "tp": 4,
+            "fp": 1,
+            "tn": 14,
+            "fn": 1
+          },
+          {
+            "threshold": 0.9354,
+            "tpr": 0.8,
+            "fpr": 0.1333,
+            "precision": 0.6667,
+            "tp": 4,
+            "fp": 2,
+            "tn": 13,
+            "fn": 1
+          },
+          {
+            "threshold": 0.9404,
+            "tpr": 0.8,
+            "fpr": 0.2,
+            "precision": 0.5714,
+            "tp": 4,
+            "fp": 3,
+            "tn": 12,
+            "fn": 1
+          },
+          {
+            "threshold": 0.941,
+            "tpr": 0.8,
+            "fpr": 0.2667,
+            "precision": 0.5,
+            "tp": 4,
+            "fp": 4,
+            "tn": 11,
+            "fn": 1
+          },
+          {
+            "threshold": 0.9485,
+            "tpr": 0.8,
+            "fpr": 0.3333,
+            "precision": 0.4444,
+            "tp": 4,
+            "fp": 5,
+            "tn": 10,
+            "fn": 1
+          },
+          {
+            "threshold": 0.9495,
+            "tpr": 0.8,
+            "fpr": 0.4,
+            "precision": 0.4,
+            "tp": 4,
+            "fp": 6,
+            "tn": 9,
+            "fn": 1
+          },
+          {
+            "threshold": 0.9614,
+            "tpr": 0.8,
+            "fpr": 0.4667,
+            "precision": 0.3636,
+            "tp": 4,
+            "fp": 7,
+            "tn": 8,
+            "fn": 1
+          },
+          {
+            "threshold": 0.9628,
+            "tpr": 0.8,
+            "fpr": 0.5333,
+            "precision": 0.3333,
+            "tp": 4,
+            "fp": 8,
+            "tn": 7,
+            "fn": 1
+          },
+          {
+            "threshold": 0.9641,
+            "tpr": 0.8,
+            "fpr": 0.6,
+            "precision": 0.3077,
+            "tp": 4,
+            "fp": 9,
+            "tn": 6,
+            "fn": 1
+          },
+          {
+            "threshold": 0.9728,
+            "tpr": 0.8,
+            "fpr": 0.6667,
+            "precision": 0.2857,
+            "tp": 4,
+            "fp": 10,
+            "tn": 5,
+            "fn": 1
+          },
+          {
+            "threshold": 0.9826,
+            "tpr": 0.8,
+            "fpr": 0.7333,
+            "precision": 0.2667,
+            "tp": 4,
+            "fp": 11,
+            "tn": 4,
+            "fn": 1
+          },
+          {
+            "threshold": 0.9865,
+            "tpr": 0.8,
+            "fpr": 0.8,
+            "precision": 0.25,
+            "tp": 4,
+            "fp": 12,
+            "tn": 3,
+            "fn": 1
+          },
+          {
+            "threshold": 0.9944,
+            "tpr": 1.0,
+            "fpr": 0.8,
+            "precision": 0.2941,
+            "tp": 5,
+            "fp": 12,
+            "tn": 3,
+            "fn": 0
+          },
+          {
+            "threshold": 0.9971,
+            "tpr": 1.0,
+            "fpr": 0.8667,
+            "precision": 0.2778,
+            "tp": 5,
+            "fp": 13,
+            "tn": 2,
+            "fn": 0
+          },
+          {
+            "threshold": 0.9993,
+            "tpr": 1.0,
+            "fpr": 0.9333,
+            "precision": 0.2632,
+            "tp": 5,
+            "fp": 14,
+            "tn": 1,
+            "fn": 0
+          },
+          {
+            "threshold": 1.9993,
+            "tpr": 1.0,
+            "fpr": 1.0,
+            "precision": 0.25,
+            "tp": 5,
+            "fp": 15,
+            "tn": 0,
+            "fn": 0
+          }
+        ]
+      },
+      "holdout": {
+        "tpr": 0.8,
+        "fpr": 0.2222,
+        "precision": 0.6667,
+        "recall": 0.8,
+        "tp": 4,
+        "fp": 2,
+        "tn": 7,
+        "fn": 1,
+        "n_pos": 5,
+        "n_neg": 9,
+        "n": 14
+      }
+    }
+  },
+  "not_fit_reason": {
+    "unigram_coverage_fail_edge": "calibration split has only 2 positive (bad) example(s); need at least 5 per class per split"
+  }
+}

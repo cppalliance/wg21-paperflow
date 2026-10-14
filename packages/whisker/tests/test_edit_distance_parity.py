@@ -19,7 +19,6 @@ import pathlib
 
 import pytest
 from rapidfuzz.distance import Levenshtein as _Lev
-
 from whisker.metrics import normalized_edit_distance
 
 # (a, b, raw_distance, normalized_edit_distance)

@@ -13,14 +13,29 @@ dependencies = [
     "mistune~=3.2.0",
     "numpy>=1.26",
     "paperstore",
+    "pymupdf~=1.27.0",
     "pylatexenc>=2.10",
     "rapidfuzz>=3.14.5,<4",
+    "rich>=13.0",
     "scipy>=1.11",
     "tomd",
 ]
 
+[project.optional-dependencies]
+# Opt-in advisory LLM lane. Keeps the whisker core install LLM-free and
+# standalone: `pip install whisker[tapetum-llm]` pulls the pipeline framework.
+tapetum-llm = [
+    "openai",
+    "pipeline",
+    "pydantic-ai",
+    "pydantic>=2.0",
+    "python-dotenv>=1.0",
+]
+
 [project.scripts]
 whisker = "whisker.__main__:main"
+whisker-tapetum-llm = "whisker.llm.cli:main"
+whisker-readback = "whisker.llm.readback_cli:main"
 
 [build-system]
 requires = ["hatchling"]
@@ -28,3 +43,18 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/whisker"]
+
+[tool.hatch.build.targets.wheel.force-include]
+"src/whisker/py.typed" = "whisker/py.typed"
+"src/whisker/survey/locks/marker.lock.json" = "whisker/survey/locks/marker.lock.json"
+"src/whisker/survey/locks/tesseract.lock.json" = "whisker/survey/locks/tesseract.lock.json"
+# Report theme assets. Without the logo and stylesheet every generated PDF loses
+# its branding, so these are not optional package data.
+"src/whisker/branding/assets/alliance.css" = "whisker/branding/assets/alliance.css"
+"src/whisker/branding/assets/cppalliance-logo.png" = "whisker/branding/assets/cppalliance-logo.png"
+"src/whisker/branding/assets/LAYOUT-REFERENCE.pdf" = "whisker/branding/assets/LAYOUT-REFERENCE.pdf"
+"src/whisker/branding/assets/LAYOUT-PATTERN.md" = "whisker/branding/assets/LAYOUT-PATTERN.md"
+# No entry for llm_readability/deepseek-v4/: hatchling already
+# ships every file under `packages` above, and force-including them a second
+# time fails the wheel build outright ("a second file is being added at the same
+# path"). The packaged-resource tests are what prove they are present.

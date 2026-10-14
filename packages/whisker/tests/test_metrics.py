@@ -6,9 +6,7 @@
 #
 
 import pytest
-
 from whisker.metrics import (
-    _parse_headings,
     clean_string,
     content_recall,
     content_tokens,
@@ -19,6 +17,9 @@ from whisker.metrics import (
     teds,
     text_nid,
     textblock2unicode,
+)
+from whisker.metrics import (
+    parse_headings as _parse_headings,
 )
 
 

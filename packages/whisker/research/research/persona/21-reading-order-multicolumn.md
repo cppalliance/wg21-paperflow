@@ -1,0 +1,32 @@
+# 21 - The Reading-Order / Multi-Column Expert
+
+**Verdict:** usable-with-conditions — unigram-gated content is the correct benchmark-aligned trade for multi-column reflow, but whisker cannot distinguish faithful reflow from total scramble, and the `cov`/`uni` gap is an unlabeled heuristic with no operational disambiguator on the score path.
+**Confidence:** high
+
+## Findings
+
+- [CRITICAL] **Total reading-order destruction can hard-pass by design.** Evidence: `_decide` hard-fails only on `unigram_coverage < 0.85`, never on shingle `coverage` (`score.py:156-160`, `136-137`); `test_reflow_high_unigram_low_shingle_not_fail` asserts `coverage=0.66, unigram=0.95 → pass` with zero flags (`test_score.py:89-96`). Impact: a conversion that preserves the source word multiset but permutes paragraphs, list items, or table rows cannot fail the content gate; only Lane 3 `order`/`table` facts (`facts.py:353-367`) or labeled `reading_order_ned` on bench (`match.py:279-295`) would catch it, and Lane 3 runs on **0/382** papers (`00` §4).
+
+- [HIGH] **The `unigram_coverage - coverage` gap is documented as "faithful reflow" but is not falsifiable without labels.** Evidence: `ContentCheckResult` docstring: large gap means "present but locally reformatted (faithful, e.g. PDF reflow)" vs low unigram means missing content (`check_content.py:141-147`); same claim in `constants.py:27-30`. Runtime on **382** ref-free papers: **14** have gap ≥ 0.25 (e.g. `P4042R0 cov=0.610 uni=0.920 gap=0.310`, `P4047R0 cov=0.658 uni=0.950 gap=0.292`), **all `review`**, **0 `pass`** with gap ≥ 0.25; mean gap **0.046**. Impact: big gaps correlate with review via co-traveling unigram band/drift/regions, but whisker still cannot label any of the 14 as reflow vs scramble — the heuristic is narrative, not measured.
+
+- [HIGH] **`reading_order_ned` exists but is absent from the default score path.** Evidence: `reading_order_ned` is "Advisory only: never gates content" (`match.py:285-286`); wired only through `bench.py` `BenchRow.reading_order` (`bench.py:67`, `247`), not `score.py` or `_decide`. The score-path sidecar exposes order-sensitive shingle `coverage`/`drift` (`score.py:240-241`) but `_decide` explicitly ignores them (`score.py:136-137`, `test_shingle_drift_alone_is_not_review` at `test_score.py:131-139`). Impact: operators see `cov=` in `--no-reference` summaries (`CLAUDE.md:117-119`) with no calibrated interpretation; a low `cov` on a `pass` (max observed gap among **163** passes: `P4178R0 cov=0.837 uni=0.952 gap=0.115`) looks alarming but is benign by spec.
+
+- [HIGH] **Retiring the shingle hard gate saved 39 real papers that a coverage floor would still reject.** Evidence: runtime count of papers with `coverage < 0.85 AND unigram_coverage ≥ 0.85` = **39/382**; prior design note: hard-gating shingle `coverage` failed **43** papers where tomd had correctly reflowed multi-column text (`CLAUDE.md:312-314`). Worst cases: `P3844R4 cov=0.507 uni=0.979`, `P4093R0/R1 cov≈0.514 uni≈0.96`. Impact: re-gating on `coverage` would recreate mass false-fail on legitimate reflow; keeping unigram-only is numerically justified, but it permanently accepts the scramble symmetric to reflow at equal multiset recall.
+
+- [MED] **Large-gap papers land in `review`, not `pass`, via correlated soft signals — partial operational mitigation.** Evidence: `P4042R0` runtime: `review` on `uni=0.920` (0.85–0.95 band), `unigram drift 0.296 > 0.1`, 2 misaligned regions (`REGION_SOFT_COUNT=1`, `constants.py:47`); `P4047R0`: `review` on 73 misaligned regions + `unigram drift 0.616` despite `cov=0.658`. Among **163** passes: **0** with `cov < 0.80`, **1** with `cov < 0.85` (`P4178R0`). Impact: total scramble on real `check_content` likely triggers region/drift review, but mild paragraph swaps with high uni and low region count can still `pass` (unit-test path); review tier is already **205/382 (53.7%)** (`00` §3a) and default CI accepts it (`--gate review`).
+
+- [MED] **5-gram shingle coverage conflates multi-column reflow with any local reordering at token-window scale.** Evidence: `_SHINGLE_WIDTH = 5` (`check_content.py:76`, `432-447`); coverage = multiset recall of shingle hashes (`check_content.py:612-615`). A column-major vs row-major read permutes every 5-gram window even when unigram multiset is intact. Impact: `cov` is a coarse, uncalibrated proxy — useful as telemetry, misleading if operators treat `cov << uni` as proof of faithfulness (`check_content.py:146-147` warns "never a pass/fail gate on its own").
+
+- [LOW] **Benchmark precedent supports the split but does not validate WG21 reflow/scramble labels.** Evidence: `constants.py:21-27` cites Docling set recall, Nougat set-F1, OmniDocBench block-match-before-NED; `set-f1-recall.md` confirms industry separates content recall from reading order and never merges them into one gate. `calibrate` has never been run (`00` §5). Impact: design is literature-consistent; operating-point trust on this corpus is still provisional.
+
+## False-pass hypothesis
+
+Synthetic path (encoded in tests): reorder source paragraphs in markdown so every source word appears once, yielding `unigram_coverage=0.95`, `coverage=0.66`, zero misaligned regions in a mocked `ContentCheckResult` → **`pass`** (`test_score.py:89-96`). On a WG21 table where two body columns are swapped but all cell tokens remain in the document: `unigram_coverage` stays ≥ 0.95, structural gates pass, **`verdict == pass`** unless region difflib or drift soft flags fire; Lane 3 `table` neighbor facts would catch it but are unauthored (`00` §4).
+
+## False-fail hypothesis
+
+`P3844R4`: `cov=0.507`, `uni=0.979`, currently **`review`** (not fail). Reinstating the retired shingle `coverage < 0.85` hard gate would **fail** this paper despite near-complete word presence — the exact failure mode that blocked **43** correct reflows (`CLAUDE.md:312-314`). Alternatively, `P3941R2/R3/R4` fail on `heading_monotone` alone with `uni=0.999` (`00` §3c): reading-order/content metrics green while structural heading pedantry hard-fails.
+
+## What would change my mind
+
+Label **≥30** papers from the **14** with gap ≥ 0.25 (plus **≥10** controls) as `{faithful_reflow, scrambled, partial_loss}` by human read of source vs markdown, then report (a) precision/recall of the gap heuristic vs labels, and (b) how many labeled scrambles with `uni ≥ 0.95` receive `pass` under ref-free scoring — or add `reading_order_ned` (or a soft `coverage`-band flag) to the score path with thresholds fitted via `calibrate` on those labels.

@@ -1,0 +1,259 @@
+{
+  "$schema": "whisker-golden-validation-labels-v1",
+  "purpose": "Independent, deterministic, LLM-free validation set derived from human-blessed golden ideals. NEVER used to fit a threshold -- see calibrate.py's fit/holdout separation. Used only to check convergent validity of a threshold fitted elsewhere against a second, independent label source.",
+  "excluded_holdout_pid": "p4182r0",
+  "label_source": "whisker.golden_labels.label_from_ideal_panel (recall-only, see module docstring for construct-validity rationale)",
+  "generated_from": {
+    "tool": "planner-authored probe script",
+    "ideals_dir": "packages/tomd/tests/fixtures/golden/ideals",
+    "engines": [
+      "tomd",
+      "markitdown"
+    ]
+  },
+  "entries": [
+    {
+      "pid": "cwg1-markitdown",
+      "paper": "cwg1",
+      "engine": "markitdown",
+      "unigram_coverage": 0.9897,
+      "golden_label": "good",
+      "label": "pass",
+      "golden_recall": 0.9938,
+      "golden_nid": 0.9949,
+      "split": "holdout"
+    },
+    {
+      "pid": "cwg1-tomd",
+      "paper": "cwg1",
+      "engine": "tomd",
+      "unigram_coverage": 0.9897,
+      "golden_label": "good",
+      "label": "pass",
+      "golden_recall": 0.9563,
+      "golden_nid": 0.9585,
+      "split": "holdout"
+    },
+    {
+      "pid": "p0533r9-markitdown",
+      "paper": "p0533r9",
+      "engine": "markitdown",
+      "unigram_coverage": 0.9249,
+      "golden_label": "review",
+      "label": "review",
+      "golden_recall": 0.8611,
+      "golden_nid": 0.5916,
+      "split": "holdout"
+    },
+    {
+      "pid": "p0533r9-tomd",
+      "paper": "p0533r9",
+      "engine": "tomd",
+      "unigram_coverage": 0.8864,
+      "golden_label": "review",
+      "label": "review",
+      "golden_recall": 0.8387,
+      "golden_nid": 0.7655,
+      "split": "holdout"
+    },
+    {
+      "pid": "p0957r8-markitdown",
+      "paper": "p0957r8",
+      "engine": "markitdown",
+      "unigram_coverage": 0.9986,
+      "golden_label": "good",
+      "label": "pass",
+      "golden_recall": 0.9645,
+      "golden_nid": 0.836,
+      "split": "holdout"
+    },
+    {
+      "pid": "p0957r8-tomd",
+      "paper": "p0957r8",
+      "engine": "tomd",
+      "unigram_coverage": 0.9628,
+      "golden_label": "good",
+      "label": "pass",
+      "golden_recall": 0.9949,
+      "golden_nid": 0.8505,
+      "split": "holdout"
+    },
+    {
+      "pid": "p1068r11-markitdown",
+      "paper": "p1068r11",
+      "engine": "markitdown",
+      "unigram_coverage": 0.2624,
+      "golden_label": "bad",
+      "label": "fail",
+      "golden_recall": 0.261,
+      "golden_nid": 0.9551,
+      "split": "holdout"
+    },
+    {
+      "pid": "p1068r11-tomd",
+      "paper": "p1068r11",
+      "engine": "tomd",
+      "unigram_coverage": 0.9843,
+      "golden_label": "good",
+      "label": "pass",
+      "golden_recall": 0.9927,
+      "golden_nid": 0.9514,
+      "split": "holdout"
+    },
+    {
+      "pid": "p1122r3-markitdown",
+      "paper": "p1122r3",
+      "engine": "markitdown",
+      "unigram_coverage": 0.9892,
+      "golden_label": "good",
+      "label": "pass",
+      "golden_recall": 0.9721,
+      "golden_nid": 0.9352,
+      "split": "holdout"
+    },
+    {
+      "pid": "p1122r3-tomd",
+      "paper": "p1122r3",
+      "engine": "tomd",
+      "unigram_coverage": 0.9716,
+      "golden_label": "good",
+      "label": "pass",
+      "golden_recall": 0.9961,
+      "golden_nid": 0.9621,
+      "split": "holdout"
+    },
+    {
+      "pid": "p2040r0-markitdown",
+      "paper": "p2040r0",
+      "engine": "markitdown",
+      "unigram_coverage": 0.3917,
+      "golden_label": "bad",
+      "label": "fail",
+      "golden_recall": 0.3904,
+      "golden_nid": 0.9889,
+      "split": "holdout"
+    },
+    {
+      "pid": "p2040r0-tomd",
+      "paper": "p2040r0",
+      "engine": "tomd",
+      "unigram_coverage": 0.9837,
+      "golden_label": "good",
+      "label": "pass",
+      "golden_recall": 0.9991,
+      "golden_nid": 0.9803,
+      "split": "holdout"
+    },
+    {
+      "pid": "p3411r5-markitdown",
+      "paper": "p3411r5",
+      "engine": "markitdown",
+      "unigram_coverage": 1.0,
+      "golden_label": "good",
+      "label": "pass",
+      "golden_recall": 0.9852,
+      "golden_nid": 0.9496,
+      "split": "holdout"
+    },
+    {
+      "pid": "p3411r5-tomd",
+      "paper": "p3411r5",
+      "engine": "tomd",
+      "unigram_coverage": 0.9999,
+      "golden_label": "good",
+      "label": "pass",
+      "golden_recall": 1.0,
+      "golden_nid": 1.0,
+      "split": "holdout"
+    },
+    {
+      "pid": "p3556r0-markitdown",
+      "paper": "p3556r0",
+      "engine": "markitdown",
+      "unigram_coverage": 0.8623,
+      "golden_label": "review",
+      "label": "review",
+      "golden_recall": 0.8226,
+      "golden_nid": 0.9166,
+      "split": "holdout"
+    },
+    {
+      "pid": "p3556r0-tomd",
+      "paper": "p3556r0",
+      "engine": "tomd",
+      "unigram_coverage": 0.9706,
+      "golden_label": "good",
+      "label": "pass",
+      "golden_recall": 0.9961,
+      "golden_nid": 0.9449,
+      "split": "holdout"
+    },
+    {
+      "pid": "p3953r0-markitdown",
+      "paper": "p3953r0",
+      "engine": "markitdown",
+      "unigram_coverage": 1.0,
+      "golden_label": "good",
+      "label": "pass",
+      "golden_recall": 0.9231,
+      "golden_nid": 0.8064,
+      "split": "holdout"
+    },
+    {
+      "pid": "p3953r0-tomd",
+      "paper": "p3953r0",
+      "engine": "tomd",
+      "unigram_coverage": 0.9886,
+      "golden_label": "good",
+      "label": "pass",
+      "golden_recall": 1.0,
+      "golden_nid": 0.9982,
+      "split": "holdout"
+    },
+    {
+      "pid": "p4020r0-markitdown",
+      "paper": "p4020r0",
+      "engine": "markitdown",
+      "unigram_coverage": 1.0,
+      "golden_label": "good",
+      "label": "pass",
+      "golden_recall": 0.9345,
+      "golden_nid": 0.8669,
+      "split": "holdout"
+    },
+    {
+      "pid": "p4020r0-tomd",
+      "paper": "p4020r0",
+      "engine": "tomd",
+      "unigram_coverage": 0.9972,
+      "golden_label": "good",
+      "label": "pass",
+      "golden_recall": 1.0,
+      "golden_nid": 1.0,
+      "split": "holdout"
+    },
+    {
+      "pid": "p4228r0-markitdown",
+      "paper": "p4228r0",
+      "engine": "markitdown",
+      "unigram_coverage": 0.9916,
+      "golden_label": "good",
+      "label": "pass",
+      "golden_recall": 0.994,
+      "golden_nid": 0.8402,
+      "split": "holdout"
+    },
+    {
+      "pid": "p4228r0-tomd",
+      "paper": "p4228r0",
+      "engine": "tomd",
+      "unigram_coverage": 0.9832,
+      "golden_label": "good",
+      "label": "pass",
+      "golden_recall": 1.0,
+      "golden_nid": 0.994,
+      "split": "holdout"
+    }
+  ],
+  "failed": []
+}

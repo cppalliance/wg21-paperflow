@@ -1,0 +1,8 @@
+{"id": "order-toc", "type": "order", "sequence": ["abstract", "Recent WG21 History", "Revision History"], "checked": "verified", "question": "After the title block, which three front-matter sections appear first, in order?"}
+{"id": "present-subtitle", "type": "present", "text": "fibers without scheduler", "checked": "verified", "question": "What short phrase does the paper use under the title to describe the proposed execution model? Quote it."}
+{"id": "present-exception-state", "type": "present", "text": "per-fiber exception state", "checked": "verified", "question": "Where does the paper say exception state lives for the proposed construct? Quote the phrase."}
+{"id": "absent-audience-label", "type": "absent", "text": "Audience:", "checked": "verified", "question": "Does a WG21 metadata field label for the intended committee still appear as visible body text after conversion? If it does not, answer NOT FOUND."}
+{"id": "table-poll-stlouis", "type": "table", "cell": "6", "neighbors": {"right": "8", "heading": "SF"}, "table_heading": "SF", "checked": "verified"}
+{"id": "table-poll-sofia", "type": "table", "cell": "10", "neighbors": {"right": "14", "heading": "SF"}, "table_heading": "SF", "checked": "verified"}
+{"id": "code-fiber-example", "type": "code", "text": "1  fiber_context* pf1; 2  fiber_context f4{[&pf1]{ 3      pf1->resume();", "checked": "verified", "question": "Quote the first code example that captures a context pointer and resumes it from inside a lambda."}
+{"id": "xref-p3472", "type": "xref", "text": "[P3472R1]", "checked": "verified", "question": "Which related WG21 paper is cited in square brackets in the prior-art discussion? Quote the citation including brackets."}

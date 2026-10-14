@@ -1,0 +1,32 @@
+# 26 - Timeout-Budget-Auditor
+
+**Verdict:** usable-with-conditions — timeout budgets are a tail-risk / reliability lever, not a cold-run speed lever; zero hits on the 3003 s run means tightening saves ≈0 s on the happy path.
+**Confidence:** high
+
+## Findings
+
+- [CRITICAL] **Zero timeout hits on the cold fleet run; budgets never bound.** Evidence: 3003.4 s run, 55 model retries, no operational timeout tombstones (`00-baseline.md:17-18,60-61`; prior grep of fleet stderr in `research/tapetum-llm-throughput/07-retry-timeout-auditor.md:12`). Per-call mean ≈20 s at 16 server slots (`00-baseline.md:24-25`). Impact: **≈0 s wall saving** on the measured cold run from any timeout tightening; this lever cannot explain or fix the 50 min → 5–10 min gap.
+
+- [HIGH] **PDF paper budget is additive 2220 s (37 min) but only wraps the outer chain.** Evidence: `_PAPER_TIMEOUT_SECONDS = 900.0` (`cli.py:138`); `_pdf_judge_timeout_seconds(None) = 900 + 5×120 + 6×120 = 2220` where `6 = 1 + MAX_UNIT_CHECKS` metadata+units (`cli.py:154-162`, `constants.py:191,223`); outer `asyncio.wait_for(..., timeout=_pdf_judge_timeout_seconds(...))` at `cli.py:1222-1237`. Text lane: `_text_lane_timeout_seconds() = 900 + 6×120 = 1620 s` (`cli.py:198-202`, `cli.py:1297-1308`). Impact: a genuinely stuck paper holds one of 32 client semaphore slots for up to **37 min** before the outer guard fires; fleet-equivalent cost of one 15 min hang ≈ 900 s / 32 ≈ **28 s** on a 3003 s run — real tail risk, negligible mean throughput.
+
+- [HIGH] **Monolith call has no per-call `asyncio.wait_for`; HTTP 600 s read is the effective cap.** Evidence: monolith uses bare `run_judge_task(...)` with no timeout wrapper (`pdf_judge.py:650-657`); metadata/unit/page calls use `asyncio.wait_for(..., timeout=120)` (`unit_judge.py:257-266`, `unit_judge.py:779-785`, `pdf_judge.py:397-403`). `AsyncOpenAI(...)` created with **no timeout override** → SDK default `Timeout(connect=5.0, read=600, write=600, pool=600)` (`model_backends.py:283`; runtime probe 2026-07-23). Backend retry `max_attempts = min(2, request_limit)` on `APITimeoutError` etc. (`model_backends.py:300-350`). Comment at `cli.py:134-137` explicitly cites the 600 s read default. Impact: worst-case monolith stall ≈ **600 s × 2 attempts + 2 s backoff ≈ 1202 s (~20 min)** on one slot before failure — the dominant tail-risk hole; unit/page 120 s caps fire first on scoped calls.
+
+- [MED] **Semaphore held for the entire per-paper chain amplifies tail risk but did not bind tonight.** Evidence: `async with sem:` wraps all of `_adjudicate_one` including monolith → metadata → escalations → units → ideal (`cli.py:1120`, `cli.py:1222-1239`, `cli.py:1151-1158`). Within-paper calls are serial by design (`00-baseline.md:36-38`, `pdf_judge.py:753`, `unit_judge.py:389`). Impact: one hung monolith blocks **1/32 client concurrency** until HTTP or paper timeout; not hidden serialization from timeout math, but timeout generosity extends slot occupancy on failure paths. Cold-run saving from fixing this: **<1%** unless hangs become frequent.
+
+- [MED] **120 s per-call caps are 6× above observed mean; p99-based ~60 s + retry is plausible but quality-neutral only under stable decode.** Evidence: implied ~20 s/call mean (`00-baseline.md:24-25`); `UNIT_CHECK_TIMEOUT_SECONDS = PAGE_ESCALATION_TIMEOUT_SECONDS = 120.0` (`constants.py:197,241`); 55 retries / ~2284 calls ≈ 2.4% (`00-baseline.md:18,22-23`) with backend 2-attempt retry already (`model_backends.py:300-350`). Counter-evidence: `max-num-seqs 32` regression caused unit checks to hit 120 s timeouts and fail-closed review caps (`research/tapetum-llm-throughput/13-determinism-guardian.md:101`). Impact: 120→60 s on scoped calls saves time **only when a call would otherwise run 60–120 s or hang**; on tonight's distribution, expect **≈0–30 s fleet wall** (order 0–1%), not minutes.
+
+- [MED] **`--all-pages` timeout scales linearly with page count and can exceed 15 min per paper.** Evidence: `unit_slots = (1 + unit_count)` when `unit_count` is set (`cli.py:155-157`); `page_count_for_timeout = _pdf_page_count(...)` when `--all-pages` (`cli.py:1218-1220`, `cli.py:1233-1236`). A 90-page paper (e.g. P3400R3 in throughput audit) gets budget 900 + 600 + 91×120 = **11 820 s (~3.3 h)**. Impact: irrelevant to default fleet (381-paper cold run uses `MAX_UNIT_CHECKS=5`), but extreme tail risk if `--all-pages` is used concurrently at c=32.
+
+- [LOW] **HTTP-layer timeout and asyncio timeout are layered inconsistently across call types.** Evidence: scoped calls: asyncio 120 s < HTTP read 600 s, so asyncio wins (`unit_judge.py:779-785`, `model_backends.py:283`). Monolith: only HTTP 600 s × retries (`pdf_judge.py:650-657`, `model_backends.py:341-350`). Ideal verifier: outer 900 s only, inner `run_task` → same HTTP defaults (`cli.py:1151-1158`, `07-retry-timeout-auditor.md:10`). No `httpx` client reuse per call — new `AsyncOpenAI` per `ModelBackend.run()` (`model_backends.py:283`). Impact: tightening HTTP read to 90 s globally would bound monolith tail but requires a **pipeline change** (whisker cannot edit `packages/pipeline/` per package-boundary rule); whisker-local `asyncio.wait_for` on monolith is the portable fix.
+
+## False-pass hypothesis
+
+Tightening scoped timeouts to 60 s without preserving the backend 2-attempt retry path: under MoE contention a slow-but-valid unit check times out at 60 s, is logged as failed (`unit_judge.py:419-423`), and triggers fail-closed `coverage_complete=False` review cap — verdict stays conservative (no silent pass), but operational error rate rises and fusion sees more `review` caps that are infrastructure artifacts, not conversion defects.
+
+## False-fail hypothesis
+
+Adding a 60 s `asyncio.wait_for` on the monolith call without retry: large-prefill papers (full PDF text + full markdown, sent once per paper at `pdf_judge.py:640-657`) can exceed 60 s TTFT/decode under load while still producing a valid judgment; premature cancel → `PdfLaneError` → error tombstone (`cli.py:1373-1387`), discarding a usable partial chain — same failure mode as P4182R0 ideal-after-judge waste (`07-retry-timeout-auditor.md:14-16`) but at monolith phase.
+
+## What would change my mind
+
+Per-call latency histograms from debug sidecars showing p99 scoped-call wall >90 s on ≥5% of the ~1510 unit checks, or ≥3 `asyncio.TimeoutError` / `APITimeoutError` tombstones in a repeat cold run — that would upgrade timeout tightening from a <1% tail lever to a schedulable few-minute saving worth pairing with monolith `wait_for`.

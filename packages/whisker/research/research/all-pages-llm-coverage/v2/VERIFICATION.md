@@ -1,0 +1,28 @@
+# v2 VERIFICATION - What is now guaranteed, line-verified (40-agent wave)
+
+Date: 2026-07-22. Workspace @ 51cb704, corpus SHAs per ../00-baseline.md. 40 composer-2.5 agents: 24 deep repo reads (12 repos x call-sites + coverage), 6 sweeps over the 19 non-LLM repos, 4 full-file reads of our own code, 3 fact re-verifications, 3 adversarial counterexample hunters. Roster check (35): all 31 corpus directories covered, no gaps. Orchestrator re-read the decisive counterexample file itself (marker `benchmarks/overall/scorers/llm.py`, full file).
+
+## Guaranteed statements (exhaustively enumerated at the pinned SHAs)
+
+**G1. No repo in the corpus runs an LLM per page for verification inside its PRODUCTION conversion pipeline.** All 31 repos swept or deep-read; every LLM/VLM call site enumerated (58 olmocr, 29 docling, 279 langextract, 23 marker, 14 MinerU, 4 Dolphin, 17 nougat, 13 surya, 39 unstructured, 12 opendataloader, 23 firecrawl, 4 markitdown; 19 further repos certified at 0 production LLM sites, ~41k pattern hits triaged). Every production site classifies as extraction or refinement. CONFIRMED by three independent hunter strategies as well.
+
+**G2. CORRECTION of round 1: per-page LLM-as-judge verification DOES exist in the corpus - as an offline eval harness.** marker `benchmarks/overall/scorers/llm.py` (`LLMScorer`, lines 94-160, orchestrator-verified verbatim): renders the sample's PDF page to an image, sends image + already-produced markdown to Gemini (temperature 0, enforced JSON schema, bounded retry) and collects component scores (overall, text, formatting, section_headers, tables, forms, equations, lists, images) with the binding rule "If text that is important to the meaning of the document is missing, do not score higher than 3/5." Documented in marker README. Additionally, olmocr's bench MINERS use LLMs to judge produced text against the source during test creation (`bench/scripts/run_difference.py:47`, `bench/miners/check_headers_footers.py:56`). Round 1's blanket "no repo does per-page LLM verification" was too broad; the correct statement is G1 (production) + this eval-harness precedent.
+
+**G3. Consequence for our design: --all-pages has direct prior art after all.** A golden-PR review is an offline eval context, exactly where marker deploys its per-page LLM judge. The precedent set is now: marker LLMScorer (per-page LLM judge, eval-only) + pdf-parse-bench (exhaustive element-level LLM judging) + olmocr-bench (exhaustive per-page deterministic gate, `benchmark.py:249-251` hard-exits when any (pdf, page) lacks a test). Our plan is the composition of these three, which no single repo ships: exhaustive page coverage (olmocr gate) x LLM judging (marker scorer) x fail-closed accounting (ours).
+
+**G4. Our three defects hold, full-file-verified.** cli.py read in full (1331 physical lines): `exhaustive` consumed only in the text-lane branch, `judge_pdf_extraction` receives no coverage parameter and has none in its signature (pdf_judge.py full read); fingerprint hashes ten fields, none encoding coverage mode; empty router leaves the pre-filled `coverage_complete=True` untouched and fusion trusts it. Nuance from the full reads: the vacuous-complete default lives in the CALLER (pdf_judge.py), not in run_unit_checks itself, and inspect_report.py omits all page-level fields pdf_judge already writes.
+
+**G5. Foreign decision facts hold, with one nuance.** langextract: `extraction.py:365` `setdefault("suppress_parse_errors", True)`, failed chunks become `[]`, no result field records suppression - CONFIRMED verbatim. marker block-selectivity: CONFIRMED with nuance (a document containing SectionHeader blocks triggers ONE document-level LLM call; pure-Text pages otherwise zero). olmocr gate: PARTIALLY as round 1 stated it - the hard exit when any (pdf, page) lacks a test is real (`benchmark.py:249-251`, sys.exit(1)), but BaselineTest auto-injection is per-PDF page 1 only; olmocr's corpus is single-page PDFs so the distinction is invisible there, but OUR multi-page transplant must inject a baseline check per page explicitly, not assume the library pattern does it.
+
+**G6. Even the extraction pipelines the operator admires can silently lose pages.** Verified silent-loss paths in olmocr (whole-doc discard + fallback not marked per page), docling (page.size None dropped without ErrorItem), MinerU (batch truncation zip, broken-PDF rewrite), Dolphin (element exceptions swallowed), nougat (marker-less paths despite MISSING_PAGE sentinels), surya (fallback heals full-page failure unrecorded), langextract, firecrawl. Full citations in the 10b-21b reports. The fail-closed coverage accounting we plan is NOT standard practice we are missing; it is ABOVE the field's standard.
+
+## What remains judgment, not guarantee
+
+- That --all-pages will catch real golden defects at a useful signal-to-noise ratio: only a labeled holdout can prove that (flip condition stands in ../SYNTHESIS.md).
+- That an LLM pass proves correctness: it cannot (TNR evidence unchanged). The report-wording condition stands.
+
+## Coverage gaps declared by agents (honest limits of the guarantee)
+
+- MinerU (14a/14b), unstructured (18b), firecrawl (20b), opendataloader (19b), markitdown/pymupdf4llm (21b), our readers (43): agents declared "exhaustive: no" with named uncovered corners (experimental pipelines, vendor stubs, non-core wrappers). None of the uncovered corners is a conversion-output verification candidate by construction (they are transport/config/UI code), but they are listed in the individual reports.
+- pandoc: src/ scanned, non-src (docs, test corpora) not.
+- Guarantee is bound to the pinned SHAs. Upstream may change tomorrow.

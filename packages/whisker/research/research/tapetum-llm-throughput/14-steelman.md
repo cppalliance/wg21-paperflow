@@ -1,0 +1,44 @@
+# 14 - Steelman
+
+**Verdict:** usable (48 min is a fair cold-re-adjudication price for a 6-call/paper grounded audit on hourly pod billing; steady-state nightly cost collapses to near-zero via incremental skip)
+**Confidence:** high
+
+## Findings
+
+- [CRITICAL] The 4.2x wall regression is explained by principled call-volume growth, not lost concurrency or a scheduling bug. Tonight's sidecars record **2,289 LLM calls across 381 papers** (median **7**, mean **6.0** calls/paper; only **6** papers at the 2-call floor). The 07-09 benchmark era was **~1 call/paper** (`00-baseline.md:61-62`). Fleet math: `2,289 × ~24 s effective decode / 16 server slots ≈ 3,433 s` brackets the observed **2,883 s** (`00-baseline.md:28,41`; `03-cascade-topology-auditor.md:77-78`). Throughput stayed uniform (~8 papers/min, no tail stall; `00-baseline.md:37-40`). Impact: the slowdown buys ~5 extra scoped judgments per paper; it is not an accidental regression.
+
+- [CRITICAL] The 07-17 source-aware lane delivers materially more defensible output per paper than the 07-09 single-shot cascade. Every PDF paper now runs a **mandatory serial chain**: monolith judge → metadata/outline check → optional page escalations (cap 5) → risk-routed unit checks (cap 5) → CPU two-sided evidence verification (`pdf_judge.py:646-890`; `unit_judge.py:231-267,379-728`). Concrete fail case **P4231R0**: metadata check independently flags missing Abstract/Introduction sections and heading drift (`metadata_outline_check.verdict=fail` in sidecar); **3** unit checks on routed pages produce a verified `content_omission` defect group with source-grounded quotes; **14** `candidate_not_found` dispositions survive verification (monolith alone reported 10 missing-content quotes, but only grounded, candidate-absent claims persist). A 07-09 monolith could have emitted the same headline verdict with zero cross-checks and no per-unit defect inventory. Impact: the extra minutes purchase findings a human golden reviewer would demand, not vanity telemetry.
+
+- [HIGH] A concrete **review** case shows unit checks catching table structure drift the monolith missed. **P1000R8**: monolith reasoning says tables and FAQ prose are faithfully preserved (sidecar `reasoning`); metadata check caps at `review` for heading drift; a routed unit check on `page:1` fails on schedule-table restructuring and yields a verified `table_corruption` defect group with source quote `"2026.2 – Brno First meeting of C++29"`. That is exactly the token-preserving corruption class the deterministic lane cannot gate (`whisker/CLAUDE.md` advisory rationale). Impact: ~3 extra calls on this paper are cheap insurance against a false pass on a high-visibility procedural paper.
+
+- [HIGH] **7.6 s/paper amortized wall** (`00-baseline.md:41-42`) is negligible in absolute terms for an unattended overnight advisory lane. The alliance pod is **billed per hour of uptime, not per token** (`SERVICES.toml:62-63`; `whisker/CLAUDE.md` "Availability and cost model"). Tonight added **~33 min** beyond the 07-09 benchmark on hardware already running 24/7: marginal dollar cost ≈ **$0**. By contrast, replaying **2,289** structured judge calls on **Claude Opus 4.6/4.8** at published **$5/$25 per MTok** ([Anthropic pricing](https://platform.claude.com/docs/en/about-claude/pricing)) with a conservative **~35k input + ~800 output tokens/call** would land near **$400–550** per full fleet pass, before retries. A human golden-QA reviewer at even **3 min/paper** would need **~19 person-hours** for 381 papers. Impact: optimizing 48 min on a lane nobody waits on is mis-prioritized vs optimizing finding quality.
+
+- [HIGH] Tonight was a **forced cold re-adjudication**, not steady-state nightly cost. The 07-22 work bumped `_LANE_VERSION` to **9**, invalidating every stored fingerprint (`00-baseline.md:43-45`; `cli.py:99-114`). All **381** papers were evaluated with skip disabled (`00-baseline.md:45`). Steady-state bare runs enable incremental skip by default: `incremental = not args.force` when `full_run` (`cli.py:1070-1071`); matching fingerprints short-circuit before any LLM call (`cli.py:1153-1168`). Fingerprints hash markdown, source, prompts, schema, model, ideal presence, and coverage mode (`cli.py:563-598`). Honest nightly estimate: if mailing converts **10–30 new/changed papers**, expect **~1–4 min** wall (10–30 × ~7.6 s/paper), not 48 min; a no-change night is **~0 s** of LLM work (381 skipped). Impact: treating tonight's number as the recurring fleet price is wrong.
+
+- [MED] The lane's fidelity posture justifies serial thoroughness over wall-clock. Project **Fidelity** rules require verified citations or honest `not_found`, and forbid partial results mistakable for complete ones (`CLAUDE.md:123-129`). The PDF lane fails closed on context overflow, judge errors, and ideal verification failures (`pdf_judge.py:586-587,658-659`; `00-baseline.md:33-34` shows 4 errors preserved, not silently dropped). Uncertain evidence caps at `review`, never silent pass (`pdf_judge.py:343-367`; `unit_judge.py:451-464`). Impact: shaving calls to recover minutes on an **advisory** lane that **never gates CI** (`whisker/CLAUDE.md` "Why the LLM never gates") trades defensibility for a metric no operator watches.
+
+- [MED] Wall time **does** matter on per-PID interactive paths, and those are already isolated from fleet defaults. `--all-pages` and `--exhaustive-units` change coverage mode and fingerprint separately (`cli.py:112-113,187`; `pdf_judge.py:858-879`; `unit_judge.py:326-328`). Tonight's fleet run logged **`all_pages=False` on every paper** (`00-baseline.md:35-36`). Golden-PR review pays its own price deliberately; the bare fleet run does not. Impact: fleet throughput tuning should not conflate with golden-PR exhaustive modes.
+
+- [LOW] Prior benchmarks already wobble ~2× at the old call budget (`00-baseline.md:54-56`: 692 s → 1,090 s → 1,465 s at the same c=32), so treating **692 s** as a hard SLA overstates precision. Impact: "4.2x regression" is real directionally, but the 07-09 anchor is not a stable floor.
+
+## Honest waste (conceded)
+
+- [MED] **111** log lines of `unit section:N has no source packet` (`00-baseline.md:32-33`; `unit_judge.py:382-385`) mean routed units were selected without extractable source text. Those slots burn wall time or push units to `unchecked` without adding verified findings. Impact: real trim target if optimizing call count.
+
+- [MED] **Page escalations were mostly refuted**: **16** escalation calls tonight (`00-baseline.md:32-33`), of which **11** did not confirm `content_missing` (sidecar aggregate on `page_escalations`). The deterministic screen flagged pages; scoped LLM re-checks often sanctioned the gap. Impact: escalation rate is low (~0.04/paper) so this is not the 4.2x driver, but it is genuinely low-yield spend.
+
+- [MED] **293/381** papers have `unchecked_unit_ids` under the `MAX_UNIT_CHECKS=5` cap (`constants.py:223-226`; sidecar aggregate). The router flagged more risky units than the fleet checks; verdicts cap at `review` rather than silently passing (`unit_judge.py:460-464`). Impact: the cap is intentional fail-closed design, but it means many unit-check calls buy coverage bookkeeping, not exhaustive audit.
+
+- [LOW] **516** `present_in_candidate` dispositions across the corpus (sidecar aggregate) refuted "missing" claims after two-sided verification. That is evidence the post-processor **prevented false fails**, not pure waste: those CPU+LLM steps converted raw model noise into honest `review`/folded verdicts (`pdf_judge.py:343-367`). Impact: some monolith output was wrong; verification earned its keep.
+
+## False-pass hypothesis
+
+**P1000R8 without unit checks:** the monolith issues a confident pass-leaning narrative ("schedule table … faithfully preserved") while metadata and a scoped unit check disagree on table structure. The 07-09 single-call path would have no `defect_groups` entry and no table_corruption signal; a human doing golden QA could ship a corrupted schedule table.
+
+## False-fail hypothesis
+
+**P4231R0 metadata fail on "Target: C++29":** the metadata check lists `Target: C++29` as missing from front matter with a `candidate_not_found` disposition, but title-block YAML mapping is sanctioned conversion behavior (`unit_judge.py:70-77`). A over-literal metadata pass can inflate fail severity on cosmetic title-block fields even when body content loss is real.
+
+## What would change my mind
+
+Exact per-call token counts from sidecar debug logs showing the 07-22 `CONVERSION_CONTRACT` prompt growth (`00-baseline.md:74-77`) added **>30% decode time per call** independent of call-count growth, **and** a second cold run at `_LANE_VERSION=9` still hits **>40 min** after incremental skip is warm. That would mean prompt bloat, not audit depth, is the dominant cost.

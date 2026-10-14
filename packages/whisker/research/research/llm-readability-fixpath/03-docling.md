@@ -1,0 +1,36 @@
+# 03 - docling
+
+**Verdict:** usable-with-conditions — Docling's multi-artifact golden replay is stronger for exhaustive pipeline regression than our Lane 3 facts gate, but our implementation is better for LLM-readability comprehension (human-verified assertions, neighbor table facts, blind readback) because Docling has no equivalent in CI.
+**Confidence:** high
+
+## Findings
+
+- [HIGH] Docling CI gates conversion via four committed ground-truth artifacts per source (`.pages.meta.json`, `.json`, `.md`, `.doctags.txt`) replayed by `verify_conversion_result_v2`, not discrete comprehension facts. Evidence: `packages/whisker/research/repos/docling/tests/verify_utils.py:355-439`, `tests/test_e2e_conversion.py:55-72`. Impact: structural fidelity is well-governed (814 files under `tests/data/`, 16 PDF sources / 28 JSON groundtruth at scan); this is resemblance-to-frozen-output, not "can an LLM recover facts from exported markdown" (`00-baseline.md:60-67`).
+
+- [HIGH] Per-cell table verification is exhaustive grid replay with semantic role flags, but has no spatial-neighbor assertions. Evidence: `verify_table_v2` checks `num_rows`/`num_cols`, every `grid[i][j].text` via `verify_text`, and `column_header`/`row_header`/`row_section` booleans (`verify_utils.py:134-170`); whisker `facts.py` checks one anchor cell plus `up`/`down`/`left`/`right`/`heading` neighbors (`facts.py:359-406`, `tables.py:44-135`). Impact: Docling catches any wrong cell anywhere in the grid and header-role drift; we catch downstream "row X column Y reads what?" comprehension failures Docling's golden never tests on markdown export. Docling does NOT check neighbor relations (extends prior scan `repo-scan/docling.md:62-64`).
+
+- [HIGH] Docling per-cell checks include role flags and full-grid text we do not assert; our facts types cover comprehension axes Docling never gates. Evidence: Docling `verify_table_v2:157-170` asserts `column_header`, `row_header`, `row_section` per cell; `verify_docitems:249-336` also gates item `label`, provenance `bbox` (`_assert_bbox_close:41-72`), `code_language`, picture dimensions. Whisker asserts `present`/`absent`/`order`/`math`/`code`/`xref`/`image_ref` with human `checked: verified` gating (`facts.py:65-76`, `474-490`) plus `auto_baseline_checks` (`facts.py:631-674`). Impact: Docling is stronger on pipeline-internal structured JSON; we are stronger on exported-markdown consumability and provenance-separated human blessing.
+
+- [MED] No blind LLM readback or docling-eval CI benchmark; only heuristic agent-side evaluator and RAG demos. Evidence: repo-wide search finds `docling-evaluate.py` only under `docs/examples/agent_skill/docling-document-intelligence/scripts/docling-evaluate.py:1-293` (heuristic density/duplicate/replacement-char checks, exit-code pass/warn/fail); SKILL.md references `scripts/docling-evaluate.py` at repo root but that path is absent (extends `repo-scan/docling.md:36-38`). No comprehension/readback analog to `readback.py:106-206` (`_generate_question`, `_evaluate_answer`, `_corrupt_markdown:284`). Impact: Docling cannot validate that an LLM reading exported markdown recovers facts; our readback harness (37/37 live, `00-baseline.md:50-52`) fills a gap Docling explicitly does not cover.
+
+- [MED] OTSL is a TableFormer/Granite-Vision internal representation; golden regression compares serialized JSON grids, not OTSL sequences. Evidence: `_parse_otsl_output` in `docling/models/stages/table_structure/table_structure_model_granite_vision.py:40-58` parses VLM OTSL tokens (`fcel`, `ched`, `lcel`, `ucel`, `xcel`); unit-tested in `tests/test_table_structure_granite_vision.py:18-107`. E2E golden path uses `verify_table_v2` on `TableItem.data.grid` (`verify_utils.py:134-172`), not OTSL string equality. Impact: OTSL is stronger for span-aware model training/eval; for markdown regression, Docling's full-grid golden is more exhaustive than our spot-check neighbor facts, but still weaker than our comprehension question ("what is immediately right of cell X?") because it never tests markdown export semantics and freezes pipeline output rather than human-verified source truth.
+
+- [MED] Corpus maintenance is golden-regeneration governance, not stratified comprehension authoring. Evidence: Docling walks all PDFs under `tests/data/pdf/sources/` (`test_e2e_conversion.py:23-32`), refreshes via `DOCLING_GEN_TEST_DATA=1 uv run pytest` (`CONTRIBUTING.md:76-80`), CI lockout `test_data_gen_flag.py:5-9`, two-reviewer Mergify on `tests/data/**` (`.github/mergify.yml:16-24`), 25 format directories under `tests/data/`. Whisker `corpus_tools.py:70-139` classifies live papers by stratum (tables/math/code/footnotes/images), picks zero-coverage candidates, and `draft_facts_scaffold:145-259` emits `checked: draft` JSONL for human promotion. Impact: Docling optimizes pipeline regression breadth; we optimize comprehension-corpus coverage of WG21 structural risk — complementary, not substitutable.
+
+- [LOW] Confidence grades are self-assessment triage, analogous to tapetum_llm advisory demotion, not comprehension gates. Evidence: `docs/concepts/confidence_scores.md:7-49` (`layout_score`, `ocr_score`, `parse_score`; `table_score` "not yet implemented"); `low_grade` uses 5th-percentile rollup (`base_models.py:593-598`). Whisker A1 grounding demotion (`adjudicate.py:295-304`) demotes confident pass when all evidence spans drop. Impact: both surface uncertainty; neither proves LLM consumability.
+
+## False-pass hypothesis
+
+Docling `verify_text` fuzzy path accepts OCR-noisy cell text when `levenshtein(gt,pred)/len(gt) < 0.4` (`verify_utils.py:99-112`), so a table cell whose numeric suffix is wrong but length-similar (e.g. `1,234.56` vs `1,234.57` on a 9-char cell, distance 1, ratio 0.11) passes `verify_table_v2` while an LLM downstream reads the wrong value. Our table facts only spot-check one cell's neighbors (`facts.py:373-406`), so a corruption elsewhere in the same table can pass if the anchored cell and its neighbors survive.
+
+## False-fail hypothesis
+
+Docling strict (non-fuzzy) bbox compare rejects cross-platform layout drift beyond `max(10^-2, page_extent × 0.0025)` (`verify_utils.py:25-27,64-72`); `test_verify_utils.py:45-52` shows 12.01 vs 10.0 fails strict mode. Our `order` facts fail when items appear in document order but normalized surfaces diverge (e.g. heading punctuation stripped by `normalized_text`), even though an LLM would still answer correctly.
+
+## Adoption candidate
+
+`verify_text` (`packages/whisker/research/repos/docling/tests/verify_utils.py:99-112`) — line-level strict equality with optional fuzzy NED gate `dist/len(gt) < threshold` (default 0.4). License: MIT (`packages/whisker/research/repos/docling/LICENSE:1`). Port as a secondary tolerance on whisker `present`/`math` checks where `max_diffs` is relative-length-aware, distinct from our absolute substring-DP budget (`facts.py:275-320`).
+
+## What would change my mind
+
+A committed docling-eval (or in-repo CI job) that runs blind LLM question-ansering against exported `.md` ground truth with leak-safe scoring, checked into `tests/` and gated in CI — demonstrating Docling validates downstream consumability, not only structural golden replay.

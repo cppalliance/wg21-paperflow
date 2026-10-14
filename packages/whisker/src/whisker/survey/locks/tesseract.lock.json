@@ -1,0 +1,39 @@
+{
+  "schema_version": 1,
+  "competitor": "tesseract",
+  "tesseract_version": "5.5.0",
+  "pymupdf_version": "1.27.2",
+  "unpacker": {
+    "sevenzr": {
+      "url": "https://github.com/ip7z/7zip/releases/download/26.02/7zr.exe",
+      "filename": "7zr.exe",
+      "sha256": "56b8cc9f4971cef253644fafe54063ed7fdca551d4dee0f8c6baa81b855acd72"
+    },
+    "sevenzip_sfx": {
+      "url": "https://github.com/ip7z/7zip/releases/download/26.02/7z2602-x64.exe",
+      "filename": "7z2602-x64.exe",
+      "sha256": "6745fa76dc2ea031596d8678f6f6b99c3c1b435b4164a63485adbbc7b8d82ef0"
+    }
+  },
+  "installer": {
+    "url": "https://github.com/tesseract-ocr/tesseract/releases/download/5.5.0/tesseract-ocr-w64-setup-5.5.0.20241111.exe",
+    "filename": "tesseract-ocr-w64-setup-5.5.0.20241111.exe",
+    "sha256": "f3fc4236425b690c8be756f35793f77394ee004be0a6460a440c754d892f68bc"
+  },
+  "tessdata": {
+    "url": "https://github.com/tesseract-ocr/tessdata_fast/raw/main/eng.traineddata",
+    "filename": "eng.traineddata",
+    "sha256": "7d4322bd2a7749724879683fc3912cb542f19906c83bcc1a52132556427170b2"
+  },
+  "artifacts": [
+    {
+      "relpath": "tesseract/tesseract.exe",
+      "sha256": "ccd044d6cf16eaaad151260e1fcc5e3e1504cd1b8644e940b4f7ae3e315dd0d3"
+    },
+    {
+      "relpath": "tesseract/tessdata/eng.traineddata",
+      "sha256": "7d4322bd2a7749724879683fc3912cb542f19906c83bcc1a52132556427170b2"
+    }
+  ],
+  "patches": []
+}

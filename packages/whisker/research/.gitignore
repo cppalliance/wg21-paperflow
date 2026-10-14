@@ -1,0 +1,6 @@
+# repos/ holds full third-party working clones used as research reference
+# material (Dolphin, MinerU, docling, ...). It is intentionally NOT ignored:
+# exclude it manually when staging a PR. Never run `git add repos/` or a blanket
+# `git add -A` from here; each clone carries its own .git and would be added as a
+# broken submodule gitlink. The committed findings live in the markdown reports
+# next to this file; see repos/README.md.

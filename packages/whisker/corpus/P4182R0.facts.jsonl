@@ -1,8 +1,8 @@
-{"id": "title-survives", "type": "present", "text": "A Citable Inventory of Platforms, Operating Systems, and Compiler Toolchains", "checked": "verified"}
-{"id": "edg-frontend", "type": "present", "text": "Edison Design Group supplies a commercial C++", "checked": "verified"}
-{"id": "pmr-term", "type": "present", "text": "polymorphic memory resources", "checked": "verified"}
-{"id": "pigweed-coro", "type": "present", "text": "Pigweed provides C++20 coroutines", "checked": "verified"}
-{"id": "docnumber-label-consumed", "type": "absent", "text": "Document Number", "checked": "verified"}
-{"id": "section-flow", "type": "order", "sequence": ["Every mailing repeats the same deployment background", "consolidates a single, citeable inventory", "The schema below states baseline capabilities", "The table lists toolchain families", "The author thanks Vinnie Falco"], "checked": "verified"}
-{"id": "tableA-gpu-coro-no", "type": "table", "cell": "GPU device code (CUDA, SYCL)", "neighbors": {"right": "No", "heading": "Category"}, "checked": "verified"}
-{"id": "tableB-console-alloc", "type": "table", "cell": "Arenas common", "neighbors": {"left": "Often off", "heading": "Alloc"}, "checked": "verified"}
+{"id": "title-survives", "type": "present", "text": "A Citable Inventory of Platforms, Operating Systems, and Compiler Toolchains", "checked": "verified", "question": "What is the paper's full title as stated in the front matter or first heading? Quote it exactly."}
+{"id": "edg-frontend", "type": "present", "text": "Edison Design Group supplies a commercial C++", "checked": "verified", "question": "Which vendor is described as providing a commercial C++ frontend? Quote the sentence."}
+{"id": "pmr-term", "type": "present", "text": "polymorphic memory resources", "checked": "verified", "question": "What name does the paper use for the C++17 PMR allocator abstraction? Quote the three-word phrase."}
+{"id": "pigweed-coro", "type": "present", "text": "Pigweed provides C++20 coroutines", "checked": "verified", "question": "According to this paper, what C++20 language feature does the Pigweed project provide? Quote the claim."}
+{"id": "docnumber-label-consumed", "type": "absent", "text": "Document Number", "checked": "verified", "question": "Does a mailing-style label for the paper identifier still appear as visible body text after conversion? If it does not, answer NOT FOUND."}
+{"id": "section-flow", "type": "order", "sequence": ["Every mailing repeats the same deployment background", "consolidates a single, citeable inventory", "The schema below states baseline capabilities", "The table lists toolchain families", "The author thanks Vinnie Falco"], "checked": "verified", "question": "In document order, summarize the five major narrative beats from the opening rationale through the thanks."}
+{"id": "tableA-gpu-coro-no", "type": "table", "cell": "GPU device code (CUDA, SYCL)", "neighbors": {"right": "No", "heading": "Category"}, "table_heading": "Coro", "checked": "verified"}
+{"id": "tableB-console-alloc", "type": "table", "cell": "Arenas common", "neighbors": {"left": "Often off", "heading": "Alloc"}, "table_heading": "Alloc", "checked": "verified"}

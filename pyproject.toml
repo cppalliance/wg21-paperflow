@@ -34,6 +34,7 @@ dev = [
     "pillow>=11.0",
     "markdown-it-py~=4.0",
     "pipeline[train]",
+    "import-linter>=2.13",
 ]
 
 [tool.uv]
@@ -60,6 +61,7 @@ testpaths = [
     "packages/mailing/tests",
     "packages/tomd/tests",
     "packages/pipeline/tests",
+    "packages/whisker/tests",
     "packages/agora/tests",
     "packages/assay/tests",
     "packages/cli/tests",
@@ -70,15 +72,127 @@ testpaths = [
 markers = [
     "network: tests that hit the live network; deselected by default (run with -m network)",
 ]
-addopts = "-m 'not network'"
+addopts = "-m 'not network' --ignore=packages/whisker/research"
 
 [tool.pyright]
 pythonVersion = "3.12"
 typeCheckingMode = "basic"
 include = ["packages"]
-exclude = ["**/tests/**"]
+exclude = ["**/tests/**", "packages/whisker/research/repos"]
 reportPrivateImportUsage = "warning"
 reportOptionalMemberAccess = "warning"
+
+[tool.importlinter]
+root_packages = ["whisker"]
+include_external_packages = true
+
+[[tool.importlinter.contracts]]
+name = "Deterministic core must not import the advisory LLM lane"
+type = "forbidden"
+source_modules = [
+    # Entry modules. menu.py reaches the advisory lane only through
+    # deferred, function-local imports, sanctioned via ignore_imports below.
+    "whisker.__main__",
+    "whisker.menu",
+    "whisker.cli_common",
+    "whisker.det.cli",
+    "whisker.det.score",
+    "whisker.metrics",
+    "whisker.det.match",
+    "whisker.gates",
+    "whisker.det.report",
+    "whisker.det.bench",
+    "whisker.constants",
+    "whisker.golden_ideals",
+    "whisker.det.guard",
+    "whisker.det.reference",
+    "whisker.tables",
+    "whisker.det.structural",
+    "whisker.det.canonical",
+    "whisker.det.anchors",
+    "whisker.facts",
+    "whisker.det.calibrate",
+    "whisker.det.paragraph_align",
+    "whisker.det.code_fence_align",
+    "whisker.det.pdf_geometry",
+    "whisker.det.golden",
+    "whisker.det.golden_compare",
+    "whisker.det.golden_gaps",
+    "whisker.det.golden_qa",
+    "whisker.det.qa_cli",
+    "whisker.det.corpus_tools",
+    "whisker.det.delta",
+    "whisker.det.probe_strength",
+    # Subpackages listed as packages so every current and future module
+    # under them inherits the boundary.
+    "whisker.det.llm_readability",
+    "whisker.branding",
+    "whisker.det.compare",
+    "whisker.survey",
+]
+forbidden_modules = [
+    "whisker.llm",
+]
+# The sanctioned lazy crossings: menu.py's function-local imports of the
+# advisory lane's CLI (its importlib indirection is invisible to the
+# import graph). Any further crossing breaks this contract.
+ignore_imports = [
+    "whisker.menu -> whisker.llm.cli",
+]
+
+[[tool.importlinter.contracts]]
+name = "Deterministic core must not import the pipeline framework"
+type = "forbidden"
+source_modules = [
+    # See the note on the same entries in the contract above.
+    "whisker.__main__",
+    "whisker.menu",
+    "whisker.cli_common",
+    "whisker.det.cli",
+    "whisker.det.score",
+    "whisker.metrics",
+    "whisker.det.match",
+    "whisker.gates",
+    "whisker.det.report",
+    "whisker.det.bench",
+    "whisker.constants",
+    "whisker.golden_ideals",
+    "whisker.det.guard",
+    "whisker.det.reference",
+    "whisker.tables",
+    "whisker.det.structural",
+    "whisker.det.canonical",
+    "whisker.det.anchors",
+    "whisker.facts",
+    "whisker.det.calibrate",
+    "whisker.det.paragraph_align",
+    "whisker.det.code_fence_align",
+    "whisker.det.pdf_geometry",
+    "whisker.det.golden",
+    "whisker.det.golden_compare",
+    "whisker.det.golden_gaps",
+    "whisker.det.golden_qa",
+    "whisker.det.qa_cli",
+    "whisker.det.corpus_tools",
+    "whisker.det.delta",
+    "whisker.det.probe_strength",
+    # See the note on the same entries in the contract above.
+    "whisker.det.llm_readability",
+    "whisker.branding",
+    "whisker.det.compare",
+    "whisker.survey",
+]
+forbidden_modules = [
+    "pipeline",
+]
+# See the note on the same entry in the contract above: ignoring this
+# link also severs the indirect menu -> whisker.llm.cli -> pipeline chain.
+ignore_imports = [
+    "whisker.menu -> whisker.llm.cli",
+]
+
+[tool.ruff]
+extend-exclude = ["packages/whisker/research/repos"]
 
 [tool.ruff.lint.per-file-ignores]
 # Tests intentionally:

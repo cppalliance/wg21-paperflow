@@ -1,0 +1,44 @@
+{
+  "schema_version": 1,
+  "competitor": "marker",
+  "marker_pdf_version": "2.0.0",
+  "llama_cpp": {
+    "release": "b10218",
+    "asset": "llama-b10218-bin-win-cpu-x64.zip",
+    "zip_sha256": "678d67405b12abd8ea3541ec6f501c10c9c15ba3cd0767bf090f79eb51168a17",
+    "binary": "llama-server.exe",
+    "binary_sha256": "d4b746f2357137759ba2be772dedd7938f5f857e74ecf4103ad97b253cd2be78"
+  },
+  "gguf": {
+    "repo": "datalab-to/surya-ocr-2-gguf",
+    "revision": "6a3a4c30e5e74446d4f8b6afd05b2f2da970f470",
+    "files": [
+      {
+        "name": "surya-2-mmproj.gguf",
+        "sha256": "98c0563673b1657ff6d021d1e5f04af06cbf61bb40c63ac613e8bb71b42fb2c0"
+      },
+      {
+        "name": "surya-2.gguf",
+        "sha256": "1f18abe17b1ed8b4e47ee9b1ad0e274c93daf5efbb6b29a04ff1712e37051e05"
+      }
+    ]
+  },
+  "patches": [
+    {
+      "id": "surya-pattern-pcre",
+      "version": 1,
+      "file": "surya/inference/prompts.py",
+      "description": "Replace PCRE \\d shorthand with [0-9] in JSON schema pattern fields",
+      "upstream_issue": "ggml-org/llama.cpp#22314",
+      "retire_when": "llama.cpp release containing PR ggml-org/llama.cpp#23436"
+    },
+    {
+      "id": "surya-spawn-signal",
+      "version": 1,
+      "file": "surya/inference/backends/spawn.py",
+      "description": "Replace os.kill(pid, 0) aliveness probe with Windows-safe _pid_alive helper",
+      "upstream_issue": "os.kill(pid,0) sends CTRL_C_EVENT on Windows",
+      "retire_when": "surya release fixing the os.kill(pid, 0) probe on Windows"
+    }
+  ]
+}

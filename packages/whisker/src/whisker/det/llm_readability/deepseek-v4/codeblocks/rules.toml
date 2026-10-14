@@ -1,0 +1,402 @@
+# DeepSeek V4 LLM-readable codeblock contract.
+#
+# THIS FILE IS THE SINGLE NORMATIVE COPY. Rules C1-C10, thresholds, the
+# DeepSeek V4 model profile, required probes and known weaknesses all live
+# here. Do not restate rule text in a prompt file, a markdown document, or a
+# Python constant: the LLM rubric, the CLI listing and every certification
+# report are rendered from this data by contract.py, so a second copy can
+# only drift.
+#
+# Changing a rule requires cited evidence, a version bump and green contract
+# tests. Adding a model means adding a sibling directory with its own
+# rules.toml, never a modification of this file.
+
+evidence = [
+  "packages/whisker/src/whisker/llm/calibration/codeblocks/SYNTHESIS.md",
+]
+
+[contract]
+id = "wg21-codeblock-readability-deepseek-v4"
+version = "1.0.1"
+schema_version = 1
+title = "DeepSeek V4 LLM-readable codeblock contract"
+authority = '''
+Whisker owns this contract. The authority chain is: research determines the
+requirements, whisker normalizes them into versioned rules, whisker
+operationalizes certification (deterministic checks, source compare, LLM
+readback, probe suites), and only then is a producer such as tomd audited
+against the result. A producer never defines these rules, and a producer's
+current behavior is never evidence that a rule is satisfied.
+
+This contract is specialized for DeepSeek V4 Pro on the alliance pod.
+Table-cell listings are owned by the tables contract rule R11, not by this
+contract.
+'''
+
+[profile]
+id = "deepseek-v4"
+version = "1.0.0"
+schema_version = 1
+display_name = "DeepSeek V4 Pro (self-hosted vLLM pod)"
+certification_status = "pending"
+notes = '''
+Status is pending, not certified. The codeblock contract and its certification
+process are implemented but no probe run under this profile has been executed.
+The table contract for this same model is separately versioned in tables/.
+'''
+
+[model_identity]
+model_ids = ["deepseek-v4-pro"]
+aliases = ["deepseek-ai/DeepSeek-V4-Pro"]
+services = ["alliance-pod", "h200x8-deepseek-v4-pro"]
+backend = "vllm_thinking"
+
+[certification]
+required_methods = ["deterministic", "source_compare", "certification"]
+required_rules = ["C10"]
+
+# --- Applicability predicates -------------------------------------------------
+
+[applicability.any_code_fence]
+description = "at least one opening fence (``` or ~~~) is present"
+
+[applicability.any_document]
+description = "always in scope; used by leftover-wording and exclusion rules"
+
+[applicability.source_compare]
+description = "a PDF or HTML source is available for fence-boundary comparison"
+
+# --- Named thresholds ---------------------------------------------------------
+
+[thresholds.survival_tokens]
+kind = "token_set"
+values = ["constexpr", "consteval", "requires", "concept"]
+unit = "C++ keyword"
+tighten = "grow_set"
+rules = ["C4"]
+rationale = '''
+These tokens are the load-bearing grammar of modern C++ wording. Growing the
+set is stricter: more tokens must survive inside the fence they belong to.
+'''
+
+# --- C1 -----------------------------------------------------------------------
+
+[[rules]]
+id = "C1"
+title = "Source listing is one fenced block"
+strength = "HARD"
+scope = "representation"
+method = "deterministic"
+applicability = "any_document"
+check_id = "listing_is_fenced"
+failure_status = "not-llm-readable"
+thresholds = []
+requirement = '''
+A C++ source listing, function synopsis, or other verbatim program text that
+appears as a distinct block in the paper must be emitted as one markdown
+fenced code block. When the listing is known C++, the opening fence carries
+the language tag `cpp`. Prose, Effects, Remarks, and standardese stay outside
+the fence. A single identifier or type name that is only monospaced in the
+source stays inline code, not a fence.
+'''
+rationale = '''
+An unfenced listing collapses into surrounding prose. An LLM cannot recover
+line identity, indent, or which tokens belong to the program versus the paper.
+'''
+llm_instruction = '''
+Treat each fenced block as one listing. Do not invent a fence around a
+single-token inline identifier. Do not pull Effects or Remarks into the fence.
+If a listing is present as a block in the paper and is not fenced, fail C1.
+'''
+evidence = ["packages/whisker/src/whisker/llm/calibration/codeblocks/SYNTHESIS.md:C1"]
+
+# --- C2 -----------------------------------------------------------------------
+
+[[rules]]
+id = "C2"
+title = "No empty fence"
+strength = "HARD"
+scope = "representation"
+method = "deterministic"
+applicability = "any_code_fence"
+check_id = "empty_fence"
+failure_status = "not-llm-readable"
+thresholds = []
+requirement = '''
+A fenced code block must contain at least one non-whitespace line between the
+opening and closing fence. An empty fence is a conversion defect.
+'''
+rationale = '''
+Empty fences are phantom listings. They waste judge attention and hide a
+dropped body.
+'''
+llm_instruction = '''
+If a fence opens and closes with only blank lines between, fail C2. Do not
+treat a fence that contains only `<ins>`/`<del>` wrappers around real tokens
+as empty.
+'''
+evidence = ["packages/whisker/src/whisker/llm/calibration/codeblocks/SYNTHESIS.md:C2"]
+
+# --- C3 -----------------------------------------------------------------------
+
+[[rules]]
+id = "C3"
+title = "No reflow inside a fence"
+strength = "HARD"
+scope = "source_fidelity"
+method = "source_compare"
+applicability = "source_compare"
+check_id = "code_no_reflow"
+failure_status = "not-llm-readable"
+thresholds = []
+requirement = '''
+Inside a fenced listing, one source line is one markdown line. Soft wrap,
+joined statements, and split tokens are defects. Leading whitespace on a
+source line is program content, not decoration, and must be preserved.
+'''
+rationale = '''
+Reflow destroys line-oriented lookup. Indent is C++ meaning. A flattened
+five-line listing cannot be cited.
+'''
+llm_instruction = '''
+Compare fence lines to the source listing. If two source lines were joined,
+or one source line was split, fail C3. Do not fail C3 when the only
+difference is a trailing newline on the last fence line.
+'''
+evidence = ["packages/whisker/src/whisker/llm/calibration/codeblocks/SYNTHESIS.md:C3"]
+
+# --- C4 -----------------------------------------------------------------------
+
+[[rules]]
+id = "C4"
+title = "Survival tokens stay in the same fence"
+strength = "HARD"
+scope = "source_fidelity"
+method = "source_compare"
+applicability = "source_compare"
+check_id = "survival_tokens"
+failure_status = "not-llm-readable"
+thresholds = ["survival_tokens"]
+requirement = '''
+The tokens `constexpr`, `consteval`, `requires`, and `concept` that belong to
+a listing must remain inside that listing's fence, on the same relative line
+as the source. Wrapping a `requires`-clause onto a new invented line, or
+dropping the token into surrounding prose, is a defect.
+'''
+rationale = '''
+These tokens are the load-bearing grammar of modern C++ wording. Losing them
+or moving them across a fence boundary changes the paper.
+'''
+llm_instruction = '''
+For each survival token in a source listing, confirm it appears in the
+matching fence. If it is missing, moved outside the fence, or split across
+an invented wrap, fail C4.
+'''
+evidence = ["packages/whisker/src/whisker/llm/calibration/codeblocks/SYNTHESIS.md:C4"]
+
+# --- C5 -----------------------------------------------------------------------
+
+[[rules]]
+id = "C5"
+title = "Fence boundaries follow source fonts"
+strength = "CONTEXTUAL"
+scope = "source_fidelity"
+method = "source_compare"
+applicability = "source_compare"
+check_id = "fence_boundary_align"
+failure_status = "review"
+thresholds = []
+requirement = '''
+Opening and closing fence placement is judged against PDF code fonts or HTML
+`<pre>`/`<code>` blocks via the existing fence-align probe. If the source
+line-break map does not match the markdown line-break map, abstain: do not
+accuse a boundary error that may be a C3 reflow. HTML sources without a
+font map are unsupported for this check and stay `not_evaluated`.
+'''
+rationale = '''
+A source-compare that ignores reflow false-fails papers whose only defect is
+wrap. Abstention keeps C5 honest until the line maps agree.
+'''
+llm_instruction = '''
+Use the fence-align probe when line maps match. If they do not, mark C5
+`not_evaluated` and let C3 own the reflow. Do not guess a font boundary
+from prose indentation.
+'''
+evidence = ["packages/whisker/src/whisker/llm/calibration/codeblocks/SYNTHESIS.md:C5"]
+
+# --- C6 -----------------------------------------------------------------------
+
+[[rules]]
+id = "C6"
+title = "Wording tags stay inside the fence; no wording divs"
+strength = "HARD"
+scope = "representation"
+method = "deterministic"
+applicability = "any_document"
+check_id = "wording_in_fence"
+failure_status = "not-llm-readable"
+thresholds = []
+requirement = '''
+When a listing is proposed wording, `<ins>` and `<del>` remain literal,
+unescaped tags on the tokens they mark, inside the fence. Do not emit
+`:::wording`, `:::wording-add`, `:::wording-remove`, or any other
+`:::wording*` fenced div. Do not HTML-escape the tags to `&lt;ins&gt;`.
+'''
+rationale = '''
+Post-2026 emit dropped wording fenced divs. Escaped tags become text. Tags
+moved outside the fence detach the edit from the program.
+'''
+llm_instruction = '''
+If the document contains `:::wording`, fail C6. If a fence that is proposed
+wording shows `constexpr` without its surrounding `<ins>`/`<del>` when the
+source has that tag, fail C6. Literal `<ins>`/`<del>` inside a fence is
+correct.
+'''
+evidence = ["packages/whisker/src/whisker/llm/calibration/codeblocks/SYNTHESIS.md:C6"]
+
+# --- C7 -----------------------------------------------------------------------
+
+[[rules]]
+id = "C7"
+title = "Font is not kind"
+strength = "HARD"
+scope = "representation"
+method = "deterministic"
+applicability = "any_document"
+check_id = "font_is_not_kind"
+failure_status = "not-llm-readable"
+thresholds = []
+requirement = '''
+A monospaced font does not by itself make a listing. Spec-element prefixes
+(`Mandates:`, `Preconditions:`, `Effects:`, `Returns:`, `Throws:`,
+`Complexity:`, `Remarks:`, `Ensures:`) stay outside the fence. A single
+monospaced identifier or type name stays inline. A sentence in body font
+that lands inside a fence is a defect.
+'''
+rationale = '''
+False fences around standardese and body sentences invent listings the paper
+does not have. Dropping spec-element labels into a fence hides them from
+wording readers.
+'''
+llm_instruction = '''
+If a fence body is an Effects/Remarks sentence or other standardese, fail C7.
+If a one-token identifier was promoted to its own fence, fail C7. Body-font
+prose inside a fence fails C7.
+'''
+evidence = ["packages/whisker/src/whisker/llm/calibration/codeblocks/SYNTHESIS.md:C7"]
+
+# --- C8 -----------------------------------------------------------------------
+
+[[rules]]
+id = "C8"
+title = "Table-cell listings are table R11"
+strength = "HARD"
+scope = "representation"
+method = "deterministic"
+applicability = "any_document"
+check_id = "cell_listing_excluded"
+failure_status = "not-llm-readable"
+thresholds = []
+requirement = '''
+A listing that lives inside a table cell is owned by the tables contract
+rule R11. The codeblocks contract does not score it, promote it to a
+standalone fence, or fail it here. Standalone listings outside tables remain
+in scope for C1-C10.
+'''
+rationale = '''
+One construct per listing. Double-scoring a cell `<pre>` produces
+contradictory verdicts.
+'''
+llm_instruction = '''
+If the only listing under review sits in a table cell, mark C8 passed and
+do not apply C1-C7 or C9-C10 to that cell. Leave the verdict to tables R11.
+'''
+evidence = ["packages/whisker/src/whisker/llm/calibration/codeblocks/SYNTHESIS.md:C8"]
+
+# --- C9 -----------------------------------------------------------------------
+
+[[rules]]
+id = "C9"
+title = "Diagrams and display grammar are not cpp"
+strength = "CONTEXTUAL"
+scope = "representation"
+method = "deterministic"
+applicability = "any_code_fence"
+check_id = "diagram_not_cpp"
+failure_status = "review"
+thresholds = []
+requirement = '''
+ASCII trees, SIMD diagrams, flowcharts, and display-grammar productions that
+are not compilable C++ must not carry the language tag `cpp`. An unlabeled
+fence (` ``` `) is the correct form when the block must remain preformatted.
+Raster figures stay images, not fences.
+'''
+rationale = '''
+A `cpp` tag tells an LLM the block is a program. Highlighting and copy-as-
+code then lie. HTML already leaves these unlabeled; PDF still tags them.
+'''
+llm_instruction = '''
+If a fence tagged `cpp` is an ASCII tree, box diagram, or grammar display
+rather than a C++ listing, review C9. Do not fail a true C++ synopsis that
+happens to use `# include` in a grammar paper when the body is still a
+program.
+'''
+evidence = ["packages/whisker/src/whisker/llm/calibration/codeblocks/SYNTHESIS.md:C9"]
+
+# --- C10 ----------------------------------------------------------------------
+
+[[rules]]
+id = "C10"
+title = "Identifier and line probe"
+strength = "HARD"
+scope = "certification"
+method = "certification"
+applicability = "any_code_fence"
+check_id = "code_identifier_probe"
+failure_status = "not-llm-readable"
+thresholds = []
+requirement = '''
+Certification asks the model to locate a named identifier on a stated fence
+line and to reject a deliberately corrupted control (wrong identifier or
+wrong line). Pending until a certified profile exists. Candidate-only runs
+leave C10 `not_evaluated`.
+'''
+rationale = '''
+A listing that cannot be addressed by identifier and line is not usable as
+a citation target, even if the fence parses.
+'''
+llm_instruction = '''
+Do not pass C10 from markdown inspection alone. When the certification
+probe runs, both the true lookup and the corrupt control must be answered
+correctly.
+'''
+evidence = ["packages/whisker/src/whisker/llm/calibration/codeblocks/SYNTHESIS.md:C10"]
+
+# --- known weaknesses ---------------------------------------------------------
+
+[[known_weaknesses]]
+id = "diagram-as-cpp"
+rules = ["C9"]
+description = '''
+PDF conversion sometimes tags ASCII trees and SIMD diagrams as `cpp` because
+the source font is monospaced. HTML conversion already leaves these unlabeled.
+Affected papers include P4016R0 and P4100R1 in the pre-golden corpus.
+'''
+evidence = [
+  "packages/whisker/src/whisker/llm/calibration/codeblocks/SYNTHESIS.md",
+]
+
+# --- required probes ----------------------------------------------------------
+
+[[probes]]
+id = "identifier-line-lookup"
+rules = ["C10"]
+description = '''
+Positional identifier lookup. Identify a target fence by its first line or
+nearby heading, then ask the model for a specific identifier on a stated
+1-based line within that fence. Repeat against a corrupted copy where the
+identifier is moved to a different line. The clean run must recover the
+identifier; the corrupt run must fail. A corrupt control that does not
+invert makes the probe unevaluated, never pass.
+'''
+evidence = ["packages/whisker/src/whisker/llm/calibration/codeblocks/SYNTHESIS.md"]
