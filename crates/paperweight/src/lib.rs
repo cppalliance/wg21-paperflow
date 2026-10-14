@@ -1,28 +1,26 @@
-//! Run a promptforge prompt against one WG21 paper from the command line.
+//! Run a runvil prompt against one WG21 paper from the command line.
 //!
-//! `<bin> [PAPER_NUM] [--file <PATH>] [--output <PATH>] [--prompt <PATH>]
-//! [--model <ID>] [--args <TEXT>]` runs a promptforge prompt against one WG21
-//! paper as a harness session and writes the prompt's declared output to
-//! stdout, or to `--output` when given. The prompt is the embedded paperweight
-//! prompt unless `--prompt` names a file; the run takes its name from the
-//! prompt's file stem (`paperweight` for the embedded one). Exactly one input is
-//! required: a paper number resolved through the SQLite paper store, or
-//! `--file` to read a markdown file verbatim. A paper number needs
-//! `WG21_DATA_DIR` pointing at the paperflow workspace; `--file` never touches
-//! it. The gateway credentials `PROMPTFORGE_GATEWAY_URL` (the gateway origin; a
+//! `<bin> <PAPER_NUM> [--output <PATH>] [--prompt <PATH>] [--model <ID>]
+//! [--verbose]` runs a runvil prompt against one WG21 paper as a harness
+//! session and writes the prompt's declared output to stdout, or to
+//! `--output` when given. The prompt is the embedded paperweight prompt unless
+//! `--prompt` names a file; the run takes its name from the prompt's file stem
+//! (`paperweight` for the embedded one). The paper number is resolved through
+//! the SQLite paper store, which needs `WG21_DATA_DIR` pointing at the
+//! paperflow workspace. The gateway credentials `PROMPTFORGE_GATEWAY_URL` (the gateway origin; a
 //! trailing `/v1` is dropped) and `PROMPTFORGE_GATEWAY_API_KEY` must both be
 //! set: the prompt binds its models through the gateway, so a local-only run
 //! can only fail. `--model` selects the gateway model; without it, the run
-//! binds the first chat model the gateway lists.
+//! binds the first chat model the gateway lists. Progress goes to stderr;
+//! `--verbose` adds every tool call, its full result, Lua log messages, and
+//! model replies.
 //!
-//! The crate builds two binaries, `paperweight` and `promptforge-cli`, both thin
-//! wrappers over [`run_cli`].
+//! The crate's `paperweight` binary is a thin wrapper over [`run_cli`].
 
 use std::error::Error;
 use std::process::ExitCode;
 
 use clap::{CommandFactory as _, FromArgMatches as _};
-use harness::cancel::CancelHandle;
 
 use crate::app::{Cancelled, Cli, RunRequest};
 
@@ -44,15 +42,12 @@ pub async fn run_cli(name: &'static str) -> ExitCode {
         Ok(cli) => cli,
         Err(error) => error.exit(),
     };
-    let cancel = install_cancel();
-    let input = cli.input();
     let request = RunRequest {
-        input: &input,
+        paper: &cli.paper,
         output: cli.output.as_deref(),
         prompt: cli.prompt.as_deref(),
         model: cli.model.as_deref(),
-        args: &cli.args,
-        cancel,
+        verbose: cli.verbose,
     };
     match app::run(request).await {
         Ok(()) => ExitCode::SUCCESS,
@@ -61,24 +56,6 @@ pub async fn run_cli(name: &'static str) -> ExitCode {
             ExitCode::from(exit_code(&error))
         }
     }
-}
-
-/// Installs a Ctrl-C handler that trips the returned cancellation handle once.
-///
-/// A failure to register the signal listener is reported to stderr rather than
-/// discarded: the run simply stays non-cancellable in that case.
-fn install_cancel() -> CancelHandle {
-    let cancel = CancelHandle::new();
-    let signal_cancel = cancel.clone();
-    tokio::spawn(async move {
-        match tokio::signal::ctrl_c().await {
-            Ok(()) => signal_cancel.cancel(),
-            Err(error) => {
-                eprintln!("warning: cannot listen for Ctrl-C, run is not cancellable: {error}");
-            }
-        }
-    });
-    cancel
 }
 
 /// Maps a run failure to a process exit code: 130 for a Ctrl-C close (the
