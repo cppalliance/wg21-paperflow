@@ -14,8 +14,11 @@ from tomd.lib.metadata_yaml.strip import (
     strip_pre_content_paragraphs,
 )
 from tomd.lib.metadata_yaml.extract import extract_metadata
+import pytest
+
 from tomd.lib.metadata_yaml.format import (
     format_front_matter,
+    is_blank_value,
     sanitize_metadata,
 )
 
@@ -321,6 +324,52 @@ class TestFormatFrontMatter:
         doc_pos = result.find("document:")
         date_pos = result.find("date:")
         assert title_pos < doc_pos < date_pos
+
+
+class TestIsBlankValue:
+
+    @pytest.mark.parametrize("value", [None, "", "   ", "\t\n", [], (), ["", "  "]])
+    def test_blank(self, value):
+        assert is_blank_value(value)
+
+    @pytest.mark.parametrize("value", ["x", " x ", ["", "a"], ("a",), 0])
+    def test_not_blank(self, value):
+        assert not is_blank_value(value)
+
+
+class TestFormatFrontMatterBlankValues:
+    """A blank value (empty, whitespace-only, or a list of blanks) is never emitted."""
+
+    @pytest.mark.parametrize(
+        ("fields", "fragment"),
+        [
+            pytest.param({"document": ""}, None, id="empty-scalar"),
+            pytest.param({"intent": "  "}, None, id="whitespace-scalar"),
+            pytest.param({"project": "  "}, None, id="whitespace-extra-scalar"),
+            pytest.param({"reply-to": []}, None, id="empty-list"),
+            pytest.param({"reply-to": ()}, None, id="empty-tuple"),
+            pytest.param({"reply-to": [""]}, None, id="all-blank-list"),
+            pytest.param({"reply-to": ["a", ""]}, 'reply-to:\n  - "a"', id="blank-list-item"),
+            pytest.param({"reply-to": ["a", "  "]}, 'reply-to:\n  - "a"', id="whitespace-list-item"),
+            pytest.param({"audience": ("LEWG", "SG1")}, 'audience:\n  - "LEWG"\n  - "SG1"', id="tuple"),
+            pytest.param({"project": ("a", "")}, 'project:\n  - "a"', id="tuple-extra-blank-item"),
+        ],
+    )
+    def test_blank_values_are_skipped(self, fields, fragment):
+        expected = '---\ntitle: "T"\n' + (fragment + "\n" if fragment else "") + "---"
+        assert format_front_matter({"title": "T", **fields}) == expected
+
+    def test_only_blank_values_returns_empty(self):
+        assert format_front_matter({"title": ""}) == ""
+        assert format_front_matter({"title": "   ", "audience": "", "reply-to": [""]}) == ""
+
+    def test_title_blank_after_normalization_is_skipped(self):
+        assert format_front_matter({"title": " \n ", "document": "P1R0"}) == "---\ndocument: P1R0\n---"
+
+    def test_blank_intent_still_inferred_from_title(self):
+        assert format_front_matter({"title": "Info: Status", "intent": ""}) == (
+            '---\ntitle: "Info: Status"\nintent: info\n---'
+        )
 
 
 class TestSanitizeMetadata:

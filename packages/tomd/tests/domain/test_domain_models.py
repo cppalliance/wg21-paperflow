@@ -273,7 +273,6 @@ def test_document_and_conversion_containers():
         paper_id="P9999R0",
         metadata=meta,
         elements=[h2, p],
-        body="",
         is_skipped=False,
         skip_reason=None,
     )

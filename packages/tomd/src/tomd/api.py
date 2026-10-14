@@ -38,6 +38,7 @@ from pathlib import Path
 from tomd.lib.metadata_yaml.format import (
     FRONT_MATTER_RE,
     format_front_matter,
+    is_blank_value,
     parse_front_matter,
     sanitize_metadata,
     strip_front_matter,
@@ -173,7 +174,7 @@ def _normalize_front_matter(md: str, mailing_meta: dict | None) -> str:
 
     # Inject missing fields (or override authoritative ones) from mailing.
     if mailing_meta:
-        present = set(parsed)
+        present = {key for key, value in parsed.items() if not is_blank_value(value)}
         # Bare-name-only reply-to (no emails) should not block the
         # mailing fallback: the mailing may have richer author+email data.
         rt = parsed.get("reply-to")
@@ -191,7 +192,7 @@ def _normalize_front_matter(md: str, mailing_meta: dict | None) -> str:
                 if isinstance(mailing_meta, dict)
                 else getattr(mailing_meta, src_key, None)
             )
-            if val in (None, "", []):
+            if is_blank_value(val):
                 continue
             if yaml_key == "date":
                 logger.debug(
@@ -207,7 +208,7 @@ def _normalize_front_matter(md: str, mailing_meta: dict | None) -> str:
 
     new_block = format_front_matter(parsed)
     if not new_block:
-        return md
+        return rest.lstrip()
 
     return f"{new_block}\n\n{rest.lstrip()}"
 
