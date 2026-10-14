@@ -7,22 +7,22 @@
 # Official repository: https://github.com/cppalliance/wg21-paperflow
 #
 
-"""Oracle tests: ``resolve_metadata`` against legacy ``api._normalize_front_matter``."""
+"""Oracle tests: ``PaperMetadata.with_mailing_fallback`` against legacy ``api._normalize_front_matter``."""
 
 import logging
-from dataclasses import fields
 from typing import Any
 
 import pytest
 
 from tomd.api import _normalize_front_matter
+from tomd.domain.mailing import MailingRecord
 from tomd.domain.metadata import PaperMetadata
 from tomd.lib.metadata_yaml.format import (
     FRONT_MATTER_RE,
     format_front_matter,
     parse_front_matter,
+    sanitize_metadata,
 )
-from tomd.resolve import _FALLBACK_KEY_MAP, MailingRecord, resolve_metadata
 
 _BODY = "## Introduction\n\nBody text.\n"
 
@@ -69,8 +69,8 @@ def _legacy(md: str, meta: dict[str, Any] | None) -> str:
 
 
 def _resolved(md: str, meta: dict[str, Any] | None) -> str:
-    parsed = PaperMetadata.from_dict(parse_front_matter(md))
-    return format_front_matter(resolve_metadata(parsed, MailingRecord.from_meta(meta)).to_dict())
+    parsed = PaperMetadata.from_dict(sanitize_metadata(parse_front_matter(md)))
+    return format_front_matter(parsed.with_mailing_fallback(MailingRecord.from_meta(meta)).to_dict())
 
 
 _ORACLE_CASES = [
@@ -248,7 +248,7 @@ _ORACLE_CASES = [
 
 
 @pytest.mark.parametrize(("parsed", "meta"), _ORACLE_CASES)
-def test_resolve_matches_legacy_normalize(
+def test_fallback_matches_legacy_normalize(
     parsed: dict[str, Any] | None,
     meta: dict[str, Any] | None,
 ) -> None:
@@ -256,61 +256,40 @@ def test_resolve_matches_legacy_normalize(
     assert _resolved(md, meta) == _legacy(md, meta)
 
 
-def test_resolve_logs_date_fallback(caplog: pytest.LogCaptureFixture) -> None:
-    with caplog.at_level(logging.DEBUG, logger="tomd.resolve"):
-        resolved = resolve_metadata(PaperMetadata(title="T"), MailingRecord(document_date="2024-02-01"))
+def test_fallback_logs_date_fallback(caplog: pytest.LogCaptureFixture) -> None:
+    with caplog.at_level(logging.DEBUG, logger="tomd.domain.metadata"):
+        resolved = PaperMetadata(title="T").with_mailing_fallback(MailingRecord(document_date="2024-02-01"))
     assert resolved.date == "2024-02-01"
     assert "Date fallback from mailing (document_date='2024-02-01')" in caplog.text
 
 
-def test_resolve_does_not_log_when_source_has_date(caplog: pytest.LogCaptureFixture) -> None:
-    with caplog.at_level(logging.DEBUG, logger="tomd.resolve"):
-        resolve_metadata(PaperMetadata(date="2024-01-15"), MailingRecord(document_date="2024-02-01"))
+def test_fallback_does_not_log_when_source_has_date(caplog: pytest.LogCaptureFixture) -> None:
+    with caplog.at_level(logging.DEBUG, logger="tomd.domain.metadata"):
+        PaperMetadata(date="2024-01-15").with_mailing_fallback(MailingRecord(document_date="2024-02-01"))
     assert "Date fallback" not in caplog.text
 
 
-def test_resolve_does_not_mutate_inputs() -> None:
+def test_fallback_does_not_mutate_inputs() -> None:
     parsed = PaperMetadata(title="T", document="D0001R0", reply_to=["Alice"])
     mailing = MailingRecord(paper_id="P0001R0", authors=("Bob <bob@example.com>",))
-    resolved = resolve_metadata(parsed, mailing)
+    resolved = parsed.with_mailing_fallback(mailing)
     assert resolved.document == "P0001R0"
     assert resolved.reply_to == ["Bob <bob@example.com>"]
     assert parsed == PaperMetadata(title="T", document="D0001R0", reply_to=["Alice"])
     assert resolved is not parsed
 
 
-def test_mailing_record_from_meta_empty_is_none() -> None:
-    assert MailingRecord.from_meta(None) is None
-    assert MailingRecord.from_meta({}) is None
+def test_fallback_with_empty_record_changes_nothing() -> None:
+    parsed = PaperMetadata(title="T", document="D0001R0", reply_to=["Alice"])
+    assert parsed.with_mailing_fallback(MailingRecord()) == parsed
 
 
-def test_mailing_record_from_meta_reads_fallback_fields_only() -> None:
-    assert MailingRecord.from_meta(_MAILING_FULL) == MailingRecord(
-        paper_id="P2583R3",
-        title="Mailing Title",
-        authors=("Mailing Author <mailing@example.com>", "Second Author <second@example.com>"),
-        target_group="EWG",
-        subgroup="EWG",
-        document_date="2024-02-01",
-    )
+def test_fallback_keeps_names_only_reply_to_when_authors_blank() -> None:
+    parsed = PaperMetadata(reply_to=["Alice"])
+    assert parsed.with_mailing_fallback(MailingRecord(authors=("", " "))).reply_to == ["Alice"]
 
 
-def test_mailing_record_from_meta_normalizes_missing_and_none() -> None:
-    assert MailingRecord.from_meta({"paper_id": "P1", "authors": None, "title": None}) == MailingRecord(
-        paper_id="P1"
-    )
-
-
-def test_resolve_fills_title_that_sanitizes_to_empty() -> None:
-    resolved = resolve_metadata(PaperMetadata(title="Title: Date: 2024"), MailingRecord(title="Mailing Title"))
-    assert resolved.title == "Mailing Title"
-
-
-def test_mailing_record_from_meta_bare_author_string_is_one_name() -> None:
-    record = MailingRecord.from_meta({"authors": "Alice <alice@example.com>"})
-    assert record is not None
-    assert record.authors == ("Alice <alice@example.com>",)
-
-
-def test_mailing_record_fields_are_exactly_the_fallback_sources() -> None:
-    assert {f.name for f in fields(MailingRecord)} == set(_FALLBACK_KEY_MAP)
+def test_fallback_scalar_reply_to_with_email_is_kept() -> None:
+    parsed = PaperMetadata(reply_to="Alice <alice@example.com>")
+    mailing = MailingRecord(authors=("Bob <bob@example.com>",))
+    assert parsed.with_mailing_fallback(mailing).reply_to == "Alice <alice@example.com>"

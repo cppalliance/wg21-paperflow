@@ -6,10 +6,15 @@ file LICENSE_1_0.txt or copy at http://www.boost.org/LICENSE_1_0.txt)
 Official repository: https://github.com/cppalliance/wg21-paperflow
 """
 
-from dataclasses import dataclass, field
+import logging
+from dataclasses import dataclass, field, replace
 from typing import Any
 
-from tomd.lib.metadata_yaml.format import FRONT_MATTER_ORDER as FRONT_MATTER_ORDER
+from tomd.domain.mailing import MailingRecord
+from tomd.lib.metadata_yaml.format import FRONT_MATTER_ORDER as FRONT_MATTER_ORDER, is_blank_value
+from tomd.lib.shared import EMAIL_RE
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -81,3 +86,34 @@ class PaperMetadata:
                 d[k] = v
 
         return d
+
+    def with_mailing_fallback(self, mailing: MailingRecord) -> "PaperMetadata":
+        """Return a copy completed from ``mailing``.
+
+        Mailing values fill only blank fields (``is_blank_value``), except
+        ``document``: SD-7 forbids D-numbers in published mailings, so the mailing
+        ``paper_id`` replaces whatever document number the source has. A ``reply_to``
+        of bare names (no email address) counts as blank. Blank mailing values never
+        fill anything.
+        """
+        date = _present_or(self.date, mailing.document_date)
+        if date != self.date:
+            logger.debug("Date fallback from mailing (document_date=%r): source had no date", date)
+
+        reply_to = self.reply_to
+        entries = [reply_to] if isinstance(reply_to, str) else reply_to
+        if not any(EMAIL_RE.search(entry) for entry in entries) and not is_blank_value(mailing.authors):
+            reply_to = list(mailing.authors)
+
+        return replace(
+            self,
+            title=_present_or(self.title, mailing.title),
+            document=_present_or(mailing.paper_id, self.document),
+            date=date,
+            audience=_present_or(self.audience, mailing.audience),
+            reply_to=reply_to,
+        )
+
+
+def _present_or[T](value: T, fallback: T) -> T:
+    return fallback if is_blank_value(value) and not is_blank_value(fallback) else value
