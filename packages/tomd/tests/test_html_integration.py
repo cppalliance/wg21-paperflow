@@ -258,3 +258,31 @@ def test_mixed_code_table_drops_img_nested_in_allowed_wrapper(tmp_path):
     assert "data:image" not in md
     assert "<img" not in md
     assert "cell alt" not in md
+
+
+MPARK_EMPTY_TITLE = """<!DOCTYPE html>
+<html><head><meta charset="utf-8"/></head><body>
+<header id="title-block-header">
+<h1 class="title"></h1>
+<table><tr><td>Document #:</td><td>P9998R0</td></tr></table>
+</header>
+<h1>Real Title</h1>
+<p>Body paragraph.</p>
+</body></html>
+"""
+
+
+def test_convert_html_empty_title_falls_back_to_first_heading(tmp_path):
+    md, _ = convert_html(_write(tmp_path, "e.html", MPARK_EMPTY_TITLE))
+    assert md.startswith('---\ntitle: "Real Title"\ndocument: P9998R0\n---\n')
+    assert 'title: ""' not in md
+
+
+def test_convert_html_all_blank_metadata_emits_no_front_matter(tmp_path):
+    html = """<!DOCTYPE html><html><head></head><body>
+<header id="title-block-header"><h1 class="title"></h1></header>
+<p>Body paragraph.</p>
+</body></html>
+"""
+    md, _ = convert_html(_write(tmp_path, "b.html", html))
+    assert md == "Body paragraph.\n"

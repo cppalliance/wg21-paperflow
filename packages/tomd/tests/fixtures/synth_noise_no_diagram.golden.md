@@ -1,7 +1,5 @@
 ---
 title: "Synthetic Noise Fixture"
-reply-to:
-
 ---
 
 <!-- tomd:summary tables=1 trusted=0 flagged=1 likely=0 marked=0 confidence=n/a unfamiliarity=0.40 -->
@@ -10,7 +8,7 @@ This synthetic fixture contains only table borders and horizontal rules. The vec
 
 <!-- tomd:level L2 minor: agreed with paperflow's own reader only; that agreement is not yet measured -->
 
-<!-- tomd:uncertain:L15-L19 -->
+<!-- tomd:uncertain:L13-L17 -->
 
 | Header | Column B cell | Column C cell |
 | --- | --- | --- |
