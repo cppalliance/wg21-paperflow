@@ -24,8 +24,9 @@ from ftfy.badness import badness as _ftfy_badness
 import mistune
 from paperstore.progress import ProgressCallback
 
+from tomd.domain.front_matter import FRONT_MATTER_ORDER
 from tomd.lib.batch import run_parallel_batch
-from tomd.lib.metadata_yaml.format import FRONT_MATTER_ORDER, parse_front_matter
+from tomd.lib.metadata_yaml.format import parse_front_matter
 
 from ..wording_markup import WORDING_TAG_RE
 

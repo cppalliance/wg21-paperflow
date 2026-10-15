@@ -2,8 +2,10 @@
 # SPDX-License-Identifier: BSL-1.0
 """YAML front matter formatting and parsing for WG21 paper metadata.
 
-Canonical field order, YAML serialization, and parsing. Single source of
-truth for the strict-order contract described in CLAUDE.md.
+Serializes metadata in the canonical order (``FRONT_MATTER_ORDER``, owned by
+``tomd.domain.front_matter``) and parses it back. The value rules applied while
+formatting (blank values, title normalization, intent from title) live in the
+domain; this module only applies them.
 
 ``parse_front_matter`` recognizes only the shapes ``format_front_matter``
 emits: scalar ``key: value`` (optionally double-quoted) and ``key:``
@@ -12,22 +14,8 @@ followed by indented ``- "item"`` lines.
 
 import re
 
-_TITLE_LABEL_RE = re.compile(
-    r"(?:Paper\s*Number|Document(?:\s*Number)?|Title|Authors?|"
-    r"Acknowledgements?|Reply[- ]?to|Audience|Date)\s*:",
-    re.IGNORECASE,
-)
-
-_DOUBLE_ANGLE_RE = re.compile(r"<\s*<([^>]+)>")
-
-_NON_AUTHOR_RE = re.compile(
-    r"^(?:Target|Proposed|Wording|Structures?|Version|Contents?|"
-    r"Read-Copy|Abstract|Introduction|Overview|Revision)\b",
-    re.IGNORECASE,
-)
-
-
-FRONT_MATTER_ORDER = ("title", "document", "date", "intent", "audience", "reply-to")
+from tomd.domain.front_matter import FRONT_MATTER_ORDER, is_blank_value
+from tomd.domain.metadata import intent_from_title, normalize_title
 
 FrontMatterDict = dict[str, str | list[str]]
 
@@ -124,60 +112,6 @@ def strip_front_matter(md: str) -> str:
     return md[match.end():]
 
 
-def sanitize_metadata(metadata: dict) -> dict:
-    """Clean up extracted metadata values before formatting.
-
-    Fixes: embedded newlines in title, metadata labels in title text,
-    double angle brackets in reply-to entries, non-author reply-to values.
-    """
-    md = dict(metadata)
-
-    if "title" in md and not isinstance(md["title"], str):
-        md["title"] = str(md["title"])
-
-    if "title" in md:
-        title = md["title"]
-        title = title.replace("\n", " ").replace("\r", " ")
-        title = re.sub(r"\s{2,}", " ", title).strip()
-        title_label_m = re.search(r"\bTitle\s*:\s*", title, re.IGNORECASE)
-        if title_label_m:
-            after_title = title[title_label_m.end():].strip()
-            next_label = _TITLE_LABEL_RE.search(after_title)
-            if next_label:
-                title = after_title[:next_label.start()].rstrip(" ,;")
-            elif after_title:
-                title = after_title
-        else:
-            m = _TITLE_LABEL_RE.search(title)
-            if m and m.start() > 0:
-                title = title[:m.start()].rstrip(" ,;")
-            elif m and m.start() == 0:
-                after_label = title[m.end():].strip()
-                next_label = _TITLE_LABEL_RE.search(after_label)
-                if next_label:
-                    title = after_label[:next_label.start()].rstrip(" ,;")
-                elif after_label:
-                    title = after_label
-        md["title"] = title.strip()
-
-    if isinstance(md.get("reply-to"), str):
-        md["reply-to"] = [md["reply-to"]]
-
-    if "reply-to" in md and isinstance(md["reply-to"], list):
-        cleaned = []
-        for entry in md["reply-to"]:
-            entry = _DOUBLE_ANGLE_RE.sub(r"<\1>", entry)
-            if _NON_AUTHOR_RE.match(entry.strip()):
-                continue
-            cleaned.append(entry)
-        if cleaned:
-            md["reply-to"] = cleaned
-        else:
-            del md["reply-to"]
-
-    return md
-
-
 def _yaml_escape(s: str) -> str:
     """Escape a string for safe inclusion in double-quoted YAML."""
     return s.replace("\\", "\\\\").replace('"', '\\"').replace("\n", "\\n")
@@ -192,19 +126,6 @@ def _yaml_value(key: str, val) -> str:
     if key == "title" or any(c in val for c in ':{}[]#&*?|>!%@`"\'\n\\'):
         return f'{key}: "{_yaml_escape(val)}"'
     return f"{key}: {val}"
-
-
-def is_blank_value(value: object) -> bool:
-    """True for ``None``, empty or whitespace-only text, and lists with no non-blank item.
-
-    A blank front-matter value counts as missing: it is never emitted, and the
-    mailing fallback fills it.
-    """
-    if value is None:
-        return True
-    if isinstance(value, (list, tuple)):
-        return all(is_blank_value(item) for item in value)
-    return not str(value).strip()
 
 
 def _without_blanks(metadata: dict) -> dict:
@@ -237,24 +158,17 @@ def format_front_matter(metadata: dict) -> str:
     if not metadata:
         return ""
     metadata = dict(metadata)
-    if "title" in metadata and isinstance(metadata["title"], str):
-        title = metadata["title"].replace("\n", " ")
-        title = re.sub(r"\s*::\s*", "::", title)
-        title = re.sub(r"  +", " ", title).strip()
-        metadata["title"] = title
+    if isinstance(metadata.get("title"), str):
+        metadata["title"] = normalize_title(metadata["title"])
 
     metadata = _without_blanks(metadata)
     if not metadata:
         return ""
 
-    if "intent" not in metadata:
-        title = metadata.get("title", "")
-        if isinstance(title, str):
-            t = title.strip()
-            if t.startswith("Info:"):
-                metadata["intent"] = "info"
-            elif t.startswith("Ask:"):
-                metadata["intent"] = "ask"
+    if "intent" not in metadata and isinstance(metadata.get("title"), str):
+        intent = intent_from_title(metadata["title"])
+        if intent:
+            metadata["intent"] = intent
 
     lines = ["---"]
     pre_reply_to: list[str] = []
