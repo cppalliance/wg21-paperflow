@@ -7,10 +7,8 @@ Official repository: https://github.com/cppalliance/wg21-paperflow
 """
 
 from tomd.domain.document import PaperDocument
-from tomd.domain.table import Table
+from tomd.lib.metadata_yaml.format import format_front_matter
 from tomd.writers.markdown.blocks import write_element
-from tomd.writers.markdown.front_matter import write_front_matter
-from tomd.writers.markdown.tables import write_table
 
 
 class MarkdownWriter:
@@ -25,9 +23,8 @@ class MarkdownWriter:
         if document.is_skipped:
             return ""
 
-        blocks = [write_front_matter(document.metadata)]
-        for elem in document.elements:
-            blocks.append(write_table(elem) if isinstance(elem, Table) else write_element(elem))
+        blocks = [format_front_matter(document.metadata.to_dict())]
+        blocks.extend(write_element(element) for element in document.elements)
 
         rendered = [block for block in blocks if block]
         if not rendered:
