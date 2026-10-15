@@ -4,23 +4,20 @@
 
 """Unit tests for metadata_yaml strip and format modules."""
 
-from conftest import make_section
-from tomd.lib.pdf.types import SectionKind
-from tomd.lib.metadata_yaml.strip import (
-    _matches_author_name,
-    _is_content_heading,
-    strip_metadata_headings,
-    strip_pre_heading_fragments,
-    strip_pre_content_paragraphs,
-)
-from tomd.lib.metadata_yaml.extract import extract_metadata
 import pytest
 
-from tomd.lib.metadata_yaml.format import (
-    format_front_matter,
-    is_blank_value,
-    sanitize_metadata,
+from conftest import make_section
+from tomd.lib.metadata_yaml.extract import extract_metadata
+from tomd.lib.metadata_yaml.format import format_front_matter
+from tomd.lib.metadata_yaml.sanitize import sanitize_metadata
+from tomd.lib.metadata_yaml.strip import (
+    _is_content_heading,
+    _matches_author_name,
+    strip_metadata_headings,
+    strip_pre_content_paragraphs,
+    strip_pre_heading_fragments,
 )
+from tomd.lib.pdf.types import SectionKind
 
 
 class TestMatchesAuthorName:
@@ -324,17 +321,6 @@ class TestFormatFrontMatter:
         doc_pos = result.find("document:")
         date_pos = result.find("date:")
         assert title_pos < doc_pos < date_pos
-
-
-class TestIsBlankValue:
-
-    @pytest.mark.parametrize("value", [None, "", "   ", "\t\n", [], (), ["", "  "]])
-    def test_blank(self, value):
-        assert is_blank_value(value)
-
-    @pytest.mark.parametrize("value", ["x", " x ", ["", "a"], ("a",), 0])
-    def test_not_blank(self, value):
-        assert not is_blank_value(value)
 
 
 class TestFormatFrontMatterBlankValues:

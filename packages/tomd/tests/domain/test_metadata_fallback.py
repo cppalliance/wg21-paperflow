@@ -21,8 +21,8 @@ from tomd.lib.metadata_yaml.format import (
     FRONT_MATTER_RE,
     format_front_matter,
     parse_front_matter,
-    sanitize_metadata,
 )
+from tomd.lib.metadata_yaml.sanitize import sanitize_metadata
 
 _BODY = "## Introduction\n\nBody text.\n"
 

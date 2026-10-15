@@ -20,7 +20,9 @@ from tomd.domain.elements import (
     WordingBlock,
 )
 from tomd.domain.span import CodeSpan, TextSpan
+from tomd.domain.table import Table, TableRow, TextCell
 from tomd.writers.markdown.blocks import write_element
+from tomd.writers.markdown.tables import write_table
 
 
 def test_write_heading():
@@ -118,7 +120,14 @@ def test_write_uncertain_element():
     assert write_element(unc) == "<!-- tomd:uncertain:L3-L3 -->\n\n$$E=mc^2$$"
 
 
+def test_write_element_table_delegates_to_write_table():
+    table = Table(
+        headers=[TextCell.from_text("Option")],
+        rows=[TableRow(cells=[TextCell.from_text("-a")])],
+    )
+    assert write_element(table) == write_table(table) == "| Option |\n| --- |\n| -a |"
+
+
 def test_write_raw_block():
     raw = RawBlock(markdown="Line 1  \n\nLine 3", origin="pdf")
     assert write_element(raw) == "Line 1  \n\nLine 3"
-
