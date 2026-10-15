@@ -52,16 +52,15 @@ from typing import TYPE_CHECKING
 import pymupdf
 
 from tomd.domain.diagnostics import VectorUncertaintyStats
-
-from .images import (
+from tomd.lib.pdf.images import (
     _PageImageCandidate,
     _VectorExtractionStats,
     _caption_for,
 )
-from .wording import is_wording_rgb
+from tomd.lib.pdf.wording import is_wording_rgb
 
 if TYPE_CHECKING:
-    from .types import Block
+    from tomd.lib.pdf.types import Block
 
 _log = logging.getLogger(__name__)
 

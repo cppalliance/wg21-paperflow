@@ -34,7 +34,7 @@ from __future__ import annotations
 
 import re
 
-from .wording_policy import UNIFORM_ROLE_THRESHOLD, implicit_role_for
+from tomd.lib.wording_policy import UNIFORM_ROLE_THRESHOLD, implicit_role_for
 
 # Non-greedy across lines so multi-line tag spans match correctly,
 # while not accidentally swallowing an unrelated downstream tag of the

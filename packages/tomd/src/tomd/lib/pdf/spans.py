@@ -8,8 +8,8 @@ because code boundaries are intentional.
 
 from dataclasses import replace
 
-from .glyphs import GLYPH_FONT_SENTINEL
-from .types import Block, Line, Span
+from tomd.lib.pdf.glyphs import GLYPH_FONT_SENTINEL
+from tomd.lib.pdf.types import Block, Line, Span
 
 
 def _is_style_span(span: Span) -> tuple[bool, bool]:
