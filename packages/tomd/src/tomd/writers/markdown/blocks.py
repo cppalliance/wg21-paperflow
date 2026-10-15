@@ -45,23 +45,13 @@ def _format_code_block(element: CodeBlock) -> str:
 
 
 def _indent(text: str, width: int) -> str:
-    """Indent every line of ``text`` by ``width`` spaces, blank lines included.
-
-    Padding blank lines leaves whitespace-only lines, but it is what the legacy HTML
-    renderer emits, so it stays until a behavior PR after the cutover.
-    """
+    """Indent every line of ``text`` by ``width`` spaces, blank lines included."""
     pad = " " * width
     return "\n".join(pad + line for line in text.split("\n"))
 
 
 def _format_list_item(item: ListItem, marker: str) -> str:
-    """Format one item as its label plus continuation blocks nested under the marker.
-
-    An item with neither label nor content renders as the empty string. A nested
-    list stays tight against its parent; any other child block is preceded by a
-    blank line, except directly after a bare marker, where a blank line would make
-    CommonMark read the item as empty and detach the block.
-    """
+    """Format one item as its label plus continuation blocks nested under the marker."""
     label = write_spans(item.spans)
     children = [
         (isinstance(child, ListBlock), rendered)

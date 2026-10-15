@@ -82,13 +82,7 @@ class CodeBlock(BlockElement):
 
 @dataclass
 class ListItem:
-    """Individual list item: an inline label plus optional continuation blocks.
-
-    ``children`` are the blocks that belong to the item after its label, in
-    document order; a nested ``ListBlock`` is how sub-lists are expressed.
-    ``marker`` is an ordinal preserved from the source (``b)``, ``(a)``) and
-    overrides the marker the writer would generate; ``None`` means generate.
-    """
+    """Individual list item: an inline label plus optional continuation blocks. """
 
     spans: list[Span] = field(default_factory=list)
     children: list[BlockElement] = field(default_factory=list)
