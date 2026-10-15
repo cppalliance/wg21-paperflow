@@ -14,6 +14,7 @@ from fixtures.sample_documents import (
     sample_full_proposal_document,
     sample_poll_table_document,
     sample_rich_blocks_document,
+    sample_structured_lists_document,
     sample_tony_table_document,
     sample_wording_diff_document,
 )
@@ -82,6 +83,11 @@ def sample_poll_table_doc():
 @pytest.fixture
 def sample_rich_blocks_doc():
     return sample_rich_blocks_document()
+
+
+@pytest.fixture
+def sample_structured_lists_doc():
+    return sample_structured_lists_document()
 
 
 @pytest.fixture
