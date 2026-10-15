@@ -585,11 +585,73 @@ def sample_full_proposal_document() -> PaperDocument:
     return PaperDocument(paper_id="P0447R26", metadata=meta, elements=elements)
 
 
+def sample_structured_lists_document() -> PaperDocument:
+    """Construct a sample PaperDocument with nested lists, item continuation blocks, and preserved ordinals."""
+    meta = PaperMetadata(
+        title="std::hive Wording Plan",
+        document="P3005R0",
+        date="2026-10-15",
+        intent="info",
+        audience=["LEWG"],
+    )
+
+    member_groups = ListBlock(items=[ListItem.from_text("Insertion and erasure")])
+    container_parts = ListBlock(
+        items=[
+            ListItem.from_text("Header synopsis"),
+            ListItem(spans=[TextSpan("Member functions")], children=[member_groups]),
+        ]
+    )
+    changes = ListBlock(
+        items=[
+            ListItem(spans=[TextSpan("Add a hive container")], children=[container_parts]),
+            ListItem(
+                spans=[TextSpan("Define a feature-test macro")],
+                children=[
+                    Paragraph.from_text("The macro tracks the library revision."),
+                    CodeBlock(code="#define __cpp_lib_hive 202602L"),
+                ],
+            ),
+            ListItem(children=[CodeBlock(code="static_assert(std::ranges::range<std::hive<int>>);")]),
+        ],
+        ordered=True,
+    )
+
+    resumed_questions = ListBlock(
+        items=[
+            ListItem.from_text("Should erasure invalidate other iterators?"),
+            ListItem.from_text("Should the block capacity be configurable?"),
+        ],
+        ordered=True,
+        start=5,
+    )
+
+    allocator_requirements = ListBlock(
+        items=[
+            ListItem(spans=[TextSpan("the allocator is copy constructible")], marker="(a)"),
+            ListItem(spans=[TextSpan("rebinding preserves equality")], marker="(b)"),
+        ],
+        ordered=True,
+    )
+
+    elements = [
+        Heading.from_text(2, "Proposed Changes"),
+        Paragraph.from_text("This revision makes three changes:"),
+        changes,
+        Heading.from_text(2, "Open Questions"),
+        resumed_questions,
+        Paragraph.from_text("The allocator requirements are:"),
+        allocator_requirements,
+    ]
+    return PaperDocument(paper_id="P3005R0", metadata=meta, elements=elements)
+
+
 ALL_SAMPLE_DOCUMENT_BUILDERS: tuple[Callable[[], PaperDocument], ...] = (
     sample_abstract_prose_document,
     sample_tony_table_document,
     sample_wording_diff_document,
     sample_poll_table_document,
     sample_rich_blocks_document,
+    sample_structured_lists_document,
     sample_full_proposal_document,
 )

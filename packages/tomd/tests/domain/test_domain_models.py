@@ -264,6 +264,13 @@ def test_block_elements_hierarchy():
     assert isinstance(unc, BlockElement)
 
 
+def test_list_item_text_includes_children():
+    nested = ListBlock(items=[ListItem.from_text("child")])
+    item = ListItem(spans=[TextSpan("label")], children=[Paragraph.from_text("more"), nested])
+    assert item.text == "label\nmore\nchild"
+    assert ListItem(children=[Paragraph.from_text("only")]).text == "only"
+
+
 def test_document_and_conversion_containers():
     meta = PaperMetadata(title="Sample Paper", document="P9999R0")
     h2 = Heading.from_text(2, "Proposed Wording")

@@ -82,9 +82,11 @@ class CodeBlock(BlockElement):
 
 @dataclass
 class ListItem:
-    """Individual item in a list containing inline spans."""
+    """Individual list item: an inline label plus optional continuation blocks. """
 
     spans: list[Span] = field(default_factory=list)
+    children: list[BlockElement] = field(default_factory=list)
+    marker: str | None = None
 
     @classmethod
     def from_text(cls, text: str) -> "ListItem":
@@ -92,15 +94,18 @@ class ListItem:
 
     @property
     def text(self) -> str:
-        return "".join(s.text for s in self.spans)
+        label = "".join(s.text for s in self.spans)
+        parts = [label, *(child.text for child in self.children)]
+        return "\n".join(part for part in parts if part)
 
 
 @dataclass
 class ListBlock(BlockElement):
-    """Ordered or unordered list containing list items."""
+    """Ordered or unordered list; ``start`` numbers the first ordered item."""
 
     items: list[ListItem] = field(default_factory=list)
     ordered: bool = False
+    start: int = 1
 
     @property
     def text(self) -> str:
