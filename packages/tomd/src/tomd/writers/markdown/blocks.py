@@ -17,12 +17,16 @@ from tomd.domain.elements import (
     Heading,
     ImageElement,
     ListBlock,
+    ListItem,
     Paragraph,
     ThematicBreak,
     UncertainElement,
     WordingBlock,
 )
 from tomd.writers.markdown.spans import write_spans
+
+
+_BULLET_MARKER = "-"
 
 
 def _format_code_block(element: CodeBlock) -> str:
@@ -40,17 +44,53 @@ def _format_code_block(element: CodeBlock) -> str:
     return f"{fence}{info}\n{element.code}\n{fence}"
 
 
+def _indent(text: str, width: int) -> str:
+    """Indent every line of ``text`` by ``width`` spaces, blank lines included.
+
+    Padding blank lines leaves whitespace-only lines, but it is what the legacy HTML
+    renderer emits, so it stays until a behavior PR after the cutover.
+    """
+    pad = " " * width
+    return "\n".join(pad + line for line in text.split("\n"))
+
+
+def _format_list_item(item: ListItem, marker: str) -> str:
+    """Format one item as its label plus continuation blocks nested under the marker.
+
+    An item with neither label nor content renders as the empty string. A nested
+    list stays tight against its parent; any other child block is preceded by a
+    blank line, except directly after a bare marker, where a blank line would make
+    CommonMark read the item as empty and detach the block.
+    """
+    label = write_spans(item.spans)
+    children = [
+        (isinstance(child, ListBlock), rendered)
+        for child in item.children
+        if (rendered := write_element(child))
+    ]
+    if not label and not children:
+        return ""
+
+    width = len(marker) + 1
+    first, _, rest = label.partition("\n")
+    lines = [f"{marker} {first}" if label else marker]
+    if rest:
+        lines.append(_indent(rest, width))
+    for position, (is_nested_list, rendered) in enumerate(children):
+        if not is_nested_list and (label or position > 0):
+            lines.append("")
+        lines.append(_indent(rendered, width))
+    return "\n".join(lines)
+
+
 def _format_list_block(element: ListBlock) -> str:
-    """Format an ordered or unordered list with aligned multiline continuations."""
+    """Format an ordered or unordered list; empty items are skipped but still counted."""
     formatted_items: list[str] = []
-    for i, item in enumerate(element.items, 1):
-        item_text = write_spans(item.spans)
-        prefix = f"{i}. " if element.ordered else "- "
-        lines = item_text.split("\n")
-        first = f"{prefix}{lines[0]}"
-        indent = " " * len(prefix)
-        rest = [f"{indent}{line}" if line else "" for line in lines[1:]]
-        formatted_items.append("\n".join([first] + rest))
+    for index, item in enumerate(element.items):
+        generated = f"{element.start + index}." if element.ordered else _BULLET_MARKER
+        formatted = _format_list_item(item, item.marker or generated)
+        if formatted:
+            formatted_items.append(formatted)
     return "\n".join(formatted_items)
 
 
