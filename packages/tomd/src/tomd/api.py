@@ -35,19 +35,19 @@ import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from tomd.domain.front_matter import is_blank_value
+from tomd.domain.metadata import EMAIL_RE
 from tomd.lib.metadata_yaml.format import (
     FRONT_MATTER_RE,
     format_front_matter,
-    is_blank_value,
     parse_front_matter,
-    sanitize_metadata,
     strip_front_matter,
 )
+from tomd.lib.metadata_yaml.sanitize import sanitize_metadata
 from tomd.errors import UnsupportedSourceFormatError
 from tomd.lib import (
     apply_strip_leading_h1,
     strip_freeform_metadata_lines,
-    EMAIL_RE,
 )
 from tomd.lib.html import convert_html
 from tomd.lib.html.images import load_html_images
