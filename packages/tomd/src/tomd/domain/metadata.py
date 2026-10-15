@@ -7,17 +7,40 @@ Official repository: https://github.com/cppalliance/wg21-paperflow
 """
 
 import logging
+import re
 from dataclasses import dataclass, field, replace
 from typing import Any
 
+from tomd.domain.front_matter import FRONT_MATTER_ORDER, is_blank_value
 from tomd.domain.mailing import MailingRecord
-from tomd.lib.metadata_yaml.format import FRONT_MATTER_ORDER as FRONT_MATTER_ORDER, is_blank_value
-from tomd.lib.shared import EMAIL_RE
 
 logger = logging.getLogger(__name__)
 
+EMAIL_RE = re.compile(r"[\w.+-]+@[\w.-]+\.\w+")
 
-@dataclass
+_KNOWN_KEYS = frozenset({*FRONT_MATTER_ORDER, "reply_to"})
+
+# A title that opens with one of these labels states the paper's intent.
+_INTENT_TITLE_PREFIXES = (("Info:", "info"), ("Ask:", "ask"))
+
+
+def normalize_title(title: str) -> str:
+    """Return ``title`` on one line: ``A :: B`` becomes ``A::B`` and whitespace runs collapse."""
+    title = title.replace("\r", " ").replace("\n", " ")
+    title = re.sub(r"\s*::\s*", "::", title)
+    return re.sub(r"\s{2,}", " ", title).strip()
+
+
+def intent_from_title(title: str) -> str:
+    """Return the intent an ``Info:`` or ``Ask:`` title prefix states, or ``""``."""
+    stripped = title.strip()
+    for prefix, intent in _INTENT_TITLE_PREFIXES:
+        if stripped.startswith(prefix):
+            return intent
+    return ""
+
+
+@dataclass(frozen=True)
 class PaperMetadata:
     """Structured metadata for a WG21 paper."""
 
@@ -34,58 +57,21 @@ class PaperMetadata:
         """Construct PaperMetadata from a dictionary of front matter keys."""
         if not data:
             return cls()
-
-        known = {"title", "document", "date", "intent", "audience", "reply-to", "reply_to"}
-        extra = {k: v for k, v in data.items() if k not in known}
-
-        audience_val = data.get("audience")
-        if audience_val is None:
-            audience: list[str] | str = []
-        elif isinstance(audience_val, (list, str)):
-            audience = audience_val
-        else:
-            audience = str(audience_val)
-
-        reply_to_val = data.get("reply-to", data.get("reply_to"))
-        if reply_to_val is None:
-            reply_to: list[str] | str = []
-        elif isinstance(reply_to_val, (list, str)):
-            reply_to = reply_to_val
-        else:
-            reply_to = str(reply_to_val)
-
         return cls(
             title=str(data.get("title") or ""),
             document=str(data.get("document") or ""),
             date=str(data.get("date") or ""),
             intent=str(data.get("intent") or ""),
-            audience=audience,
-            reply_to=reply_to,
-            extra=extra,
+            audience=_list_or_str(data.get("audience")),
+            reply_to=_list_or_str(data.get("reply-to", data.get("reply_to"))),
+            extra={k: v for k, v in data.items() if k not in _KNOWN_KEYS},
         )
 
     def to_dict(self) -> dict[str, Any]:
-        """Serialize metadata into a dict ordered by canonical FRONT_MATTER_ORDER."""
-        d: dict[str, Any] = {}
-        for key in FRONT_MATTER_ORDER:
-            if key == "title" and self.title:
-                d["title"] = self.title
-            elif key == "document" and self.document:
-                d["document"] = self.document
-            elif key == "date" and self.date:
-                d["date"] = self.date
-            elif key == "intent" and self.intent:
-                d["intent"] = self.intent
-            elif key == "audience" and self.audience:
-                d["audience"] = self.audience
-            elif key == "reply-to" and self.reply_to:
-                d["reply-to"] = self.reply_to
-
-        for k, v in self.extra.items():
-            if k not in d:
-                d[k] = v
-
-        return d
+        """Serialize to a dict in ``FRONT_MATTER_ORDER``, extras last; blank values are omitted."""
+        d = {key: getattr(self, key.replace("-", "_")) for key in FRONT_MATTER_ORDER}
+        d.update((k, v) for k, v in self.extra.items() if k not in d)
+        return {k: v for k, v in d.items() if not is_blank_value(v)}
 
     def with_mailing_fallback(self, mailing: MailingRecord) -> "PaperMetadata":
         """Return a copy completed from ``mailing``.
@@ -117,3 +103,9 @@ class PaperMetadata:
 
 def _present_or[T](value: T, fallback: T) -> T:
     return fallback if is_blank_value(value) and not is_blank_value(fallback) else value
+
+
+def _list_or_str(value: Any) -> list[str] | str:
+    if value is None:
+        return []
+    return value if isinstance(value, (list, str)) else str(value)
