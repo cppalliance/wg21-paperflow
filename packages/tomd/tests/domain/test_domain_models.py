@@ -25,7 +25,8 @@ from tomd.domain.elements import (
     WordingBlock,
 )
 from tomd.domain.image import ExtractedImage
-from tomd.domain.metadata import FRONT_MATTER_ORDER, PaperMetadata
+from tomd.domain.front_matter import FRONT_MATTER_ORDER
+from tomd.domain.metadata import PaperMetadata, intent_from_title, normalize_title
 from tomd.domain.span import (
     CodeSpan,
     EmphasisSpan,
@@ -168,6 +169,47 @@ def test_paper_metadata_roundtrip_and_ordering():
     empty_meta = PaperMetadata.from_dict(None)
     assert empty_meta.title == ""
     assert empty_meta.to_dict() == {}
+
+
+def test_paper_metadata_is_frozen():
+    meta = PaperMetadata(title="T")
+    with pytest.raises(FrozenInstanceError):
+        meta.title = "Other"  # type: ignore[misc]
+
+
+def test_paper_metadata_to_dict_omits_blank_values():
+    meta = PaperMetadata(title="  ", document="P1R0", intent="\t", audience=[""], extra={"project": " "})
+    assert meta.to_dict() == {"document": "P1R0"}
+
+
+def test_paper_metadata_from_dict_coerces_audience_and_reply_to():
+    meta = PaperMetadata.from_dict({"audience": 7, "reply_to": "A <a@example.com>"})
+    assert meta.audience == "7"
+    assert meta.reply_to == "A <a@example.com>"
+    assert meta.extra == {}
+
+
+@pytest.mark.parametrize(
+    ("title", "expected"),
+    [
+        ("Plain", "Plain"),
+        ("std :: execution  Senders", "std::execution Senders"),
+        ("Line one\nline two", "Line one line two"),
+        ("Carriage\r\nreturn", "Carriage return"),
+        ("Tab\t\truns", "Tab runs"),
+        ("  padded  ", "padded"),
+    ],
+)
+def test_normalize_title(title, expected):
+    assert normalize_title(title) == expected
+
+
+@pytest.mark.parametrize(
+    ("title", "expected"),
+    [("Info: Status", "info"), ("  Ask: Direction", "ask"), ("Plain", ""), ("info: lower", "")],
+)
+def test_intent_from_title(title, expected):
+    assert intent_from_title(title) == expected
 
 
 def test_table_and_cells():
