@@ -5,12 +5,13 @@ import os
 import re
 from pathlib import Path
 
+from tomd.domain.front_matter import is_blank_value
+
 from .. import (
     DOC_NUM_RE,
     apply_strip_leading_h1,
     dedup_paragraphs,
     format_front_matter,
-    is_blank_value,
     override_revision_from_filename,
     strip_orphan_toc_list,
     strip_redundant_body_meta,

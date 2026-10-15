@@ -6,8 +6,10 @@ import re
 
 from bs4 import BeautifulSoup, Tag
 
+from tomd.domain.metadata import EMAIL_RE
+
 from .. import (
-    DOC_NUM_RE, EMAIL_RE, parse_author_lines,
+    DOC_NUM_RE, parse_author_lines,
     deobfuscate_email, enrich_reply_to_names, normalize_date,
 )
 from ..similarity import fuzzy_match_label
