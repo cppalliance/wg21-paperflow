@@ -3,14 +3,14 @@
 import logging
 from urllib.parse import urlparse
 
-from .. import ALLOWED_LINK_SCHEMES
-from .types import (
+from tomd.lib.shared import ALLOWED_LINK_SCHEMES
+from tomd.lib.pdf.types import (
     Block, Line, Span,
     WORD_GAP_RATIO, LINE_SPACING_RATIO, PARA_SPACING_RATIO,
     FALLBACK_FONT_SIZE,
     compute_bbox,
 )
-from .mono import classify_monospace
+from tomd.lib.pdf.mono import classify_monospace
 
 _log = logging.getLogger(__name__)
 

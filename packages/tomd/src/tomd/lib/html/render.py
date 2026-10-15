@@ -8,11 +8,11 @@ from collections import deque
 
 from bs4 import BeautifulSoup, CData, Comment, ProcessingInstruction, Tag, NavigableString
 
-from .. import CODE_LANG_LABELS, strip_format_chars, ALLOWED_LINK_SCHEMES
-from ..wording_cleanup import strip_redundant_tags
-from ..wording_markup import wording_tag_open
-from .. import tables as _tables
-from ..pdf.code_format import is_diagram_block
+from tomd.lib import tables as _tables
+from tomd.lib.shared import CODE_LANG_LABELS, strip_format_chars, ALLOWED_LINK_SCHEMES
+from tomd.lib.wording_cleanup import strip_redundant_tags
+from tomd.lib.wording_markup import wording_tag_open
+from tomd.lib.pdf.code_format import is_diagram_block
 
 _BOLD_WRAP_RE = re.compile(r"^\*\*(.+)\*\*$")
 _LOSSY_TABLE_MARKER = "<!-- tomd:lossy-table -->"

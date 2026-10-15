@@ -20,8 +20,8 @@ import math
 import re
 from collections import Counter
 
-from .glyphs import GLYPH_FONT_SENTINEL
-from .types import Block
+from tomd.lib.pdf.glyphs import GLYPH_FONT_SENTINEL
+from tomd.lib.pdf.types import Block
 
 _FONT_MODIFIERS = frozenset({
     "thin", "hairline", "extralight", "ultralight", "light",

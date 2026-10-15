@@ -45,7 +45,7 @@ from typing import TYPE_CHECKING, Literal
 if TYPE_CHECKING:
     import pymupdf
 
-    from .types import Block
+    from tomd.lib.pdf.types import Block
 
 
 ImageSource = Literal["raster", "vector"]

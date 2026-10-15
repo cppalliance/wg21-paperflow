@@ -43,9 +43,9 @@ import math
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from .emoji_data import EMOJI_PRESENTATION_RANGES
-from .images import MIN_IMAGE_DIM_PT
-from .types import Block, Line, Section, SectionKind, Span, compute_bbox
+from tomd.lib.pdf.emoji_data import EMOJI_PRESENTATION_RANGES
+from tomd.lib.pdf.images import MIN_IMAGE_DIM_PT
+from tomd.lib.pdf.types import Block, Line, Section, SectionKind, Span, compute_bbox
 
 if TYPE_CHECKING:
     import pymupdf
