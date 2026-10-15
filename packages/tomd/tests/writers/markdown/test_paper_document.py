@@ -55,6 +55,14 @@ def test_paper_document_rich_blocks_and_nested_lists(
     assert actual == sample_markdown("rich_blocks")
 
 
+def test_paper_document_structured_lists(
+    sample_structured_lists_doc: PaperDocument,
+    sample_markdown: Callable[[str], str],
+) -> None:
+    actual = MarkdownWriter().write(sample_structured_lists_doc)
+    assert actual == sample_markdown("structured_lists")
+
+
 def test_paper_document_full_proposal_assembly(
     sample_full_proposal_doc: PaperDocument,
     sample_markdown: Callable[[str], str],
