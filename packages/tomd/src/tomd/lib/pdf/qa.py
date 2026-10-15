@@ -28,7 +28,7 @@ from tomd.domain.front_matter import FRONT_MATTER_ORDER
 from tomd.lib.batch import run_parallel_batch
 from tomd.lib.metadata_yaml.format import parse_front_matter
 
-from ..wording_markup import WORDING_TAG_RE
+from tomd.lib.wording_markup import WORDING_TAG_RE
 
 __all__ = [
     "QABatchResult",

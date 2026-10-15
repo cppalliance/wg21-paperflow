@@ -10,11 +10,11 @@ import re
 
 from tomd.domain.metadata import EMAIL_RE
 
-from .. import (
+from tomd.lib.shared import (
     strip_format_chars, parse_author_lines,
     deobfuscate_email, enrich_reply_to_names, normalize_date,
 )
-from .types import Block
+from tomd.lib.pdf.types import Block
 
 _log = logging.getLogger(__name__)
 

@@ -5,37 +5,36 @@ import html as _html
 import logging
 import re
 
-from .. import (
+from tomd.domain.diagnostics import GlyphPassStats, VectorUncertaintyStats
+from tomd.lib import tables as _tables
+from tomd.lib.metadata_yaml.format import format_front_matter
+from tomd.lib.shared import (
     DEFAULT_FENCE_LANG,
+    _find_front_matter_end,
     apply_strip_leading_h1,
     dedup_paragraphs,
-    format_front_matter,
     strip_redundant_body_meta,
     strip_orphan_toc_list,
 )
-from .. import tables as _tables
-from ..shared import _find_front_matter_end
-from .cleanup import normalize_whitespace
-from .code_format import is_diagram_block, maybe_normalize_code_line
-from .code_grid import CodeGrid
-from .wording_emit import _render_wording_section
-from tomd.domain.diagnostics import GlyphPassStats, VectorUncertaintyStats
+from tomd.domain.elements import Confidence
+from tomd.lib.pdf.cleanup import normalize_whitespace
+from tomd.lib.pdf.code_format import is_diagram_block, maybe_normalize_code_line
+from tomd.lib.pdf.code_grid import CodeGrid
+from tomd.lib.pdf.wording_emit import _render_wording_section
+from tomd.lib.pdf.glyphs import (
+    GLYPH_PLACEHOLDER_MARKER_TEMPLATE,
+    UNKNOWN_GLYPH,
+)
+from tomd.lib.pdf.images import TRUNCATION_MARKER_TEMPLATE
+from tomd.lib.pdf.levels import SHOWN_FROM, comment as level_comment
+from tomd.lib.pdf.runctx import current
+from tomd.lib.pdf.types import Line, Span, Section, SectionKind, BULLET_CHARS, BULLET_RE, NUMBERED_LIST_RE, FALLBACK_FONT_SIZE
+from tomd.lib.pdf.vector_images import format_uncertainty_marker, should_emit_marker
 from tomd.writers.markdown.escape import (
     escape_italic_wrapper,
     escape_leading_atx,
     escape_pipe_in_cell,
 )
-
-from .glyphs import (
-    GLYPH_PLACEHOLDER_MARKER_TEMPLATE,
-    UNKNOWN_GLYPH,
-)
-from .images import TRUNCATION_MARKER_TEMPLATE
-from .levels import SHOWN_FROM, comment as level_comment
-from .runctx import current
-from .types import Line, Span, Section, SectionKind, BULLET_CHARS, BULLET_RE, NUMBERED_LIST_RE, FALLBACK_FONT_SIZE
-from tomd.domain.elements import Confidence
-from .vector_images import format_uncertainty_marker, should_emit_marker
 _log = logging.getLogger(__name__)
 
 # A heading section can span multiple Line objects two ways: a single visual
@@ -1207,7 +1206,7 @@ def _assign_emdash_nesting(sections: list[Section]) -> None:
 
 def _annotate_wrap(rendered: str, sec: Section) -> str:
     """Wrap rendered markdown in a colored HTML div for highlight mode."""
-    from .highlight import KIND_COLORS, CONFIDENCE_BORDERS
+    from tomd.lib.pdf.highlight import KIND_COLORS, CONFIDENCE_BORDERS
     bg = KIND_COLORS.get(sec.kind.value, "transparent")
     border = CONFIDENCE_BORDERS.get(sec.confidence.value, "3px solid #ccc")
     kind_label = sec.kind.value.replace("-", " ")

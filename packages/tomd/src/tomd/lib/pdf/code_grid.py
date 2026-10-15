@@ -40,7 +40,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from .types import Line, Section
+from tomd.lib.pdf.types import Line, Section
 
 # Fallback monospace character width (points) when a section has no
 # multi-glyph span to measure. WG21 code fonts run ~5-6pt/char.

@@ -28,7 +28,7 @@ All fall within our HSV ranges: green 90-180, red <=30 or >=330.
 
 import colorsys
 import logging
-from .types import Block
+from tomd.lib.pdf.types import Block
 
 _log = logging.getLogger(__name__)
 

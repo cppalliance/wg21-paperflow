@@ -7,19 +7,19 @@ from pathlib import Path
 
 from tomd.domain.front_matter import is_blank_value
 
-from .. import (
+from tomd.lib.metadata_yaml.format import format_front_matter
+from tomd.lib.shared import (
     DOC_NUM_RE,
     apply_strip_leading_h1,
     dedup_paragraphs,
-    format_front_matter,
     override_revision_from_filename,
     strip_orphan_toc_list,
     strip_redundant_body_meta,
 )
-from . import extract as _extract
-from . import render as _render
-from .images import HtmlImagesResult
-from ..pdf.images import TRUNCATION_MARKER_TEMPLATE
+from tomd.lib.html import extract as _extract
+from tomd.lib.html import render as _render
+from tomd.lib.html.images import HtmlImagesResult
+from tomd.lib.pdf.images import TRUNCATION_MARKER_TEMPLATE
 
 _log = logging.getLogger(__name__)
 
