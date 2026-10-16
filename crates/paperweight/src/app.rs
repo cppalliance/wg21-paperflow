@@ -26,7 +26,7 @@ use paperstore::{PaperNum, StorageBackend};
 use paperstore_sqlite::SqliteBackend;
 use tokio::sync::broadcast::error::RecvError;
 
-/// The embedded paperweight prompt, vendored from the promptforge prompts.
+/// The embedded paperweight prompt, vendored from the runvil prompts.
 const DEFAULT_PROMPT: &str = include_str!("../paperweight.md");
 
 /// The name the embedded prompt runs under.
@@ -36,7 +36,7 @@ const DEFAULT_PROMPT_NAME: &str = "paperweight";
 #[derive(Debug, Parser)]
 #[command(
     version,
-    about = "Run a promptforge prompt against a WG21 paper",
+    about = "Run a runvil prompt against a WG21 paper",
     group = clap::ArgGroup::new("input").args(["paper", "file"]).required(true)
 )]
 pub(crate) struct Cli {
@@ -385,7 +385,7 @@ async fn fetch_chat_models(base_url: &str, key: &str) -> Result<Vec<serde_json::
 /// Returns the chat-capable entries of an OpenAI-shape model list.
 ///
 /// An entry is chat-capable when it has a non-empty `id` and either no
-/// `kind` or `kind` `"chat"`, the rule the promptforge workshop applies.
+/// `kind` or `kind` `"chat"`, the rule the runvil workshop applies.
 fn chat_models(list: serde_json::Value) -> Result<Vec<serde_json::Value>> {
     let serde_json::Value::Object(mut list) = list else {
         bail!("the model list is not a JSON object");
@@ -432,8 +432,8 @@ fn prompt_name(prompt: Option<&Path>) -> Result<String> {
 /// local-only mode: a missing credential is a startup error naming both
 /// variables rather than a silent downgrade.
 fn gateway_from_env(name: &str) -> Result<(String, String)> {
-    let endpoint = env_optional("PROMPTFORGE_GATEWAY_URL")?;
-    let token = env_optional("PROMPTFORGE_GATEWAY_API_KEY")?;
+    let endpoint = env_optional("RUNVIL_GATEWAY_URL")?;
+    let token = env_optional("RUNVIL_GATEWAY_API_KEY")?;
     let endpoint = endpoint.map(|value| gateway_origin(&value));
     let token = token.map(|value| value.trim().to_owned());
     match (endpoint, token) {
@@ -441,7 +441,7 @@ fn gateway_from_env(name: &str) -> Result<(String, String)> {
             Ok((endpoint, token))
         }
         _ => bail!(
-            "PROMPTFORGE_GATEWAY_URL and PROMPTFORGE_GATEWAY_API_KEY must both be set: \
+            "RUNVIL_GATEWAY_URL and RUNVIL_GATEWAY_API_KEY must both be set: \
              the {name} prompt binds its models through the gateway"
         ),
     }
@@ -654,7 +654,7 @@ mod tests {
 
     #[test]
     fn embedded_prompt_declares_io() {
-        assert!(DEFAULT_PROMPT.contains("\npromptforge: 0\n"));
+        assert!(DEFAULT_PROMPT.contains("\nrunvil: 0\n"));
         assert!(DEFAULT_PROMPT.contains("path: paper.md"));
         assert!(DEFAULT_PROMPT.contains("path: report.md"));
     }

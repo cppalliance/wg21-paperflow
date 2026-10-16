@@ -1868,7 +1868,7 @@ dependencies = [
  "harness-log",
  "harness-runner",
  "harness-sessions",
- "promptforge",
+ "runvil",
  "workspace-hack",
 ]
 
@@ -1877,7 +1877,7 @@ name = "harness-capabilities"
 version = "0.3.0"
 dependencies = [
  "async-trait",
- "promptforge",
+ "runvil",
  "serde_json",
  "tracing",
  "workspace-hack",
@@ -1899,7 +1899,7 @@ version = "0.3.0"
 dependencies = [
  "bytes",
  "harness-runner",
- "promptforge",
+ "runvil",
  "reqwest",
  "serde",
  "serde_json",
@@ -1915,7 +1915,7 @@ version = "0.3.0"
 dependencies = [
  "harness-capabilities",
  "harness-log",
- "promptforge",
+ "runvil",
  "rand 0.9.5",
  "serde_json",
  "sha2",
@@ -1936,7 +1936,7 @@ dependencies = [
  "harness-models",
  "harness-runner",
  "harness-web",
- "promptforge",
+ "runvil",
  "rand 0.9.5",
  "serde",
  "serde_json",
@@ -1953,7 +1953,7 @@ dependencies = [
  "harness-capabilities",
  "harness-web-search",
  "harness-webfetch",
- "promptforge",
+ "runvil",
  "workspace-hack",
 ]
 
@@ -1963,7 +1963,7 @@ version = "0.3.0"
 dependencies = [
  "async-trait",
  "harness-capabilities",
- "promptforge",
+ "runvil",
  "reqwest",
  "serde",
  "serde_json",
@@ -1982,7 +1982,7 @@ dependencies = [
  "htmd",
  "ipnet",
  "mime",
- "promptforge",
+ "runvil",
  "readabilityrs",
  "reqwest",
  "serde_json",
@@ -3570,28 +3570,28 @@ dependencies = [
 ]
 
 [[package]]
-name = "promptforge"
+name = "runvil"
 version = "0.3.0"
 dependencies = [
- "promptforge-engine",
- "promptforge-lua",
- "promptforge-model-client",
- "promptforge-parser",
- "promptforge-types",
- "promptforge-vfs",
+ "runvil-engine",
+ "runvil-lua",
+ "runvil-model-client",
+ "runvil-parser",
+ "runvil-types",
+ "runvil-vfs",
  "workspace-hack",
 ]
 
 [[package]]
-name = "promptforge-engine"
+name = "runvil-engine"
 version = "0.3.0"
 dependencies = [
  "mlua",
- "promptforge-lua",
- "promptforge-model-client",
- "promptforge-parser",
- "promptforge-types",
- "promptforge-vfs",
+ "runvil-lua",
+ "runvil-model-client",
+ "runvil-parser",
+ "runvil-types",
+ "runvil-vfs",
  "serde",
  "serde_json",
  "thiserror 2.0.20",
@@ -3599,13 +3599,13 @@ dependencies = [
 ]
 
 [[package]]
-name = "promptforge-lua"
+name = "runvil-lua"
 version = "0.3.0"
 dependencies = [
  "mlua",
- "promptforge-model-client",
- "promptforge-types",
- "promptforge-vfs",
+ "runvil-model-client",
+ "runvil-types",
+ "runvil-vfs",
  "serde",
  "serde_json",
  "thiserror 2.0.20",
@@ -3613,10 +3613,10 @@ dependencies = [
 ]
 
 [[package]]
-name = "promptforge-model-client"
+name = "runvil-model-client"
 version = "0.3.0"
 dependencies = [
- "promptforge-types",
+ "runvil-types",
  "serde",
  "serde_json",
  "thiserror 2.0.20",
@@ -3624,11 +3624,11 @@ dependencies = [
 ]
 
 [[package]]
-name = "promptforge-parser"
+name = "runvil-parser"
 version = "0.3.0"
 dependencies = [
- "promptforge-lua",
- "promptforge-types",
+ "runvil-lua",
+ "runvil-types",
  "pulldown-cmark",
  "serde",
  "serde_yaml_ng",
@@ -3637,7 +3637,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "promptforge-types"
+name = "runvil-types"
 version = "0.3.0"
 dependencies = [
  "serde",
@@ -3648,7 +3648,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "promptforge-vfs"
+name = "runvil-vfs"
 version = "0.3.0"
 
 [[package]]

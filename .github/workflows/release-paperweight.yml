@@ -15,8 +15,8 @@ jobs:
     permissions:
       contents: write
     steps:
-      # The paperweight crate depends on promptforge through the
-      # vendor/promptforge submodule, so the checkout must be recursive.
+      # The paperweight crate depends on runvil through the
+      # vendor/runvil submodule, so the checkout must be recursive.
       - uses: actions/checkout@v4
         with:
           submodules: recursive
