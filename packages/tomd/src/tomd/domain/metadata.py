@@ -8,6 +8,7 @@ Official repository: https://github.com/cppalliance/wg21-paperflow
 
 import logging
 import re
+from collections.abc import Mapping
 from dataclasses import dataclass, field, replace
 from typing import Any
 
@@ -48,64 +49,57 @@ class PaperMetadata:
     document: str = ""
     date: str = ""
     intent: str = ""
-    audience: list[str] | str = field(default_factory=list)
-    reply_to: list[str] | str = field(default_factory=list)
+    audience: list[str] | str = ""
+    reply_to: list[str] = field(default_factory=list)
     extra: dict[str, Any] = field(default_factory=dict)
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any] | None) -> "PaperMetadata":
-        """Construct PaperMetadata from a dictionary of front matter keys."""
+    def from_dict(cls, data: Mapping[str, Any] | None) -> "PaperMetadata":
+        """Construct PaperMetadata from front-matter keys; a scalar ``reply-to`` becomes a one-item list."""
         if not data:
             return cls()
+        reply_to = data.get("reply-to", data.get("reply_to", []))
         return cls(
-            title=str(data.get("title") or ""),
-            document=str(data.get("document") or ""),
-            date=str(data.get("date") or ""),
-            intent=str(data.get("intent") or ""),
-            audience=_list_or_str(data.get("audience")),
-            reply_to=_list_or_str(data.get("reply-to", data.get("reply_to"))),
+            title=data.get("title", ""),
+            document=data.get("document", ""),
+            date=data.get("date", ""),
+            intent=data.get("intent", ""),
+            audience=data.get("audience", ""),
+            reply_to=[reply_to] if isinstance(reply_to, str) else reply_to,
             extra={k: v for k, v in data.items() if k not in _KNOWN_KEYS},
         )
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize to a dict in ``FRONT_MATTER_ORDER``, extras last; blank values are omitted."""
-        d = {key: getattr(self, key.replace("-", "_")) for key in FRONT_MATTER_ORDER}
+        d = {
+            "title": self.title,
+            "document": self.document,
+            "date": self.date,
+            "intent": self.intent,
+            "audience": self.audience,
+            "reply-to": self.reply_to,
+        }
         d.update((k, v) for k, v in self.extra.items() if k not in d)
         return {k: v for k, v in d.items() if not is_blank_value(v)}
 
-    def with_mailing_fallback(self, mailing: MailingRecord) -> "PaperMetadata":
-        """Return a copy completed from ``mailing``.
+    def fill_from_mailing(self, mailing: MailingRecord) -> "PaperMetadata":
+        """Return a copy with blank fields filled from ``mailing``.
 
-        Mailing values fill only blank fields (``is_blank_value``), except
-        ``document``: SD-7 forbids D-numbers in published mailings, so the mailing
-        ``paper_id`` replaces whatever document number the source has. A ``reply_to``
-        of bare names (no email address) counts as blank. Blank mailing values never
-        fill anything.
+        ``document`` is the exception: a non-blank mailing ``paper_id`` always replaces
+        it, because SD-7 forbids D-numbers in published mailings. A ``reply_to`` with no
+        email address counts as blank, because the mailing authors may carry emails.
         """
-        date = _present_or(self.date, mailing.document_date)
-        if date != self.date:
-            logger.debug("Date fallback from mailing (document_date=%r): source had no date", date)
-
-        reply_to = self.reply_to
-        entries = [reply_to] if isinstance(reply_to, str) else reply_to
-        if not any(EMAIL_RE.search(entry) for entry in entries) and not is_blank_value(mailing.authors):
-            reply_to = list(mailing.authors)
-
+        if is_blank_value(self.date) and not is_blank_value(mailing.document_date):
+            logger.debug(
+                "Date fallback from mailing (document_date=%r): source had no date",
+                mailing.document_date,
+            )
+        keep_reply_to = is_blank_value(mailing.authors) or any(EMAIL_RE.search(e) for e in self.reply_to)
         return replace(
             self,
-            title=_present_or(self.title, mailing.title),
-            document=_present_or(mailing.paper_id, self.document),
-            date=date,
-            audience=_present_or(self.audience, mailing.audience),
-            reply_to=reply_to,
+            title=mailing.title if is_blank_value(self.title) else self.title,
+            document=self.document if is_blank_value(mailing.paper_id) else mailing.paper_id,
+            date=mailing.document_date if is_blank_value(self.date) else self.date,
+            audience=mailing.audience if is_blank_value(self.audience) else self.audience,
+            reply_to=self.reply_to if keep_reply_to else list(mailing.authors),
         )
-
-
-def _present_or[T](value: T, fallback: T) -> T:
-    return fallback if is_blank_value(value) and not is_blank_value(fallback) else value
-
-
-def _list_or_str(value: Any) -> list[str] | str:
-    if value is None:
-        return []
-    return value if isinstance(value, (list, str)) else str(value)
