@@ -27,19 +27,15 @@ class MailingRecord:
     def from_meta(cls, meta: Mapping[str, Any] | None) -> "MailingRecord":
         """Build a record from the ``convert_paper_full`` ``meta`` dict.
 
-        ``None`` values read as empty and a bare ``authors`` string is one name.
-        ``audience`` is the first non-blank of ``subgroup`` (mailing-row name) and
-        ``target_group`` (SqliteBackend row name). Other keys (``intent``, ``url``)
-        are ignored.
+        ``audience`` is ``subgroup`` unless that is blank, then ``target_group``.
         """
-        meta = meta or {}
-        authors = meta.get("authors") or ()
-        subgroup = meta.get("subgroup")
-        audience = meta.get("target_group") if is_blank_value(subgroup) else subgroup
+        if not meta:
+            return cls()
+        subgroup = meta.get("subgroup", "")
         return cls(
-            paper_id=str(meta.get("paper_id") or ""),
-            title=str(meta.get("title") or ""),
-            authors=(authors,) if isinstance(authors, str) else tuple(str(name) for name in authors),
-            audience=str(audience or ""),
-            document_date=str(meta.get("document_date") or ""),
+            paper_id=meta.get("paper_id", ""),
+            title=meta.get("title", ""),
+            authors=tuple(meta.get("authors", ())),
+            audience=meta.get("target_group", "") if is_blank_value(subgroup) else subgroup,
+            document_date=meta.get("document_date", ""),
         )
