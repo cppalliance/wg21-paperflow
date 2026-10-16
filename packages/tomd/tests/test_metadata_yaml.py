@@ -322,6 +322,45 @@ class TestFormatFrontMatter:
         date_pos = result.find("date:")
         assert title_pos < doc_pos < date_pos
 
+    def test_canonical_order_and_quoting(self):
+        metadata = {
+            "reply-to": ["Author Name <author@example.com>"],
+            "audience": ["LEWG", "SG1"],
+            "intent": "explore",
+            "date": "2026-03-01",
+            "document": "P1234R0",
+            "title": "Sample Proposal",
+        }
+        assert format_front_matter(metadata) == (
+            "---\n"
+            'title: "Sample Proposal"\n'
+            "document: P1234R0\n"
+            "date: 2026-03-01\n"
+            "intent: explore\n"
+            "audience:\n"
+            '  - "LEWG"\n'
+            '  - "SG1"\n'
+            "reply-to:\n"
+            '  - "Author Name <author@example.com>"\n'
+            "---"
+        )
+
+    def test_extra_keys_precede_reply_to(self):
+        metadata = {
+            "title": "Extras",
+            "reply-to": ["A <a@example.com>"],
+            "project": "ISO C++",
+            "document": "P9999R1",
+        }
+        assert format_front_matter(metadata) == (
+            '---\ntitle: "Extras"\ndocument: P9999R1\nproject: ISO C++\nreply-to:\n  - "A <a@example.com>"\n---'
+        )
+
+    def test_title_is_normalized(self):
+        assert format_front_matter({"title": "std :: execution  Senders"}) == (
+            '---\ntitle: "std::execution Senders"\n---'
+        )
+
 
 class TestFormatFrontMatterBlankValues:
     """A blank value (empty, whitespace-only, or a list of blanks) is never emitted."""
