@@ -30,7 +30,6 @@ class PaperDocument:
     paper_id: str
     metadata: PaperMetadata = field(default_factory=PaperMetadata)
     elements: list[BlockElement] = field(default_factory=list)
-    body: str = ""
     images: list[ExtractedImage] = field(default_factory=list)
     is_skipped: bool = False
     skip_reason: SkipReason | None = None

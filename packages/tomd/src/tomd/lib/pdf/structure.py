@@ -8,17 +8,17 @@ import unicodedata
 from collections import Counter
 from dataclasses import replace
 
-from .. import (
+from tomd.lib.shared import (
     CODE_LANG_LABELS, DATE_RE, DEFAULT_FENCE_LANG, SECTION_NUM_PATTERN,
     SECTION_NUM_PREFIX_RE, strip_format_chars,
 )
 # `drop_leaked_toc_entries` reuses toc.py's TOC-recognition helpers so the
 # two "what is a TOC" definitions stay a single source of truth (see #122).
-from ..toc import MIN_TOC_RUN, is_toc_label, normalize_toc_entry
-from .cleanup import collect_hyphen_evidence, dehyphenate_pair
-from .glyphs import GLYPH_FONT_SENTINEL, UNKNOWN_GLYPH
-from .wording import is_foreign_chromatic
-from .types import (
+from tomd.lib.toc import MIN_TOC_RUN, is_toc_label, normalize_toc_entry
+from tomd.lib.pdf.cleanup import collect_hyphen_evidence, dehyphenate_pair
+from tomd.lib.pdf.glyphs import GLYPH_FONT_SENTINEL, UNKNOWN_GLYPH
+from tomd.lib.pdf.wording import is_foreign_chromatic
+from tomd.lib.pdf.types import (
     Block, Line, Span, Section, SectionKind, Confidence,
     FigureRegion,
     SIMILARITY_THRESHOLD, TERMINAL_PUNCTUATION, FALLBACK_BODY_SIZE,
@@ -1141,7 +1141,7 @@ def heading_confidence(has_number: bool, number_level: int,
 # Deferred import: metadata_yaml.extract imports from pdf.types which imports
 # from pdf.__init__ which imports from structure.py. Moving this to the
 # top-level import block creates a circular import.
-from ..metadata_yaml.extract import extract_metadata as _extract_metadata  # noqa: E402
+from tomd.lib.metadata_yaml.extract import extract_metadata as _extract_metadata  # noqa: E402
 
 
 

@@ -1,7 +1,5 @@
 ---
 title: "Synthetic Noise Fixture"
-reply-to:
-
 ---
 
 This synthetic fixture contains only table borders and horizontal rules. The vector-extraction pipeline must produce zero image candidates from this page.

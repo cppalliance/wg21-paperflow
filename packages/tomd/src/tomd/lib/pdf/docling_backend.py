@@ -28,8 +28,8 @@ import fitz as _fitz
 import logging
 from pathlib import Path
 
-from .types import Block, Line, Section, SectionKind, Span, Confidence
-from ._fitz_lock import _FITZ_LOCK
+from tomd.lib.pdf.types import Block, Line, Section, SectionKind, Span, Confidence
+from tomd.lib.pdf._fitz_lock import _FITZ_LOCK
 
 _log = logging.getLogger(__name__)
 
@@ -292,7 +292,7 @@ def enrich_tables_with_docling(
     if not docling_tables:
         return 0
 
-    from .table import _classify_and_annotate
+    from tomd.lib.pdf.table import _classify_and_annotate
 
     enriched = 0
 
@@ -655,7 +655,7 @@ def discover_tables_with_docling(
     if not docling_tables:
         return [], remaining_blocks
 
-    from .table import _classify_and_annotate
+    from tomd.lib.pdf.table import _classify_and_annotate
 
     new_sections: list[Section] = []
     consumed_indices: set[int] = set()

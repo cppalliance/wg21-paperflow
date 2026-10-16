@@ -21,8 +21,10 @@ from tomd.domain.elements import (
     UncertainElement,
     WordingBlock,
 )
+from tomd.domain.front_matter import FRONT_MATTER_ORDER
 from tomd.domain.image import ExtractedImage
-from tomd.domain.metadata import FRONT_MATTER_ORDER, PaperMetadata
+from tomd.domain.mailing import MailingRecord
+from tomd.domain.metadata import PaperMetadata
 from tomd.domain.span import (
     CodeSpan,
     EmphasisSpan,
@@ -66,6 +68,7 @@ __all__ = [
     "LinkSpan",
     "ListBlock",
     "ListItem",
+    "MailingRecord",
     "PaperDocument",
     "PaperMetadata",
     "Paragraph",

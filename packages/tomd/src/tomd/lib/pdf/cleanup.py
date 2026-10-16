@@ -6,15 +6,15 @@ import re
 from collections import defaultdict
 from dataclasses import dataclass, replace
 
-from .. import strip_format_chars, DOC_NUM_RE
-from .types import (
+from tomd.lib.shared import strip_format_chars, DOC_NUM_RE
+from tomd.lib.pdf.types import (
     Block, Line, PageEdgeItem,
     Y_TOLERANCE, REPEATING_THRESHOLD, EDGE_ITEMS_PER_PAGE,
     RUNNING_FOOTER_MAX_WORDS, EDGE_BAND_BOTTOM_FRACTION,
     TERMINAL_PUNCTUATION,
     PAGE_NUM_RE, COMPOUND_PREFIXES,
 )
-from .wg21 import _LABEL_RE as _WG21_LABEL_RE
+from tomd.lib.pdf.wg21 import _LABEL_RE as _WG21_LABEL_RE
 
 _log = logging.getLogger(__name__)
 
