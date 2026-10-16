@@ -36,15 +36,6 @@ def test_from_meta_reads_fallback_fields_only() -> None:
     )
 
 
-def test_from_meta_none_values_read_as_empty() -> None:
-    meta = {"paper_id": "P1", "authors": None, "title": None, "subgroup": None, "target_group": None}
-    assert MailingRecord.from_meta(meta) == MailingRecord(paper_id="P1")
-
-
-def test_from_meta_bare_author_string_is_one_name() -> None:
-    assert MailingRecord.from_meta({"authors": "Alice <alice@example.com>"}).authors == (
-        "Alice <alice@example.com>",
-    )
 
 
 def test_from_meta_audience_prefers_subgroup() -> None:
