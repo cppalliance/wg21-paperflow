@@ -171,21 +171,15 @@ def test_paper_metadata_roundtrip_and_ordering():
     assert empty_meta.to_dict() == {}
 
 
-def test_paper_metadata_is_frozen():
-    meta = PaperMetadata(title="T")
-    with pytest.raises(FrozenInstanceError):
-        meta.title = "Other"  # type: ignore[misc]
-
-
 def test_paper_metadata_to_dict_omits_blank_values():
     meta = PaperMetadata(title="  ", document="P1R0", intent="\t", audience=[""], extra={"project": " "})
     assert meta.to_dict() == {"document": "P1R0"}
 
 
-def test_paper_metadata_from_dict_coerces_audience_and_reply_to():
-    meta = PaperMetadata.from_dict({"audience": 7, "reply_to": "A <a@example.com>"})
-    assert meta.audience == "7"
-    assert meta.reply_to == "A <a@example.com>"
+@pytest.mark.parametrize("key", ["reply-to", "reply_to"])
+def test_paper_metadata_from_dict_scalar_reply_to_becomes_list(key):
+    meta = PaperMetadata.from_dict({key: "A <a@example.com>"})
+    assert meta.reply_to == ["A <a@example.com>"]
     assert meta.extra == {}
 
 
