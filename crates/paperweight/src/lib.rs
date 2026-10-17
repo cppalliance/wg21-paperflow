@@ -2,7 +2,7 @@
 //!
 //! `<bin> [PAPER_NUM] [--file <PATH>] [--output <PATH>] [--prompt <PATH>]
 //! [--model <ID>] [--args <TEXT>]` runs a runvil prompt against one WG21
-//! paper as a harness session and writes the prompt's declared output to
+//! paper as one harness run and writes the prompt's declared output to
 //! stdout, or to `--output` when given. The prompt is the embedded paperweight
 //! prompt unless `--prompt` names a file; the run takes its name from the
 //! prompt's file stem (`paperweight` for the embedded one). Exactly one input is
@@ -22,7 +22,7 @@ use std::error::Error;
 use std::process::ExitCode;
 
 use clap::{CommandFactory as _, FromArgMatches as _};
-use harness::cancel::CancelHandle;
+use tokio::sync::oneshot;
 
 use crate::app::{Cancelled, Cli, RunRequest};
 
@@ -63,22 +63,24 @@ pub async fn run_cli(name: &'static str) -> ExitCode {
     }
 }
 
-/// Installs a Ctrl-C handler that trips the returned cancellation handle once.
+/// Installs a Ctrl-C handler that resolves the returned receiver once.
 ///
 /// A failure to register the signal listener is reported to stderr rather than
 /// discarded: the run simply stays non-cancellable in that case.
-fn install_cancel() -> CancelHandle {
-    let cancel = CancelHandle::new();
-    let signal_cancel = cancel.clone();
+fn install_cancel() -> oneshot::Receiver<()> {
+    let (sender, receiver) = oneshot::channel();
     tokio::spawn(async move {
         match tokio::signal::ctrl_c().await {
-            Ok(()) => signal_cancel.cancel(),
+            // The run may already have ended and dropped the receiver.
+            Ok(()) => {
+                let _ignored = sender.send(());
+            }
             Err(error) => {
                 eprintln!("warning: cannot listen for Ctrl-C, run is not cancellable: {error}");
             }
         }
     });
-    cancel
+    receiver
 }
 
 /// Maps a run failure to a process exit code: 130 for a Ctrl-C close (the

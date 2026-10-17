@@ -5,26 +5,30 @@
 //! environment and model selection, resolves the prompt source and its name
 //! (the embedded paperweight prompt by default, `--prompt` from disk otherwise),
 //! loads the paper markdown (from the SQLite paper store for a paper number,
-//! verbatim from disk for `--file`), and runs the prompt as a harness session.
-//! The harness stages the paper at the prompt's declared input and hands back
-//! its declared output, which is written to `--output`, or to stdout when no
-//! path is given.
+//! verbatim from disk for `--file`), and runs the prompt through one harness
+//! run whose model rounds go to the gateway. The harness stages the paper at
+//! the prompt's declared input and hands back its declared output, which is
+//! written to `--output`, or to stdout when no path is given.
 
 use std::ffi::OsStr;
 use std::fmt;
 use std::io::{self, Write as _};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use std::time::Duration;
 
 use anyhow::{Context, Result, bail};
 use clap::Parser;
-use harness::cancel::CancelHandle;
-use harness::{
-    CatalogBinding, FailureKind, GatewayBinding, Harness, HarnessConfig, HostSnapshot,
-    LaunchRequest, OutputError, Session, SessionEvent, SessionState,
+use harness::plugin::{HostContext, HostServices, PackageRegistry};
+use harness::record::{
+    Record, RecordKind, RecorderFuture, RunId, RunMeta, RunOutcome, RunRecorder,
 };
+use harness::vfs::VfsRef;
+use harness::{BoxFuture, Harness, HostSnapshot, OutputError, Timer};
+use harness_gateway_client::{GatewayBroker, GatewayEndpoint, SecretString};
 use paperstore::{PaperNum, StorageBackend};
 use paperstore_sqlite::SqliteBackend;
-use tokio::sync::broadcast::error::RecvError;
+use tokio::sync::oneshot;
 
 /// The embedded paperweight prompt, vendored from the runvil prompts.
 const DEFAULT_PROMPT: &str = include_str!("../paperweight.md");
@@ -100,8 +104,8 @@ pub(crate) struct RunRequest<'a> {
     pub(crate) model: Option<&'a str>,
     /// The prompt's arguments, passed verbatim.
     pub(crate) args: &'a str,
-    /// The cooperative cancellation handle wired to Ctrl-C.
-    pub(crate) cancel: CancelHandle,
+    /// Resolves once when Ctrl-C asks the run to end.
+    pub(crate) cancel: oneshot::Receiver<()>,
 }
 
 impl std::fmt::Debug for RunRequest<'_> {
@@ -132,14 +136,14 @@ impl std::error::Error for Cancelled {}
 /// Runs one analysis using the gateway configuration read from the environment.
 ///
 /// # Errors
-/// Returns an error if either gateway variable is unset or blank, the paper
-/// input cannot be loaded (`WG21_DATA_DIR` unset, the number missing from the
-/// store or without converted markdown, or the `--file` path unreadable), the
-/// gateway model list cannot be fetched or lists no chat model, the harness
-/// refuses the launch (including a selected model the gateway does not list),
-/// the run fails,
-/// the run is cancelled ([`Cancelled`]), or the prompt did not produce its
-/// declared output, or the `--prompt` path has no usable file name.
+/// Returns an error if either gateway variable is unset, blank, or not a
+/// usable gateway URL or key, the paper input cannot be loaded
+/// (`WG21_DATA_DIR` unset, the number missing from the store or without
+/// converted markdown, or the `--file` path unreadable), the harness cannot
+/// resolve the run's model (the gateway model list cannot be fetched, lists
+/// no model, or lacks the selected one), the run fails, the run is cancelled
+/// ([`Cancelled`]), the prompt did not produce its declared output, or the
+/// `--prompt` path has no usable file name.
 pub(crate) async fn run(request: RunRequest<'_>) -> Result<()> {
     let RunRequest {
         input,
@@ -147,10 +151,13 @@ pub(crate) async fn run(request: RunRequest<'_>) -> Result<()> {
         prompt,
         model,
         args,
-        cancel,
+        mut cancel,
     } = request;
     let name = prompt_name(prompt)?;
     let (base_url, key) = gateway_from_env(&name)?;
+    let endpoint = GatewayEndpoint::new(&format!("{base_url}/v1"))
+        .with_context(|| format!("use the gateway at {base_url}"))?;
+    let key = SecretString::new(key).context("use the gateway API key")?;
     let model = selected_model(model);
 
     let source = match prompt {
@@ -159,66 +166,54 @@ pub(crate) async fn run(request: RunRequest<'_>) -> Result<()> {
             .with_context(|| format!("read prompt file {}", path.display()))?,
         None => DEFAULT_PROMPT.to_owned(),
     };
-    // Load before the launch: a store miss or an unreadable file fails fast,
+    // Load before the run: a store miss or an unreadable file fails fast,
     // before any network call.
     let paper_md = load_input_markdown(input).await?;
-    let models = fetch_chat_models(&base_url, &key).await?;
-    if models.is_empty() {
-        bail!("the gateway at {base_url} lists no chat model");
-    }
 
-    // Removed when `work` drops, whether or not the run succeeds.
-    let work = tempfile::Builder::new()
-        .prefix(&format!("{name}-"))
-        .tempdir()
-        .context("create the run's scratch directory")?;
-    let agents_path = work.path().join("agents");
-    let state_dir = work.path().join("state");
-    for dir in [&agents_path, &state_dir] {
-        tokio::fs::create_dir_all(dir)
-            .await
-            .with_context(|| format!("create directory {}", dir.display()))?;
-    }
-    let prompt_path = agents_path.join(format!("{name}.md"));
-    tokio::fs::write(&prompt_path, &source)
-        .await
-        .with_context(|| format!("write the prompt to {}", prompt_path.display()))?;
-
-    let harness = Harness::new(HarnessConfig {
-        agents_path,
-        state_dir,
-    });
-    harness.set_gateway(GatewayBinding {
-        base_url,
-        key,
-        generation: 1,
-    });
-    harness.set_catalog(CatalogBinding {
-        generation: 1,
-        models,
-    });
-    harness.set_host(HostSnapshot {
-        selected_model: model,
-        workspace_roots: Vec::new(),
-    });
-
-    let session = harness
-        .launch(LaunchRequest {
-            agent: name.clone(),
-            args: args.to_owned(),
-            input_text: Some(paper_md),
-        })
-        .await
-        .with_context(|| format!("launch the {name} session"))?;
-    let ending = await_closed(&session, &cancel).await;
-
-    let report = match session.output_text() {
-        Ok(report) => report,
-        Err(OutputError::Unfinished) if ending.cancelled => return Err(Cancelled.into()),
-        Err(OutputError::Unfinished) => match ending.failure {
-            Some(message) => bail!("run failed: {message}"),
-            None => bail!("run did not complete"),
+    let harness = Harness::new(
+        Arc::new(ProgressRecorder),
+        Arc::new(GatewayBroker::new(endpoint, key)),
+        Arc::new(TokioTimer),
+        Arc::new(HostContext::new(
+            PackageRegistry::new(),
+            HostServices::new(),
+        )),
+        HostServices::new(),
+    );
+    let control = harness.control();
+    let run = harness.run(harness::RunRequest {
+        name: name.clone(),
+        source,
+        args: args.to_owned(),
+        input_text: Some(paper_md),
+        vfs: VfsRef::default(),
+        host: HostSnapshot {
+            selected_model: model,
+            workspace_roots: Vec::new(),
         },
+    });
+    tokio::pin!(run);
+    let mut cancel_requested = false;
+    // A failed Ctrl-C listener drops the sender; the pattern then disables
+    // the branch and the run goes on uncancellable.
+    let report = loop {
+        tokio::select! {
+            result = &mut run => break result,
+            Ok(()) = &mut cancel, if !cancel_requested => {
+                cancel_requested = true;
+                control.cancel();
+            }
+        }
+    }
+    .with_context(|| format!("run the {name} prompt"))?;
+
+    match report.outcome {
+        RunOutcome::Completed { .. } => {}
+        RunOutcome::Cancelled => return Err(Cancelled.into()),
+        RunOutcome::Failed { message, .. } => bail!("run failed: {message}"),
+    }
+    let report = match report.output {
+        Ok(report) => report,
         Err(error @ OutputError::Missing { .. }) => {
             return Err(error).context("the prompt did not produce its declared output");
         }
@@ -236,66 +231,41 @@ pub(crate) async fn run(request: RunRequest<'_>) -> Result<()> {
     Ok(())
 }
 
-/// How a session ended, as the CLI observed it.
-#[derive(Debug, Default)]
-struct Ending {
-    /// Ctrl-C requested the close.
-    cancelled: bool,
-    /// The last run-failure report, when the run ended in error.
-    failure: Option<String>,
+/// The run's recorder: prints one progress line to stderr for each event
+/// and keeps no history, since the CLI reads the run's result from its
+/// report.
+#[derive(Debug)]
+struct ProgressRecorder;
+
+impl RunRecorder for ProgressRecorder {
+    fn begin_run(&self, _meta: RunMeta) -> RecorderFuture<'_, RunId> {
+        Box::pin(async { Ok(RunId::from_raw(1)) })
+    }
+
+    fn append(&self, _run: RunId, record: Record) -> RecorderFuture<'_, ()> {
+        if matches!(record.kind, RecordKind::Event) {
+            print_progress(&record.payload);
+        }
+        Box::pin(async { Ok(()) })
+    }
+
+    fn end_run(&self, _run: RunId, _outcome: RunOutcome) -> RecorderFuture<'_, ()> {
+        Box::pin(async { Ok(()) })
+    }
 }
 
-/// Prints the session's progress to stderr until it reports `Closed`,
-/// closing it for good when `cancel` fires.
-///
-/// A session closes on its own when its run completes or fails, so this
-/// returns without a Ctrl-C too.
-async fn await_closed(session: &Session, cancel: &CancelHandle) -> Ending {
-    let mut events = session.subscribe_events();
-    let mut errors = session.subscribe_errors();
-    let mut state = session.subscribe_state();
-    let mut ending = Ending::default();
-    let mut events_open = true;
-    let mut errors_open = true;
-    loop {
-        if *state.borrow_and_update() == SessionState::Closed {
-            break;
-        }
-        tokio::select! {
-            changed = state.changed() => {
-                if changed.is_err() {
-                    break;
-                }
-            }
-            event = events.recv(), if events_open => match event {
-                Ok(event) => print_progress(&event),
-                Err(RecvError::Lagged(_)) => {}
-                Err(RecvError::Closed) => events_open = false,
-            },
-            failure = errors.recv(), if errors_open => match failure {
-                Ok(failure) if failure.kind == FailureKind::RunFailed => {
-                    ending.failure = Some(failure.message);
-                }
-                Ok(_) | Err(RecvError::Lagged(_)) => {}
-                Err(RecvError::Closed) => errors_open = false,
-            },
-            () = cancel.cancelled(), if !ending.cancelled => {
-                ending.cancelled = true;
-                session.close();
-            }
-        }
+/// Sleeps on the CLI runtime's tokio timer.
+#[derive(Debug)]
+struct TokioTimer;
+
+impl Timer for TokioTimer {
+    fn sleep(&self, duration: Duration) -> BoxFuture<()> {
+        Box::pin(tokio::time::sleep(duration))
     }
-    // A failure reported alongside the close may still be queued.
-    while let Ok(failure) = errors.try_recv() {
-        if failure.kind == FailureKind::RunFailed {
-            ending.failure = Some(failure.message);
-        }
-    }
-    ending
 }
 
-/// Writes one progress line for a session event to stderr.
-fn print_progress(event: &SessionEvent) {
+/// Writes one progress line for a run event to stderr.
+fn print_progress(event: &serde_json::Value) {
     // Progress is a side channel, so a failed write to stderr is
     // deliberately dropped rather than surfaced.
     let _ignored = writeln!(
@@ -307,9 +277,9 @@ fn print_progress(event: &SessionEvent) {
     );
 }
 
-/// Returns the string field `name` of the event's payload, or `-`.
-fn event_field<'a>(event: &'a SessionEvent, name: &str) -> &'a str {
-    let Some(value) = event.event.get(name) else {
+/// Returns the string field `name` of the event, or `-`.
+fn event_field<'a>(event: &'a serde_json::Value, name: &str) -> &'a str {
+    let Some(value) = event.get(name) else {
         return "-";
     };
     value.as_str().unwrap_or("-")
@@ -356,8 +326,8 @@ fn load_paper_md(backend: &impl StorageBackend, num: &PaperNum) -> paperstore::R
 
 /// Returns the explicit model selection, trimmed.
 ///
-/// A missing or blank selection is `None`, which the harness resolves to the
-/// first model in the catalog binding.
+/// A missing or blank selection is `None`, which the harness resolves
+/// against the gateway's model list.
 fn selected_model(model: Option<&str>) -> Option<String> {
     model
         .map(str::trim)
@@ -365,56 +335,10 @@ fn selected_model(model: Option<&str>) -> Option<String> {
         .map(str::to_owned)
 }
 
-/// Fetches the gateway's model list and returns its chat-capable entries,
-/// in the gateway's order.
-async fn fetch_chat_models(base_url: &str, key: &str) -> Result<Vec<serde_json::Value>> {
-    let url = format!("{base_url}/v1/models");
-    let list: serde_json::Value = reqwest::Client::new()
-        .get(&url)
-        .bearer_auth(key)
-        .send()
-        .await
-        .and_then(reqwest::Response::error_for_status)
-        .with_context(|| format!("fetch the gateway model list from {url}"))?
-        .json()
-        .await
-        .with_context(|| format!("decode the gateway model list from {url}"))?;
-    chat_models(list).with_context(|| format!("read the gateway model list from {url}"))
-}
-
-/// Returns the chat-capable entries of an OpenAI-shape model list.
-///
-/// An entry is chat-capable when it has a non-empty `id` and either no
-/// `kind` or `kind` `"chat"`, the rule the runvil workshop applies.
-fn chat_models(list: serde_json::Value) -> Result<Vec<serde_json::Value>> {
-    let serde_json::Value::Object(mut list) = list else {
-        bail!("the model list is not a JSON object");
-    };
-    let Some(serde_json::Value::Array(models)) = list.remove("data") else {
-        bail!("the model list has no `data` array");
-    };
-    Ok(models.into_iter().filter(is_chat_capable).collect())
-}
-
-/// Returns whether `model` is a chat model with a usable id.
-fn is_chat_capable(model: &serde_json::Value) -> bool {
-    let has_id = model
-        .get("id")
-        .and_then(serde_json::Value::as_str)
-        .is_some_and(|id| !id.is_empty());
-    let chat_kind = match model.get("kind") {
-        None => true,
-        Some(serde_json::Value::String(kind)) => kind == "chat",
-        Some(_) => false,
-    };
-    has_id && chat_kind
-}
-
 /// Returns the name the run takes from its prompt: the `--prompt` file stem,
 /// or [`DEFAULT_PROMPT_NAME`] for the embedded prompt.
 ///
-/// The harness launches an agent by the stem of its file in the agents
-/// directory, so the prompt is written there under this name.
+/// The name becomes the run's `execution` field in every progress line.
 fn prompt_name(prompt: Option<&Path>) -> Result<String> {
     let Some(path) = prompt else {
         return Ok(DEFAULT_PROMPT_NAME.to_owned());
@@ -448,7 +372,7 @@ fn gateway_from_env(name: &str) -> Result<(String, String)> {
 }
 
 /// Returns the gateway origin for `url`: trimmed, without trailing slashes
-/// or a `/v1` suffix, because the harness appends `/v1` itself.
+/// or a `/v1` suffix, because `run` appends `/v1` itself.
 fn gateway_origin(url: &str) -> String {
     let url = url.trim().trim_end_matches('/');
     url.strip_suffix("/v1")
@@ -479,12 +403,11 @@ mod tests {
     use clap::Parser;
     use paperstore::PaperNum;
     use paperstore_sqlite::SqliteBackend;
-    use serde_json::json;
     use tempfile::TempDir;
 
     use super::{
-        Cli, DEFAULT_PROMPT, PaperInput, chat_models, gateway_origin, load_input_markdown,
-        load_paper_md, prompt_name, selected_model,
+        Cli, DEFAULT_PROMPT, PaperInput, gateway_origin, load_input_markdown, load_paper_md,
+        prompt_name, selected_model,
     };
 
     fn paper_num() -> PaperNum {
@@ -613,31 +536,6 @@ mod tests {
             "a path with no file name is refused"
         );
         assert!(name(Some("")).is_err(), "an empty path is refused");
-    }
-
-    #[test]
-    fn chat_models_filters_non_chat() {
-        let list = json!({ "object": "list", "data": [
-            { "id": "whisper-base", "kind": "transcription" },
-            { "id": "analyst", "kind": "chat" },
-            { "id": "" },
-            { "id": "plain" },
-            { "id": "odd", "kind": 3 },
-        ]});
-        let models = chat_models(list).unwrap_or_else(|e| panic!("chat models: {e}"));
-        assert_eq!(
-            models,
-            [
-                json!({ "id": "analyst", "kind": "chat" }),
-                json!({ "id": "plain" })
-            ]
-        );
-    }
-
-    #[test]
-    fn chat_models_rejects_missing_data() {
-        assert!(chat_models(json!({ "object": "list" })).is_err());
-        assert!(chat_models(json!([])).is_err());
     }
 
     #[test]
