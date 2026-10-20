@@ -21,7 +21,7 @@ Modify 24.3.11.4 [hive.modifiers] as follows:
 
 > iterator insert(const T& value);
 > iterator insert(T&& value);
->
+> 
 > -1- Effects: Inserts a copy or moved value into the hive.
 > -2- Returns: An iterator pointing to the newly inserted element.
 > -3- Complexity: Constant time.

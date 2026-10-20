@@ -246,10 +246,19 @@ def test_block_elements_hierarchy():
     assert bq.text == "This is quoted."
     assert isinstance(bq, BlockElement)
 
-    wb = WordingBlock(role="wording", text="Change [basic.def] as follows:")
+    wb = WordingBlock.from_text("Change [basic.def] as follows:", role="wording")
     assert wb.role == "wording"
     assert wb.text == "Change [basic.def] as follows:"
     assert isinstance(wb, BlockElement)
+
+    cb_diff = CodeBlock(
+        language="cpp",
+        lines=[
+            [TextSpan("template<class U>")],
+            [TextSpan("  constexpr "), StrikethroughSpan.from_text("explicit"), TextSpan(" void f();")],
+        ],
+    )
+    assert cb_diff.text == "template<class U>\n  constexpr explicit void f();"
 
     tb = ThematicBreak()
     assert isinstance(tb, BlockElement)
@@ -269,6 +278,17 @@ def test_list_item_text_includes_children():
     item = ListItem(spans=[TextSpan("label")], children=[Paragraph.from_text("more"), nested])
     assert item.text == "label\nmore\nchild"
     assert ListItem(children=[Paragraph.from_text("only")]).text == "only"
+
+
+def test_blockquote_and_wording_text_include_children():
+    bq = Blockquote(children=[Paragraph.from_text("first"), Paragraph.from_text("second")])
+    assert bq.text == "first\nsecond"
+
+    wb = WordingBlock(
+        role="wording-add",
+        children=[Paragraph.from_text("clause 1"), CodeBlock(code="int x;")],
+    )
+    assert wb.text == "clause 1\nint x;"
 
 
 def test_document_and_conversion_containers():

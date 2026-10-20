@@ -20,6 +20,7 @@ from tomd.domain.elements import (
     ThematicBreak,
     UncertainElement,
     WordingBlock,
+    WordingRole,
 )
 from tomd.domain.image import ExtractedImage
 from tomd.domain.metadata import FRONT_MATTER_ORDER, PaperMetadata
@@ -85,4 +86,5 @@ __all__ = [
     "UncertainElement",
     "UnderlineSpan",
     "WordingBlock",
+    "WordingRole",
 ]

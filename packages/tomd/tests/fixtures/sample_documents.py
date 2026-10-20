@@ -189,18 +189,31 @@ def sample_wording_diff_document() -> PaperDocument:
             ]
         ),
         Paragraph.from_text("Modify 24.3.11.4 [hive.modifiers] as follows:"),
-        Blockquote.from_text(
-            "iterator insert(const T& value);\n"
-            "iterator insert(T&& value);\n"
-            "\n"
-            "-1- Effects: Inserts a copy or moved value into the hive.\n"
-            "-2- Returns: An iterator pointing to the newly inserted element.\n"
-            "-3- Complexity: Constant time.\n"
-            "-4- Remarks: Does not invalidate any existing references or iterators."
+        Blockquote(
+            children=[
+                Paragraph.from_text(
+                    "iterator insert(const T& value);\n"
+                    "iterator insert(T&& value);"
+                ),
+                Paragraph.from_text(
+                    "-1- Effects: Inserts a copy or moved value into the hive.\n"
+                    "-2- Returns: An iterator pointing to the newly inserted element.\n"
+                    "-3- Complexity: Constant time.\n"
+                    "-4- Remarks: Does not invalidate any existing references or iterators."
+                ),
+            ]
         ),
         WordingBlock(
             role="wording",
-            text="<ins>A hive does not provide contiguous storage guarantee [container.reqmts].</ins>",
+            children=[
+                Paragraph(
+                    spans=[
+                        UnderlineSpan.from_text(
+                            "A hive does not provide contiguous storage guarantee [container.reqmts]."
+                        )
+                    ]
+                )
+            ],
         ),
     ]
     return PaperDocument(paper_id="P3002R0", metadata=meta, elements=elements)
@@ -506,7 +519,15 @@ def sample_full_proposal_document() -> PaperDocument:
 
     wording_block = WordingBlock(
         role="wording",
-        text="<ins>A hive fulfills all requirements of a SequenceContainer.</ins>",
+        children=[
+            Paragraph(
+                spans=[
+                    UnderlineSpan.from_text(
+                        "A hive fulfills all requirements of a SequenceContainer."
+                    )
+                ]
+            )
+        ],
     )
 
     poll_table = Table(

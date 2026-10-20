@@ -79,13 +79,16 @@ def test_write_blockquote():
     bq2 = Blockquote.from_text("Line 1\nLine 2")
     assert write_element(bq2) == "> Line 1\n> Line 2"
 
+    bq3 = Blockquote(children=[Paragraph.from_text("First"), Paragraph.from_text("Second")])
+    assert write_element(bq3) == "> First\n> \n> Second"
+
 
 def test_write_thematic_break():
     assert write_element(ThematicBreak()) == "---"
 
 
 def test_write_wording_block():
-    wb = WordingBlock(role="wording", text="Modify [format.string] as follows:")
+    wb = WordingBlock.from_text("Modify [format.string] as follows:", role="wording")
     assert write_element(wb) == "Modify [format.string] as follows:"
 
 
