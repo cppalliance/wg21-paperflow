@@ -267,7 +267,7 @@ Each step's tests pass before the next step starts, and each step leaves `cargo 
 
 <step-2>
 
-### Step 2: Lines, headings, sections, and outline
+### Step 2: Lines, headings, sections, and outline [completed]
 
 - Component: paper-mcp-text
 - Tests: `cargo test --locked --manifest-path crates/paper-mcp/Cargo.toml text::`

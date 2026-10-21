@@ -6,3 +6,4 @@
 
 pub mod dates;
 pub mod paper_id;
+pub mod text;

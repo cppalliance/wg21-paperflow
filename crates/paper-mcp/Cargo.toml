@@ -34,5 +34,6 @@ dbg_macro = "warn"
 doc_markdown = "allow"
 
 [dependencies]
+schemars = "1.2.2"
 serde = { version = "1.0.229", features = ["derive"] }
 thiserror = "2.0.21"
