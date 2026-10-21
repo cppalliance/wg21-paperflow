@@ -4,6 +4,7 @@
 //! `paper-mcp ingest` copies the paperstore into Qdrant; `paper-mcp serve`
 //! answers MCP calls from Qdrant alone.
 
+pub mod bm25;
 pub mod config;
 pub mod dates;
 pub mod paper_id;

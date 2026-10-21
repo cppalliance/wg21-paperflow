@@ -309,7 +309,7 @@ Each step's tests pass before the next step starts, and each step leaves `cargo 
 
 <step-5>
 
-### Step 5: BM25 options and query-term matching
+### Step 5: BM25 options and query-term matching [completed]
 
 - Component: paper-mcp-ingest
 - Tests: `cargo test --locked --manifest-path crates/paper-mcp/Cargo.toml bm25::`
