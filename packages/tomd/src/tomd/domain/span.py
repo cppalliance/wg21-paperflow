@@ -6,17 +6,33 @@ file LICENSE_1_0.txt or copy at http://www.boost.org/LICENSE_1_0.txt)
 Official repository: https://github.com/cppalliance/wg21-paperflow
 """
 
-from dataclasses import dataclass, field
+from collections.abc import Callable
+from dataclasses import dataclass, field, replace
+from typing import ClassVar, Literal, Self
 
 
 @dataclass(frozen=True)
 class Span:
     """Base class for all semantic inline text nodes."""
 
+    wording_role: ClassVar[Literal["ins", "del"] | None] = None
+
     @property
     def text(self) -> str:
         """Return recursive unformatted plain text of this span."""
         return ""
+
+    def map_text(self, fn: Callable[[str], str]) -> Self:
+        """Return a copy of this span with ``fn`` applied to plain text leaves."""
+        return self
+
+    def role_text(self, target_type: type["Span"]) -> str:
+        """Return concatenated plain text of spans matching ``target_type``."""
+        return ""
+
+    def unwrap(self, target_type: type["Span"]) -> tuple["Span", ...]:
+        """Return span sequence with ``target_type`` containers replaced by their children."""
+        return (self,)
 
 
 @dataclass(frozen=True)
@@ -29,10 +45,13 @@ class TextSpan(Span):
     def text(self) -> str:
         return self.content
 
+    def map_text(self, fn: Callable[[str], str]) -> Self:
+        return replace(self, content=fn(self.content))
+
 
 @dataclass(frozen=True)
 class CodeSpan(Span):
-    """Monospace inline code snippet leaf (e.g. `std::vector`)."""
+    """Inline code snippet leaf."""
 
     code: str
 
@@ -43,7 +62,7 @@ class CodeSpan(Span):
 
 @dataclass(frozen=True)
 class LineBreakSpan(Span):
-    """Hard line break within a block or table cell (<br>)."""
+    """Hard line break within a block or table cell."""
 
     @property
     def text(self) -> str:
@@ -51,100 +70,72 @@ class LineBreakSpan(Span):
 
 
 @dataclass(frozen=True)
-class StrongSpan(Span):
-    """Bold / strongly emphasized text container (e.g. **important**)."""
+class ContainerSpan(Span):
+    """Base class for semantic inline spans that wrap child spans."""
 
     children: tuple[Span, ...] = field(default_factory=tuple)
 
     @classmethod
-    def from_text(cls, text: str) -> "StrongSpan":
+    def from_text(cls, text: str) -> Self:
         return cls(children=(TextSpan(text),))
 
     @property
     def text(self) -> str:
         return "".join(c.text for c in self.children)
 
+    def map_text(self, fn: Callable[[str], str]) -> Self:
+        return replace(self, children=tuple(c.map_text(fn) for c in self.children))
 
-@dataclass(frozen=True)
-class EmphasisSpan(Span):
-    """Italic / emphasized text container (e.g. *note*)."""
+    def role_text(self, target_type: type[Span]) -> str:
+        if isinstance(self, target_type):
+            return self.text
+        return "".join(c.role_text(target_type) for c in self.children)
 
-    children: tuple[Span, ...] = field(default_factory=tuple)
-
-    @classmethod
-    def from_text(cls, text: str) -> "EmphasisSpan":
-        return cls(children=(TextSpan(text),))
-
-    @property
-    def text(self) -> str:
-        return "".join(c.text for c in self.children)
-
-
-@dataclass(frozen=True)
-class StrikethroughSpan(Span):
-    """Deleted wording edit / strikethrough container (e.g. <del>)."""
-
-    children: tuple[Span, ...] = field(default_factory=tuple)
-
-    @classmethod
-    def from_text(cls, text: str) -> "StrikethroughSpan":
-        return cls(children=(TextSpan(text),))
-
-    @property
-    def text(self) -> str:
-        return "".join(c.text for c in self.children)
+    def unwrap(self, target_type: type[Span]) -> tuple[Span, ...]:
+        unwrapped = tuple(u for c in self.children for u in c.unwrap(target_type))
+        if isinstance(self, target_type):
+            return unwrapped
+        return (replace(self, children=unwrapped),)
 
 
 @dataclass(frozen=True)
-class UnderlineSpan(Span):
-    """Inserted wording edit / underline container (e.g. <ins>)."""
-
-    children: tuple[Span, ...] = field(default_factory=tuple)
-
-    @classmethod
-    def from_text(cls, text: str) -> "UnderlineSpan":
-        return cls(children=(TextSpan(text),))
-
-    @property
-    def text(self) -> str:
-        return "".join(c.text for c in self.children)
+class StrongSpan(ContainerSpan):
+    """Strongly emphasized inline text container."""
 
 
 @dataclass(frozen=True)
-class SubscriptSpan(Span):
-    """Subscript inline container (e.g. <sub>)."""
-
-    children: tuple[Span, ...] = field(default_factory=tuple)
-
-    @classmethod
-    def from_text(cls, text: str) -> "SubscriptSpan":
-        return cls(children=(TextSpan(text),))
-
-    @property
-    def text(self) -> str:
-        return "".join(c.text for c in self.children)
+class EmphasisSpan(ContainerSpan):
+    """Emphasized inline text container."""
 
 
 @dataclass(frozen=True)
-class SuperscriptSpan(Span):
-    """Superscript inline container (e.g. <sup>)."""
+class DeletedSpan(ContainerSpan):
+    """Deleted wording text container."""
 
-    children: tuple[Span, ...] = field(default_factory=tuple)
-
-    @classmethod
-    def from_text(cls, text: str) -> "SuperscriptSpan":
-        return cls(children=(TextSpan(text),))
-
-    @property
-    def text(self) -> str:
-        return "".join(c.text for c in self.children)
+    wording_role: ClassVar[Literal["ins", "del"] | None] = "del"
 
 
 @dataclass(frozen=True)
-class LinkSpan(Span):
+class InsertedSpan(ContainerSpan):
+    """Inserted wording text container."""
+
+    wording_role: ClassVar[Literal["ins", "del"] | None] = "ins"
+
+
+@dataclass(frozen=True)
+class SubscriptSpan(ContainerSpan):
+    """Subscript inline text container."""
+
+
+@dataclass(frozen=True)
+class SuperscriptSpan(ContainerSpan):
+    """Superscript inline text container."""
+
+
+@dataclass(frozen=True)
+class LinkSpan(ContainerSpan):
     """Hyperlinked inline text pointing to a target URL."""
 
-    children: tuple[Span, ...] = field(default_factory=tuple)
     url: str = ""
     title: str | None = None
 
@@ -156,7 +147,3 @@ class LinkSpan(Span):
         title: str | None = None,
     ) -> "LinkSpan":
         return cls(children=(TextSpan(text),), url=url, title=title)
-
-    @property
-    def text(self) -> str:
-        return "".join(c.text for c in self.children)

@@ -28,16 +28,17 @@ from tomd.domain.image import ExtractedImage
 from tomd.domain.metadata import FRONT_MATTER_ORDER, PaperMetadata
 from tomd.domain.span import (
     CodeSpan,
+    ContainerSpan,
+    DeletedSpan,
     EmphasisSpan,
+    InsertedSpan,
     LineBreakSpan,
     LinkSpan,
     Span,
-    StrikethroughSpan,
     StrongSpan,
     SubscriptSpan,
     SuperscriptSpan,
     TextSpan,
-    UnderlineSpan,
 )
 from tomd.domain.table import (
     Cell,
@@ -105,12 +106,15 @@ def test_container_spans_and_nesting():
 
     emphasis = EmphasisSpan.from_text("italic")
     assert emphasis.text == "italic"
+    assert isinstance(emphasis, ContainerSpan)
 
-    strike = StrikethroughSpan.from_text("deleted")
-    assert strike.text == "deleted"
+    deleted = DeletedSpan.from_text("deleted")
+    assert deleted.text == "deleted"
+    assert deleted.wording_role == "del"
 
-    underline = UnderlineSpan.from_text("inserted")
-    assert underline.text == "inserted"
+    inserted = InsertedSpan.from_text("inserted")
+    assert inserted.text == "inserted"
+    assert inserted.wording_role == "ins"
 
     sub = SubscriptSpan.from_text("sub")
     assert sub.text == "sub"
@@ -255,7 +259,7 @@ def test_block_elements_hierarchy():
         language="cpp",
         lines=[
             [TextSpan("template<class U>")],
-            [TextSpan("  constexpr "), StrikethroughSpan.from_text("explicit"), TextSpan(" void f();")],
+            [TextSpan("  constexpr "), DeletedSpan.from_text("explicit"), TextSpan(" void f();")],
         ],
     )
     assert cb_diff.text == "template<class U>\n  constexpr explicit void f();"

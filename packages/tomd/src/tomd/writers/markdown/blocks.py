@@ -9,7 +9,7 @@ Official repository: https://github.com/cppalliance/wg21-paperflow
 from __future__ import annotations
 
 from collections.abc import Sequence
-from dataclasses import replace
+from functools import singledispatch
 import re
 
 from tomd.domain.elements import (
@@ -26,17 +26,12 @@ from tomd.domain.elements import (
     WordingBlock,
 )
 from tomd.domain.span import (
-    EmphasisSpan,
-    LinkSpan,
+    DeletedSpan,
+    InsertedSpan,
     Span,
-    StrikethroughSpan,
-    StrongSpan,
-    SubscriptSpan,
-    SuperscriptSpan,
     TextSpan,
-    UnderlineSpan,
 )
-from tomd.domain.table import Table, TableRow, TextCell
+from tomd.domain.table import Table
 from tomd.lib.pdf.cleanup import escape_leading_atx, normalize_whitespace
 from tomd.lib.pdf.wording_emit import _escape_wording_text
 from tomd.lib.wording_markup import wording_tag_open
@@ -47,16 +42,6 @@ from tomd.writers.markdown.tables import write_table
 
 _BULLET_MARKER = "-"
 _WHITESPACE_RE = re.compile(r"\s")
-_RoleSpanType = type[UnderlineSpan | StrikethroughSpan]
-_CONTAINER_SPAN_TYPES = (
-    StrongSpan,
-    EmphasisSpan,
-    StrikethroughSpan,
-    UnderlineSpan,
-    SubscriptSpan,
-    SuperscriptSpan,
-    LinkSpan,
-)
 
 
 def _wrap_wording_tag(tag: str, inner: str) -> str:
@@ -70,7 +55,7 @@ def _wrap_wording_tag(tag: str, inner: str) -> str:
 
 
 def _is_whitespace_span(span: Span) -> bool:
-    return isinstance(span, (TextSpan, UnderlineSpan, StrikethroughSpan)) and not span.text.strip()
+    return isinstance(span, (TextSpan, InsertedSpan, DeletedSpan)) and not span.text.strip()
 
 
 def _group_domain_wording_spans(spans: Sequence[Span]) -> list[tuple[str | None, list[Span]]]:
@@ -93,8 +78,8 @@ def _group_domain_wording_spans(spans: Sequence[Span]) -> list[tuple[str | None,
     for span in spans:
         if _is_whitespace_span(span):
             ws_buf.append(TextSpan(span.text))
-        elif isinstance(span, (UnderlineSpan, StrikethroughSpan)):
-            role = "ins" if isinstance(span, UnderlineSpan) else "del"
+        elif isinstance(span, (InsertedSpan, DeletedSpan)):
+            role = span.wording_role
             if role != group_role:
                 _flush()
                 group_role = role
@@ -110,18 +95,10 @@ def _group_domain_wording_spans(spans: Sequence[Span]) -> list[tuple[str | None,
     return segments
 
 
-def _escape_wording_span(span: Span) -> Span:
-    if isinstance(span, TextSpan):
-        return TextSpan(_escape_wording_text(span.content))
-    if isinstance(span, _CONTAINER_SPAN_TYPES):
-        return replace(span, children=tuple(_escape_wording_span(c) for c in span.children))
-    return span
-
-
 def _write_wording_spans(spans: Sequence[Span]) -> str:
     parts: list[str] = []
     for role, seg_spans in _group_domain_wording_spans(spans):
-        rendered = write_spans([_escape_wording_span(s) for s in seg_spans])
+        rendered = write_spans([s.map_text(_escape_wording_text) for s in seg_spans])
         if role in ("ins", "del"):
             parts.append(_wrap_wording_tag(role, rendered))
         else:
@@ -242,91 +219,6 @@ def _non_ws_len(text: str) -> int:
     return len(_WHITESPACE_RE.sub("", text))
 
 
-def _count_tagged_span_chars(spans: Sequence[Span], target_type: _RoleSpanType) -> int:
-    total = 0
-    for span in spans:
-        if isinstance(span, target_type):
-            total += _non_ws_len(span.text)
-        elif isinstance(span, _CONTAINER_SPAN_TYPES):
-            total += _count_tagged_span_chars(span.children, target_type)
-    return total
-
-
-def _count_tagged_block_chars(block: BlockElement, target_type: _RoleSpanType) -> int:
-    if isinstance(block, (Paragraph, Heading)):
-        return _count_tagged_span_chars(block.spans, target_type)
-    if isinstance(block, ListBlock):
-        return sum(
-            _count_tagged_span_chars(item.spans, target_type)
-            + sum(_count_tagged_block_chars(c, target_type) for c in item.children)
-            for item in block.items
-        )
-    if isinstance(block, (Blockquote, WordingBlock)):
-        return sum(_count_tagged_block_chars(c, target_type) for c in block.children)
-    if isinstance(block, Table):
-        cells = (*block.headers, *(c for row in block.rows for c in row.cells))
-        return sum(
-            _count_tagged_span_chars(c.spans, target_type)
-            for c in cells
-            if isinstance(c, TextCell)
-        )
-    # Code-shaped blocks (including code diffs) keep inline role tags literal.
-    return 0
-
-
-def _unwrap_spans(spans: Sequence[Span], target_type: _RoleSpanType) -> list[Span]:
-    unwrapped: list[Span] = []
-    for span in spans:
-        if isinstance(span, target_type):
-            unwrapped.extend(_unwrap_spans(span.children, target_type))
-        elif isinstance(span, _CONTAINER_SPAN_TYPES):
-            children = tuple(_unwrap_spans(span.children, target_type))
-            unwrapped.append(replace(span, children=children))
-        else:
-            unwrapped.append(span)
-    return unwrapped
-
-
-def _unwrap_block(block: BlockElement, target_type: _RoleSpanType) -> BlockElement:
-    if isinstance(block, (Paragraph, Heading)):
-        return replace(block, spans=_unwrap_spans(block.spans, target_type))
-    if isinstance(block, ListBlock):
-        items = [
-            replace(
-                item,
-                spans=_unwrap_spans(item.spans, target_type),
-                children=[_unwrap_block(c, target_type) for c in item.children],
-            )
-            for item in block.items
-        ]
-        return replace(block, items=items)
-    if isinstance(block, (Blockquote, WordingBlock)):
-        return replace(
-            block,
-            children=[_unwrap_block(c, target_type) for c in block.children],
-        )
-    if isinstance(block, Table):
-        headers = [
-            replace(c, spans=_unwrap_spans(c.spans, target_type))
-            if isinstance(c, TextCell)
-            else c
-            for c in block.headers
-        ]
-        rows = [
-            TableRow(
-                cells=[
-                    replace(c, spans=_unwrap_spans(c.spans, target_type))
-                    if isinstance(c, TextCell)
-                    else c
-                    for c in row.cells
-                ]
-            )
-            for row in block.rows
-        ]
-        return replace(block, headers=headers, rows=rows)
-    return block
-
-
 def strip_redundant_roles(block: WordingBlock) -> WordingBlock:
     """Unwrap redundant inline role spans when ``block`` is uniformly one role."""
     implicit = implicit_role_for(block.role)
@@ -337,23 +229,68 @@ def strip_redundant_roles(block: WordingBlock) -> WordingBlock:
     if total_chars == 0:
         return block
 
-    target_type = UnderlineSpan if implicit == "ins" else StrikethroughSpan
-    if _count_tagged_block_chars(block, target_type) / total_chars < UNIFORM_ROLE_THRESHOLD:
+    target_type = InsertedSpan if implicit == "ins" else DeletedSpan
+    if _non_ws_len(block.role_text(target_type)) / total_chars < UNIFORM_ROLE_THRESHOLD:
         return block
 
-    return replace(
-        block,
-        children=[_unwrap_block(child, target_type) for child in block.children],
-    )
+    return block.unwrap_spans(target_type)
 
 
+@singledispatch
 def _format_wording_child(child: BlockElement) -> str:
-    if isinstance(child, Paragraph):
-        return _format_wording_paragraph(child)
     return write_element(child)
 
 
-def _format_wording_block(element: WordingBlock) -> str:
+@_format_wording_child.register
+def _format_wording_paragraph_child(child: Paragraph) -> str:
+    return _format_wording_paragraph(child)
+
+
+@singledispatch
+def write_element(element: BlockElement) -> str:
+    """Format a single BlockElement into Markdown text."""
+    return getattr(element, "text", "")
+
+
+@write_element.register
+def _write_heading(element: Heading) -> str:
+    level = max(1, min(6, element.level))
+    prefix = "#" * level
+    return f"{prefix} {write_spans(element.spans)}"
+
+
+@write_element.register
+def _write_paragraph(element: Paragraph) -> str:
+    return write_spans(element.spans)
+
+
+@write_element.register
+def _write_code_block(element: CodeBlock) -> str:
+    return _format_code_block(element)
+
+
+@write_element.register
+def _write_list_block(element: ListBlock) -> str:
+    return _format_list_block(element)
+
+
+@write_element.register
+def _write_table(element: Table) -> str:
+    return write_table(element)
+
+
+@write_element.register
+def _write_blockquote(element: Blockquote) -> str:
+    return _format_blockquote(element)
+
+
+@write_element.register
+def _write_thematic_break(_element: ThematicBreak) -> str:
+    return "---"
+
+
+@write_element.register
+def _write_wording_block(element: WordingBlock) -> str:
     """Format a wording block without a fenced div wrapper."""
     cleaned = strip_redundant_roles(element)
     return "\n\n".join(
@@ -363,43 +300,16 @@ def _format_wording_block(element: WordingBlock) -> str:
     )
 
 
-def write_element(element: BlockElement) -> str:
-    """Format a single BlockElement into Markdown text."""
-    if isinstance(element, Heading):
-        level = max(1, min(6, element.level))
-        prefix = "#" * level
-        return f"{prefix} {write_spans(element.spans)}"
-
-    if isinstance(element, Paragraph):
-        return write_spans(element.spans)
-
-    if isinstance(element, CodeBlock):
-        return _format_code_block(element)
-
-    if isinstance(element, ListBlock):
-        return _format_list_block(element)
-
-    if isinstance(element, Table):
-        return write_table(element)
-
-    if isinstance(element, Blockquote):
-        return _format_blockquote(element)
-
-    if isinstance(element, ThematicBreak):
-        return "---"
-
-    if isinstance(element, WordingBlock):
-        return _format_wording_block(element)
-
+@write_element.register
+def _write_image_element(_element: ImageElement) -> str:
     # Markdown never carries image syntax (#408); the node stays in the AST for other writers.
-    if isinstance(element, ImageElement):
-        return ""
+    return ""
 
-    if isinstance(element, UncertainElement):
-        prompt_str = element.prompt.replace('"', '\\"')
-        return f'<!-- tomd:uncertain prompt="{prompt_str}" -->\n{element.raw_content}'
 
-    return getattr(element, "text", "")
+@write_element.register
+def _write_uncertain_element(element: UncertainElement) -> str:
+    prompt_str = element.prompt.replace('"', '\\"')
+    return f'<!-- tomd:uncertain prompt="{prompt_str}" -->\n{element.raw_content}'
 
 
 __all__ = ["strip_redundant_roles", "write_element"]

@@ -20,11 +20,11 @@ from tomd.domain.elements import (
 )
 from tomd.domain.span import (
     CodeSpan,
+    DeletedSpan,
+    InsertedSpan,
     Span as DomainSpan,
-    StrikethroughSpan,
     StrongSpan,
     TextSpan,
-    UnderlineSpan,
 )
 from tomd.domain.table import Table, TableRow, TextCell
 from tomd.lib.html.extract import parse_html
@@ -53,7 +53,7 @@ def test_wording_prose_uniform_add_and_remove():
     )
     add_ast = WordingBlock(
         role="wording-add",
-        children=[Paragraph(spans=[UnderlineSpan.from_text("• added bullet")])],
+        children=[Paragraph(spans=[InsertedSpan.from_text("• added bullet")])],
     )
     assert write_element(strip_redundant_roles(add_ast)) == _render_wording_section(add_sec) == "• added bullet"
 
@@ -63,7 +63,7 @@ def test_wording_prose_uniform_add_and_remove():
     )
     rem_ast = WordingBlock(
         role="wording-remove",
-        children=[Paragraph(spans=[StrikethroughSpan.from_text("doomed paragraph")])],
+        children=[Paragraph(spans=[DeletedSpan.from_text("doomed paragraph")])],
     )
     assert write_element(strip_redundant_roles(rem_ast)) == _render_wording_section(rem_sec) == "doomed paragraph"
 
@@ -79,7 +79,7 @@ def test_wording_prose_mixed_and_neutral():
             Paragraph(
                 spans=[
                     TextSpan("context "),
-                    UnderlineSpan.from_text("inserted"),
+                    InsertedSpan.from_text("inserted"),
                     TextSpan(" tail"),
                 ]
             )
@@ -100,9 +100,9 @@ def test_wording_prose_mixed_and_neutral():
         children=[
             Paragraph(
                 spans=[
-                    UnderlineSpan.from_text("new"),
+                    InsertedSpan.from_text("new"),
                     TextSpan(" / "),
-                    StrikethroughSpan.from_text("old"),
+                    DeletedSpan.from_text("old"),
                 ]
             )
         ],
@@ -120,37 +120,37 @@ def test_wording_prose_grouping_and_angle_bracket_escaping():
             SectionKind.WORDING,
             "wording",
             [Line(spans=[_pdf_span("A", "ins"), _pdf_span(" "), _pdf_span("B", "ins")])],
-            [UnderlineSpan.from_text("A"), TextSpan(" "), UnderlineSpan.from_text("B")],
+            [InsertedSpan.from_text("A"), TextSpan(" "), InsertedSpan.from_text("B")],
         ),
         (
             SectionKind.WORDING,
             "wording",
             [Line(spans=[_pdf_span("A", "ins"), _pdf_span(" "), _pdf_span("B", "del")])],
-            [UnderlineSpan.from_text("A"), TextSpan(" "), StrikethroughSpan.from_text("B")],
+            [InsertedSpan.from_text("A"), TextSpan(" "), DeletedSpan.from_text("B")],
         ),
         (
             SectionKind.WORDING,
             "wording",
             [Line(spans=[_pdf_span("native_simd", "del"), _pdf_span("<float>", monospace=True)])],
-            [StrikethroughSpan.from_text("native_simd"), TextSpan("<float>")],
+            [DeletedSpan.from_text("native_simd"), TextSpan("<float>")],
         ),
         (
             SectionKind.WORDING,
             "wording",
             [Line(spans=[_pdf_span("template<class U>", "ins")])],
-            [UnderlineSpan.from_text("template<class U>")],
+            [InsertedSpan.from_text("template<class U>")],
         ),
         (
             SectionKind.WORDING,
             "wording",
             [Line(spans=[_pdf_span("x", "del"), _pdf_span("U&& value", monospace=True)])],
-            [StrikethroughSpan.from_text("x"), TextSpan("U&& value")],
+            [DeletedSpan.from_text("x"), TextSpan("U&& value")],
         ),
         (
             SectionKind.WORDING,
             "wording",
             [Line(spans=[_pdf_span("use ", "ins"), _pdf_span("vec<float>", "context", monospace=True)])],
-            [UnderlineSpan.from_text("use "), CodeSpan("vec<float>")],
+            [InsertedSpan.from_text("use "), CodeSpan("vec<float>")],
         ),
         (
             SectionKind.WORDING_ADD,
@@ -165,9 +165,9 @@ def test_wording_prose_grouping_and_angle_bracket_escaping():
                 )
             ],
             [
-                UnderlineSpan.from_text("• "),
-                UnderlineSpan.from_text("common_type_t<From, To>"),
-                UnderlineSpan.from_text(" is To,"),
+                InsertedSpan.from_text("• "),
+                InsertedSpan.from_text("common_type_t<From, To>"),
+                InsertedSpan.from_text(" is To,"),
             ],
         ),
         (
@@ -178,16 +178,16 @@ def test_wording_prose_grouping_and_angle_bracket_escaping():
                 Line(spans=[_pdf_span("Second inserted sentence.", "ins")]),
             ],
             [
-                UnderlineSpan.from_text("First inserted sentence."),
+                InsertedSpan.from_text("First inserted sentence."),
                 TextSpan("\n"),
-                UnderlineSpan.from_text("Second inserted sentence."),
+                InsertedSpan.from_text("Second inserted sentence."),
             ],
         ),
         (
             SectionKind.WORDING,
             "wording",
             [Line(spans=[_pdf_span('# include "header" ', None), _pdf_span("added", "ins")])],
-            [TextSpan('# include "header" '), UnderlineSpan.from_text("added")],
+            [TextSpan('# include "header" '), InsertedSpan.from_text("added")],
         ),
     ]
 
@@ -262,7 +262,7 @@ def test_wording_code_diff_shapes():
                     [TextSpan("template<class U>")],
                     [
                         TextSpan("  constexpr "),
-                        StrikethroughSpan.from_text("explicit(see below)"),
+                        DeletedSpan.from_text("explicit(see below)"),
                         TextSpan(" basic_vec(U&& value) noexcept;"),
                     ],
                 ],
@@ -291,13 +291,13 @@ def test_wording_code_diff_shapes():
                 lines=[
                     [
                         TextSpan("template<"),
-                        StrikethroughSpan.from_text("class"),
-                        UnderlineSpan.from_text("explicitly-convertible-to<value_type>"),
+                        DeletedSpan.from_text("class"),
+                        InsertedSpan.from_text("explicitly-convertible-to<value_type>"),
                         TextSpan(" U>"),
                     ],
                     [
                         TextSpan("  "),
-                        UnderlineSpan.from_text("consteval basic_vec(U&& x);"),
+                        InsertedSpan.from_text("consteval basic_vec(U&& x);"),
                     ],
                 ],
             )
@@ -318,8 +318,8 @@ def test_wording_code_diff_shapes():
             CodeBlock(
                 language="cpp",
                 lines=[
-                    [UnderlineSpan.from_text("x" * 200)],
-                    [StrikethroughSpan.from_text("noexcept")],
+                    [InsertedSpan.from_text("x" * 200)],
+                    [DeletedSpan.from_text("noexcept")],
                 ],
             )
         ],
@@ -336,7 +336,7 @@ def test_wording_html_div_equivalents():
             '<div class="wording-add"><p><ins>wholly added clause</ins></p></div>',
             WordingBlock(
                 role="wording-add",
-                children=[Paragraph(spans=[UnderlineSpan.from_text("wholly added clause")])],
+                children=[Paragraph(spans=[InsertedSpan.from_text("wholly added clause")])],
             ),
         ),
         (
@@ -347,7 +347,7 @@ def test_wording_html_div_equivalents():
                     Paragraph(
                         spans=[
                             TextSpan("unchanged context here plus "),
-                            UnderlineSpan.from_text("a bit"),
+                            InsertedSpan.from_text("a bit"),
                         ]
                     )
                 ],
@@ -357,7 +357,7 @@ def test_wording_html_div_equivalents():
             '<div class="wording"><p><ins>everything inserted</ins></p></div>',
             WordingBlock(
                 role="wording",
-                children=[Paragraph(spans=[UnderlineSpan.from_text("everything inserted")])],
+                children=[Paragraph(spans=[InsertedSpan.from_text("everything inserted")])],
             ),
         ),
     ]
@@ -374,67 +374,67 @@ def test_wording_html_div_equivalents():
         # Exactly at 0.95 threshold (95 role chars / 100 total chars)
         (
             "wording-add",
-            [UnderlineSpan.from_text("a" * 95), TextSpan(" "), TextSpan("b" * 5)],
+            [InsertedSpan.from_text("a" * 95), TextSpan(" "), TextSpan("b" * 5)],
             f"<ins>{'a' * 95}</ins> {'b' * 5}",
         ),
         (
             "wording-remove",
-            [StrikethroughSpan.from_text("a" * 95), TextSpan(" "), TextSpan("b" * 5)],
+            [DeletedSpan.from_text("a" * 95), TextSpan(" "), TextSpan("b" * 5)],
             f"<del>{'a' * 95}</del> {'b' * 5}",
         ),
         # Just below 0.95 threshold (94 role chars / 100 total chars)
         (
             "wording-add",
-            [UnderlineSpan.from_text("a" * 94), TextSpan(" "), TextSpan("b" * 6)],
+            [InsertedSpan.from_text("a" * 94), TextSpan(" "), TextSpan("b" * 6)],
             f"<ins>{'a' * 94}</ins> {'b' * 6}",
         ),
         (
             "wording-remove",
-            [StrikethroughSpan.from_text("a" * 94), TextSpan(" "), TextSpan("b" * 6)],
+            [DeletedSpan.from_text("a" * 94), TextSpan(" "), TextSpan("b" * 6)],
             f"<del>{'a' * 94}</del> {'b' * 6}",
         ),
         # Above 0.95 threshold (96 role chars / 100 total chars and 100%)
         (
             "wording-add",
-            [UnderlineSpan.from_text("a" * 96), TextSpan(" "), TextSpan("b" * 4)],
+            [InsertedSpan.from_text("a" * 96), TextSpan(" "), TextSpan("b" * 4)],
             f"<ins>{'a' * 96}</ins> {'b' * 4}",
         ),
         (
             "wording-add",
-            [UnderlineSpan.from_text("• added bullet")],
+            [InsertedSpan.from_text("• added bullet")],
             "<ins>• added bullet</ins>",
         ),
         (
             "wording-remove",
-            [StrikethroughSpan.from_text("obsolete clause")],
+            [DeletedSpan.from_text("obsolete clause")],
             "<del>obsolete clause</del>",
         ),
         # Contrarian tag survives uniform section
         (
             "wording-add",
-            [UnderlineSpan.from_text("A" * 200), TextSpan(" "), StrikethroughSpan.from_text("x")],
+            [InsertedSpan.from_text("A" * 200), TextSpan(" "), DeletedSpan.from_text("x")],
             f"<ins>{'A' * 200}</ins> <del>x</del>",
         ),
         (
             "wording-remove",
-            [StrikethroughSpan.from_text("B" * 200), TextSpan(" "), UnderlineSpan.from_text("y")],
+            [DeletedSpan.from_text("B" * 200), TextSpan(" "), InsertedSpan.from_text("y")],
             f"<del>{'B' * 200}</del> <ins>y</ins>",
         ),
         # Neutral role never strips even at 100%
         (
             "wording",
-            [UnderlineSpan.from_text("a" * 100)],
+            [InsertedSpan.from_text("a" * 100)],
             f"<ins>{'a' * 100}</ins>",
         ),
         # Multiline role spans
         (
             "wording-add",
-            [UnderlineSpan.from_text("first line\nsecond line\nthird line")],
+            [InsertedSpan.from_text("first line\nsecond line\nthird line")],
             "<ins>first line\nsecond line\nthird line</ins>",
         ),
         (
             "wording-remove",
-            [StrikethroughSpan.from_text("first line\nsecond line\nthird line")],
+            [DeletedSpan.from_text("first line\nsecond line\nthird line")],
             "<del>first line\nsecond line\nthird line</del>",
         ),
         # Untagged and empty
@@ -466,19 +466,19 @@ def test_strip_redundant_roles_unwraps_compound_child_blocks():
     block = WordingBlock(
         role="wording-add",
         children=[
-            Heading(level=3, spans=[UnderlineSpan.from_text("20.1 General")]),
+            Heading(level=3, spans=[InsertedSpan.from_text("20.1 General")]),
             ListBlock(
                 items=[
                     ListItem(
-                        spans=[StrongSpan(children=(UnderlineSpan.from_text("first item"),))],
-                        children=[Paragraph(spans=[UnderlineSpan.from_text("continuation")])],
+                        spans=[StrongSpan(children=(InsertedSpan.from_text("first item"),))],
+                        children=[Paragraph(spans=[InsertedSpan.from_text("continuation")])],
                     )
                 ]
             ),
-            Blockquote(children=[Paragraph(spans=[UnderlineSpan.from_text("quoted note")])]),
+            Blockquote(children=[Paragraph(spans=[InsertedSpan.from_text("quoted note")])]),
             Table(
-                headers=[TextCell(spans=[UnderlineSpan.from_text("Header")])],
-                rows=[TableRow(cells=[TextCell(spans=[UnderlineSpan.from_text("Value")])])],
+                headers=[TextCell(spans=[InsertedSpan.from_text("Header")])],
+                rows=[TableRow(cells=[TextCell(spans=[InsertedSpan.from_text("Value")])])],
             ),
         ],
     )

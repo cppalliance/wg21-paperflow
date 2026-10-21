@@ -21,12 +21,12 @@ from tomd.domain.elements import (
 from tomd.domain.metadata import PaperMetadata
 from tomd.domain.span import (
     CodeSpan,
+    DeletedSpan,
     EmphasisSpan,
+    InsertedSpan,
     LinkSpan,
-    StrikethroughSpan,
     StrongSpan,
     TextSpan,
-    UnderlineSpan,
 )
 from tomd.domain.table import (
     CellAlign,
@@ -169,7 +169,7 @@ def sample_wording_diff_document() -> PaperDocument:
                     "A hive is a sequence container that supports constant-time insertion and erasure. "
                 ),
                 TextSpan("An instance of `hive` "),
-                StrikethroughSpan(
+                DeletedSpan(
                     children=(
                         TextSpan("shall allocate elements using "),
                         CodeSpan("std::allocator"),
@@ -177,7 +177,7 @@ def sample_wording_diff_document() -> PaperDocument:
                     )
                 ),
                 TextSpan(" "),
-                UnderlineSpan(
+                InsertedSpan(
                     children=(
                         TextSpan(
                             "may allocate memory using an allocator satisfying the "
@@ -208,7 +208,7 @@ def sample_wording_diff_document() -> PaperDocument:
             children=[
                 Paragraph(
                     spans=[
-                        UnderlineSpan.from_text(
+                        InsertedSpan.from_text(
                             "A hive does not provide contiguous storage guarantee [container.reqmts]."
                         )
                     ]
@@ -509,9 +509,9 @@ def sample_full_proposal_document() -> PaperDocument:
     wording_para = Paragraph(
         spans=[
             TextSpan("Modify 24.3 [containers.summary] paragraph 1 as follows: "),
-            StrikethroughSpan.from_text("The library provides sequence containers."),
+            DeletedSpan.from_text("The library provides sequence containers."),
             TextSpan(" "),
-            UnderlineSpan.from_text(
+            InsertedSpan.from_text(
                 "The library provides sequence containers, including hive."
             ),
         ]
@@ -522,7 +522,7 @@ def sample_full_proposal_document() -> PaperDocument:
         children=[
             Paragraph(
                 spans=[
-                    UnderlineSpan.from_text(
+                    InsertedSpan.from_text(
                         "A hive fulfills all requirements of a SequenceContainer."
                     )
                 ]

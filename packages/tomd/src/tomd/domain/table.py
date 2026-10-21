@@ -5,8 +5,9 @@ file LICENSE_1_0.txt or copy at http://www.boost.org/LICENSE_1_0.txt)
 
 Official repository: https://github.com/cppalliance/wg21-paperflow
 """
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from enum import StrEnum
+from typing import Self
 
 from tomd.domain.elements import BlockElement
 from tomd.domain.span import Span, TextSpan
@@ -39,6 +40,14 @@ class Cell:
         """Return plain unformatted text of this cell."""
         return ""
 
+    def role_text(self, target_type: type[Span]) -> str:
+        """Return concatenated plain text of inline spans matching ``target_type``."""
+        return ""
+
+    def unwrap_spans(self, target_type: type[Span]) -> Self:
+        """Return a copy of this cell with ``target_type`` spans unwrapped."""
+        return self
+
 
 @dataclass
 class TextCell(Cell):
@@ -62,6 +71,12 @@ class TextCell(Cell):
     @property
     def text(self) -> str:
         return "".join(s.text for s in self.spans)
+
+    def role_text(self, target_type: type[Span]) -> str:
+        return "".join(s.role_text(target_type) for s in self.spans)
+
+    def unwrap_spans(self, target_type: type[Span]) -> Self:
+        return replace(self, spans=[u for s in self.spans for u in s.unwrap(target_type)])
 
 
 @dataclass
@@ -103,3 +118,17 @@ class Table(BlockElement):
         for row in self.rows:
             parts.append("\t".join(c.text for c in row.cells))
         return "\n".join(parts)
+
+    def role_text(self, target_type: type[Span]) -> str:
+        cells = (*self.headers, *(c for row in self.rows for c in row.cells))
+        return "".join(c.role_text(target_type) for c in cells)
+
+    def unwrap_spans(self, target_type: type[Span]) -> Self:
+        return replace(
+            self,
+            headers=[c.unwrap_spans(target_type) for c in self.headers],
+            rows=[
+                TableRow(cells=[c.unwrap_spans(target_type) for c in row.cells])
+                for row in self.rows
+            ],
+        )

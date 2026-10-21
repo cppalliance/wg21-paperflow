@@ -1,10 +1,10 @@
 """
 Block-level AST nodes for WG21 paper documents.
 
-Fenced code diffs are represented on ``CodeBlock`` via its optional ``lines``
-field (per-line span sequences carrying ``UnderlineSpan`` / ``StrikethroughSpan``
-role runs) rather than a separate element class, keeping one fenced-code block
-type across the AST and writer.
+Code diffs are represented on ``CodeBlock`` via its optional ``lines`` field
+(per-line span sequences carrying ``InsertedSpan`` / ``DeletedSpan`` role runs)
+rather than a separate element class, keeping one code block type across the
+AST and writer.
 
 Distributed under the Boost Software License, Version 1.0. (See accompanying
 
@@ -12,9 +12,9 @@ file LICENSE_1_0.txt or copy at http://www.boost.org/LICENSE_1_0.txt)
 
 Official repository: https://github.com/cppalliance/wg21-paperflow
 """
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from enum import StrEnum
-from typing import Literal
+from typing import Literal, Self
 
 from tomd.domain.span import Span, TextSpan
 
@@ -45,6 +45,14 @@ class BlockElement:
         """Return recursive unformatted plain text of this block."""
         return ""
 
+    def role_text(self, target_type: type[Span]) -> str:
+        """Return concatenated plain text of inline spans matching ``target_type``."""
+        return ""
+
+    def unwrap_spans(self, target_type: type[Span]) -> Self:
+        """Return a copy of this block with ``target_type`` spans unwrapped."""
+        return self
+
 
 @dataclass
 class Heading(BlockElement):
@@ -61,6 +69,12 @@ class Heading(BlockElement):
     def text(self) -> str:
         return "".join(s.text for s in self.spans)
 
+    def role_text(self, target_type: type[Span]) -> str:
+        return "".join(s.role_text(target_type) for s in self.spans)
+
+    def unwrap_spans(self, target_type: type[Span]) -> Self:
+        return replace(self, spans=[u for s in self.spans for u in s.unwrap(target_type)])
+
 
 @dataclass
 class Paragraph(BlockElement):
@@ -76,10 +90,16 @@ class Paragraph(BlockElement):
     def text(self) -> str:
         return "".join(s.text for s in self.spans)
 
+    def role_text(self, target_type: type[Span]) -> str:
+        return "".join(s.role_text(target_type) for s in self.spans)
+
+    def unwrap_spans(self, target_type: type[Span]) -> Self:
+        return replace(self, spans=[u for s in self.spans for u in s.unwrap(target_type)])
+
 
 @dataclass
 class CodeBlock(BlockElement):
-    """Fenced multi-line code block; ``lines`` carries inline role spans for code diffs."""
+    """Multi-line code block; ``lines`` carries inline role spans for code diffs."""
 
     code: str = ""
     language: str = "cpp"
@@ -111,6 +131,18 @@ class ListItem:
         parts = [label, *(child.text for child in self.children)]
         return "\n".join(part for part in parts if part)
 
+    def role_text(self, target_type: type[Span]) -> str:
+        spans_text = "".join(s.role_text(target_type) for s in self.spans)
+        children_text = "".join(c.role_text(target_type) for c in self.children)
+        return spans_text + children_text
+
+    def unwrap_spans(self, target_type: type[Span]) -> Self:
+        return replace(
+            self,
+            spans=[u for s in self.spans for u in s.unwrap(target_type)],
+            children=[c.unwrap_spans(target_type) for c in self.children],
+        )
+
 
 @dataclass
 class ListBlock(BlockElement):
@@ -123,6 +155,12 @@ class ListBlock(BlockElement):
     @property
     def text(self) -> str:
         return "\n".join(item.text for item in self.items)
+
+    def role_text(self, target_type: type[Span]) -> str:
+        return "".join(item.role_text(target_type) for item in self.items)
+
+    def unwrap_spans(self, target_type: type[Span]) -> Self:
+        return replace(self, items=[item.unwrap_spans(target_type) for item in self.items])
 
 
 @dataclass
@@ -140,6 +178,12 @@ class Blockquote(BlockElement):
     def text(self) -> str:
         return "\n".join(child.text for child in self.children if child.text)
 
+    def role_text(self, target_type: type[Span]) -> str:
+        return "".join(c.role_text(target_type) for c in self.children)
+
+    def unwrap_spans(self, target_type: type[Span]) -> Self:
+        return replace(self, children=[c.unwrap_spans(target_type) for c in self.children])
+
 
 @dataclass
 class WordingBlock(BlockElement):
@@ -156,10 +200,16 @@ class WordingBlock(BlockElement):
     def text(self) -> str:
         return "\n".join(child.text for child in self.children if child.text)
 
+    def role_text(self, target_type: type[Span]) -> str:
+        return "".join(c.role_text(target_type) for c in self.children)
+
+    def unwrap_spans(self, target_type: type[Span]) -> Self:
+        return replace(self, children=[c.unwrap_spans(target_type) for c in self.children])
+
 
 @dataclass
 class ThematicBreak(BlockElement):
-    """Horizontal divider / thematic break (---)."""
+    """Horizontal divider / thematic break."""
 
     pass
 

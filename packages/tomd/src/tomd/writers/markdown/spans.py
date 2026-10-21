@@ -8,21 +8,22 @@ Official repository: https://github.com/cppalliance/wg21-paperflow
 
 from __future__ import annotations
 
+from collections.abc import Sequence
+from functools import singledispatch
 import re
-from typing import Sequence
 
 from tomd.domain.span import (
     CodeSpan,
+    DeletedSpan,
     EmphasisSpan,
+    InsertedSpan,
     LineBreakSpan,
     LinkSpan,
     Span,
-    StrikethroughSpan,
     StrongSpan,
     SubscriptSpan,
     SuperscriptSpan,
     TextSpan,
-    UnderlineSpan,
 )
 
 
@@ -52,59 +53,80 @@ def format_code_span(code: str) -> str:
     return f"{fence}{code}{fence}"
 
 
+@singledispatch
 def write_span(span: Span) -> str:
     """Recursively format a domain Span AST node into Markdown/HTML text."""
-    if isinstance(span, TextSpan):
-        return span.content
-
-    if isinstance(span, CodeSpan):
-        return format_code_span(span.code)
-
-    if isinstance(span, LineBreakSpan):
-        return "<br>"
-
-    if isinstance(span, StrongSpan):
-        inner = write_spans(span.children)
-        if not inner:
-            return ""
-        return _wrap_delimiters(inner, "**")
-
-    if isinstance(span, EmphasisSpan):
-        inner = write_spans(span.children)
-        if not inner:
-            return ""
-        return _wrap_delimiters(inner, "*")
-
-    if isinstance(span, StrikethroughSpan):
-        inner = write_spans(span.children)
-        if not inner:
-            return ""
-        return f"<del>{inner}</del>"
-
-    if isinstance(span, UnderlineSpan):
-        inner = write_spans(span.children)
-        if not inner:
-            return ""
-        return f"<ins>{inner}</ins>"
-
-    if isinstance(span, SubscriptSpan):
-        inner = write_spans(span.children)
-        if not inner:
-            return ""
-        return f"<sub>{inner}</sub>"
-
-    if isinstance(span, SuperscriptSpan):
-        inner = write_spans(span.children)
-        if not inner:
-            return ""
-        return f"<sup>{inner}</sup>"
-
-    if isinstance(span, LinkSpan):
-        inner = write_spans(span.children)
-        title_suffix = f' "{span.title}"' if span.title else ""
-        return f"[{inner}]({span.url}{title_suffix})"
-
     return getattr(span, "text", "")
+
+
+@write_span.register
+def _write_text_span(span: TextSpan) -> str:
+    return span.content
+
+
+@write_span.register
+def _write_code_span(span: CodeSpan) -> str:
+    return format_code_span(span.code)
+
+
+@write_span.register
+def _write_line_break_span(_span: LineBreakSpan) -> str:
+    return "<br>"
+
+
+@write_span.register
+def _write_strong_span(span: StrongSpan) -> str:
+    inner = write_spans(span.children)
+    if not inner:
+        return ""
+    return _wrap_delimiters(inner, "**")
+
+
+@write_span.register
+def _write_emphasis_span(span: EmphasisSpan) -> str:
+    inner = write_spans(span.children)
+    if not inner:
+        return ""
+    return _wrap_delimiters(inner, "*")
+
+
+@write_span.register
+def _write_deleted_span(span: DeletedSpan) -> str:
+    inner = write_spans(span.children)
+    if not inner:
+        return ""
+    return f"<del>{inner}</del>"
+
+
+@write_span.register
+def _write_inserted_span(span: InsertedSpan) -> str:
+    inner = write_spans(span.children)
+    if not inner:
+        return ""
+    return f"<ins>{inner}</ins>"
+
+
+@write_span.register
+def _write_subscript_span(span: SubscriptSpan) -> str:
+    inner = write_spans(span.children)
+    if not inner:
+        return ""
+    return f"<sub>{inner}</sub>"
+
+
+@write_span.register
+def _write_superscript_span(span: SuperscriptSpan) -> str:
+    inner = write_spans(span.children)
+    if not inner:
+        return ""
+    return f"<sup>{inner}</sup>"
+
+
+@write_span.register
+def _write_link_span(span: LinkSpan) -> str:
+    inner = write_spans(span.children)
+    title_suffix = f' "{span.title}"' if span.title else ""
+    return f"[{inner}]({span.url}{title_suffix})"
 
 
 def write_spans(spans: Sequence[Span]) -> str:
