@@ -35,18 +35,19 @@ import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from tomd.domain.front_matter import is_blank_value
+from tomd.domain.metadata import EMAIL_RE
 from tomd.lib.metadata_yaml.format import (
     FRONT_MATTER_RE,
     format_front_matter,
     parse_front_matter,
-    sanitize_metadata,
     strip_front_matter,
 )
+from tomd.lib.metadata_yaml.sanitize import sanitize_metadata
 from tomd.errors import UnsupportedSourceFormatError
 from tomd.lib import (
     apply_strip_leading_h1,
     strip_freeform_metadata_lines,
-    EMAIL_RE,
 )
 from tomd.lib.html import convert_html
 from tomd.lib.html.images import load_html_images
@@ -173,7 +174,7 @@ def _normalize_front_matter(md: str, mailing_meta: dict | None) -> str:
 
     # Inject missing fields (or override authoritative ones) from mailing.
     if mailing_meta:
-        present = set(parsed)
+        present = {key for key, value in parsed.items() if not is_blank_value(value)}
         # Bare-name-only reply-to (no emails) should not block the
         # mailing fallback: the mailing may have richer author+email data.
         rt = parsed.get("reply-to")
@@ -191,7 +192,7 @@ def _normalize_front_matter(md: str, mailing_meta: dict | None) -> str:
                 if isinstance(mailing_meta, dict)
                 else getattr(mailing_meta, src_key, None)
             )
-            if val in (None, "", []):
+            if is_blank_value(val):
                 continue
             if yaml_key == "date":
                 logger.debug(
@@ -207,7 +208,7 @@ def _normalize_front_matter(md: str, mailing_meta: dict | None) -> str:
 
     new_block = format_front_matter(parsed)
     if not new_block:
-        return md
+        return rest.lstrip()
 
     return f"{new_block}\n\n{rest.lstrip()}"
 

@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING
 from tomd.lib import DOC_NUM_PATTERN, SECTION_NUM_PATTERN
 
 if TYPE_CHECKING:
-    from .images import ExtractedImage
+    from tomd.lib.pdf.images import ExtractedImage
 
 
 class Confidence(Enum):

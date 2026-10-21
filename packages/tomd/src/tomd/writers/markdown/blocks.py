@@ -23,7 +23,9 @@ from tomd.domain.elements import (
     UncertainElement,
     WordingBlock,
 )
+from tomd.domain.table import Table
 from tomd.writers.markdown.spans import write_spans
+from tomd.writers.markdown.tables import write_table
 
 
 _BULLET_MARKER = "-"
@@ -99,6 +101,9 @@ def write_element(element: BlockElement) -> str:
 
     if isinstance(element, ListBlock):
         return _format_list_block(element)
+
+    if isinstance(element, Table):
+        return write_table(element)
 
     if isinstance(element, Blockquote):
         lines = element.content.split("\n")

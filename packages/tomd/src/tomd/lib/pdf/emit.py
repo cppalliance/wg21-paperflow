@@ -4,28 +4,28 @@ import html as _html
 import logging
 import re
 
-from .. import (
+from tomd.lib import tables as _tables
+from tomd.lib.metadata_yaml.format import format_front_matter
+from tomd.lib.shared import (
     DEFAULT_FENCE_LANG,
+    _find_front_matter_end,
     apply_strip_leading_h1,
     dedup_paragraphs,
-    format_front_matter,
     strip_redundant_body_meta,
     strip_orphan_toc_list,
 )
-from .. import tables as _tables
-from ..shared import _find_front_matter_end
-from .cleanup import escape_leading_atx, normalize_whitespace
-from .code_format import is_diagram_block, maybe_normalize_code_line
-from .code_grid import CodeGrid
-from .wording_emit import _render_wording_section
-from .glyphs import (
+from tomd.lib.pdf.cleanup import escape_leading_atx, normalize_whitespace
+from tomd.lib.pdf.code_format import is_diagram_block, maybe_normalize_code_line
+from tomd.lib.pdf.code_grid import CodeGrid
+from tomd.lib.pdf.wording_emit import _render_wording_section
+from tomd.lib.pdf.glyphs import (
     GLYPH_PLACEHOLDER_MARKER_TEMPLATE,
     UNKNOWN_GLYPH,
     GlyphPassStats,
 )
-from .images import TRUNCATION_MARKER_TEMPLATE, VectorUncertaintyStats
-from .types import Line, Span, Section, SectionKind, BULLET_CHARS, BULLET_RE, NUMBERED_LIST_RE, FALLBACK_FONT_SIZE
-from .vector_images import format_uncertainty_marker, should_emit_marker
+from tomd.lib.pdf.images import TRUNCATION_MARKER_TEMPLATE, VectorUncertaintyStats
+from tomd.lib.pdf.types import Line, Span, Section, SectionKind, BULLET_CHARS, BULLET_RE, NUMBERED_LIST_RE, FALLBACK_FONT_SIZE
+from tomd.lib.pdf.vector_images import format_uncertainty_marker, should_emit_marker
 _log = logging.getLogger(__name__)
 
 # A heading section can span multiple Line objects two ways: a single visual
@@ -1160,7 +1160,7 @@ def _assign_emdash_nesting(sections: list[Section]) -> None:
 
 def _annotate_wrap(rendered: str, sec: Section) -> str:
     """Wrap rendered markdown in a colored HTML div for highlight mode."""
-    from .highlight import KIND_COLORS, CONFIDENCE_BORDERS
+    from tomd.lib.pdf.highlight import KIND_COLORS, CONFIDENCE_BORDERS
     bg = KIND_COLORS.get(sec.kind.value, "transparent")
     border = CONFIDENCE_BORDERS.get(sec.confidence.value, "3px solid #ccc")
     kind_label = sec.kind.value.replace("-", " ")
