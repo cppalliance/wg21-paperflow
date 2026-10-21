@@ -320,7 +320,7 @@ Each step's tests pass before the next step starts, and each step leaves `cargo 
 
 <step-6>
 
-### Step 6: Embed and ingest papers into Qdrant
+### Step 6: Embed and ingest papers into Qdrant [completed]
 
 - Component: paper-mcp-ingest
 - Tests: `cargo test --locked --manifest-path crates/paper-mcp/Cargo.toml ingest::`

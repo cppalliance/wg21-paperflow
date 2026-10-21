@@ -34,12 +34,20 @@ dbg_macro = "warn"
 doc_markdown = "allow"
 
 [dependencies]
+fastembed = { version = "7.1.1", default-features = false, features = ["ort-download-binaries-rustls-tls", "hf-hub-rustls-tls"] }
+qdrant-client = { version = "1.19.0", default-features = false, features = ["serde", "uuid"] }
+rusqlite = { version = "0.40.2", features = ["bundled"] }
 schemars = "1.2.2"
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.151"
+sha2 = "0.11.0"
 thiserror = "2.0.21"
+tokenizers = { version = "0.23.2", default-features = false, features = ["onig"] }
+tokio = { version = "1.53.2", features = ["rt-multi-thread", "macros", "signal", "sync", "time"] }
 toml = "1.1.8"
+tracing = "0.1.44"
 unicode-normalization = "0.1.25"
+uuid = { version = "1.27.0", features = ["v4", "v5"] }
 
 [dev-dependencies]
 insta = "1.49.0"

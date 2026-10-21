@@ -7,5 +7,8 @@
 pub mod bm25;
 pub mod config;
 pub mod dates;
+pub mod embed;
+pub mod ingest;
 pub mod paper_id;
+pub mod qdrant;
 pub mod text;
