@@ -356,7 +356,7 @@ Each step's tests pass before the next step starts, and each step leaves `cargo 
 
 <step-9>
 
-### Step 9: MCP tools over Streamable HTTP
+### Step 9: MCP tools over Streamable HTTP [completed]
 
 - Component: paper-mcp-serve
 - Tests: `cargo test --locked --manifest-path crates/paper-mcp/Cargo.toml`
