@@ -371,7 +371,7 @@ Each step's tests pass before the next step starts, and each step leaves `cargo 
 
 <step-10>
 
-### Step 10: CLI, container deployment, and CI
+### Step 10: CLI, container deployment, and CI [completed]
 
 - Component: paper-mcp-ops
 - Tests: `cargo build --locked --manifest-path crates/paper-mcp/Cargo.toml`
