@@ -6,6 +6,7 @@
 
 pub mod bm25;
 pub mod config;
+pub mod cursor;
 pub mod dates;
 pub mod embed;
 pub mod ingest;

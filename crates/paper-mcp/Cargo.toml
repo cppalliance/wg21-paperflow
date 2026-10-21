@@ -34,6 +34,7 @@ dbg_macro = "warn"
 doc_markdown = "allow"
 
 [dependencies]
+base64 = "0.23.1"
 fastembed = { version = "7.1.1", default-features = false, features = ["ort-download-binaries-rustls-tls", "hf-hub-rustls-tls"] }
 qdrant-client = { version = "1.19.0", default-features = false, features = ["serde", "uuid"] }
 rusqlite = { version = "0.40.2", features = ["bundled"] }
