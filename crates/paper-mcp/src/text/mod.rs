@@ -1,11 +1,15 @@
-//! The paper text model (design §5.2 to §5.4): lines, headings, code
-//! fences, and sections.
+//! The paper text model (design §5.2 to §5.5): lines, headings, code
+//! fences, sections, blocks, and retrieval chunks.
 //!
 //! Everything here is pure: no input or output, no model, no Qdrant. Ingest
 //! and serve both build their views of a paper from [`Document`], so every
 //! tool and every search hit agree on line numbers and section indexes.
 
+mod blocks;
+mod chunks;
 mod headings;
+#[cfg(test)]
+mod proptests;
 mod range;
 mod sections;
 
@@ -15,6 +19,11 @@ use std::num::NonZeroU32;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
+pub use blocks::{Block, BlockKind};
+pub use chunks::{
+    Chunk, ChunkSettings, MIN_MAX_TOKENS, PaperLabel, SPECIAL_TOKENS, TokenCounter, chunk_document,
+    chunk_section, context_header,
+};
 pub use headings::{Heading, clean_heading_text};
 pub use range::{InclusiveRange, resolve_range};
 pub use sections::Section;
@@ -76,6 +85,10 @@ one_based!(
     /// A 1-based section index (§5.4).
     SectionIndex
 );
+one_based!(
+    /// A 1-based chunk number within one section (§5.5).
+    ChunkNo
+);
 
 /// One paper's markdown, split into lines and analysed for code fences and
 /// headings.
@@ -83,6 +96,7 @@ one_based!(
 pub struct Document<'a> {
     lines: Vec<&'a str>,
     fenced: Vec<bool>,
+    fence_ends: Vec<Option<usize>>,
     headings: Vec<Heading>,
 }
 
@@ -95,11 +109,12 @@ impl<'a> Document<'a> {
     #[must_use]
     pub fn parse(text: &'a str) -> Self {
         let lines = split_lines(text);
-        let (fenced, _) = headings::scan_fences(&lines);
+        let (fenced, fence_ends) = headings::scan_fences(&lines);
         let headings = headings::find_headings(&lines, &fenced);
         Self {
             lines,
             fenced,
+            fence_ends,
             headings,
         }
     }
@@ -143,6 +158,12 @@ impl<'a> Document<'a> {
     /// Whether a 0-based line is inside a code fence, fence lines included.
     pub(crate) fn is_fenced(&self, index: usize) -> bool {
         self.fenced.get(index).copied().unwrap_or(false)
+    }
+
+    /// For a 0-based line that opens a code fence, the 0-based line that
+    /// closes it, or the last line when the fence is left open.
+    pub(crate) fn fence_end(&self, index: usize) -> Option<usize> {
+        self.fence_ends.get(index).copied().flatten()
     }
 
     /// The paper's sections (§5.4). They tile the paper; a paper with no

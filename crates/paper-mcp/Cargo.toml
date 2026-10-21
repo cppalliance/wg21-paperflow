@@ -37,3 +37,11 @@ doc_markdown = "allow"
 schemars = "1.2.2"
 serde = { version = "1.0.229", features = ["derive"] }
 thiserror = "2.0.21"
+
+[dev-dependencies]
+insta = "1.49.0"
+proptest = "1.11.0"
+
+[[test]]
+name = "it"
+path = "tests/it/main.rs"

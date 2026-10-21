@@ -282,7 +282,7 @@ Each step's tests pass before the next step starts, and each step leaves `cargo 
 
 <step-3>
 
-### Step 3: Blocks and retrieval chunks
+### Step 3: Blocks and retrieval chunks [completed]
 
 - Component: paper-mcp-text
 - Tests: `cargo test --locked --manifest-path crates/paper-mcp/Cargo.toml text::`, then `cargo test --locked --manifest-path crates/paper-mcp/Cargo.toml --test it -- --ignored golden` with `WG21_DATA_DIR` set to the local paperstore workspace
