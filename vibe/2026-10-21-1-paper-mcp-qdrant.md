@@ -4,34 +4,34 @@ overview: Add paper-mcp, a Rust MCP server that gives prompts full access to WG2
 todos:
   - id: ids-dates
     content: "Step 1: scaffold crates/paper-mcp as its own workspace, excluded from the root one; PaperId and RevisionTarget parsing; strict ISO dates and mailing months"
-    status: pending
+    status: completed
   - id: text-model
     content: "Step 2: text model: lines, code fences, headings and heading cleanup, the section rules with their fallback, Lua-style range resolution, and the outline"
-    status: pending
+    status: completed
   - id: chunks
     content: "Step 3: blocks and retrieval chunks with overlap, size-limited splitting, and the context header; proptest invariants; insta golden snapshots of six real papers"
-    status: pending
+    status: completed
   - id: config
     content: "Step 4: typed configuration from an optional TOML file and PAPER_MCP_* environment overrides, validated at load"
-    status: pending
+    status: completed
   - id: bm25
     content: "Step 5: shared BM25 options, case and accent folding, the Qdrant-compatible tokenizer, and match_lines"
-    status: pending
+    status: completed
   - id: ingest
     content: "Step 6: BGE-M3 embedding worker, Qdrant collections, payloads, writes and queries, and the ingest command over the read-only paperstore"
-    status: pending
+    status: completed
   - id: cursor
     content: "Step 7: opaque paging cursors bound to the arguments that produced them"
-    status: pending
+    status: completed
   - id: auth
     content: "Step 8: bearer-token auth from a keys file with SIGHUP reload and constant-time comparison"
-    status: pending
+    status: completed
   - id: tools
     content: "Step 9: the eight MCP tools, tool error codes, and the stateless Streamable HTTP router; end-to-end test over a fixture paperstore"
-    status: pending
+    status: completed
   - id: ops
     content: "Step 10: clap CLI with ingest and serve, Dockerfile, compose-paper-mcp-rust.yaml, CI jobs, cargo-deny config, and the README section"
-    status: pending
+    status: completed
 isProject: false
 ---
 
