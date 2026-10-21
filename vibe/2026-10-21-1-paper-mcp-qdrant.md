@@ -345,7 +345,7 @@ Each step's tests pass before the next step starts, and each step leaves `cargo 
 
 <step-8>
 
-### Step 8: Bearer-token auth
+### Step 8: Bearer-token auth [completed]
 
 - Component: paper-mcp-serve
 - Tests: `cargo test --locked --manifest-path crates/paper-mcp/Cargo.toml serve::auth::`
