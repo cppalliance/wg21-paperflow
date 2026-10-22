@@ -9,8 +9,10 @@ Official repository: https://github.com/cppalliance/wg21-paperflow
 from __future__ import annotations
 
 from collections.abc import Sequence
+from dataclasses import dataclass
 from functools import singledispatch
 import re
+from typing import Self
 
 from tomd.domain.elements import (
     BlockElement,
@@ -254,9 +256,12 @@ def write_element(element: BlockElement) -> str:
 
 @write_element.register
 def _write_heading(element: Heading) -> str:
+    content = write_spans(element.spans)
+    if not content.strip():
+        return ""
     level = max(1, min(6, element.level))
     prefix = "#" * level
-    return f"{prefix} {write_spans(element.spans)}"
+    return f"{prefix} {content}"
 
 
 @write_element.register
@@ -306,10 +311,47 @@ def _write_image_element(_element: ImageElement) -> str:
     return ""
 
 
+def format_uncertain_element(
+    element: UncertainElement,
+    line_num: int = 1,
+) -> str:
+    """Format an uncertain region with its 1-based line-range marker."""
+    text = element.text.rstrip()
+    text_lines = text.count("\n") + 1
+    text_start = line_num + 2
+    comment = f"<!-- tomd:uncertain:L{text_start}-L{text_start + text_lines - 1} -->"
+    return f"{comment}\n\n{text}"
+
+
 @write_element.register
 def _write_uncertain_element(element: UncertainElement) -> str:
-    prompt_str = element.prompt.replace('"', '\\"')
-    return f'<!-- tomd:uncertain prompt="{prompt_str}" -->\n{element.raw_content}'
+    return format_uncertain_element(element)
 
 
-__all__ = ["strip_redundant_roles", "write_element"]
+@dataclass
+class RenderContext:
+    """Tracks 1-based line offset across top-level blocks during Markdown emission."""
+
+    line_num: int = 1
+
+    @classmethod
+    def from_front_matter(cls, front_matter: str) -> Self:
+        return cls(line_num=front_matter.count("\n") + 3 if front_matter else 1)
+
+    def render_block(self, element: BlockElement) -> str:
+        if isinstance(element, UncertainElement):
+            rendered = format_uncertain_element(element, self.line_num)
+        else:
+            rendered = write_element(element)
+            if not rendered.strip():
+                return ""
+        self.line_num += rendered.count("\n") + 2
+        return rendered
+
+
+__all__ = [
+    "RenderContext",
+    "format_uncertain_element",
+    "strip_redundant_roles",
+    "write_element",
+]

@@ -8,18 +8,11 @@ from dataclasses import dataclass, field
 from enum import Enum, StrEnum
 from typing import TYPE_CHECKING
 
+from tomd.domain.provenance import Confidence as Confidence
 from tomd.lib import DOC_NUM_PATTERN, SECTION_NUM_PATTERN
 
 if TYPE_CHECKING:
     from .images import ExtractedImage
-
-
-class Confidence(Enum):
-    """Confidence level for structural classification decisions."""
-    HIGH = "high"
-    MEDIUM = "medium"
-    LOW = "low"
-    UNCERTAIN = "uncertain"
 
 
 class SkipReason(StrEnum):

@@ -24,6 +24,7 @@ from tomd.domain.elements import (
 )
 from tomd.domain.image import ExtractedImage
 from tomd.domain.metadata import FRONT_MATTER_ORDER, PaperMetadata
+from tomd.domain.provenance import Confidence, Provenance
 from tomd.domain.span import (
     CodeSpan,
     ContainerSpan,
@@ -57,6 +58,7 @@ __all__ = [
     "CodeBlock",
     "CodeCell",
     "CodeSpan",
+    "Confidence",
     "ContainerSpan",
     "ConvertedPaper",
     "DeletedSpan",
@@ -74,6 +76,7 @@ __all__ = [
     "PaperDocument",
     "PaperMetadata",
     "Paragraph",
+    "Provenance",
     "SkipReason",
     "Span",
     "StrongSpan",

@@ -9,6 +9,7 @@ Official repository: https://github.com/cppalliance/wg21-paperflow
 from dataclasses import FrozenInstanceError
 import pytest
 
+from tomd.domain import Confidence, Provenance
 from tomd.domain.document import ConvertedPaper, PaperDocument, SkipReason
 from tomd.domain.elements import (
     BlockElement,
@@ -49,6 +50,7 @@ from tomd.domain.table import (
     TableStrategy,
     TextCell,
 )
+from tomd.lib.pdf.types import Confidence as PdfConfidence
 
 
 def test_span_primitives_and_immutability():
@@ -272,9 +274,43 @@ def test_block_elements_hierarchy():
     assert img.text == "Figure 1"
     assert isinstance(img, BlockElement)
 
-    unc = UncertainElement(prompt="Check table layout", raw_content="<div>raw</div>")
-    assert unc.prompt == "Check table layout"
+    unc = UncertainElement(
+        mupdf_text="mupdf version",
+        spatial_text="spatial version",
+        page=4,
+        text="mupdf version",
+        context_before="before text",
+        context_after="after text",
+    )
+    assert unc.mupdf_text == "mupdf version"
+    assert unc.spatial_text == "spatial version"
+    assert unc.page == 4
+    assert unc.text == "mupdf version"
+    assert unc.context_before == "before text"
+    assert unc.context_after == "after text"
+    assert unc.provenance is None
     assert isinstance(unc, BlockElement)
+
+
+def test_provenance_and_confidence():
+    assert Confidence is PdfConfidence
+    assert Confidence.HIGH.value == "high"
+    assert Confidence.MEDIUM.value == "medium"
+    assert Confidence.LOW.value == "low"
+    assert Confidence.UNCERTAIN.value == "uncertain"
+
+    prov = Provenance(page=3, confidence=Confidence.MEDIUM)
+    assert prov.page == 3
+    assert prov.confidence == Confidence.MEDIUM
+    with pytest.raises(FrozenInstanceError):
+        prov.page = 5  # type: ignore[misc]
+
+    para = Paragraph.from_text("hello", provenance=prov)
+    assert para.provenance == prov
+    assert Heading.from_text(2, "Intro", provenance=prov).provenance == prov
+    assert Blockquote.from_text("Note", provenance=prov).provenance == prov
+    assert WordingBlock.from_text("Clause", provenance=prov).provenance == prov
+    assert Paragraph.from_text("default").provenance is None
 
 
 def test_list_item_text_includes_children():
