@@ -18,6 +18,7 @@ from tomd.domain import (
     ImageElement,
     ListBlock,
     PaperDocument,
+    PaperMetadata,
     Paragraph,
     Provenance,
     TextSpan,
@@ -80,7 +81,10 @@ def _make_section(
     )
 
 
-def _sections_to_document(sections: list[Section]) -> PaperDocument:
+def _sections_to_document(
+    sections: list[Section],
+    meta: dict[str, Any] | None = None,
+) -> PaperDocument:
     elements: list[BlockElement] = []
     for idx, sec in enumerate(sections):
         prov = Provenance(page=sec.page_num, confidence=sec.confidence)
@@ -118,7 +122,11 @@ def _sections_to_document(sections: list[Section]) -> PaperDocument:
         else:
             elements.append(Paragraph([TextSpan(sec.text)], provenance=prov))
 
-    return PaperDocument(paper_id="P0000R0", elements=elements)
+    return PaperDocument(
+        paper_id="P0000R0",
+        metadata=PaperMetadata.from_dict(meta),
+        elements=elements,
+    )
 
 
 def _assert_twin_parity(
@@ -126,8 +134,8 @@ def _assert_twin_parity(
     meta: dict[str, Any] | None = None,
 ) -> tuple[str, list[str] | None]:
     metadata = meta or {}
-    doc = _sections_to_document(sections)
-    actual_md = MarkdownWriter().write(doc, meta=metadata)
+    doc = _sections_to_document(sections, metadata)
+    actual_md = MarkdownWriter().write(doc)
     actual_prompts = build_reconcile_prompts(doc)
     assert actual_md == emit_markdown(metadata, sections)
     assert actual_prompts == emit_prompts(sections)
