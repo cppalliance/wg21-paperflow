@@ -20,6 +20,7 @@ from tomd.domain import (
     PaperDocument,
     Paragraph,
     Provenance,
+    TextSpan,
     UncertainElement,
     WordingBlock,
 )
@@ -103,7 +104,7 @@ def _sections_to_document(sections: list[Section]) -> PaperDocument:
             )
         elif sec.kind in (SectionKind.HEADING, SectionKind.TITLE):
             level = 1 if sec.kind == SectionKind.TITLE else sec.heading_level
-            elements.append(Heading.from_text(level, sec.text, provenance=prov))
+            elements.append(Heading(level, [TextSpan(sec.text)], provenance=prov))
         elif sec.kind == SectionKind.CODE:
             elements.append(
                 CodeBlock(code=sec.text, language=sec.fence_lang, provenance=prov)
@@ -115,7 +116,7 @@ def _sections_to_document(sections: list[Section]) -> PaperDocument:
         elif sec.kind == SectionKind.WORDING:
             elements.append(WordingBlock(children=[], provenance=prov))
         else:
-            elements.append(Paragraph.from_text(sec.text, provenance=prov))
+            elements.append(Paragraph([TextSpan(sec.text)], provenance=prov))
 
     return PaperDocument(paper_id="P0000R0", elements=elements)
 

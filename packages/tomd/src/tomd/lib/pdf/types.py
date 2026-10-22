@@ -1,14 +1,12 @@
 """Shared data types, constants, and precompiled regex patterns for PDF conversion."""
 
-from __future__ import annotations
-
 import re
 from collections import Counter
 from dataclasses import dataclass, field
 from enum import Enum, StrEnum
 from typing import TYPE_CHECKING
 
-from tomd.domain.provenance import Confidence as Confidence
+from tomd.domain.provenance import Confidence
 from tomd.lib import DOC_NUM_PATTERN, SECTION_NUM_PATTERN
 
 if TYPE_CHECKING:

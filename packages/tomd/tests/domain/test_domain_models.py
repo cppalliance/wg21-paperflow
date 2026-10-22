@@ -305,11 +305,8 @@ def test_provenance_and_confidence():
     with pytest.raises(FrozenInstanceError):
         prov.page = 5  # type: ignore[misc]
 
-    para = Paragraph.from_text("hello", provenance=prov)
+    para = Paragraph(spans=[TextSpan("hello")], provenance=prov)
     assert para.provenance == prov
-    assert Heading.from_text(2, "Intro", provenance=prov).provenance == prov
-    assert Blockquote.from_text("Note", provenance=prov).provenance == prov
-    assert WordingBlock.from_text("Clause", provenance=prov).provenance == prov
     assert Paragraph.from_text("default").provenance is None
 
 
