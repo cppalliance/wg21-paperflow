@@ -16,6 +16,7 @@ from dataclasses import dataclass, field, replace
 from enum import StrEnum
 from typing import Literal, Self
 
+from tomd.domain.provenance import Provenance
 from tomd.domain.span import Span, TextSpan
 
 WordingRole = Literal["wording", "wording-add", "wording-remove"]
@@ -40,6 +41,8 @@ class ElementKind(StrEnum):
 class BlockElement:
     """Base class for all document-level block AST nodes."""
 
+    provenance: Provenance | None = field(default=None, kw_only=True)
+
     @property
     def text(self) -> str:
         """Return recursive unformatted plain text of this block."""
@@ -62,8 +65,14 @@ class Heading(BlockElement):
     spans: list[Span] = field(default_factory=list)
 
     @classmethod
-    def from_text(cls, level: int, text: str) -> "Heading":
-        return cls(level=level, spans=[TextSpan(text)])
+    def from_text(
+        cls,
+        level: int,
+        text: str,
+        *,
+        provenance: Provenance | None = None,
+    ) -> Self:
+        return cls(level=level, spans=[TextSpan(text)], provenance=provenance)
 
     @property
     def text(self) -> str:
@@ -83,8 +92,13 @@ class Paragraph(BlockElement):
     spans: list[Span] = field(default_factory=list)
 
     @classmethod
-    def from_text(cls, text: str) -> "Paragraph":
-        return cls(spans=[TextSpan(text)])
+    def from_text(
+        cls,
+        text: str,
+        *,
+        provenance: Provenance | None = None,
+    ) -> Self:
+        return cls(spans=[TextSpan(text)], provenance=provenance)
 
     @property
     def text(self) -> str:
@@ -122,7 +136,7 @@ class ListItem:
     marker: str | None = None
 
     @classmethod
-    def from_text(cls, text: str) -> "ListItem":
+    def from_text(cls, text: str) -> Self:
         return cls(spans=[TextSpan(text)])
 
     @property
@@ -171,8 +185,18 @@ class Blockquote(BlockElement):
     role: str | None = None
 
     @classmethod
-    def from_text(cls, content: str, role: str | None = None) -> "Blockquote":
-        return cls(children=[Paragraph.from_text(content)] if content else [], role=role)
+    def from_text(
+        cls,
+        content: str,
+        role: str | None = None,
+        *,
+        provenance: Provenance | None = None,
+    ) -> Self:
+        return cls(
+            children=[Paragraph.from_text(content)] if content else [],
+            role=role,
+            provenance=provenance,
+        )
 
     @property
     def text(self) -> str:
@@ -193,8 +217,18 @@ class WordingBlock(BlockElement):
     children: list[BlockElement] = field(default_factory=list)
 
     @classmethod
-    def from_text(cls, text: str, role: WordingRole = "wording") -> "WordingBlock":
-        return cls(role=role, children=[Paragraph.from_text(text)] if text else [])
+    def from_text(
+        cls,
+        text: str,
+        role: WordingRole = "wording",
+        *,
+        provenance: Provenance | None = None,
+    ) -> Self:
+        return cls(
+            role=role,
+            children=[Paragraph.from_text(text)] if text else [],
+            provenance=provenance,
+        )
 
     @property
     def text(self) -> str:
@@ -227,13 +261,13 @@ class ImageElement(BlockElement):
         return self.caption or self.alt
 
 
-@dataclass
+@dataclass(slots=True)
 class UncertainElement(BlockElement):
-    """Flagged block with conversion uncertainty or reviewer prompt."""
+    """Region where dual-path PDF extraction disagreed."""
 
-    prompt: str
-    raw_content: str = ""
-
-    @property
-    def text(self) -> str:
-        return self.raw_content
+    mupdf_text: str
+    spatial_text: str
+    page: int
+    text: str
+    context_before: str = ""
+    context_after: str = ""
