@@ -26,7 +26,6 @@ PRECEDING_CONTEXT_HEADER = "Context (preceding confident section):"
 FOLLOWING_CONTEXT_HEADER = "Context (following confident section):"
 MUPDF_HEADER = "MuPDF extraction:"
 SPATIAL_HEADER = "Spatial extraction:"
-_CODE_FENCE = "```"
 
 
 def _format_reconcile_prompt(elem: UncertainElement) -> str:
@@ -46,14 +45,14 @@ def _format_reconcile_prompt(elem: UncertainElement) -> str:
     parts.extend(
         (
             MUPDF_HEADER,
-            _CODE_FENCE,
+            "```",
             elem.mupdf_text or elem.text,
-            _CODE_FENCE,
+            "```",
             "",
             SPATIAL_HEADER,
-            _CODE_FENCE,
+            "```",
             elem.spatial_text or elem.text,
-            _CODE_FENCE,
+            "```",
         )
     )
 
