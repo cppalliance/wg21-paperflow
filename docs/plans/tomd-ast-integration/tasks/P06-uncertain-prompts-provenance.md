@@ -81,9 +81,7 @@ Checklist output (tails):
   ruff:        All checks passed!
   pyright:     0 errors, 0 warnings, 0 informations
 Known divergences found:
-  None. UncertainElement uses @dataclass(slots=True) so its required `text: str`
-  field descriptor cleanly overrides `BlockElement.text` read-only property at
-  both runtime and static type checking.
+  None.
 Open questions:
   None.
 ```
@@ -114,12 +112,14 @@ Fix:
 - Extract `_format_reconcile_prompt(elem: UncertainElement) -> str` and keep `build_reconcile_prompts` focused on filtering `document.elements`.
 - Narrow `__all__` in `tomd/prompts.py` to `["build_reconcile_prompts"]` while keeping the prompt strings as module constants.
 
-## R3. Use `Self` return annotations and remove redundant `from __future__ import annotations` (low)
+## R3. Remove `@dataclass(slots=True)` quirk on `UncertainElement`, use `Self`, and drop redundant `from __future__ import annotations` (low)
 
+- `UncertainElement` used `@dataclass(slots=True)` solely so `text: str` (without a default) would create a slot descriptor shadowing `BlockElement.text` (`@property`). Because `BlockElement` is not slotted, `UncertainElement` had split storage (`__slots__` + inherited `__dict__`) where `vars(unc)` only returned `{'provenance': ...}`. Setting `text: str = ""` places `"text"` in `UncertainElement.__dict__` and shadows `BlockElement.text` cleanly without `slots=True`.
 - `from_text` factories in `domain/elements.py` used stringified class return annotations instead of `Self`.
 - `writers/markdown/blocks.py` and `lib/pdf/types.py` carried unnecessary `from __future__ import annotations` imports.
 
 Fix:
+- Use `@dataclass` (without `slots=True`) and `text: str = ""` on `UncertainElement`.
 - Use `-> Self` on `from_text` factories in `domain/elements.py`.
 - Remove `from __future__ import annotations` from `writers/markdown/blocks.py` and `lib/pdf/types.py`.
 
@@ -140,5 +140,5 @@ Fix:
 |------|---------|
 | R1 | Done. Added `RenderContext` in `blocks.py`, simplified `format_uncertain_element` to return `str`, handled empty headings in `_write_heading`, and simplified `MarkdownWriter.write`. |
 | R2 | Done. Extracted `_format_reconcile_prompt` and narrowed `tomd/prompts.py` `__all__` to `["build_reconcile_prompts"]`. |
-| R3 | Done. Used `-> Self` on `from_text` factories in `domain/elements.py` and removed `from __future__ import annotations` from `blocks.py` and `lib/pdf/types.py`. |
-| R4 | Done. Consolidated `test_uncertain_and_prompts.py` with `@pytest.mark.parametrize`, added multi-line code block and prompt boundary cases, and moved `PdfConfidence` import to top level in `test_domain_models.py`. |
+| R3 | Done. Removed `slots=True` from `UncertainElement` (using `text: str = ""`), used `-> Self` on `from_text` factories, and removed `from __future__ import annotations` from `blocks.py` and `lib/pdf/types.py`. |
+| R4 | Done. Consolidated `test_uncertain_and_prompts.py` with `@pytest.mark.parametrize`, populated `doc.metadata` directly (no `meta=` arg to `write`), added multi-line code block and prompt boundary cases, and moved `PdfConfidence` import to top level in `test_domain_models.py`. |
