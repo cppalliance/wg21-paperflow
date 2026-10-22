@@ -230,13 +230,13 @@ class ImageElement(BlockElement):
         return self.caption or self.alt
 
 
-@dataclass(slots=True)
+@dataclass
 class UncertainElement(BlockElement):
     """Region where dual-path PDF extraction disagreed."""
 
     mupdf_text: str
     spatial_text: str
     page: int
-    text: str
+    text: str = ""
     context_before: str = ""
     context_after: str = ""
