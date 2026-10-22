@@ -78,11 +78,15 @@ Status: done
 Files changed:
   packages/tomd/src/tomd/domain/__init__.py
   packages/tomd/src/tomd/domain/elements.py
+  packages/tomd/src/tomd/domain/span.py
+  packages/tomd/src/tomd/domain/table.py
   packages/tomd/src/tomd/writers/markdown/blocks.py
+  packages/tomd/src/tomd/writers/markdown/spans.py
   packages/tomd/tests/domain/test_domain_models.py
   packages/tomd/tests/fixtures/markdown/sample_documents/wording_diff.md
   packages/tomd/tests/fixtures/sample_documents.py
   packages/tomd/tests/writers/markdown/test_blocks.py
+  packages/tomd/tests/writers/markdown/test_spans.py
   packages/tomd/tests/writers/markdown/test_wording_and_blockquote.py
 Checklist output (tails):
   tomd pytest: 2568 passed, 7 skipped, 1 xfailed in 122.04s
@@ -93,7 +97,7 @@ Checklist output (tails):
 Model chosen for code diffs and why:
   CodeBlock gains an optional `lines: list[list[Span]] | None = None` field (with
   `code: str = ""` default). This keeps a single fenced-code block element across
-  the AST and writer while preserving per-line `UnderlineSpan`/`StrikethroughSpan`
+  the AST and writer while preserving per-line `InsertedSpan`/`DeletedSpan`
   role spans for intra-block code diffs.
 Known divergences found (confirm the blockquote trailing-space quirk is recorded):
   Confirmed recorded in STATUS.md: blockquote blank lines render as `> ` with a
