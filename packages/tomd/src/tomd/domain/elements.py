@@ -65,14 +65,8 @@ class Heading(BlockElement):
     spans: list[Span] = field(default_factory=list)
 
     @classmethod
-    def from_text(
-        cls,
-        level: int,
-        text: str,
-        *,
-        provenance: Provenance | None = None,
-    ) -> Self:
-        return cls(level=level, spans=[TextSpan(text)], provenance=provenance)
+    def from_text(cls, level: int, text: str) -> Self:
+        return cls(level=level, spans=[TextSpan(text)])
 
     @property
     def text(self) -> str:
@@ -92,13 +86,8 @@ class Paragraph(BlockElement):
     spans: list[Span] = field(default_factory=list)
 
     @classmethod
-    def from_text(
-        cls,
-        text: str,
-        *,
-        provenance: Provenance | None = None,
-    ) -> Self:
-        return cls(spans=[TextSpan(text)], provenance=provenance)
+    def from_text(cls, text: str) -> Self:
+        return cls(spans=[TextSpan(text)])
 
     @property
     def text(self) -> str:
@@ -185,18 +174,8 @@ class Blockquote(BlockElement):
     role: str | None = None
 
     @classmethod
-    def from_text(
-        cls,
-        content: str,
-        role: str | None = None,
-        *,
-        provenance: Provenance | None = None,
-    ) -> Self:
-        return cls(
-            children=[Paragraph.from_text(content)] if content else [],
-            role=role,
-            provenance=provenance,
-        )
+    def from_text(cls, content: str, role: str | None = None) -> Self:
+        return cls(children=[Paragraph.from_text(content)] if content else [], role=role)
 
     @property
     def text(self) -> str:
@@ -217,18 +196,8 @@ class WordingBlock(BlockElement):
     children: list[BlockElement] = field(default_factory=list)
 
     @classmethod
-    def from_text(
-        cls,
-        text: str,
-        role: WordingRole = "wording",
-        *,
-        provenance: Provenance | None = None,
-    ) -> Self:
-        return cls(
-            role=role,
-            children=[Paragraph.from_text(text)] if text else [],
-            provenance=provenance,
-        )
+    def from_text(cls, text: str, role: WordingRole = "wording") -> Self:
+        return cls(role=role, children=[Paragraph.from_text(text)] if text else [])
 
     @property
     def text(self) -> str:
