@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import TYPE_CHECKING
 
-from tomd.domain.provenance import Confidence
+from tomd.domain.elements import Confidence
 from tomd.lib import DOC_NUM_PATTERN, SECTION_NUM_PATTERN
 
 if TYPE_CHECKING:

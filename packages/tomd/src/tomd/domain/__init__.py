@@ -16,12 +16,14 @@ from tomd.domain.elements import (
     BlockElement,
     Blockquote,
     CodeBlock,
+    Confidence,
     ElementKind,
     Heading,
     ImageElement,
     ListBlock,
     ListItem,
     Paragraph,
+    Provenance,
     ThematicBreak,
     UncertainElement,
     WordingBlock,
@@ -29,7 +31,6 @@ from tomd.domain.elements import (
 )
 from tomd.domain.image import ExtractedImage, ImageSource
 from tomd.domain.metadata import PaperMetadata
-from tomd.domain.provenance import Confidence, Provenance
 from tomd.lib.metadata_yaml.format import FRONT_MATTER_ORDER
 from tomd.domain.span import (
     CodeSpan,

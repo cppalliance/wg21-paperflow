@@ -1,7 +1,8 @@
 """Tests for lib.pdf.emit."""
 
 from conftest import make_section, make_line, make_span
-from tomd.lib.pdf.types import SectionKind, Confidence, Section, Span, Line
+from tomd.domain.elements import Confidence
+from tomd.lib.pdf.types import SectionKind, Section, Span, Line
 from tomd.lib.pdf.emit import (
     _emdash_bullet_items,
     emit_markdown,

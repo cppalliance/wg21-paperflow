@@ -1,144 +1,76 @@
-# P06 Uncertain element, reconcile prompts, provenance
+# P06: Uncertain Regions, Reconcile Prompts, and Block Provenance
 
-| Wave | Deps | Parallel with | Size | Risk |
-|------|------|---------------|------|------|
-| 1 | P02 | P03, P04, P05, P07 | M | medium |
+## Context
 
-## Goal
+When `tomd` converts a PDF paper into Markdown, it extracts text from each page using two independent algorithms:
+1. **MuPDF extraction** (`mupdf_text`): PyMuPDF's native text-block ordering.
+2. **Spatial extraction** (`spatial_text`): geometric clustering of spans and lines by bounding box.
 
-Make uncertain regions round-trip: the element carries both extractions and its
-neighbor context, the writer reproduces the `<!-- tomd:uncertain:L{a}-L{b} -->` marker
-with legacy line arithmetic, and reconcile prompts are built from the AST. Add optional
-provenance (page, confidence) to blocks.
+When the two extractions agree (`Confidence.HIGH`, `MEDIUM`, or `LOW`), the converter classifies the text into normal structural blocks (headings, paragraphs, lists, code blocks, tables). When they disagree on a page (`Confidence.UNCERTAIN`), `tomd` does not silently guess. Instead, it does two things:
 
-## Read first
+1. **Marks the region in `<pid>.md`** with a 1-based line-range HTML comment above the MuPDF text:
+   ```markdown
+   <!-- tomd:uncertain:L120-L125 -->
 
-- `lib/pdf/emit.py`: `emit_markdown` (the `line_num` arithmetic at the top of the loop
-  and in the UNCERTAIN branch), `emit_prompts` (line 1344)
-- `lib/pdf/types.py`: `Confidence`, `Section` fields `mupdf_text`, `spatial_text`,
-  `page_num`, `confidence`
-- `domain/elements.py` `UncertainElement`, `writers/markdown/blocks.py`,
-  `writers/markdown/writer.py`
-- Tests: `tests/test_emit.py` uncertain and prompts cases; golden prompts files
-  (`tests/fixtures/golden/*.prompts.json`)
+   <MuPDF extracted text>
+   ```
+2. **Generates an LLM reconciliation prompt in `<pid>.prompts.json`** containing the page number, both extractions (`mupdf_text` and `spatial_text`), and up to 200 characters of the preceding and following confident sections (`context_before` and `context_after`).
 
-## Change
+Previously, the AST domain (`tomd.domain`) and `MarkdownWriter` only had a placeholder `UncertainElement(prompt, raw_content)` that could not represent dual-path extractions, compute line-range markers, or build reconciliation prompts. Additionally, `BlockElement` had no field to carry source `page` and `Confidence` metadata (which `lib/pdf` tracks on every `Section`).
 
-1. Move `Confidence` into `domain/` (for example `domain/provenance.py`); `lib/pdf/types.py`
-   re-exports it. Add `Provenance(page: int, confidence: Confidence)`.
-2. `BlockElement` gains `provenance: Provenance | None = field(default=None, kw_only=True)`.
-   Writers ignore it.
-3. `UncertainElement(mupdf_text: str, spatial_text: str, page: int, text: str,
-   context_before: str = "", context_after: str = "")`. `text` is what is emitted (the
-   MuPDF version). `context_*` are the at-most-200-character neighbor snippets that
-   `emit_prompts` computes today; the adapter fills them, so the AST never has to
-   reproduce `Section.text` projections.
-4. Writer: a render context tracks `line_num` with exactly the legacy arithmetic:
-   start `fm.count("\n") + 3` if front matter was emitted else `1`; after a normal block
-   `+= rendered.count("\n") + 2`; for an uncertain block
-   `text_start = line_num + 2`, `+= text_lines + 3`, marker
-   `<!-- tomd:uncertain:L{text_start}-L{text_start + text_lines - 1} -->`. Blocks that
-   render to empty strings are skipped exactly as in `emit_markdown`.
-5. `tomd/prompts.py` (new): `build_reconcile_prompts(document) -> list[str] | None`, a
-   port of `emit_prompts` using `UncertainElement` fields. Prompt text must be
-   byte-identical; keep the strings as module constants.
+## Approach
 
-## Do not
+1. **Block Provenance (`Confidence` and `Provenance` in `domain/elements.py`)**
+   - Define `Confidence` (`HIGH`, `MEDIUM`, `LOW`, `UNCERTAIN`) and `Provenance(page: int, confidence: Confidence)` directly in `tomd.domain.elements` (re-exported from `tomd.domain`), and update internal callers to import `Confidence` from `tomd.domain.elements` so `domain` never imports from `lib/pdf`.
+   - Delete the separate `packages/tomd/src/tomd/domain/provenance.py` file.
+   - Keep `provenance: Provenance | None = field(default=None, kw_only=True)` on `BlockElement`.
 
-- Change marker format or prompt wording. Do not touch `emit.py`.
-- Compute context from neighboring elements; it is data on the element.
+2. **`UncertainElement` and Reconcile Prompts in `tomd.domain`**
+   - Delete top-level `packages/tomd/src/tomd/prompts.py`.
+   - `UncertainElement` in `domain/elements.py` holds `mupdf_text: str`, `spatial_text: str`, `page: int`, `text: str = ""`, `context_before: str = ""`, and `context_after: str = ""`.
+   - Add `UncertainElement.reconcile_prompt(self) -> str` with the prompt template inline so the entire prompt format is readable in one place.
+   - Add `PaperDocument.reconcile_prompts(self) -> list[str] | None` in `domain/document.py` to collect prompts from all `UncertainElement` blocks in document order (returning `None` when there are none, matching `emit_prompts`).
 
-## Tests
+3. **1-Based Line Tracking in `MarkdownWriter` (`writer.py` and `blocks.py`)**
+   - Remove `RenderContext` from `writers/markdown/blocks.py`.
+   - Simplify `format_uncertain_element(element, line_num=1) -> str` in `blocks.py`:
+     - The comment sits on `line_num`, a blank line sits on `line_num + 1`, so the text starts at `text_start = line_num + 2` and ends at `text_end = text_start + text.count("\n")`.
+   - Track `line_num = 1` directly inside `MarkdownWriter.write` in `writer.py`:
+     - Every emitted block `b` (including front matter and each non-empty body element) is followed by a blank separator line (`"\n\n"`), so it advances `line_num += b.count("\n") + 2`.
+     - Empty or whitespace-only blocks (including empty `Heading`s) are skipped without advancing `line_num`.
 
-Twin tests: build `Section` lists with uncertain sections at the start, middle, end,
-adjacent to each other, and after empty-rendering sections; build the equivalent AST;
-assert writer output equals `emit_markdown(...)` and `build_reconcile_prompts` equals
-`emit_prompts`. Include a case with and without front matter (line offset).
+## Files to Modify
 
-## Acceptance
+- `packages/tomd/src/tomd/domain/__init__.py`
+- `packages/tomd/src/tomd/domain/document.py`
+- `packages/tomd/src/tomd/domain/elements.py`
+- `packages/tomd/src/tomd/domain/provenance.py` (delete)
+- `packages/tomd/src/tomd/prompts.py` (delete)
+- `packages/tomd/src/tomd/lib/pdf/types.py`
+- `packages/tomd/src/tomd/writers/markdown/blocks.py`
+- `packages/tomd/src/tomd/writers/markdown/writer.py`
+- `packages/tomd/tests/domain/test_domain_models.py`
+- `packages/tomd/tests/writers/markdown/test_blocks.py`
+- `packages/tomd/tests/writers/markdown/test_uncertain_and_prompts.py`
+- `docs/plans/tomd-ast-integration/tasks/P06-uncertain-prompts-provenance.md`
 
-Checklist green; twin tests byte-equal.
+## Reuse
 
-## Handoff (fill in at the end)
+- `tomd.domain.elements.UncertainElement` and `tomd.domain.document.PaperDocument` as the home for reconcile prompt generation (matching how P02 placed metadata fallback on `PaperMetadata`).
+- `tomd.lib.pdf.emit.emit_markdown` and `tomd.lib.pdf.emit.emit_prompts` (`packages/tomd/src/tomd/lib/pdf/emit.py`) as the byte-parity oracle in tests.
+- `make_section`, `make_line`, `make_span` (`packages/tomd/tests/conftest.py`) in `test_uncertain_and_prompts.py`.
 
-```
-Status: done
-Files changed:
-  docs/plans/tomd-ast-integration/tasks/P06-uncertain-prompts-provenance.md
-  packages/tomd/src/tomd/domain/__init__.py
-  packages/tomd/src/tomd/domain/elements.py
-  packages/tomd/src/tomd/domain/provenance.py
-  packages/tomd/src/tomd/lib/pdf/types.py
-  packages/tomd/src/tomd/prompts.py
-  packages/tomd/src/tomd/writers/markdown/blocks.py
-  packages/tomd/src/tomd/writers/markdown/writer.py
-  packages/tomd/tests/domain/test_domain_models.py
-  packages/tomd/tests/writers/markdown/test_blocks.py
-  packages/tomd/tests/writers/markdown/test_uncertain_and_prompts.py
-Checklist output (tails):
-  imports:     python -c "import tomd.domain, tomd.lib.pdf, tomd.prompts" (exit 0)
-  pytest:      493 passed, 5 warnings in 0.39s
-  ruff:        All checks passed!
-  pyright:     0 errors, 0 warnings, 0 informations
-Known divergences found:
-  None.
-Open questions:
-  None.
-```
+## Steps
 
----
+- [x] Move `Confidence` and `Provenance` into `packages/tomd/src/tomd/domain/elements.py`, update imports in `domain/__init__.py` and `lib/pdf/types.py`, and delete `packages/tomd/src/tomd/domain/provenance.py`.
+- [x] Add `reconcile_prompt()` to `UncertainElement` in `domain/elements.py` and `reconcile_prompts()` to `PaperDocument` in `domain/document.py`, then delete `packages/tomd/src/tomd/prompts.py`.
+- [x] Simplify `format_uncertain_element` in `writers/markdown/blocks.py`, remove `RenderContext`, and inline the `line_num` loop in `MarkdownWriter.write` (`writers/markdown/writer.py`).
+- [x] Update `test_domain_models.py` and `test_uncertain_and_prompts.py` to use `doc.reconcile_prompts()` and `conftest.py` helpers, trimming test boilerplate.
+- [x] Run pytest, ruff, and pyright to verify all checks pass.
 
-# Review follow-ups
+## Verification
 
-Adversarial review of the P06 working tree. Items are ordered by severity and resolved in place.
-
-## R1. Encapsulate `line_num` tracking in `RenderContext` and simplify `MarkdownWriter.write` / `blocks.py` (medium)
-
-- Requirement 4 specifies a render context tracking `line_num`. Instead, `line_num` arithmetic was split across `MarkdownWriter.write` (`front.count("\n") + 3 if front else 1` and `line_num += rendered.count("\n") + 2`) and `blocks.format_uncertain_element` (which returned a `(rendered, next_line_num)` 2-tuple that `_write_uncertain_element` had to unpack and discard).
-- Because `format_uncertain_element` joins the comment marker and `text` with `\n\n` into one block string (`f"{comment}\n\n{text}"`), its line advancement `rendered.count("\n") + 2` is algebraically identical to `text_lines + 3` (`(2 + text_lines - 1) + 2 == text_lines + 3`).
-- `MarkdownWriter.write` also duplicated `@singledispatch` type checks (`isinstance(elem, UncertainElement)`, `isinstance(elem, Table)`, `isinstance(elem, BlockElement)`, `isinstance(elem, Heading)`), and placed empty-heading suppression in `writer.py` instead of `_write_heading` in `blocks.py` (so `write_element(Heading.from_text(2, "   "))` returned `"##    "` instead of `""`).
-
-Fix:
-- Make `_write_heading` in `writers/markdown/blocks.py` return `""` when `not content.strip()`.
-- Make `format_uncertain_element(element, line_num=1) -> str` return only the formatted block string.
-- Add `RenderContext` (`from_front_matter`, `render_block`) in `writers/markdown/blocks.py` and use it in `MarkdownWriter.write`, removing the redundant `Heading`, `UncertainElement`, `Table`, `write_table`, and `format_uncertain_element` imports and branches from `writer.py`.
-
-## R2. Narrow `tomd/prompts.py` exports and extract per-element helper (low)
-
-- `tomd/prompts.py` exported 7 internal string constants (including `CODE_FENCE = "```"`) in `__all__` alongside `build_reconcile_prompts`.
-- `build_reconcile_prompts` mixed document filtering with single-element prompt formatting.
-
-Fix:
-- Extract `_format_reconcile_prompt(elem: UncertainElement) -> str` and keep `build_reconcile_prompts` focused on filtering `document.elements`.
-- Narrow `__all__` in `tomd/prompts.py` to `["build_reconcile_prompts"]` while keeping the prompt strings as module constants.
-
-## R3. Remove `@dataclass(slots=True)` quirk on `UncertainElement`, use `Self`, and drop redundant `from __future__ import annotations` (low)
-
-- `UncertainElement` used `@dataclass(slots=True)` solely so `text: str` (without a default) would create a slot descriptor shadowing `BlockElement.text` (`@property`). Because `BlockElement` is not slotted, `UncertainElement` had split storage (`__slots__` + inherited `__dict__`) where `vars(unc)` only returned `{'provenance': ...}`. Setting `text: str = ""` places `"text"` in `UncertainElement.__dict__` and shadows `BlockElement.text` cleanly without `slots=True`.
-- `from_text` factories in `domain/elements.py` used stringified class return annotations instead of `Self`.
-- `writers/markdown/blocks.py` and `lib/pdf/types.py` carried unnecessary `from __future__ import annotations` imports.
-
-Fix:
-- Use `@dataclass` (without `slots=True`) and `text: str = ""` on `UncertainElement`.
-- Use `-> Self` on `from_text` factories in `domain/elements.py`.
-- Remove `from __future__ import annotations` from `writers/markdown/blocks.py` and `lib/pdf/types.py`.
-
-## R4. Consolidate `test_uncertain_and_prompts.py`, cover multi-line and prompt boundary cases, and clean up `test_domain_models.py` (medium)
-
-- Every confident section preceding an `UncertainElement` in `test_uncertain_and_prompts.py` rendered as a single line (`rendered.count("\n") == 0`), so `rendered.count("\n")` in `line_num += rendered.count("\n") + 2` was never exercised for non-zero newline counts.
-- Missing prompt boundary cases: `context_after` > 200 characters adjacent to an uncertain block, asymmetric `mupdf_text`/`spatial_text` empty fallbacks (only one empty), and whitespace-only confident neighbors (`ctx_before` stripping to `""`).
-- `test_domain_models.py` had a function-local import `from tomd.lib.pdf.types import Confidence as PdfConfidence`.
-
-Fix:
-- Fix `Span.bbox` in `_make_section` so multi-line `SectionKind.CODE` sections render as multi-line code blocks in `emit_markdown`, and add a multi-line `CodeBlock` before an `UncertainElement` case.
-- Consolidate `test_uncertain_and_prompts.py` with `@pytest.mark.parametrize` and add the missing `context_after` > 200 chars, asymmetric extraction fallback, and whitespace-neighbor cases.
-- Move the `PdfConfidence` import to module top level in `test_domain_models.py`.
-
-## Resolution log
-
-| Item | Outcome |
-|------|---------|
-| R1 | Done. Added `RenderContext` in `blocks.py`, simplified `format_uncertain_element` to return `str`, handled empty headings in `_write_heading`, and simplified `MarkdownWriter.write`. |
-| R2 | Done. Extracted `_format_reconcile_prompt` and narrowed `tomd/prompts.py` `__all__` to `["build_reconcile_prompts"]`. |
-| R3 | Done. Removed `slots=True` from `UncertainElement` (using `text: str = ""`), used `-> Self` on `from_text` factories, and removed `from __future__ import annotations` from `blocks.py` and `lib/pdf/types.py`. |
-| R4 | Done. Consolidated `test_uncertain_and_prompts.py` with `@pytest.mark.parametrize`, populated `doc.metadata` directly (no `meta=` arg to `write`), added multi-line code block and prompt boundary cases, and moved `PdfConfidence` import to top level in `test_domain_models.py`. |
+- `uv run --package tomd pytest packages/tomd/tests -q`
+- `uv run ruff check packages tests`
+- `uv run pyright packages/tomd/src/tomd packages/tomd/tests`
+- `git status --short`

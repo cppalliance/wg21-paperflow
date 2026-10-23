@@ -10,7 +10,7 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 
 from tomd.domain.diagnostics import Diagnostics
-from tomd.domain.elements import BlockElement
+from tomd.domain.elements import BlockElement, UncertainElement
 from tomd.domain.image import ExtractedImage
 from tomd.domain.metadata import PaperMetadata
 
@@ -36,3 +36,12 @@ class PaperDocument:
     is_skipped: bool = False
     skip_reason: SkipReason | None = None
     diagnostics: Diagnostics = field(default_factory=Diagnostics)
+
+    def reconcile_prompts(self) -> list[str] | None:
+        """Build LLM reconciliation prompts for all uncertain regions, or None if none exist."""
+        prompts = [
+            elem.reconcile_prompt()
+            for elem in self.elements
+            if isinstance(elem, UncertainElement)
+        ]
+        return prompts or None

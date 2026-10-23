@@ -10,7 +10,6 @@ from dataclasses import FrozenInstanceError
 import pytest
 
 from tomd.api import ConvertedPaper
-from tomd.domain import Confidence, Provenance
 from tomd.domain.diagnostics import (
     Diagnostics,
     GlyphPassStats,
@@ -21,12 +20,14 @@ from tomd.domain.elements import (
     BlockElement,
     Blockquote,
     CodeBlock,
+    Confidence,
     ElementKind,
     Heading,
     ImageElement,
     ListBlock,
     ListItem,
     Paragraph,
+    Provenance,
     ThematicBreak,
     UncertainElement,
     WordingBlock,
@@ -57,7 +58,6 @@ from tomd.domain.table import (
     TableStrategy,
     TextCell,
 )
-from tomd.lib.pdf.types import Confidence as PdfConfidence
 
 
 def test_span_primitives_and_immutability():
@@ -301,11 +301,11 @@ def test_block_elements_hierarchy():
     assert unc.context_before == "before text"
     assert unc.context_after == "after text"
     assert unc.provenance is None
+    assert "This region is on page 4." in unc.reconcile_prompt()
     assert isinstance(unc, BlockElement)
 
 
 def test_provenance_and_confidence():
-    assert Confidence is PdfConfidence
     assert Confidence.HIGH.value == "high"
     assert Confidence.MEDIUM.value == "medium"
     assert Confidence.LOW.value == "low"
@@ -355,6 +355,7 @@ def test_document_and_conversion_containers():
     assert not doc.is_skipped
     assert doc.skip_reason is None
     assert doc.diagnostics == Diagnostics()
+    assert doc.reconcile_prompts() is None
 
     skipped_doc = PaperDocument(
         paper_id="P0000R0",
