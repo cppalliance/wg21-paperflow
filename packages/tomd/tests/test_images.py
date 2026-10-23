@@ -25,10 +25,10 @@ import pytest
 
 from conftest import make_section
 
+from tomd.domain.diagnostics import VectorUncertaintyStats
+from tomd.domain.image import ExtractedImage
 from tomd.lib.pdf.emit import emit_markdown
 from tomd.lib.pdf.images import (
-    ExtractedImage,
-    VectorUncertaintyStats,
     _MAX_IMAGES_PER_PAPER,
     _PageImageCandidate,
     _VectorExtractionStats,

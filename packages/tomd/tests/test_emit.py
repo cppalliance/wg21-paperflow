@@ -830,7 +830,7 @@ def test_emit_markdown_renders_inserted_sub_caption_paragraph():
     sub-caption PARAGRAPH (lines=[], text=*...*) renders as the
     italic caption paragraph + a blank line + the italic sub-caption.
     No image syntax is emitted (#408)."""
-    from tomd.lib.pdf.images import ExtractedImage
+    from tomd.domain.image import ExtractedImage
     img = ExtractedImage(
         page=6, index_on_page=1, ext="png", bytes=b"",
         bbox=(86, 0, 506, 284),
@@ -867,7 +867,7 @@ def test_emit_markdown_image_caption_not_reemitted_when_body_kept():
     the IMAGE section must render as nothing - re-emitting the alt as
     italic would duplicate the caption that is still visible in the
     body."""
-    from tomd.lib.pdf.images import ExtractedImage
+    from tomd.domain.image import ExtractedImage
     img = ExtractedImage(
         page=4, index_on_page=1, ext="png", bytes=b"",
         bbox=(86, 0, 506, 284),

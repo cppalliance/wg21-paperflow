@@ -18,12 +18,13 @@ from .cleanup import escape_leading_atx, normalize_whitespace
 from .code_format import is_diagram_block, maybe_normalize_code_line
 from .code_grid import CodeGrid
 from .wording_emit import _render_wording_section
+from tomd.domain.diagnostics import GlyphPassStats, VectorUncertaintyStats
+
 from .glyphs import (
     GLYPH_PLACEHOLDER_MARKER_TEMPLATE,
     UNKNOWN_GLYPH,
-    GlyphPassStats,
 )
-from .images import TRUNCATION_MARKER_TEMPLATE, VectorUncertaintyStats
+from .images import TRUNCATION_MARKER_TEMPLATE
 from .types import Line, Span, Section, SectionKind, BULLET_CHARS, BULLET_RE, NUMBERED_LIST_RE, FALLBACK_FONT_SIZE
 from .vector_images import format_uncertainty_marker, should_emit_marker
 _log = logging.getLogger(__name__)

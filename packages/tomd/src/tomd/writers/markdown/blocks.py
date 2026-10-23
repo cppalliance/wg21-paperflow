@@ -310,6 +310,3 @@ def _write_image_element(_element: ImageElement) -> str:
 def _write_uncertain_element(element: UncertainElement) -> str:
     prompt_str = element.prompt.replace('"', '\\"')
     return f'<!-- tomd:uncertain prompt="{prompt_str}" -->\n{element.raw_content}'
-
-
-__all__ = ["strip_redundant_roles", "write_element"]

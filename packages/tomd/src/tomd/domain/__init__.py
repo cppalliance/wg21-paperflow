@@ -6,7 +6,12 @@ file LICENSE_1_0.txt or copy at http://www.boost.org/LICENSE_1_0.txt)
 Official repository: https://github.com/cppalliance/wg21-paperflow
 """
 
-from tomd.domain.document import ConvertedPaper, PaperDocument, SkipReason
+from tomd.domain.diagnostics import (
+    Diagnostics,
+    GlyphPassStats,
+    VectorUncertaintyStats,
+)
+from tomd.domain.document import PaperDocument, SkipReason
 from tomd.domain.elements import (
     BlockElement,
     Blockquote,
@@ -22,8 +27,9 @@ from tomd.domain.elements import (
     WordingBlock,
     WordingRole,
 )
-from tomd.domain.image import ExtractedImage
-from tomd.domain.metadata import FRONT_MATTER_ORDER, PaperMetadata
+from tomd.domain.image import ExtractedImage, ImageSource
+from tomd.domain.metadata import PaperMetadata
+from tomd.lib.metadata_yaml.format import FRONT_MATTER_ORDER
 from tomd.domain.span import (
     CodeSpan,
     ContainerSpan,
@@ -58,14 +64,16 @@ __all__ = [
     "CodeCell",
     "CodeSpan",
     "ContainerSpan",
-    "ConvertedPaper",
     "DeletedSpan",
+    "Diagnostics",
     "ElementKind",
     "EmphasisSpan",
     "ExtractedImage",
     "FRONT_MATTER_ORDER",
+    "GlyphPassStats",
     "Heading",
     "ImageElement",
+    "ImageSource",
     "InsertedSpan",
     "LineBreakSpan",
     "LinkSpan",
@@ -87,6 +95,7 @@ __all__ = [
     "TextSpan",
     "ThematicBreak",
     "UncertainElement",
+    "VectorUncertaintyStats",
     "WordingBlock",
     "WordingRole",
 ]

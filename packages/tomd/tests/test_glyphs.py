@@ -13,13 +13,13 @@ from pathlib import Path
 import pymupdf
 import re
 
+from tomd.domain.diagnostics import GlyphPassStats
 from tomd.lib.html import convert_html
 from tomd.lib.pdf.glyphs import (
     _GLYPH_COINCIDENT_TOLERANCE_PT as TOL,
     GLYPH_FONT_SENTINEL,
     UNKNOWN_GLYPH,
     GlyphCandidate,
-    GlyphPassStats,
     _is_emoji_presentation,
     collect_glyph_candidates,
     collect_text_emoji_bboxes,
