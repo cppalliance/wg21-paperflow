@@ -9,9 +9,10 @@ Official repository: https://github.com/cppalliance/wg21-paperflow
 from typing import Any
 
 from tomd.domain.document import PaperDocument
+from tomd.domain.elements import UncertainElement
 from tomd.lib.metadata_yaml.format import parse_front_matter
 from tomd.lib.shared import apply_strip_leading_h1, strip_freeform_metadata_lines
-from tomd.writers.markdown.blocks import RenderContext
+from tomd.writers.markdown.blocks import format_uncertain_element, write_element
 from tomd.writers.markdown.front_matter import write_front_matter
 from tomd.writers.markdown.normalizers import (
     normalize_front_matter,
@@ -36,14 +37,24 @@ class MarkdownWriter:
 
         # Branch 1: Structured AST Elements
         if document.elements:
+            blocks: list[str] = []
+            line_num = 1
+
             front = write_front_matter(mailing_meta)
-            ctx = RenderContext.from_front_matter(front)
-            blocks = [front] if front else []
-            blocks.extend(
-                rendered
-                for elem in document.elements
-                if (rendered := ctx.render_block(elem))
-            )
+            if front:
+                blocks.append(front)
+                line_num += front.count("\n") + 2
+
+            for elem in document.elements:
+                if isinstance(elem, UncertainElement):
+                    rendered = format_uncertain_element(elem, line_num)
+                else:
+                    rendered = write_element(elem)
+                    if not rendered.strip():
+                        continue
+                blocks.append(rendered)
+                line_num += rendered.count("\n") + 2
+
             return "\n\n".join(blocks).rstrip() + "\n"
 
         # Branch 2: Hybrid Body String (Adapter Fallback)

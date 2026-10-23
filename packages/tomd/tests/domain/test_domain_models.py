@@ -9,18 +9,19 @@ Official repository: https://github.com/cppalliance/wg21-paperflow
 from dataclasses import FrozenInstanceError
 import pytest
 
-from tomd.domain import Confidence, Provenance
 from tomd.domain.document import ConvertedPaper, PaperDocument, SkipReason
 from tomd.domain.elements import (
     BlockElement,
     Blockquote,
     CodeBlock,
+    Confidence,
     ElementKind,
     Heading,
     ImageElement,
     ListBlock,
     ListItem,
     Paragraph,
+    Provenance,
     ThematicBreak,
     UncertainElement,
     WordingBlock,
@@ -289,6 +290,7 @@ def test_block_elements_hierarchy():
     assert unc.context_before == "before text"
     assert unc.context_after == "after text"
     assert unc.provenance is None
+    assert "This region is on page 4." in unc.reconcile_prompt()
     assert isinstance(unc, BlockElement)
 
 
@@ -345,6 +347,7 @@ def test_document_and_conversion_containers():
     assert len(doc.elements) == 2
     assert not doc.is_skipped
     assert doc.skip_reason is None
+    assert doc.reconcile_prompts() is None
 
     skipped_doc = PaperDocument(
         paper_id="P0000R0",
