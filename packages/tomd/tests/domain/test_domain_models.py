@@ -14,12 +14,14 @@ from tomd.domain.elements import (
     BlockElement,
     Blockquote,
     CodeBlock,
+    Confidence,
     ElementKind,
     Heading,
     ImageElement,
     ListBlock,
     ListItem,
     Paragraph,
+    Provenance,
     ThematicBreak,
     UncertainElement,
     WordingBlock,
@@ -49,6 +51,7 @@ from tomd.domain.table import (
     TableStrategy,
     TextCell,
 )
+from tomd.lib.pdf.types import Confidence as PdfConfidence
 
 
 def test_span_primitives_and_immutability():
@@ -272,9 +275,41 @@ def test_block_elements_hierarchy():
     assert img.text == "Figure 1"
     assert isinstance(img, BlockElement)
 
-    unc = UncertainElement(prompt="Check table layout", raw_content="<div>raw</div>")
-    assert unc.prompt == "Check table layout"
+    unc = UncertainElement(
+        mupdf_text="mupdf version",
+        spatial_text="spatial version",
+        page=4,
+        text="mupdf version",
+        context_before="before text",
+        context_after="after text",
+    )
+    assert unc.mupdf_text == "mupdf version"
+    assert unc.spatial_text == "spatial version"
+    assert unc.page == 4
+    assert unc.text == "mupdf version"
+    assert unc.context_before == "before text"
+    assert unc.context_after == "after text"
+    assert unc.provenance is None
+    assert "This region is on page 4." in unc.reconcile_prompt()
     assert isinstance(unc, BlockElement)
+
+
+def test_provenance_and_confidence():
+    assert Confidence is PdfConfidence
+    assert Confidence.HIGH.value == "high"
+    assert Confidence.MEDIUM.value == "medium"
+    assert Confidence.LOW.value == "low"
+    assert Confidence.UNCERTAIN.value == "uncertain"
+
+    prov = Provenance(page=3, confidence=Confidence.MEDIUM)
+    assert prov.page == 3
+    assert prov.confidence == Confidence.MEDIUM
+    with pytest.raises(FrozenInstanceError):
+        prov.page = 5  # type: ignore[misc]
+
+    para = Paragraph(spans=[TextSpan("hello")], provenance=prov)
+    assert para.provenance == prov
+    assert Paragraph.from_text("default").provenance is None
 
 
 def test_list_item_text_includes_children():
@@ -312,6 +347,7 @@ def test_document_and_conversion_containers():
     assert len(doc.elements) == 2
     assert not doc.is_skipped
     assert doc.skip_reason is None
+    assert doc.reconcile_prompts() is None
 
     skipped_doc = PaperDocument(
         paper_id="P0000R0",
