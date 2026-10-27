@@ -17,7 +17,7 @@ output:
 
 # Paperweight
 
-Prose under this heading that no fence reads sends nothing to a model, so it needs no model binding. Globals defined in the fence below do not survive into any section, so it holds the model binding and nothing else. Sections pass data to each other only through the store (fences within one section share globals).
+Prose under this heading that no fence reads never reaches a model. The fence below only sets the default model, and its globals do not reach any section. Sections share data only through the store, and fences within one section share globals.
 
 ---
 
@@ -27,9 +27,9 @@ models.default("writer")
 
 ## Assess
 
-**Prologue.** Splits the paper, publishes the pieces and the criteria to the store, and hands the head of the paper to the triage turn. The fences of this section run in file order on one Lua VM: bare globals persist from one fence to the next, `local`s do not.
+**Prologue.** Splits the paper, writes the pieces and the criteria to the store, and passes the head of the paper to the triage turn. The fences of this section run in file order on one Lua VM. Bare globals stay set from one fence to the next, but `local`s do not.
 
-**Model binding and tunables.** `SAMPLES` must be odd. Units are H2 sections, so `SECTION_BUDGET` only bites on the rare oversized section; it must leave room in the context for the criterion text and the reply, since a unit is sent once per vote.
+**Model binding and tunables.** `SAMPLES` must be odd. Units are H2 sections, so `SECTION_BUDGET` only matters for the rare oversized section. It must leave room in the context for the criterion text and the reply, because a unit is sent once per vote.
 
 ---
 
@@ -40,7 +40,7 @@ SAMPLES = 3
 SECTION_BUDGET = 30000
 ```
 
-**Criteria.** Each criterion is graded in isolation, so every entry says what it is *not*, to stop it absorbing its neighbour. `label` is what a human ever sees; `short` is internal only and never reaches a prompt. Each criterion below is one fence calling `criterion(short, label, prose)`, with the criterion text as the Markdown directly above it. Where a criterion has guidance, a second fence calls `guidance(prose)` on the Markdown above that.
+**Criteria.** Each criterion is graded alone, so every entry says what it is *not*, to keep it from absorbing its neighbour. `label` is the name a human sees. `short` is internal and never reaches a prompt. Each criterion below is one fence calling `criterion(short, label, prose)`, and its text is the Markdown directly above the fence. Where a criterion has guidance, a second fence calls `guidance(prose)`, and the guidance text is the Markdown above that fence.
 
 ---
 
@@ -122,7 +122,7 @@ Grade on checkability. A `2` needs somewhere a reader could actually go and look
 guidance(prose)
 ```
 
-**Guidance header.** The line below is the header that goes above each criterion's guidance when it is published. It is read as `prose` in its own fence and joined to the guidance in the publish step.
+**Guidance header.** The line below is the header placed above each criterion's guidance when it is published. A fence reads it as `prose`, and the publish step joins it to the guidance.
 
 ---
 
@@ -132,16 +132,16 @@ Notes on applying this criterion. These do not change what the criterion says; t
 GUIDANCE_HEADER = prose
 ```
 
-**Sectioning.** One unit per H2 section, not per fixed-size window. A section is a coherent piece of argument with a heading that says what it is, so the grader can tell a wording annex from a motivation chapter; a 30,000-character window glued together from the tail of one section and the head of another cannot.
+**Sectioning.** One unit per H2 section, not per fixed-size window. A section is one coherent piece of argument under a heading that says what it is, so the grader can tell a wording annex from a motivation chapter. A 30,000-character window made from the end of one section and the start of another has no such heading.
 
-Across the 569 proposals in the store the median paper has 8 H2 sections (p25 5, p75 11) and the median section is 47 lines. Only 4% have fewer than two sections, against 70% that fit in a single fixed-size chunk. So corroboration across units, which needs two independent units, applies to 91% of papers by section and only 30% by chunk.
+Across the 569 proposals in the store the median paper has 8 H2 sections (p25 5, p75 11) and the median section is 47 lines. Only 4% have fewer than two sections, against 70% that fit in a single fixed-size chunk. Corroboration across units needs two independent units, so it applies to 91% of papers by section and only 30% by chunk.
 
-Everything before the first H2 becomes a front-matter unit, so the title and abstract are never dropped. A section larger than `SECTION_BUDGET` is split into parts, and EVERY part repeats the heading: a part that arrives without it is the contextless blob this design exists to avoid. Pure regex, so it cannot vary between runs.
+Everything before the first H2 becomes a front-matter unit, so the title and abstract are never dropped. A section larger than `SECTION_BUDGET` is split into parts, and every part repeats the heading. A part without it would be a blob with no context, which this design avoids. The split is pure regex, so it gives the same result on every run.
 
-**Line cleanup.** Two things happen to every line as the paper is read:
+**Line cleanup.** Every line gets two changes as the paper is read.
 
-- Embedded images arrive as single-line base64 data URIs, sometimes megabytes long. The line-granular splitter cannot split them and the backend rejects the oversized prompt. The alt text is kept and the payload dropped.
-- Papers in the store use CRLF, so the carriage return is stripped: it would otherwise ride along inside section headings and mangle any line the diagnostics print them on. Lua 5.4 makes the loop variable const, so the stripped line goes into a local rather than back into `line`.
+- Embedded images arrive as single-line base64 data URIs, sometimes megabytes long. The line-based splitter cannot split them, and the backend rejects the oversized prompt. The alt text is kept and the payload is dropped.
+- Papers in the store use CRLF, so the carriage return is stripped. Left in, it would appear inside section headings and break any diagnostics line that prints them. Lua 5.4 makes the loop variable const, so the stripped line goes into a local instead of back into `line`.
 
 ---
 
@@ -159,14 +159,14 @@ if #lines == 0 then
 end
 ```
 
-**Finding the section headings.** H2 is the house style and the first choice. But the store holds papers generated by several toolchains, and two of them defeat a bare `"^## "` test:
+**Finding the section headings.** H2 is the house style and the first choice. But the store holds papers generated by several toolchains, and two of them defeat a bare `"^## "` test.
 
-- Bikeshed output that numbers sections as bold paragraphs, e.g. `2. **Motivation and Scope**`, with H2 reserved for a few outer headings. P4021R2 has 23 numbered sections and only 16 H2s.
-- hackmd exports that emit no H2 at all, or bury the text behind an anchor link. P3248R5 came through as ONE unit covering the whole paper, so every criterion was graded off a single 300-line blob with no top2 to temper it, and its Changelog and Acknowledgements were never dropped as bookkeeping.
+- Bikeshed output numbers sections as bold paragraphs, e.g. `2. **Motivation and Scope**`, and reserves H2 for a few outer headings. P4021R2 has 23 numbered sections and only 16 H2s.
+- hackmd exports emit no H2 at all, or hide the text behind an anchor link. P3248R5 came through as one unit covering the whole paper. Every criterion was graded off a single 300-line blob, `top2` had only one unit to work with, and its Changelog and Acknowledgements were never dropped as bookkeeping.
 
-So try the styles in order of preference and take the first that carves the paper into a plausible number of pieces. The chosen style is reported in the diagnostics, because a paper that falls back is worth a second look.
+Try the styles in order of preference and take the first that splits the paper into a reasonable number of pieces. The chosen style is reported in the diagnostics, because a paper that falls back deserves a second look.
 
-H2 and the bold-numbered form are taken TOGETHER, because P4021R2 mixes them: 16 H2s and 23 bold-numbered sections, so choosing either alone loses the other. The bold pattern matches only a line that is nothing but a number and bold text, so the risk of a false heading is small. The remaining styles are fallbacks for papers that yield almost nothing from the first two.
+H2 and the bold-numbered form are taken together, because P4021R2 mixes them. It has 16 H2s and 23 bold-numbered sections, so using either alone loses the other. The bold pattern matches only a line that is nothing but a number and bold text, so a false heading is unlikely. The remaining styles are fallbacks for papers that yield almost nothing from the first two.
 
 ---
 
@@ -214,7 +214,7 @@ store.write("pg_heading_style.md",
     (#used > 0) and table.concat(used, " + ") or "none found")
 ```
 
-**Heading cleanup.** A heading may arrive wrapped in anchor markup, which otherwise defeats the bookkeeping test: hackmd writes `## [#Changelog](#Changelog)Changelog`, and `[#changelog](...` does not start with `changelog`, so the section is graded as argument. Strip the decoration and keep the words.
+**Heading cleanup.** A heading may arrive wrapped in anchor markup, which defeats the bookkeeping test. hackmd writes `## [#Changelog](#Changelog)Changelog`, and `[#changelog](...` does not start with `changelog`, so the section is graded as argument. This function strips the extra markup and keeps the words.
 
 ---
 
@@ -231,10 +231,10 @@ function clean_heading(raw)
 end
 ```
 
-**Blocks and units.** The blocks tile the file exactly: front matter, then one per section. Each unit repeats its heading at the top of every part, including parts two and beyond, which would otherwise arrive with no indication of where in the paper they come from. Inside the loop over blocks:
+**Blocks and units.** The blocks cover the file exactly, with front matter first and then one block per section. Each unit repeats its heading at the top of every part, including parts two and beyond, which would otherwise not say where in the paper they come from. Inside the loop over blocks:
 
 - The heading line itself is re-emitted by `add_unit`, so the loop skips it.
-- An oversized section is split on line boundaries. This is rare: the 99th percentile section in the store is 570 lines.
+- An oversized section is split on line boundaries. This is rare, since the 99th percentile section in the store is 570 lines.
 
 ---
 
@@ -309,7 +309,7 @@ if #chunks == 0 then
 end
 ```
 
-**Publish to the store.** The store is the only channel that crosses a section boundary, so the chunks, the criteria and the counts all go through it. The guidance header travels with the text so that a criterion carrying no guidance renders nothing at all rather than an empty heading. The last statement hands the head of the paper to the triage turn.
+**Publish to the store.** The store is the only channel that crosses a section boundary, so the chunks, the criteria and the counts all go through it. The guidance header is stored with the guidance text, so a criterion with no guidance produces nothing, not an empty heading. The last statement passes the head of the paper to the triage turn.
 
 ---
 
@@ -337,7 +337,7 @@ store.write("pg_counts.md", #chunks .. "," .. SAMPLES)
 var.paper_head = untrusted(chunks[1])
 ```
 
-**Epilogue.** Grades every criterion, aggregates in host code, and writes the verdict, the model-facing evidence and the host-facing diagnostics to the store. It recovers the state the prologue published from the store.
+**Epilogue.** Grades every criterion, aggregates in host code, and writes the verdict, the model-facing evidence and the host-facing diagnostics to the store. It reads back the state the prologue published to the store.
 
 ---
 
@@ -353,7 +353,7 @@ Answer with exactly one word: `PROPOSAL` or `NOT_PROPOSAL`. No explanation.
 reply = models.infer(prose)
 ```
 
-**Label bands.** Points are the sum of per-criterion grades (0, 1 or 2), so the maximum is twice the number of criteria. Edit these thresholds to move the label boundaries; nothing else in the pipeline decides the label.
+**Label bands.** Points are the sum of per-criterion grades (0, 1 or 2), so the maximum is twice the number of criteria. Edit these thresholds to move the label boundaries. Nothing else in the pipeline decides the label.
 
 ---
 
@@ -367,7 +367,7 @@ LABELS = {
 }
 ```
 
-**Text helpers.** `as_string` is a last-resort coercion. The fanout return value is a host object rather than a Lua string, so it has no string methods; it is only reached when a reply file is missing.
+**Text helpers.** `as_string` is a last-resort coercion. The fanout return value is a host object, not a Lua string, so it has no string methods. Only a missing reply file leads here.
 
 ---
 
@@ -393,9 +393,9 @@ function as_string(v)
 end
 ```
 
-**Label helpers.** A score one point from a band edge is a coin flip between two labels. `EDGE_WINDOW` says so on the verdict line rather than letting the label imply false precision.
+**Label helpers.** A score one point from a band edge could fall in either of two labels. `EDGE_WINDOW` says so on the verdict line, so the label does not suggest false precision.
 
-In `edge_note`, with fractional points the band boundary sits exactly at `LABELS[i].max`: `label_for` puts `p <= max` in the lower band and anything above it in the next one. A score within `EDGE_WINDOW` of that line could have fallen either way, so the note says which band it nearly landed in.
+In `edge_note`, with fractional points the band boundary sits exactly at `LABELS[i].max`. `label_for` puts `p <= max` in the lower band and anything above it in the next one. A score within `EDGE_WINDOW` of that line could have fallen either way, so the note names the other band, the one it was close to.
 
 ---
 
@@ -424,7 +424,7 @@ function edge_note(points)
 end
 ```
 
-**Recover the prologue's published state.** The section headings come back one per unit, so the diagnostics can say which part of the paper a vote came from instead of numbering anonymous windows.
+**Recover the prologue's published state.** The section headings come back one per unit, so the diagnostics can say which part of the paper a vote came from, instead of numbering anonymous windows.
 
 ---
 
@@ -455,7 +455,7 @@ nchunks, nsamples = tonumber(nchunks) or 1, tonumber(nsamples) or 1
 max_points = 2 * ncrit
 ```
 
-**Triage verdict** from this section's own model turn.
+**Triage verdict.** Read from this section's own model turn.
 
 ---
 
@@ -463,7 +463,7 @@ max_points = 2 * ncrit
 is_proposal = not (reply or ""):upper():find("NOT_PROPOSAL", 1, true)
 ```
 
-**One job per criterion, per chunk, per sample.** The job count depends only on the criteria and the size of the paper, never on how the paper happens to be sectioned.
+**One job per criterion, per chunk, per sample.** The job count depends only on the criteria and the size of the paper, never on how the paper is divided into sections.
 
 ---
 
@@ -485,7 +485,7 @@ if #jobs > 0 then
 end
 ```
 
-**Parse, validate, aggregate.** All arithmetic happens in host code: the model never sees a running total and never picks a label. This fence sets up the vote tables, and the next one fills them.
+**Parse, validate, aggregate.** All arithmetic happens in host code. The model never sees a running total and never picks a label. This fence sets up the vote tables, and the next one fills them.
 
 ---
 
@@ -503,12 +503,12 @@ for c = 1, ncrit do
 end
 ```
 
-Every validated quote goes into a pool with a count of how many independent passes found it. Which quotes reach the adjudicator decides all seven grades, and a single pass picks them erratically: two runs of this pipeline on the same paper differed only in which quotes surfaced, and the totals came out 12 and 8. Counting agreement across passes is what stops that.
+Every validated quote goes into a pool with a count of how many independent passes found it. Which quotes reach the adjudicator decides all seven grades, and a single pass picks them inconsistently. Two runs of this pipeline on the same paper differed only in which quotes were found, and the totals were 12 and 8. Counting agreement across passes prevents that.
 
 Inside the loop over jobs:
 
-- Each Grade arm writes its reply to the store, which is the only channel that reliably carries a plain string back here. The fanout return value is a host object with no string methods, so it is a fallback only.
-- A non-zero grade must be backed by text that actually occurs in the paper. This is the load-bearing check: it stops the paper's own annotations, or an invented paraphrase, from being scored as evidence.
+- Each Grade arm writes its reply to the store, which is the only channel that reliably returns a plain string here. The fanout return value is a host object with no string methods, so it is a fallback only.
+- A non-zero grade needs a quote that actually occurs in the paper. This stops the paper's own annotations, or an invented paraphrase, from scoring as evidence.
 
 ---
 
@@ -571,7 +571,7 @@ for i, job in ipairs(jobs) do
 end
 ```
 
-**Ranking.** Each pool is ranked by how many passes found the quote, ties broken by order of first appearance so the selection is reproducible, then the top few are kept.
+**Ranking.** Rank each pool by how many passes found the quote. Ties go to the quote that appeared first, so the selection is the same on every run. Keep the top few.
 
 ---
 
@@ -590,11 +590,11 @@ for c = 1, ncrit do
 end
 ```
 
-**Aggregate: median over samples, corroboration over chunks.** Within a chunk the samples are repeated measurements of one judgement, so the median is right: it discards a lone dissenting pass.
+**Aggregate: median over samples, corroboration over chunks.** Within a chunk the samples are repeated measurements of one judgement, so the median is right. It discards a lone dissenting pass.
 
-Across chunks, a plain max lets one chunk out of twenty carry a criterion, and with seven criteria and many chunks that is a lot of chances for a single false positive to score full marks. So full marks now need corroboration: at least `CORROBORATION` chunks independently reaching 2. One chunk reaching 2, or any chunk reaching 1, scores 1: the paper raised the point but only one part of it carried. Papers too short to have `CORROBORATION` chunks are exempt, since the rule cannot be met there.
+Across chunks, a plain max lets one chunk out of twenty decide a criterion's grade. With seven criteria and many chunks, a single false positive has many chances to score full marks. Full marks therefore need corroboration, meaning at least `CORROBORATION` chunks independently reaching 2. One chunk reaching 2, or any chunk reaching 1, scores 1. That grade means the paper raised the point but supported it in only one part. Papers too short to have `CORROBORATION` chunks are exempt, since the rule cannot be met there.
 
-Simulated against the ten calibration papers this moved bias from +2.43 to +0.93, mean absolute error from 3.03 to 1.73, and correlation with the three human reviewers from 0.70 to 0.87, which is above the reviewers' agreement with each other. Note the trade: unlike a max, this rule turns on a threshold, so a criterion sitting at exactly one firing chunk can flip between runs.
+Simulated against the ten calibration papers, this moved bias from +2.43 to +0.93 and mean absolute error from 3.03 to 1.73. It also moved correlation with the three human reviewers from 0.70 to 0.87, which is above the reviewers' agreement with each other. The trade-off is that, unlike a max, this rule depends on a threshold, so a criterion with exactly one firing chunk can change grade between runs.
 
 ---
 
@@ -610,16 +610,16 @@ end
 
 **Two levels of aggregation.**
 
-*Intra-section.* The three samples are repeated measurements of one judgement, so their MEAN is the section's grade. The median used to stand here and was lossy: it collapsed 2/2/0 and 2/2/2 both to 2, and 2/0/0 and 0/0/0 both to 0, discarding a distinction the samples had actually drawn. The mean keeps it, and it makes section grades continuous, which is what lets the rules below mean anything.
+*Intra-section.* The three samples are repeated measurements of one judgement, so their mean is the section's grade. The median used to be used here and lost information. It gave 2 for both 2/2/0 and 2/2/2, and 0 for both 2/0/0 and 0/0/0, discarding a difference the samples had actually shown. The mean keeps that difference and makes section grades continuous, which the rules below depend on.
 
-*Inter-section.* How a paper's sections combine depends on what the criterion claims.
+*Inter-section.* Sections combine in different ways, depending on what the criterion claims.
 
-- A criterion asserting that something EXISTS is settled by one qualifying section. A repository link is stated once and is no weaker for it. These take the max.
-- A criterion asserting EXTENT is not. A paper that situates itself against five alternatives has done more than one that names a single competitor. These accumulate.
+- A criterion asserting that something exists is satisfied by one qualifying section. A repository link is stated once and is no weaker for it. These take the max.
+- A criterion asserting extent is not satisfied that way. A paper that situates itself against five alternatives has done more than one that names a single competitor. These accumulate.
 
 Only `implementation` is classified as existence-asserting, through `BINARY`.
 
-Three accumulation variants are computed from the same section means so one run can be read every way. `INTER_RULE` picks which one the verdict uses; the others are reported beside it. `top2` is preferred on principle because it carries no free threshold: one strong section alone lands near 1, two land near 2, and it degrades smoothly in between.
+Three accumulation variants are computed from the same section means, so one run can be read every way. `INTER_RULE` picks which one the verdict uses, and the others are reported beside it. `top2` is preferred on principle because it has no free threshold. One strong section alone gives a grade near 1, two give a grade near 2, and the grade changes smoothly in between.
 
 ---
 
@@ -636,7 +636,7 @@ ACCUM_FULL = 4.0               -- summed section grades needed for full marks,
 BINARY = { implementation = true }
 ```
 
-**Section means and rules.** Every rule takes the list of per-section means for one criterion and returns a grade in `[0, 2]`. In `rule_grade`, the `"corroborated"` branch: full marks need `CORROBORATION` strong sections; a paper too short for the rule to be satisfiable is exempt and keeps its best section.
+**Section means and rules.** Every rule takes the list of per-section means for one criterion and returns a grade in `[0, 2]`. In `rule_grade`, the `"corroborated"` branch requires `CORROBORATION` strong sections for full marks. A paper too short for the rule to be satisfiable is exempt and keeps its best section.
 
 ---
 
@@ -676,7 +676,7 @@ function rule_grade(rule, means)
 end
 ```
 
-**Grader agreement, and what one grader would have given.** Diagnostic only: this reads the votes that have already been gathered and changes nothing about grading, so a run of this file is still comparable with every earlier v4 run. It answers two questions that otherwise need separate experiments: how often the three graders of a section agree, and what the verdict would have been with `SAMPLES = 1`.
+**Grader agreement, and what one grader would have given.** This block only reports. It reads the votes already gathered and changes no grade, so a run of this file stays comparable with every earlier v4 run. It answers two questions that would otherwise need separate experiments: how often the three graders of a section agree, and what the verdict would have been with `SAMPLES = 1`.
 
 ---
 
@@ -695,7 +695,7 @@ function total_from_sample(idx)
 end
 ```
 
-A split is one of three quite different things, and the triple says which: a lone dissenter finding something where the others found nothing (0/0/1), a lone dissenter finding nothing where the others found strong evidence (2/2/0), or genuine hesitancy at a grade boundary (1/2/2). Only the last is about the rubric; the first two are about whether a pass noticed a particular sentence.
+A split is one of three different things, and the triple says which. It can be a lone dissenter finding something the others missed (0/0/1), a lone dissenter missing strong evidence the others found (2/2/0), or doubt at a grade boundary (1/2/2). Only the last concerns the rubric. The first two concern whether a pass noticed a particular sentence.
 
 ---
 
@@ -725,7 +725,7 @@ end
 **Apply both levels.** In the loop:
 
 - Each section's grade is the mean of its samples (intra-section).
-- Across sections, existence-asserting criteria take the max, and the rest accumulate by whichever rule is in force.
+- Across sections, existence-asserting criteria take the max, and the rest accumulate by the rule `INTER_RULE` selects.
 
 ---
 
@@ -774,7 +774,7 @@ for c = 1, ncrit do
 end
 ```
 
-**Shared passages.** A passage offered as the best evidence for two different criteria is a warning sign, not two pieces of evidence. It is flagged for the adjudicator.
+**Shared passages.** A passage offered as the best evidence for two different criteria is suspect, and it is not two pieces of evidence. It is flagged for the adjudicator.
 
 ---
 
@@ -818,7 +818,7 @@ for c = 1, ncrit do
 end
 ```
 
-**Evidence: a record of what the first pass found.** Provisional grades are words, not numbers. Candidate quotes are numbered so the adjudicator can weigh them. Nothing internal appears here: no scale, no counts, no shorthand. Anything written here can be echoed into the report.
+**Evidence, a record of what the first pass found.** Provisional grades are words, not numbers. Candidate quotes are numbered so the adjudicator can weigh them. Nothing internal appears here, such as a scale, counts or shorthand. Anything written here can be copied into the report.
 
 ---
 
@@ -853,7 +853,7 @@ end
 store.write("evidence.md", table.concat(evidence, "\n"))
 ```
 
-**The verdict.** The grades from the first pass are the verdict. An adjudication turn used to sit here, re-judging each criterion with all the evidence in view. It was removed: across the ten calibration papers it turned a +2.53 bias into a -2.27 one and dropped correlation with the human reviewers from 0.68 to 0.53, because it saturated at grade 1 the way the first pass saturates at grade 2. Awarding 2 in only 10 of 70 judgements where the reviewers awarded it in 30, it damaged the strong papers worst.
+**The verdict.** The grades from the first pass are the verdict. An adjudication turn used to sit here, judging each criterion again with all the evidence in view. It was removed. Across the ten calibration papers it changed a +2.53 bias into a -2.27 one and lowered correlation with the human reviewers from 0.68 to 0.53. It gave grade 1 too often, the way the first pass gives grade 2 too often. It awarded 2 in only 10 of 70 judgements where the reviewers awarded it in 30, and it did the most damage to the strong papers.
 
 ---
 
@@ -863,13 +863,13 @@ for c = 1, ncrit do final[c] = scores[c] end
 final_points = points
 ```
 
-**The weight line.** The label carries the claim; the number is detail.
+**The weight line.** The label states the claim and the number adds detail.
 
-Measured over two full runs of the ten calibration papers, a rerun prints the same exact total 1 time in 10, the same integer 5 times in 10, the same band 9 times in 10. The run-to-run sigma of the total is 0.41 points, so "12.33" claims precision forty times finer than the measurement supports. Hence an integer, not a fraction: the exact value lives in `diagnostics.md`, where it is audit material rather than a headline a rerun can contradict.
+Over two full runs of the ten calibration papers, a rerun prints the same exact total 1 time in 10, the same integer 5 in 10 and the same band 9 in 10. The run-to-run sigma of the total is 0.41 points, so "12.33" claims precision forty times finer than the measurement supports. Hence the line shows an integer, not a fraction. The exact value is in `diagnostics.md`, which is audit material, not a main result a rerun can contradict.
 
-The label spans every band the three graders would have reached on their own. That costs one notch of stability against the bare band (8 of 10 runs reproduce it rather than 9) and buys two things: it says when the score sits on a boundary, and when it does move it moves by NARROWING to one of its own members: 10 of 10 pairs of runs are nested, never contradictory. A bare band gives no warning before flipping.
+The label covers every band the three graders would have reached on their own. That reduces stability by one step compared with the bare band (8 of 10 runs match it, against 9), and it gives two benefits. It says when the score is on a boundary, and when the label does change it narrows to one of its own members. 10 of 10 pairs of runs are nested, and none conflict. A bare band gives no warning before it changes.
 
-In `band_span`, the bands reached are every band reached by the three single-grader totals, plus the verdict's.
+`band_span` returns every band reached by the three single-grader totals, plus the verdict's band.
 
 ---
 
@@ -900,7 +900,7 @@ end
 store.write("weight.md", weight_line)
 ```
 
-**Findings: the ONLY file the prose turn sees.** Passages are shown only for criteria that scored above zero, so the prose cannot credit evidence the grades rejected.
+**Findings, the only file the prose turn sees.** Passages are shown only for criteria that scored above zero, so the prose cannot credit evidence the grades rejected.
 
 ---
 
@@ -929,7 +929,7 @@ end
 store.write("findings.md", table.concat(findings, "\n"))
 ```
 
-**Diagnostics.** Host-facing only, never interpolated into a prompt. The `## SUMMARY` block is the compact summary, and the `splits` lines are wrapped at a width that survives being pasted as plain text.
+**Diagnostics.** These are for the host only and never go into a prompt. The `## SUMMARY` block is the short summary, and the `splits` lines are wrapped at a width that stays readable when pasted as plain text.
 
 ---
 
@@ -1090,7 +1090,7 @@ models.use("writer", { temperature = 0.3 })
 var.findings = untrusted(store.read("findings.md"))
 ```
 
-**Epilogue.** The grades were settled before this turn ran, so all that is left is to wrap the prose in the verdict and attach diagnostics.
+**Epilogue.** The grades are fixed before this turn runs, so this turn only wraps the prose in the verdict and attaches diagnostics.
 
 ---
 
@@ -1130,7 +1130,7 @@ if not weight_line:find("%S") then
 end
 ```
 
-The diagnostics are still built in full and left in the store as `diagnostics.md`: per-section sample votes, section means, every candidate quote with its agreement count, the totals under all four inter-section rules, grader unanimity, the single-sample simulation and the split triples. They are simply not appended to the report. To get them out of a run, read `diagnostics.md` from the store, or restore the appendix below.
+The diagnostics are still built in full and left in the store as `diagnostics.md`. They hold per-section sample votes, section means, every candidate quote with its agreement count, the totals under all four inter-section rules, how often the graders agree, the single-sample simulation and the split triples. They are not added to the report. To get them out of a run, read `diagnostics.md` from the store, or restore the appendix below.
 
 ```
 local diag = read_or_empty("diagnostics.md")
