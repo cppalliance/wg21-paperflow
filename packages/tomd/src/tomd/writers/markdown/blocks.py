@@ -6,8 +6,6 @@ file LICENSE_1_0.txt or copy at http://www.boost.org/LICENSE_1_0.txt)
 Official repository: https://github.com/cppalliance/wg21-paperflow
 """
 
-from __future__ import annotations
-
 from collections.abc import Sequence
 from functools import singledispatch
 import re
@@ -21,6 +19,7 @@ from tomd.domain.elements import (
     ListBlock,
     ListItem,
     Paragraph,
+    RawBlock,
     ThematicBreak,
     UncertainElement,
     WordingBlock,
@@ -32,10 +31,13 @@ from tomd.domain.span import (
     TextSpan,
 )
 from tomd.domain.table import Table
-from tomd.lib.pdf.cleanup import escape_leading_atx, normalize_whitespace
-from tomd.lib.pdf.wording_emit import _escape_wording_text
+from tomd.lib.pdf.cleanup import normalize_whitespace
 from tomd.lib.wording_markup import wording_tag_open
 from tomd.lib.wording_policy import UNIFORM_ROLE_THRESHOLD, implicit_role_for
+from tomd.writers.markdown.escape import (
+    escape_leading_atx,
+    escape_wording_angle_brackets,
+)
 from tomd.writers.markdown.spans import write_spans
 from tomd.writers.markdown.tables import write_table
 
@@ -98,7 +100,7 @@ def _group_domain_wording_spans(spans: Sequence[Span]) -> list[tuple[str | None,
 def _write_wording_spans(spans: Sequence[Span]) -> str:
     parts: list[str] = []
     for role, seg_spans in _group_domain_wording_spans(spans):
-        rendered = write_spans([s.map_text(_escape_wording_text) for s in seg_spans])
+        rendered = write_spans([s.map_text(escape_wording_angle_brackets) for s in seg_spans])
         if role in ("ins", "del"):
             parts.append(_wrap_wording_tag(role, rendered))
         else:
@@ -261,7 +263,7 @@ def _write_heading(element: Heading) -> str:
 
 @write_element.register
 def _write_paragraph(element: Paragraph) -> str:
-    return write_spans(element.spans)
+    return escape_leading_atx(write_spans(element.spans))
 
 
 @write_element.register
@@ -310,3 +312,9 @@ def _write_image_element(_element: ImageElement) -> str:
 def _write_uncertain_element(element: UncertainElement) -> str:
     prompt_str = element.prompt.replace('"', '\\"')
     return f'<!-- tomd:uncertain prompt="{prompt_str}" -->\n{element.raw_content}'
+
+
+@write_element.register
+def _write_raw_block(element: RawBlock) -> str:
+    return element.markdown
+

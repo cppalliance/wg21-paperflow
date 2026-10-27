@@ -29,10 +29,14 @@ from __future__ import annotations
 from .. import DEFAULT_FENCE_LANG
 from ..wording_cleanup import strip_redundant_tags
 from ..wording_policy import UNIFORM_ROLE_THRESHOLD, implicit_role_for
-from .cleanup import escape_leading_atx, normalize_whitespace
+from .cleanup import normalize_whitespace
 from .code_format import normalize_code_line
 from .code_grid import CodeGrid
 from .types import Line, Span, Section
+from tomd.writers.markdown.escape import (
+    escape_leading_atx,
+    escape_wording_angle_brackets,
+)
 
 # Monospace fraction at or above which a wording section reads as code.
 _MONO_DOMINANT_THRESHOLD = 0.80
@@ -50,24 +54,6 @@ _CODE_PROMOTION_MIN_LINES = 2
 # that extraction split onto its own line, not real nesting. Such
 # lines are pinned to column zero instead of indented across the page.
 _MAX_CODE_DIFF_INDENT = 24
-
-
-def _escape_wording_text(text: str) -> str:
-    """HTML-escape literal (non-tag, non-backtick) text in a wording line.
-
-    Wording lines render inside a Pandoc fenced div where ``<ins>`` /
-    ``<del>`` are real HTML tags, so the surrounding content sits in an
-    HTML context. A literal ``<`` / ``>`` in the code (the ``<float>`` in
-    ``vec<float>``) is otherwise parsed as a stray HTML tag and silently
-    dropped by the renderer. Escaping makes those angle brackets render
-    literally. Backtick code spans are left untouched: the Markdown
-    renderer already escapes their contents, and escaping them here would
-    surface the raw entities. The ``<ins>`` / ``<del>`` tags themselves
-    are emitted around the escaped text, never through this helper.
-    """
-    return (text.replace("&", "&amp;")
-                .replace("<", "&lt;")
-                .replace(">", "&gt;"))
 
 
 def _group_wording_spans(line: Line) -> list[tuple[str | None, list[Span]]]:
@@ -133,7 +119,7 @@ def _role_tag(
     if normalize:
         inner = normalize_code_line(inner)
     if escape:
-        inner = _escape_wording_text(inner)
+        inner = escape_wording_angle_brackets(inner)
     return f"{lead}<{role}>{inner}</{role}>{trail}"
 
 
@@ -152,11 +138,11 @@ def _render_wording_line(line: Line) -> str:
         if role in ("ins", "del"):
             parts.append(_role_tag(role, spans))
         elif role is None:
-            parts.extend(_escape_wording_text(s.text) for s in spans)
+            parts.extend(escape_wording_angle_brackets(s.text) for s in spans)
         else:
             parts.append("".join(
                 f"`{s.text.strip()}`" if s.monospace and s.text.strip()
-                else _escape_wording_text(s.text)
+                else escape_wording_angle_brackets(s.text)
                 for s in spans
             ))
     return "".join(parts)

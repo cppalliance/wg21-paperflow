@@ -13,6 +13,7 @@ from ..wording_cleanup import strip_redundant_tags
 from ..wording_markup import wording_tag_open
 from .. import tables as _tables
 from ..pdf.code_format import is_diagram_block
+from tomd.writers.markdown.escape import escape_pipe_in_cell
 
 _BOLD_WRAP_RE = re.compile(r"^\*\*(.+)\*\*$")
 _LOSSY_TABLE_MARKER = "<!-- tomd:lossy-table -->"
@@ -1219,7 +1220,7 @@ def _denormalize_table(el: Tag) -> list[list[str]]:
             if col_idx >= max_cols:
                 break
 
-            text = _inline_text(cell).strip().replace("|", "\\|")
+            text = escape_pipe_in_cell(_inline_text(cell).strip())
             text = _COLLAPSE_WS_RE.sub(" ", text)
             try:
                 rs = int(cell.get("rowspan", 1))
@@ -1292,7 +1293,7 @@ def _render_table_flat(el: Tag) -> str:
                 continue
             seen.add(nid)
             text = _cell_own_text(node)
-            text = _COLLAPSE_WS_RE.sub(" ", text).strip().replace("|", "\\|")
+            text = escape_pipe_in_cell(_COLLAPSE_WS_RE.sub(" ", text).strip())
             current_row.append(text)
     if current_row:
         rows.append(current_row)
@@ -1456,7 +1457,7 @@ def _render_table(el: Tag) -> str | None:
             for td in tr.find_all(["th", "td"], recursive=False):
                 cell_text = _inline_text(td).strip()
                 cell_text = _COLLAPSE_WS_RE.sub(" ", cell_text)
-                cells.append(cell_text.replace("|", "\\|"))
+                cells.append(escape_pipe_in_cell(cell_text))
             if cells:
                 rows.append(cells)
 

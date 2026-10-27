@@ -34,6 +34,7 @@ class ElementKind(StrEnum):
     THEMATIC_BREAK = "thematic_break"
     IMAGE = "image"
     UNCERTAIN = "uncertain"
+    RAW = "raw"
 
 
 @dataclass
@@ -237,3 +238,16 @@ class UncertainElement(BlockElement):
     @property
     def text(self) -> str:
         return self.raw_content
+
+
+@dataclass
+class RawBlock(BlockElement):
+    """Temporary migration scaffolding block emitted verbatim until P28/P29."""
+
+    markdown: str
+    origin: str
+
+    @property
+    def text(self) -> str:
+        return self.markdown
+
