@@ -301,7 +301,7 @@ def test_block_elements_hierarchy():
     assert unc.context_before == "before text"
     assert unc.context_after == "after text"
     assert unc.provenance is None
-    assert "This region is on page 4." in unc.reconcile_prompt()
+    assert "This region is on page 4." in unc.get_reconciliation_prompt()
     assert isinstance(unc, BlockElement)
 
 
@@ -355,7 +355,7 @@ def test_document_and_conversion_containers():
     assert not doc.is_skipped
     assert doc.skip_reason is None
     assert doc.diagnostics == Diagnostics()
-    assert doc.reconcile_prompts() is None
+    assert doc.get_reconciliation_prompts() is None
 
     skipped_doc = PaperDocument(
         paper_id="P0000R0",
