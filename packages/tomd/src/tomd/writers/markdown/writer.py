@@ -14,6 +14,7 @@ from tomd.lib.metadata_yaml.format import parse_front_matter
 from tomd.lib.shared import apply_strip_leading_h1, strip_freeform_metadata_lines
 from tomd.writers.markdown.blocks import format_uncertain_element, write_element
 from tomd.writers.markdown.front_matter import write_front_matter
+from tomd.writers.markdown.markers import append_trailer_markers
 from tomd.writers.markdown.normalizers import (
     normalize_front_matter,
     strip_body_metadata_text,
@@ -24,12 +25,12 @@ from tomd.writers.markdown.normalizers import (
 class MarkdownWriter:
     """Canonical Markdown backend writer and normalizer for PaperDocument ASTs."""
 
-    def write(
+    def write_body(
         self,
         document: PaperDocument,
         meta: dict[str, Any] | None = None,
     ) -> str:
-        """Format a PaperDocument into canonical Markdown text."""
+        """Format a PaperDocument into canonical Markdown text without trailer markers."""
         if document.is_skipped:
             return ""
 
@@ -73,3 +74,18 @@ class MarkdownWriter:
 
         md = strip_toc(md)
         return md
+
+    def write(
+        self,
+        document: PaperDocument,
+        meta: dict[str, Any] | None = None,
+    ) -> str:
+        """Format a PaperDocument into canonical Markdown text."""
+        if document.is_skipped:
+            return ""
+
+        return append_trailer_markers(
+            self.write_body(document, meta=meta),
+            document.diagnostics,
+            kept_image_count=len(document.images),
+        )

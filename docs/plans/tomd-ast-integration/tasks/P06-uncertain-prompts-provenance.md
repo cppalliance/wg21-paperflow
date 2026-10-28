@@ -21,7 +21,7 @@ Previously, the AST domain (`tomd.domain`) and `MarkdownWriter` only had a place
 ## Approach
 
 1. **Block Provenance (`Confidence` and `Provenance` in `domain/elements.py`)**
-   - Define `Confidence` (`HIGH`, `MEDIUM`, `LOW`, `UNCERTAIN`) and `Provenance(page: int, confidence: Confidence)` directly in `tomd.domain.elements`, re-exported from `tomd.domain` and `tomd.lib.pdf.types` so `domain` never imports from `lib/pdf`.
+   - Define `Confidence` (`HIGH`, `MEDIUM`, `LOW`, `UNCERTAIN`) and `Provenance(page: int, confidence: Confidence)` directly in `tomd.domain.elements` (re-exported from `tomd.domain`), and update internal callers to import `Confidence` from `tomd.domain.elements` so `domain` never imports from `lib/pdf`.
    - Delete the separate `packages/tomd/src/tomd/domain/provenance.py` file.
    - Keep `provenance: Provenance | None = field(default=None, kw_only=True)` on `BlockElement`.
 

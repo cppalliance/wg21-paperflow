@@ -321,10 +321,3 @@ def format_uncertain_element(
 @write_element.register
 def _write_uncertain_element(element: UncertainElement) -> str:
     return format_uncertain_element(element)
-
-
-__all__ = [
-    "format_uncertain_element",
-    "strip_redundant_roles",
-    "write_element",
-]
