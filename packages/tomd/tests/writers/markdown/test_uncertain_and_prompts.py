@@ -80,41 +80,42 @@ def _sections_to_document(
     elements: list[BlockElement] = []
     for idx, sec in enumerate(sections):
         prov = Provenance(page=sec.page_num, confidence=sec.confidence)
-        if sec.kind == SectionKind.UNCERTAIN:
-            before = sections[idx - 1] if idx > 0 else None
-            after = sections[idx + 1] if idx + 1 < len(sections) else None
-            elements.append(
-                UncertainElement(
-                    mupdf_text=sec.mupdf_text,
-                    spatial_text=sec.spatial_text,
-                    page=sec.page_num,
-                    text=sec.text,
-                    context_before=(
-                        before.text[:200].strip()
-                        if before and before.kind != SectionKind.UNCERTAIN
-                        else ""
-                    ),
-                    context_after=(
-                        after.text[:200].strip()
-                        if after and after.kind != SectionKind.UNCERTAIN
-                        else ""
-                    ),
-                    provenance=prov,
+        match sec.kind:
+            case SectionKind.UNCERTAIN:
+                before = sections[idx - 1] if idx > 0 else None
+                after = sections[idx + 1] if idx + 1 < len(sections) else None
+                elements.append(
+                    UncertainElement(
+                        mupdf_text=sec.mupdf_text,
+                        spatial_text=sec.spatial_text,
+                        page=sec.page_num,
+                        text=sec.text,
+                        context_before=(
+                            before.text[:200].strip()
+                            if before and before.kind != SectionKind.UNCERTAIN
+                            else ""
+                        ),
+                        context_after=(
+                            after.text[:200].strip()
+                            if after and after.kind != SectionKind.UNCERTAIN
+                            else ""
+                        ),
+                        provenance=prov,
+                    )
                 )
-            )
-        elif sec.kind in (SectionKind.HEADING, SectionKind.TITLE):
-            level = 1 if sec.kind == SectionKind.TITLE else sec.heading_level
-            elements.append(Heading(level, [TextSpan(sec.text)], provenance=prov))
-        elif sec.kind == SectionKind.CODE:
-            elements.append(CodeBlock(code=sec.text, language=sec.fence_lang, provenance=prov))
-        elif sec.kind == SectionKind.IMAGE:
-            elements.append(ImageElement(caption="", alt="", provenance=prov))
-        elif sec.kind == SectionKind.LIST:
-            elements.append(ListBlock(items=[], provenance=prov))
-        elif sec.kind == SectionKind.WORDING:
-            elements.append(WordingBlock(children=[], provenance=prov))
-        else:
-            elements.append(Paragraph([TextSpan(sec.text)], provenance=prov))
+            case SectionKind.HEADING | SectionKind.TITLE:
+                level = 1 if sec.kind == SectionKind.TITLE else sec.heading_level
+                elements.append(Heading(level, [TextSpan(sec.text)], provenance=prov))
+            case SectionKind.CODE:
+                elements.append(CodeBlock(code=sec.text, language=sec.fence_lang, provenance=prov))
+            case SectionKind.IMAGE:
+                elements.append(ImageElement(caption="", alt="", provenance=prov))
+            case SectionKind.LIST:
+                elements.append(ListBlock(items=[], provenance=prov))
+            case SectionKind.WORDING:
+                elements.append(WordingBlock(children=[], provenance=prov))
+            case _:
+                elements.append(Paragraph([TextSpan(sec.text)], provenance=prov))
 
     return PaperDocument(
         paper_id="P0000R0",
@@ -130,7 +131,7 @@ def _assert_twin_parity(
     metadata = meta or {}
     doc = _sections_to_document(sections, metadata)
     actual_md = MarkdownWriter().write(doc)
-    actual_prompts = doc.reconcile_prompts()
+    actual_prompts = doc.get_reconciliation_prompts()
     assert actual_md == emit_markdown(metadata, sections)
     assert actual_prompts == emit_prompts(sections)
     return actual_md, actual_prompts

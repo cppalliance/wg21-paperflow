@@ -12,16 +12,17 @@ file LICENSE_1_0.txt or copy at http://www.boost.org/LICENSE_1_0.txt)
 
 Official repository: https://github.com/cppalliance/wg21-paperflow
 """
-from dataclasses import dataclass, field, replace
-from enum import Enum, StrEnum
+from dataclasses import asdict, dataclass, field, replace
+from enum import StrEnum
 from typing import Literal, Self
 
 from tomd.domain.span import Span, TextSpan
+from tomd.prompts import render_prompt
 
 WordingRole = Literal["wording", "wording-add", "wording-remove"]
 
 
-class Confidence(Enum):
+class Confidence(StrEnum):
     """Confidence level for structural classification decisions."""
 
     HIGH = "high"
@@ -253,46 +254,13 @@ class UncertainElement(BlockElement):
     mupdf_text: str
     spatial_text: str
     page: int
+    # Body text emitted under the uncertain marker in Markdown (starts as
+    # mupdf_text, potentially trimmed by downstream passes such as abstract
+    # extraction); also used as a fallback if either extraction is empty.
     text: str = ""
     context_before: str = ""
     context_after: str = ""
 
-    def reconcile_prompt(self) -> str:
+    def get_reconciliation_prompt(self) -> str:
         """Build the self-contained LLM reconciliation prompt for this region."""
-        parts: list[str] = [
-            "You are reconciling text extracted from a PDF using two independent "
-            "methods that produced different results. Reconcile them into clean "
-            "Markdown.",
-            "",
-            "CRITICAL: Keep ALL data verbatim. Do not summarize, omit, or paraphrase "
-            "any text. Every word from the source must appear in your output. You are "
-            "only fixing structure (paragraphs, headings, lists, formatting) - never "
-            "content.",
-            "",
-            f"This region is on page {self.page}.",
-            "",
-        ]
-        if self.context_before:
-            parts.extend((
-                "Context (preceding confident section):",
-                f"> {self.context_before}",
-                "",
-            ))
-        parts.extend((
-            "MuPDF extraction:",
-            "```",
-            self.mupdf_text or self.text,
-            "```",
-            "",
-            "Spatial extraction:",
-            "```",
-            self.spatial_text or self.text,
-            "```",
-        ))
-        if self.context_after:
-            parts.extend((
-                "",
-                "Context (following confident section):",
-                f"> {self.context_after}",
-            ))
-        return "\n".join(parts)
+        return render_prompt("uncertain_element.md.j2", **asdict(self))

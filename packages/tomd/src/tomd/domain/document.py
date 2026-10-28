@@ -37,10 +37,10 @@ class PaperDocument:
     skip_reason: SkipReason | None = None
     diagnostics: Diagnostics = field(default_factory=Diagnostics)
 
-    def reconcile_prompts(self) -> list[str] | None:
+    def get_reconciliation_prompts(self) -> list[str] | None:
         """Build LLM reconciliation prompts for all uncertain regions, or None if none exist."""
         prompts = [
-            elem.reconcile_prompt()
+            elem.get_reconciliation_prompt()
             for elem in self.elements
             if isinstance(elem, UncertainElement)
         ]
