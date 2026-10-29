@@ -16,12 +16,12 @@ from tomd.domain.diagnostics import (
     VectorUncertaintyStats,
 )
 from tomd.domain.document import PaperDocument
-from tomd.domain.elements import Paragraph
+from tomd.domain.elements import Confidence, Paragraph
 from tomd.domain.image import ExtractedImage
 from tomd.domain.metadata import PaperMetadata
 from tomd.lib.pdf.emit import emit_markdown
 from tomd.lib.pdf.glyphs import UNKNOWN_GLYPH
-from tomd.lib.pdf.types import Confidence, Line, Section, SectionKind, Span as PdfSpan
+from tomd.lib.pdf.types import Line, Section, SectionKind, Span as PdfSpan
 from tomd.writers.markdown import MarkdownWriter, append_trailer_markers
 
 _META_DICT = {"title": "Marker Twin Test", "document": "P9999R0"}

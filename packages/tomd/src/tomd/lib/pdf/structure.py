@@ -14,12 +14,13 @@ from .. import (
 )
 # `drop_leaked_toc_entries` reuses toc.py's TOC-recognition helpers so the
 # two "what is a TOC" definitions stay a single source of truth (see #122).
+from tomd.domain.elements import Confidence
 from ..toc import MIN_TOC_RUN, is_toc_label, normalize_toc_entry
 from .cleanup import collect_hyphen_evidence, dehyphenate_pair
 from .glyphs import GLYPH_FONT_SENTINEL, UNKNOWN_GLYPH
 from .wording import is_foreign_chromatic
 from .types import (
-    Block, Line, Span, Section, SectionKind, Confidence,
+    Block, Line, Span, Section, SectionKind,
     FigureRegion,
     SIMILARITY_THRESHOLD, TERMINAL_PUNCTUATION, FALLBACK_BODY_SIZE,
     MIN_UNCERTAIN_WORDS, compute_bbox,

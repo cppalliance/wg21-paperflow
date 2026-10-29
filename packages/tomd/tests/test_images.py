@@ -26,6 +26,7 @@ import pytest
 from conftest import make_section
 
 from tomd.domain.diagnostics import VectorUncertaintyStats
+from tomd.domain.elements import Confidence
 from tomd.domain.image import ExtractedImage
 from tomd.lib.pdf.emit import emit_markdown
 from tomd.lib.pdf.images import (
@@ -46,7 +47,6 @@ from tomd.lib.pdf.pipeline import (
 from tomd.lib.pdf.structure import structure_sections
 from tomd.lib.pdf.types import (
     Block,
-    Confidence,
     Line,
     Section,
     SectionKind,
@@ -3896,7 +3896,7 @@ def _apply_threading_and_insertion(
     objects.
     """
     from dataclasses import replace as _replace
-    from tomd.lib.pdf.emit import _escape_italic_text
+    from tomd.writers.markdown.escape import escape_italic_wrapper
 
     new_sections: list[Section] = []
     for sec in sections:
@@ -3911,7 +3911,7 @@ def _apply_threading_and_insertion(
                     kind=SectionKind.PARAGRAPH,
                     text=(
                         "*"
-                        + _escape_italic_text(unwrapped)
+                        + escape_italic_wrapper(unwrapped)
                         + "*"
                     ),
                     confidence=Confidence.MEDIUM,

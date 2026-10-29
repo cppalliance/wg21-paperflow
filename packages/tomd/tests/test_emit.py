@@ -1,7 +1,8 @@
 """Tests for lib.pdf.emit."""
 
 from conftest import make_section, make_line, make_span
-from tomd.lib.pdf.types import SectionKind, Confidence, Section, Span, Line
+from tomd.domain.elements import Confidence
+from tomd.lib.pdf.types import SectionKind, Section, Span, Line
 from tomd.lib.pdf.emit import (
     _emdash_bullet_items,
     emit_markdown,
@@ -800,7 +801,7 @@ class TestSanitizeMetadata:
 # bypassing _render_line_spans so the *...* wrapper survives.
 
 
-from tomd.lib.pdf.emit import _render_paragraph_spans, _escape_italic_text
+from tomd.lib.pdf.emit import _render_paragraph_spans
 from tomd.lib.pdf.types import Section
 
 
@@ -888,57 +889,6 @@ def test_emit_markdown_image_caption_not_reemitted_when_body_kept():
     # The caption appears exactly once, from the kept body section.
     assert md.count("Figure 1: Expected memory layout") == 1
     assert "*Figure 1: Expected memory layout*" not in md
-
-
-# -- _escape_italic_text: markdown-escape correctness ---------------
-
-
-def test_escape_italic_text_escapes_asterisk():
-    assert _escape_italic_text("a * b") == r"a \* b"
-
-
-def test_escape_italic_text_escapes_underscore():
-    assert _escape_italic_text("foo_bar") == r"foo\_bar"
-
-
-def test_escape_italic_text_escapes_backtick():
-    assert _escape_italic_text("code `x` here") == r"code \`x\` here"
-
-
-def test_escape_italic_text_escapes_backslash():
-    assert _escape_italic_text("path\\to\\file") == r"path\\to\\file"
-
-
-def test_escape_italic_text_escapes_leading_list_marker():
-    assert _escape_italic_text("- a list looking line") == r"\- a list looking line"
-    # Asterisks are escaped first; the leading-block branch only adds
-    # a backslash for "-", "+", ">", "#". The escaped "*" is no longer
-    # parsed as a list marker.
-    assert _escape_italic_text("* asterisk first") == r"\* asterisk first"
-    assert _escape_italic_text("+ plus first") == r"\+ plus first"
-
-
-def test_escape_italic_text_escapes_leading_blockquote():
-    assert _escape_italic_text("> quoted thing") == r"\> quoted thing"
-
-
-def test_escape_italic_text_escapes_leading_heading():
-    assert _escape_italic_text("# heading-shaped") == r"\# heading-shaped"
-
-
-def test_escape_italic_text_escapes_leading_ordered_list():
-    """`1.` at the start would parse as an ordered list marker - the
-    period must be escaped so the paragraph stays a paragraph."""
-    assert _escape_italic_text("1. first item") == r"1\. first item"
-    assert _escape_italic_text("42. answer") == r"42\. answer"
-
-
-def test_escape_italic_text_passes_plain_text():
-    assert _escape_italic_text("plain caption text") == "plain caption text"
-
-
-def test_escape_italic_text_handles_empty():
-    assert _escape_italic_text("") == ""
 
 
 _CHAR_W = 6.0

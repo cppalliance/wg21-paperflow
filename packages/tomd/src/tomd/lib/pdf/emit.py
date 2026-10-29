@@ -14,7 +14,12 @@ from .. import (
 )
 from .. import tables as _tables
 from ..shared import _find_front_matter_end
-from .cleanup import escape_leading_atx, normalize_whitespace
+from tomd.writers.markdown.escape import (
+    escape_italic_wrapper,
+    escape_leading_atx,
+    escape_pipe_in_cell,
+)
+from .cleanup import normalize_whitespace
 from .code_format import is_diagram_block, maybe_normalize_code_line
 from .code_grid import CodeGrid
 from .wording_emit import _render_wording_section
@@ -764,7 +769,7 @@ def _render_cell_spans(spans: list, suppress_bold: bool = False) -> str:
             return f"`{merged}`"
     line = Line(spans=flat_spans)
     result = _render_line_spans(line, suppress_bold=suppress_bold).strip()
-    return result.replace("|", "\\|")
+    return escape_pipe_in_cell(result)
 
 
 def _spans_to_code_lines(spans: list) -> str:
@@ -1007,44 +1012,6 @@ def _render_table(sec: Section) -> str:
     return "\n".join(lines)
 
 
-_ITALIC_INLINE_ESCAPE_RE = re.compile(r"([\\*_`])")
-# Leading characters that would otherwise be parsed as a list marker,
-# blockquote, ATX heading, or ordered-list start. The synthesised
-# sub-caption paragraph (text == "*...*") would be misclassified if any
-# of these appears at column 0 inside the italics wrapper.
-_LEADING_BLOCK_CHARS = ("-", "*", "+", ">", "#")
-_LEADING_ORDERED_RE = re.compile(r"^(\d+)\.")
-
-
-def _escape_italic_text(text: str) -> str:
-    """Escape characters that would break a ``*...*`` italic wrapper.
-
-    Used by the sub-caption insertion path in the pipeline (sub-caption
-    PARAGRAPH sections are emitted as ``*<escaped>*``). Escapes:
-
-    - ``\\`` so a trailing backslash doesn't eat the closing ``*``.
-    - ``*``, ``_``, and backticks so they don't terminate the wrapper
-      or open a code span.
-    - A leading list/quote/heading character so the paragraph doesn't
-      render as a list item, blockquote, or heading once the italics
-      wrapper is in place.
-    """
-    escaped = _ITALIC_INLINE_ESCAPE_RE.sub(r"\\\1", text)
-    if not escaped:
-        return escaped
-    if escaped[0] in _LEADING_BLOCK_CHARS:
-        # The first character has already been backslash-escaped if it
-        # was ``*``; the other leading-block characters need their own
-        # leading backslash.
-        if escaped[0] != "\\":
-            escaped = "\\" + escaped
-    else:
-        m = _LEADING_ORDERED_RE.match(escaped)
-        if m:
-            escaped = escaped[:m.end() - 1] + "\\." + escaped[m.end():]
-    return escaped
-
-
 def _render_image(sec: Section) -> str:
     """Render a :class:`SectionKind.IMAGE` section as its caption text.
 
@@ -1066,7 +1033,7 @@ def _render_image(sec: Section) -> str:
     alt = sec.image_ref.suggested_alt
     if not alt or not sec.image_ref.caption_body_dropped:
         return ""
-    return "*" + _escape_italic_text(alt) + "*"
+    return "*" + escape_italic_wrapper(alt) + "*"
 
 
 def _render_section_md(sec: Section) -> str:
@@ -1124,7 +1091,7 @@ def _section_min_x0(sec: Section) -> float:
     return min(x0s) if x0s else 0.0
 
 
-def _assign_emdash_nesting(sections: list[Section]) -> None:
+def assign_emdash_nesting(sections: list[Section]) -> None:
     """Pre-pass: set indent_level on consecutive em-dash bullet sections.
 
     Groups of adjacent em-dash PARAGRAPH sections are identified.
@@ -1157,6 +1124,34 @@ def _assign_emdash_nesting(sections: list[Section]) -> None:
                 ) + 1
         for sec, x0 in zip(group, x0s):
             sec.indent_level = level_map.get(x0, 0)
+
+
+def fold_table_continuations(sections: list[Section]) -> list[Section]:
+    """Pre-pass: fold cross-page table continuations into the preceding table.
+
+    The detection layer marks the continuation with table_continuation=True
+    and has already stripped its duplicate header row.
+    """
+    folded: set[int] = set()
+    for i in range(len(sections) - 1, 0, -1):
+        sec = sections[i]
+        if (sec.kind == SectionKind.TABLE
+                and sec.table_continuation
+                and sec.columns):
+            for j in range(i - 1, -1, -1):
+                prev = sections[j]
+                if prev.kind == SectionKind.TABLE and prev.columns:
+                    prev.columns.extend(sec.columns)
+                    prev.text = "\n".join(
+                        " | ".join(
+                            "".join(s.text for s in cell).strip()
+                            for cell in row)
+                        for row in prev.columns)
+                    folded.add(i)
+                    break
+    if folded:
+        sections[:] = [s for i, s in enumerate(sections) if i not in folded]
+    return sections
 
 
 def _annotate_wrap(rendered: str, sec: Section) -> str:
@@ -1213,34 +1208,8 @@ def emit_markdown(
     ``placeholders`` count is taken from the finished body (after
     duplicate-paragraph collapse) so it matches a grep of the output.
     """
-    _assign_emdash_nesting(sections)
-
-    # Pre-pass: fold cross-page table continuations into the preceding
-    # table so they render as a single HTML/pipe table.  The detection
-    # layer marks the continuation with table_continuation=True and has
-    # already stripped its duplicate header row.
-    folded: set[int] = set()
-    for i in range(len(sections) - 1, 0, -1):
-        sec = sections[i]
-        if (sec.kind == SectionKind.TABLE
-                and getattr(sec, "table_continuation", False)
-                and sec.columns):
-            # Walk backwards to find the preceding TABLE section
-            # (skipping any interleaved non-table sections like page
-            # numbers or headings that the pipeline may have inserted).
-            for j in range(i - 1, -1, -1):
-                prev = sections[j]
-                if prev.kind == SectionKind.TABLE and prev.columns:
-                    prev.columns.extend(sec.columns)
-                    prev.text = "\n".join(
-                        " | ".join(
-                            "".join(s.text for s in cell).strip()
-                            for cell in row)
-                        for row in prev.columns)
-                    folded.add(i)
-                    break
-    if folded:
-        sections = [s for i, s in enumerate(sections) if i not in folded]
+    assign_emdash_nesting(sections)
+    sections = fold_table_continuations(sections)
 
     parts: list[str] = []
 

@@ -18,6 +18,7 @@ from .cleanup import (
 )
 from tomd.domain.diagnostics import GlyphPassStats, VectorUncertaintyStats
 from tomd.domain.document import SkipReason
+from tomd.domain.elements import Confidence
 from tomd.domain.image import ExtractedImage
 
 from .extract import extract_mupdf, extract_spatial, collect_links, attach_links
@@ -57,9 +58,14 @@ from .table import (
     _filter_phantom_mupdf_tables, _cluster_x_positions,
 )
 from .wg21 import extract_metadata_from_blocks
-from .emit import emit_markdown, emit_prompts, _escape_italic_text
+from tomd.writers.markdown.escape import escape_italic_wrapper
+from .emit import (
+    assign_emdash_nesting,
+    emit_markdown,
+    emit_prompts,
+    fold_table_continuations,
+)
 from .types import (
-    Confidence,
     KNOWN_SECTIONS,
     Section,
     SectionKind,
@@ -2349,7 +2355,7 @@ def run_pipeline(
                         new_sections.append(
                             Section(
                                 kind=SectionKind.PARAGRAPH,
-                                text=("*" + _escape_italic_text(unwrapped) + "*"),
+                                text=("*" + escape_italic_wrapper(unwrapped) + "*"),
                                 confidence=Confidence.MEDIUM,
                                 page_num=sec.page_num,
                             )
@@ -2661,6 +2667,8 @@ def run_pipeline(
     # duplicate headings and title-like paragraph/list entries, plus the
     # non-recurring stragglers (front-region only) that fragment the block.
     sections = drop_leaked_toc_entries(sections)
+    assign_emdash_nesting(sections)
+    sections = fold_table_continuations(sections)
 
     md = emit_markdown(
         metadata,

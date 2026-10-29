@@ -21,6 +21,23 @@ from tomd.domain.span import Span, TextSpan
 WordingRole = Literal["wording", "wording-add", "wording-remove"]
 
 
+class Confidence(StrEnum):
+    """Confidence level for structural classification decisions."""
+
+    HIGH = "high"
+    MEDIUM = "medium"
+    LOW = "low"
+    UNCERTAIN = "uncertain"
+
+
+@dataclass(frozen=True)
+class Provenance:
+    """Source page and confidence metadata for a block element."""
+
+    page: int
+    confidence: Confidence
+
+
 class ElementKind(StrEnum):
     """Enumeration of block element kinds."""
 
@@ -34,11 +51,14 @@ class ElementKind(StrEnum):
     THEMATIC_BREAK = "thematic_break"
     IMAGE = "image"
     UNCERTAIN = "uncertain"
+    RAW = "raw"
 
 
 @dataclass
 class BlockElement:
     """Base class for all document-level block AST nodes."""
+
+    provenance: Provenance | None = field(default=None, kw_only=True)
 
     @property
     def text(self) -> str:
@@ -229,11 +249,64 @@ class ImageElement(BlockElement):
 
 @dataclass
 class UncertainElement(BlockElement):
-    """Flagged block with conversion uncertainty or reviewer prompt."""
+    """Region where dual-path PDF extraction disagreed."""
 
-    prompt: str
-    raw_content: str = ""
+    mupdf_text: str
+    spatial_text: str
+    page: int
+    # Emitted Markdown text for the region (the MuPDF extraction).
+    text: str = ""
+    context_before: str = ""
+    context_after: str = ""
+
+    def reconcile_prompt(self) -> str:
+        """Build the self-contained LLM reconciliation prompt for this region."""
+        parts: list[str] = [
+            "You are reconciling text extracted from a PDF using two independent "
+            "methods that produced different results. Reconcile them into clean "
+            "Markdown.",
+            "",
+            "CRITICAL: Keep ALL data verbatim. Do not summarize, omit, or paraphrase "
+            "any text. Every word from the source must appear in your output. You are "
+            "only fixing structure (paragraphs, headings, lists, formatting) - never "
+            "content.",
+            "",
+            f"This region is on page {self.page}.",
+            "",
+        ]
+        if self.context_before:
+            parts.extend((
+                "Context (preceding confident section):",
+                f"> {self.context_before}",
+                "",
+            ))
+        parts.extend((
+            "MuPDF extraction:",
+            "```",
+            self.mupdf_text or self.text,
+            "```",
+            "",
+            "Spatial extraction:",
+            "```",
+            self.spatial_text or self.text,
+            "```",
+        ))
+        if self.context_after:
+            parts.extend((
+                "",
+                "Context (following confident section):",
+                f"> {self.context_after}",
+            ))
+        return "\n".join(parts)
+
+
+@dataclass
+class RawBlock(BlockElement):
+    """Temporary pre-rendered Markdown block used as migration scaffolding until P28/P29."""
+
+    markdown: str
+    origin: str
 
     @property
     def text(self) -> str:
-        return self.raw_content
+        return self.markdown
