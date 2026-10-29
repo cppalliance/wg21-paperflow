@@ -1,4 +1,4 @@
-//! The `promptforge-cli` command: see the `paperweight` library crate.
+//! The `runvil-cli` command: see the `paperweight` library crate.
 
 use std::process::ExitCode;
 

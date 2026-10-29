@@ -8,16 +8,16 @@ Official repository: https://github.com/cppalliance/wg21-paperflow
 
 from tomd.domain.span import (
     CodeSpan,
+    DeletedSpan,
     EmphasisSpan,
+    InsertedSpan,
     LineBreakSpan,
     LinkSpan,
     Span,
-    StrikethroughSpan,
     StrongSpan,
     SubscriptSpan,
     SuperscriptSpan,
     TextSpan,
-    UnderlineSpan,
 )
 from tomd.writers.markdown.spans import write_span, write_spans
 
@@ -32,8 +32,8 @@ def test_write_span_primitives():
 def test_write_span_formatting():
     assert write_span(StrongSpan.from_text("bold")) == "**bold**"
     assert write_span(EmphasisSpan.from_text("italic")) == "*italic*"
-    assert write_span(StrikethroughSpan.from_text("deleted")) == "<del>deleted</del>"
-    assert write_span(UnderlineSpan.from_text("inserted")) == "<ins>inserted</ins>"
+    assert write_span(DeletedSpan.from_text("deleted")) == "<del>deleted</del>"
+    assert write_span(InsertedSpan.from_text("inserted")) == "<ins>inserted</ins>"
     assert write_span(SubscriptSpan.from_text("2")) == "<sub>2</sub>"
     assert write_span(SuperscriptSpan.from_text("3")) == "<sup>3</sup>"
     assert write_span(LinkSpan.from_text("link", "https://example.com")) == "[link](https://example.com)"

@@ -48,7 +48,7 @@ Set `WG21_DATA_DIR` to point to your workspace directory.
 ### Run paperweight locally
 
 `paperweight` (in `crates/`) runs the paperweight prompt against one paper
-through a [promptforge](https://github.com/cppalliance/promptforge) gateway.
+through a [runvil](https://github.com/cppalliance/runvil) gateway.
 It needs no Docker, only a gateway to talk to.
 
 Get the binary in one of two ways:
@@ -56,8 +56,8 @@ Get the binary in one of two ways:
 - Download `paperweight-<tag>-x86_64-unknown-linux-gnu.tar.gz` from a paperflow
   release (x86_64 Linux only).
 - Build it. Install [rustup](https://rustup.rs/); the toolchain pinned in
-  `rust-toolchain.toml` installs itself on first use. promptforge is vendored
-  as the `vendor/promptforge` submodule:
+  `rust-toolchain.toml` installs itself on first use. runvil is vendored
+  as the `vendor/runvil` submodule:
 
   ```bash
   git submodule update --init
@@ -67,12 +67,12 @@ Get the binary in one of two ways:
 Point it at a gateway and run it on a paper:
 
 ```bash
-export PROMPTFORGE_GATEWAY_URL=http://127.0.0.1:8085
-export PROMPTFORGE_GATEWAY_API_KEY=...       # the gateway's server.api_key
+export RUNVIL_GATEWAY_URL=http://127.0.0.1:8085
+export RUNVIL_GATEWAY_API_KEY=...       # the gateway's server.api_key
 paperweight --file paper.md                    # or: paperweight P4003R2
 ```
 
-- The gateway can be one you run yourself (the promptforge release
+- The gateway can be one you run yourself (the runvil release
   installer's Gateway component) or a shared one reached over an SSH tunnel,
   for example `ssh -L 8085:127.0.0.1:8085 <user>@stage.wg21.org`.
 - A paper number is looked up in the paper store under `WG21_DATA_DIR`;
@@ -83,9 +83,9 @@ paperweight --file paper.md                    # or: paperweight P4003R2
   `Weight:`.
 - `paperweight --help` lists the rest.
 
-To move promptforge, check out the new commit inside `vendor/promptforge`,
+To move runvil, check out the new commit inside `vendor/runvil`,
 fix the crate against it, and commit both in one PR. The pin must not be
-newer than the promptforge commit the deployed gateway runs.
+newer than the runvil commit the deployed gateway runs.
 
 ## Tests
 

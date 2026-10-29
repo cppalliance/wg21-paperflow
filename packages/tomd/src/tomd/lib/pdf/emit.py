@@ -4,6 +4,7 @@ import html as _html
 import logging
 import re
 
+from tomd.domain.diagnostics import GlyphPassStats, VectorUncertaintyStats
 from tomd.lib import tables as _tables
 from tomd.lib.metadata_yaml.format import format_front_matter
 from tomd.lib.shared import (
@@ -21,9 +22,8 @@ from tomd.lib.pdf.wording_emit import _render_wording_section
 from tomd.lib.pdf.glyphs import (
     GLYPH_PLACEHOLDER_MARKER_TEMPLATE,
     UNKNOWN_GLYPH,
-    GlyphPassStats,
 )
-from tomd.lib.pdf.images import TRUNCATION_MARKER_TEMPLATE, VectorUncertaintyStats
+from tomd.lib.pdf.images import TRUNCATION_MARKER_TEMPLATE
 from tomd.lib.pdf.types import Line, Span, Section, SectionKind, BULLET_CHARS, BULLET_RE, NUMBERED_LIST_RE, FALLBACK_FONT_SIZE
 from tomd.lib.pdf.vector_images import format_uncertainty_marker, should_emit_marker
 _log = logging.getLogger(__name__)

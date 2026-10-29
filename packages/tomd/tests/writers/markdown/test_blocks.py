@@ -37,6 +37,9 @@ def test_write_heading():
     h_zero = Heading.from_text(0, "Zero Level")
     assert write_element(h_zero) == "# Zero Level"
 
+    assert write_element(Heading.from_text(2, "   ")) == ""
+    assert write_element(Heading(level=2)) == ""
+
 
 def test_write_paragraph():
     p1 = Paragraph.from_text("This is simple prose.")
@@ -81,13 +84,16 @@ def test_write_blockquote():
     bq2 = Blockquote.from_text("Line 1\nLine 2")
     assert write_element(bq2) == "> Line 1\n> Line 2"
 
+    bq3 = Blockquote(children=[Paragraph.from_text("First"), Paragraph.from_text("Second")])
+    assert write_element(bq3) == "> First\n> \n> Second"
+
 
 def test_write_thematic_break():
     assert write_element(ThematicBreak()) == "---"
 
 
 def test_write_wording_block():
-    wb = WordingBlock(role="wording", text="Modify [format.string] as follows:")
+    wb = WordingBlock.from_text("Modify [format.string] as follows:", role="wording")
     assert write_element(wb) == "Modify [format.string] as follows:"
 
 
@@ -101,8 +107,13 @@ def test_write_image_element_renders_nothing():
 
 
 def test_write_uncertain_element():
-    unc = UncertainElement(prompt="Verify math formula", raw_content="$$E=mc^2$$")
-    assert write_element(unc) == '<!-- tomd:uncertain prompt="Verify math formula" -->\n$$E=mc^2$$'
+    unc = UncertainElement(
+        mupdf_text="$$E=mc^2$$",
+        spatial_text="E = m c 2",
+        page=1,
+        text="$$E=mc^2$$",
+    )
+    assert write_element(unc) == "<!-- tomd:uncertain:L3-L3 -->\n\n$$E=mc^2$$"
 
 
 def test_write_element_table_delegates_to_write_table():

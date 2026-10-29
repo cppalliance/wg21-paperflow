@@ -28,7 +28,8 @@ import fitz as _fitz
 import logging
 from pathlib import Path
 
-from tomd.lib.pdf.types import Block, Line, Section, SectionKind, Span, Confidence
+from tomd.domain.elements import Confidence
+from tomd.lib.pdf.types import Block, Line, Section, SectionKind, Span
 from tomd.lib.pdf._fitz_lock import _FITZ_LOCK
 
 _log = logging.getLogger(__name__)

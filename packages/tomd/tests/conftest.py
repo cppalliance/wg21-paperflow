@@ -14,10 +14,12 @@ from fixtures.sample_documents import (
     sample_full_proposal_document,
     sample_poll_table_document,
     sample_rich_blocks_document,
+    sample_structured_lists_document,
     sample_tony_table_document,
     sample_wording_diff_document,
 )
-from tomd.lib.pdf.types import Block, Confidence, Line, Section, SectionKind, Span
+from tomd.domain.elements import Confidence
+from tomd.lib.pdf.types import Block, Line, Section, SectionKind, Span
 
 _SAMPLE_MD_DIR = _TESTS_DIR / "fixtures" / "markdown" / "sample_documents"
 
@@ -82,6 +84,11 @@ def sample_poll_table_doc():
 @pytest.fixture
 def sample_rich_blocks_doc():
     return sample_rich_blocks_document()
+
+
+@pytest.fixture
+def sample_structured_lists_doc():
+    return sample_structured_lists_document()
 
 
 @pytest.fixture

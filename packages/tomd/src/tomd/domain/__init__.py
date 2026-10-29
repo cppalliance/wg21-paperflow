@@ -6,37 +6,46 @@ file LICENSE_1_0.txt or copy at http://www.boost.org/LICENSE_1_0.txt)
 Official repository: https://github.com/cppalliance/wg21-paperflow
 """
 
-from tomd.domain.document import ConvertedPaper, PaperDocument, SkipReason
+from tomd.domain.diagnostics import (
+    Diagnostics,
+    GlyphPassStats,
+    VectorUncertaintyStats,
+)
+from tomd.domain.document import PaperDocument, SkipReason
 from tomd.domain.elements import (
     BlockElement,
     Blockquote,
     CodeBlock,
+    Confidence,
     ElementKind,
     Heading,
     ImageElement,
     ListBlock,
     ListItem,
     Paragraph,
+    Provenance,
     ThematicBreak,
     UncertainElement,
     WordingBlock,
+    WordingRole,
 )
 from tomd.domain.front_matter import FRONT_MATTER_ORDER
-from tomd.domain.image import ExtractedImage
+from tomd.domain.image import ExtractedImage, ImageSource
 from tomd.domain.mailing import MailingRecord
 from tomd.domain.metadata import PaperMetadata
 from tomd.domain.span import (
     CodeSpan,
+    ContainerSpan,
+    DeletedSpan,
     EmphasisSpan,
+    InsertedSpan,
     LineBreakSpan,
     LinkSpan,
     Span,
-    StrikethroughSpan,
     StrongSpan,
     SubscriptSpan,
     SuperscriptSpan,
     TextSpan,
-    UnderlineSpan,
 )
 from tomd.domain.table import (
     Cell,
@@ -57,13 +66,19 @@ __all__ = [
     "CodeBlock",
     "CodeCell",
     "CodeSpan",
-    "ConvertedPaper",
+    "Confidence",
+    "ContainerSpan",
+    "DeletedSpan",
+    "Diagnostics",
     "ElementKind",
     "EmphasisSpan",
     "ExtractedImage",
     "FRONT_MATTER_ORDER",
+    "GlyphPassStats",
     "Heading",
     "ImageElement",
+    "ImageSource",
+    "InsertedSpan",
     "LineBreakSpan",
     "LinkSpan",
     "ListBlock",
@@ -72,9 +87,9 @@ __all__ = [
     "PaperDocument",
     "PaperMetadata",
     "Paragraph",
+    "Provenance",
     "SkipReason",
     "Span",
-    "StrikethroughSpan",
     "StrongSpan",
     "SubscriptSpan",
     "SuperscriptSpan",
@@ -86,6 +101,7 @@ __all__ = [
     "TextSpan",
     "ThematicBreak",
     "UncertainElement",
-    "UnderlineSpan",
+    "VectorUncertaintyStats",
     "WordingBlock",
+    "WordingRole",
 ]

@@ -16,10 +16,12 @@ from tomd.lib.pdf.cleanup import (
     find_hidden_regions,
     strip_hidden_blocks,
 )
+from tomd.domain.diagnostics import GlyphPassStats, VectorUncertaintyStats
+from tomd.domain.document import SkipReason
+from tomd.domain.elements import Confidence
+from tomd.domain.image import ExtractedImage
 from tomd.lib.pdf.extract import extract_mupdf, extract_spatial, collect_links, attach_links
 from tomd.lib.pdf.images import (
-    ExtractedImage,
-    VectorUncertaintyStats,
     _CAPTION_LABEL_RE,
     _CAPTION_SEARCH_RADIUS_BELOW_PT,
     _VectorExtractionStats,
@@ -28,7 +30,6 @@ from tomd.lib.pdf.images import (
 )
 from tomd.lib.pdf.vector_images import extract_page_vector_images
 from tomd.lib.pdf.glyphs import (
-    GlyphPassStats,
     collect_glyph_candidates,
     collect_text_emoji_bboxes,
     drop_glyphs_in_code_and_tables,
@@ -58,11 +59,9 @@ from tomd.lib.pdf.table import (
 from tomd.lib.pdf.wg21 import extract_metadata_from_blocks
 from tomd.lib.pdf.emit import emit_markdown, emit_prompts, _escape_italic_text
 from tomd.lib.pdf.types import (
-    Confidence,
     KNOWN_SECTIONS,
     Section,
     SectionKind,
-    SkipReason,
     is_readable,
 )
 from tomd.lib.shared import DOC_NUM_RE, override_revision_from_filename
@@ -95,7 +94,7 @@ from tomd.lib.pdf.docling_backend import (
 )
 from tomd.lib.pdf._fitz_lock import _FITZ_LOCK
 
-__all__ = ["run_pipeline", "PipelineResult", "ExtractedImage"]
+__all__ = ["run_pipeline", "PipelineResult"]
 
 _log = logging.getLogger(__name__)
 

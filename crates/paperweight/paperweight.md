@@ -1,7 +1,7 @@
 ---
 name: paperweight
 description: Report on the evidence a WG21 paper provides for its need of standardization
-promptforge: 0
+runvil: 0
 models:
   writer:
     keywords: [no-thinking]
@@ -531,7 +531,7 @@ end
 
 local replies = nil
 if #jobs > 0 then
-    replies = fanout("### Grade", jobs)
+    replies = tasks.fanout("### Grade", jobs)
 end
 
 -- --- parse, validate, aggregate --------------------------------------------

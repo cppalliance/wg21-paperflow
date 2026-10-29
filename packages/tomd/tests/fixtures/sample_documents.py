@@ -21,12 +21,12 @@ from tomd.domain.elements import (
 from tomd.domain.metadata import PaperMetadata
 from tomd.domain.span import (
     CodeSpan,
+    DeletedSpan,
     EmphasisSpan,
+    InsertedSpan,
     LinkSpan,
-    StrikethroughSpan,
     StrongSpan,
     TextSpan,
-    UnderlineSpan,
 )
 from tomd.domain.table import (
     CellAlign,
@@ -169,7 +169,7 @@ def sample_wording_diff_document() -> PaperDocument:
                     "A hive is a sequence container that supports constant-time insertion and erasure. "
                 ),
                 TextSpan("An instance of `hive` "),
-                StrikethroughSpan(
+                DeletedSpan(
                     children=(
                         TextSpan("shall allocate elements using "),
                         CodeSpan("std::allocator"),
@@ -177,7 +177,7 @@ def sample_wording_diff_document() -> PaperDocument:
                     )
                 ),
                 TextSpan(" "),
-                UnderlineSpan(
+                InsertedSpan(
                     children=(
                         TextSpan(
                             "may allocate memory using an allocator satisfying the "
@@ -189,18 +189,31 @@ def sample_wording_diff_document() -> PaperDocument:
             ]
         ),
         Paragraph.from_text("Modify 24.3.11.4 [hive.modifiers] as follows:"),
-        Blockquote.from_text(
-            "iterator insert(const T& value);\n"
-            "iterator insert(T&& value);\n"
-            "\n"
-            "-1- Effects: Inserts a copy or moved value into the hive.\n"
-            "-2- Returns: An iterator pointing to the newly inserted element.\n"
-            "-3- Complexity: Constant time.\n"
-            "-4- Remarks: Does not invalidate any existing references or iterators."
+        Blockquote(
+            children=[
+                Paragraph.from_text(
+                    "iterator insert(const T& value);\n"
+                    "iterator insert(T&& value);"
+                ),
+                Paragraph.from_text(
+                    "-1- Effects: Inserts a copy or moved value into the hive.\n"
+                    "-2- Returns: An iterator pointing to the newly inserted element.\n"
+                    "-3- Complexity: Constant time.\n"
+                    "-4- Remarks: Does not invalidate any existing references or iterators."
+                ),
+            ]
         ),
         WordingBlock(
             role="wording",
-            text="<ins>A hive does not provide contiguous storage guarantee [container.reqmts].</ins>",
+            children=[
+                Paragraph(
+                    spans=[
+                        InsertedSpan.from_text(
+                            "A hive does not provide contiguous storage guarantee [container.reqmts]."
+                        )
+                    ]
+                )
+            ],
         ),
     ]
     return PaperDocument(paper_id="P3002R0", metadata=meta, elements=elements)
@@ -496,9 +509,9 @@ def sample_full_proposal_document() -> PaperDocument:
     wording_para = Paragraph(
         spans=[
             TextSpan("Modify 24.3 [containers.summary] paragraph 1 as follows: "),
-            StrikethroughSpan.from_text("The library provides sequence containers."),
+            DeletedSpan.from_text("The library provides sequence containers."),
             TextSpan(" "),
-            UnderlineSpan.from_text(
+            InsertedSpan.from_text(
                 "The library provides sequence containers, including hive."
             ),
         ]
@@ -506,7 +519,15 @@ def sample_full_proposal_document() -> PaperDocument:
 
     wording_block = WordingBlock(
         role="wording",
-        text="<ins>A hive fulfills all requirements of a SequenceContainer.</ins>",
+        children=[
+            Paragraph(
+                spans=[
+                    InsertedSpan.from_text(
+                        "A hive fulfills all requirements of a SequenceContainer."
+                    )
+                ]
+            )
+        ],
     )
 
     poll_table = Table(
@@ -585,11 +606,73 @@ def sample_full_proposal_document() -> PaperDocument:
     return PaperDocument(paper_id="P0447R26", metadata=meta, elements=elements)
 
 
+def sample_structured_lists_document() -> PaperDocument:
+    """Construct a sample PaperDocument with nested lists, item continuation blocks, and preserved ordinals."""
+    meta = PaperMetadata(
+        title="std::hive Wording Plan",
+        document="P3005R0",
+        date="2026-10-15",
+        intent="info",
+        audience=["LEWG"],
+    )
+
+    member_groups = ListBlock(items=[ListItem.from_text("Insertion and erasure")])
+    container_parts = ListBlock(
+        items=[
+            ListItem.from_text("Header synopsis"),
+            ListItem(spans=[TextSpan("Member functions")], children=[member_groups]),
+        ]
+    )
+    changes = ListBlock(
+        items=[
+            ListItem(spans=[TextSpan("Add a hive container")], children=[container_parts]),
+            ListItem(
+                spans=[TextSpan("Define a feature-test macro")],
+                children=[
+                    Paragraph.from_text("The macro tracks the library revision."),
+                    CodeBlock(code="#define __cpp_lib_hive 202602L"),
+                ],
+            ),
+            ListItem(children=[CodeBlock(code="static_assert(std::ranges::range<std::hive<int>>);")]),
+        ],
+        ordered=True,
+    )
+
+    resumed_questions = ListBlock(
+        items=[
+            ListItem.from_text("Should erasure invalidate other iterators?"),
+            ListItem.from_text("Should the block capacity be configurable?"),
+        ],
+        ordered=True,
+        start=5,
+    )
+
+    allocator_requirements = ListBlock(
+        items=[
+            ListItem(spans=[TextSpan("the allocator is copy constructible")], marker="(a)"),
+            ListItem(spans=[TextSpan("rebinding preserves equality")], marker="(b)"),
+        ],
+        ordered=True,
+    )
+
+    elements = [
+        Heading.from_text(2, "Proposed Changes"),
+        Paragraph.from_text("This revision makes three changes:"),
+        changes,
+        Heading.from_text(2, "Open Questions"),
+        resumed_questions,
+        Paragraph.from_text("The allocator requirements are:"),
+        allocator_requirements,
+    ]
+    return PaperDocument(paper_id="P3005R0", metadata=meta, elements=elements)
+
+
 ALL_SAMPLE_DOCUMENT_BUILDERS: tuple[Callable[[], PaperDocument], ...] = (
     sample_abstract_prose_document,
     sample_tony_table_document,
     sample_wording_diff_document,
     sample_poll_table_document,
     sample_rich_blocks_document,
+    sample_structured_lists_document,
     sample_full_proposal_document,
 )

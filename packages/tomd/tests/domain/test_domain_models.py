@@ -9,17 +9,25 @@ Official repository: https://github.com/cppalliance/wg21-paperflow
 from dataclasses import FrozenInstanceError
 import pytest
 
-from tomd.domain.document import ConvertedPaper, PaperDocument, SkipReason
+from tomd.api import ConvertedPaper
+from tomd.domain.diagnostics import (
+    Diagnostics,
+    GlyphPassStats,
+    VectorUncertaintyStats,
+)
+from tomd.domain.document import PaperDocument, SkipReason
 from tomd.domain.elements import (
     BlockElement,
     Blockquote,
     CodeBlock,
+    Confidence,
     ElementKind,
     Heading,
     ImageElement,
     ListBlock,
     ListItem,
     Paragraph,
+    Provenance,
     ThematicBreak,
     UncertainElement,
     WordingBlock,
@@ -29,16 +37,17 @@ from tomd.domain.front_matter import FRONT_MATTER_ORDER
 from tomd.domain.metadata import PaperMetadata, intent_from_title, normalize_title
 from tomd.domain.span import (
     CodeSpan,
+    ContainerSpan,
+    DeletedSpan,
     EmphasisSpan,
+    InsertedSpan,
     LineBreakSpan,
     LinkSpan,
     Span,
-    StrikethroughSpan,
     StrongSpan,
     SubscriptSpan,
     SuperscriptSpan,
     TextSpan,
-    UnderlineSpan,
 )
 from tomd.domain.table import (
     Cell,
@@ -91,10 +100,10 @@ def test_enums_and_base_types():
     assert ElementKind.IMAGE == "image"
     assert ElementKind.UNCERTAIN == "uncertain"
 
-    # SkipReason enumeration
-    assert SkipReason.EMPTY_CONTENT == "empty_content"
-    assert SkipReason.SLIDE_DECK == "slide_deck"
-    assert SkipReason.STANDARDS_DRAFT == "standards_draft"
+    # SkipReason enumeration (canonical legacy values)
+    assert SkipReason.EMPTY_PDF == "empty pdf"
+    assert SkipReason.SLIDE_DECK == "slide deck"
+    assert SkipReason.STANDARDS_DRAFT == "standards draft"
     assert SkipReason.UNREADABLE == "unreadable"
 
 
@@ -106,12 +115,15 @@ def test_container_spans_and_nesting():
 
     emphasis = EmphasisSpan.from_text("italic")
     assert emphasis.text == "italic"
+    assert isinstance(emphasis, ContainerSpan)
 
-    strike = StrikethroughSpan.from_text("deleted")
-    assert strike.text == "deleted"
+    deleted = DeletedSpan.from_text("deleted")
+    assert deleted.text == "deleted"
+    assert deleted.wording_role == "del"
 
-    underline = UnderlineSpan.from_text("inserted")
-    assert underline.text == "inserted"
+    inserted = InsertedSpan.from_text("inserted")
+    assert inserted.text == "inserted"
+    assert inserted.wording_role == "ins"
 
     sub = SubscriptSpan.from_text("sub")
     assert sub.text == "sub"
@@ -241,16 +253,21 @@ def test_table_and_cells():
 
 def test_image_models():
     extracted = ExtractedImage(
-        stored_filename="figure1.png",
+        page=1,
+        index_on_page=2,
+        ext="png",
         bytes=b"\x89PNG\r\n\x1a\n",
-        caption="Figure 1: State machine",
-        alt="State machine diagram",
-        source="raster",
+        bbox=(10.0, 20.0, 110.0, 120.0),
+        suggested_alt="Figure 1: State machine",
+        stored_filename="p1234r0-fig1-2.png",
+        xref=42,
     )
-    assert extracted.stored_filename == "figure1.png"
-    assert extracted.bytes == b"\x89PNG\r\n\x1a\n"
-    assert extracted.caption == "Figure 1: State machine"
     assert extracted.source == "raster"
+    assert extracted.sub_captions == ()
+    assert extracted.caption_body_dropped is False
+
+    with pytest.raises(FrozenInstanceError):
+        extracted.page = 2  # type: ignore[misc]
 
 
 def test_block_elements_hierarchy():
@@ -282,10 +299,19 @@ def test_block_elements_hierarchy():
     assert bq.text == "This is quoted."
     assert isinstance(bq, BlockElement)
 
-    wb = WordingBlock(role="wording", text="Change [basic.def] as follows:")
+    wb = WordingBlock.from_text("Change [basic.def] as follows:", role="wording")
     assert wb.role == "wording"
     assert wb.text == "Change [basic.def] as follows:"
     assert isinstance(wb, BlockElement)
+
+    cb_diff = CodeBlock(
+        language="cpp",
+        lines=[
+            [TextSpan("template<class U>")],
+            [TextSpan("  constexpr "), DeletedSpan.from_text("explicit"), TextSpan(" void f();")],
+        ],
+    )
+    assert cb_diff.text == "template<class U>\n  constexpr explicit void f();"
 
     tb = ThematicBreak()
     assert isinstance(tb, BlockElement)
@@ -295,9 +321,58 @@ def test_block_elements_hierarchy():
     assert img.text == "Figure 1"
     assert isinstance(img, BlockElement)
 
-    unc = UncertainElement(prompt="Check table layout", raw_content="<div>raw</div>")
-    assert unc.prompt == "Check table layout"
+    unc = UncertainElement(
+        mupdf_text="mupdf version",
+        spatial_text="spatial version",
+        page=4,
+        text="mupdf version",
+        context_before="before text",
+        context_after="after text",
+    )
+    assert unc.mupdf_text == "mupdf version"
+    assert unc.spatial_text == "spatial version"
+    assert unc.page == 4
+    assert unc.text == "mupdf version"
+    assert unc.context_before == "before text"
+    assert unc.context_after == "after text"
+    assert unc.provenance is None
+    assert "This region is on page 4." in unc.get_reconciliation_prompt()
     assert isinstance(unc, BlockElement)
+
+
+def test_provenance_and_confidence():
+    assert Confidence.HIGH.value == "high"
+    assert Confidence.MEDIUM.value == "medium"
+    assert Confidence.LOW.value == "low"
+    assert Confidence.UNCERTAIN.value == "uncertain"
+
+    prov = Provenance(page=3, confidence=Confidence.MEDIUM)
+    assert prov.page == 3
+    assert prov.confidence == Confidence.MEDIUM
+    with pytest.raises(FrozenInstanceError):
+        prov.page = 5  # type: ignore[misc]
+
+    para = Paragraph(spans=[TextSpan("hello")], provenance=prov)
+    assert para.provenance == prov
+    assert Paragraph.from_text("default").provenance is None
+
+
+def test_list_item_text_includes_children():
+    nested = ListBlock(items=[ListItem.from_text("child")])
+    item = ListItem(spans=[TextSpan("label")], children=[Paragraph.from_text("more"), nested])
+    assert item.text == "label\nmore\nchild"
+    assert ListItem(children=[Paragraph.from_text("only")]).text == "only"
+
+
+def test_blockquote_and_wording_text_include_children():
+    bq = Blockquote(children=[Paragraph.from_text("first"), Paragraph.from_text("second")])
+    assert bq.text == "first\nsecond"
+
+    wb = WordingBlock(
+        role="wording-add",
+        children=[Paragraph.from_text("clause 1"), CodeBlock(code="int x;")],
+    )
+    assert wb.text == "clause 1\nint x;"
 
 
 def test_document_and_conversion_containers():
@@ -309,24 +384,67 @@ def test_document_and_conversion_containers():
         paper_id="P9999R0",
         metadata=meta,
         elements=[h2, p],
-        is_skipped=False,
-        skip_reason=None,
     )
     assert doc.paper_id == "P9999R0"
     assert len(doc.elements) == 2
     assert not doc.is_skipped
     assert doc.skip_reason is None
+    assert doc.diagnostics == Diagnostics()
+    assert doc.get_reconciliation_prompts() is None
 
     skipped_doc = PaperDocument(
         paper_id="P0000R0",
         metadata=meta,
         is_skipped=True,
-        skip_reason=SkipReason.EMPTY_CONTENT,
+        skip_reason=SkipReason.EMPTY_PDF,
     )
     assert skipped_doc.is_skipped is True
-    assert skipped_doc.skip_reason == SkipReason.EMPTY_CONTENT
+    assert skipped_doc.skip_reason == SkipReason.EMPTY_PDF
 
-    converted = ConvertedPaper.from_document(doc, markdown="---\ntitle: Sample Paper\n---\n\n## Proposed Wording\n\nText here.\n")
-    assert converted.paper_id == "P9999R0"
-    assert converted.metadata.title == "Sample Paper"
+    converted = ConvertedPaper(
+        markdown="---\ntitle: Sample Paper\n---\n\n## Proposed Wording\n\nText here.\n",
+        prompts=None,
+        intent="info",
+    )
     assert "Proposed Wording" in converted.markdown
+
+
+@pytest.mark.parametrize(
+    ("stats", "present", "expected_fired", "expected_marker"),
+    [
+        (GlyphPassStats(), 0, False, False),
+        (GlyphPassStats(injected=1), 0, True, False),
+        (GlyphPassStats(free_standing=1), 0, True, False),
+        (GlyphPassStats(injected=1), 1, True, True),
+        (GlyphPassStats(skipped_coincident=1), 0, True, True),
+        (GlyphPassStats(skipped_code_section=1), 0, True, True),
+    ],
+)
+def test_glyph_pass_stats_predicates(
+    stats: GlyphPassStats,
+    present: int,
+    expected_fired: bool,
+    expected_marker: bool,
+):
+    assert stats.fired is expected_fired
+    assert stats.should_emit_marker(present) is expected_marker
+
+
+def test_diagnostics_models():
+    vec_stats = VectorUncertaintyStats(
+        pages_scanned=2,
+        candidates=3,
+        kept=1,
+        rejected=2,
+        reasons={"too_small": 2},
+        pages_skipped=0,
+    )
+    assert vec_stats.rejected == 2
+    with pytest.raises(FrozenInstanceError):
+        vec_stats.kept = 0  # type: ignore[misc]
+
+    default_diag = Diagnostics()
+    assert default_diag.dropped_image_count(0) == 0
+    assert Diagnostics(images_truncated=False, source_image_count=25).dropped_image_count(20) == 0
+    assert Diagnostics(images_truncated=True, source_image_count=20).dropped_image_count(20) == 0
+    assert Diagnostics(images_truncated=True, source_image_count=25).dropped_image_count(20) == 5
