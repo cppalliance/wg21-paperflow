@@ -236,14 +236,14 @@ def gutter_regions(blocks: list[Block]) -> list[Region]:
             a, b = run["iv"]
             left = [" ".join(g[2] for g in segs if g[1] <= a + 1) for _, _, segs in rws]
             right = [" ".join(g[2] for g in segs if g[0] >= b - 1) for _, _, segs in rws]
-            if sum(_prose(l) and _prose(r) for l, r in zip(left, right)) >= 0.5 * len(rws):
+            if sum(_prose(lt) and _prose(rt) for lt, rt in zip(left, right)) >= 0.5 * len(rws):
                 continue                      # two-column page layout
             if sum(r.lstrip().startswith(_COMMENT) for r in right) >= 0.5 * len(rws):
                 continue                      # code with aligned comments
-            if (sum(bool(_HANGING_LABEL.match(l.strip())) for l in left) >= 0.7 * len(rws)
+            if (sum(bool(_HANGING_LABEL.match(lt.strip())) for lt in left) >= 0.7 * len(rws)
                     and sum(len(r.split()) for r in right) >= 4 * len(rws)):
                 continue                      # numbered paragraphs, citations: label + text
-            if sum(bool(_LEADER.search(l + " " + r)) for l, r in zip(left, right)) >= 0.3 * len(rws):
+            if sum(bool(_LEADER.search(lt + " " + rt)) for lt, rt in zip(left, right)) >= 0.3 * len(rws):
                 continue                      # contents with dot leaders
             if _is_not_table([(t, bt, sg) for t, bt, sg in rws], page):
                 continue                      # contents, numbered code, front matter
@@ -465,7 +465,7 @@ _OV_MONO = 0.5           # code (monospace) is not judged here
 
 def _visual_rows(lines):
     rows: list = []
-    for ln in sorted(lines, key=lambda l: ((l.bbox[1] + l.bbox[3]) / 2, l.bbox[0])):
+    for ln in sorted(lines, key=lambda li: ((li.bbox[1] + li.bbox[3]) / 2, li.bbox[0])):
         yc = (ln.bbox[1] + ln.bbox[3]) / 2
         if rows and abs(yc - rows[-1][0]) <= 3:
             rows[-1][1].append(ln)
@@ -515,14 +515,14 @@ def outside_view_regions(sections: list[Section]) -> list[Region]:
         shared = sum(1 for i, a in enumerate(starts) if len(a) >= 2 and any(
             j != i and sum(1 for x in a for y in b if abs(x - y) <= _START_TOL) >= 2
             for j, b in enumerate(starts))) / len(rows)
-        fill = sorted(max(l.bbox[2] for l in r) - min(l.bbox[0] for l in r) for r in rows)[len(rows) // 2] / measure
+        fill = sorted(max(ln.bbox[2] for ln in r) - min(ln.bbox[0] for ln in r) for r in rows)[len(rows) // 2] / measure
         page = sec.lines[0].page_num
         if page == 0 and sum(p[0][2].strip().endswith(":") for p in pieces if p) >= 0.5 * len(rows):
             continue                          # "Date: 2024-03-19" front matter
         if segs >= 2 and shared >= _OV_SHARED and fill <= _OV_FILL:
             same = [ln for ln in sec.lines if ln.page_num == page]
-            out.append((page, (min(l.bbox[0] for l in same), min(l.bbox[1] for l in same),
-                               max(l.bbox[2] for l in same), max(l.bbox[3] for l in same)),
+            out.append((page, (min(ln.bbox[0] for ln in same), min(ln.bbox[1] for ln in same),
+                               max(ln.bbox[2] for ln in same), max(ln.bbox[3] for ln in same)),
                         "a block set apart from the prose and laid out in aligned columns",
                         len(rows)))
     return out

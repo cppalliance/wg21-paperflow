@@ -80,7 +80,7 @@ def _join_rows(lines: list[Line]) -> list[Line]:
     three lines. A space is inserted where the runs are visibly apart.
     """
     rows: list[list[Line]] = []
-    for ln in sorted(lines, key=lambda l: (l.page_num, (l.bbox[1] + l.bbox[3]) / 2, l.bbox[0])):
+    for ln in sorted(lines, key=lambda li: (li.page_num, (li.bbox[1] + li.bbox[3]) / 2, li.bbox[0])):
         yc = (ln.bbox[1] + ln.bbox[3]) / 2
         r0 = rows[-1][0] if rows else None
         # same baseline: centres within 3pt, or (a glyph set larger than its line, such
@@ -94,7 +94,7 @@ def _join_rows(lines: list[Line]) -> list[Line]:
             rows.append([ln])
     out = []
     for row in rows:
-        row.sort(key=lambda l: l.bbox[0])
+        row.sort(key=lambda ln: ln.bbox[0])
         spans: list[Span] = []
         for prev, ln in zip([None] + row, row):
             if prev is not None and spans:
@@ -112,8 +112,8 @@ def _join_rows(lines: list[Line]) -> list[Line]:
                     spans[-1].text += " "
             spans.extend(ln.spans)
         out.append(Line(spans=spans, page_num=row[0].page_num,
-                        bbox=(min(l.bbox[0] for l in row), min(l.bbox[1] for l in row),
-                              max(l.bbox[2] for l in row), max(l.bbox[3] for l in row))))
+                        bbox=(min(ln.bbox[0] for ln in row), min(ln.bbox[1] for ln in row),
+                              max(ln.bbox[2] for ln in row), max(ln.bbox[3] for ln in row))))
     return out
 
 

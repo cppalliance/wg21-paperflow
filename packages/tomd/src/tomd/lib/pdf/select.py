@@ -881,8 +881,8 @@ def split_at_headers(cand: TableCandidate) -> list[TableCandidate]:
         lines = [ln for r in rows for c in r for ln in c]
         if not lines:
             continue
-        box = (min(l.bbox[0] for l in lines), min(l.bbox[1] for l in lines),
-               max(l.bbox[2] for l in lines), max(l.bbox[3] for l in lines))
+        box = (min(ln.bbox[0] for ln in lines), min(ln.bbox[1] for ln in lines),
+               max(ln.bbox[2] for ln in lines), max(ln.bbox[3] for ln in lines))
         part = _carry(TableCandidate(cand.source, rows, {pg: box}), cand)
         part.flags = list(cand.flags) + ["split-at-header"]
         if hasattr(cand, "trace"):
@@ -1568,6 +1568,6 @@ def remove_table_regions(blocks: list[Block], tables: list[Section]) -> list[Blo
             out.append(blk)
         elif keep:
             out.append(Block(lines=keep, page_num=blk.page_num,
-                             bbox=(min(l.bbox[0] for l in keep), min(l.bbox[1] for l in keep),
-                                   max(l.bbox[2] for l in keep), max(l.bbox[3] for l in keep))))
+                             bbox=(min(ln.bbox[0] for ln in keep), min(ln.bbox[1] for ln in keep),
+                                   max(ln.bbox[2] for ln in keep), max(ln.bbox[3] for ln in keep))))
     return out

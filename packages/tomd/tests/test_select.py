@@ -16,7 +16,7 @@ from tomd.lib.pdf.select import (
     partial_reading,
     select_tables,
 )
-from tomd.lib.pdf.types import Block, Confidence, Line, Section, SectionKind, Span, TableCandidate
+from tomd.lib.pdf.types import Block, Confidence, Line, Section, SectionKind, Span
 from tomd.lib.pdf import select as select_mod
 from tomd.lib.pdf.classify import withhold_trust
 

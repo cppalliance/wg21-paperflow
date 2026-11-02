@@ -94,7 +94,7 @@ def _blocks(lines: list[Line], rules=()) -> list[list[Line]]:
     groups: dict = defaultdict(list)
     for i, ln in enumerate(lines):
         groups[find(i)].append(ln)
-    return [sorted(g, key=lambda l: (l.bbox[1], l.bbox[0])) for g in groups.values()]
+    return [sorted(g, key=lambda ln: (ln.bbox[1], ln.bbox[0])) for g in groups.values()]
 
 
 def _spaced(line: Line) -> Line:
@@ -113,12 +113,12 @@ def _spaced(line: Line) -> Line:
 
 
 def _box(block: list[Line]) -> tuple[float, float, float, float]:
-    return (min(l.bbox[0] for l in block), min(l.bbox[1] for l in block),
-            max(l.bbox[2] for l in block), max(l.bbox[3] for l in block))
+    return (min(ln.bbox[0] for ln in block), min(ln.bbox[1] for ln in block),
+            max(ln.bbox[2] for ln in block), max(ln.bbox[3] for ln in block))
 
 
 def _grams(block: list[Line]) -> set[str]:
-    t = re.sub(r"\s+", "", "".join(l.text for l in block))
+    t = re.sub(r"\s+", "", "".join(ln.text for ln in block))
     return {t[i:i + 3] for i in range(len(t) - 2)}
 
 
@@ -129,12 +129,12 @@ def same_code(left: list[Line], right: list[Line]) -> float:
 
 
 def _comment_share(block: list[Line]) -> float:
-    return sum(l.text.strip().startswith(_COMMENT) for l in block) / max(len(block), 1)
+    return sum(ln.text.strip().startswith(_COMMENT) for ln in block) / max(len(block), 1)
 
 
 def _code_like(block: list[Line]) -> bool:
     """Code, not prose set in a monospace font."""
-    return sum(bool(_CODE_MARK.search(l.text)) for l in block) >= _CODE_LINES * len(block)
+    return sum(bool(_CODE_MARK.search(ln.text)) for ln in block) >= _CODE_LINES * len(block)
 
 
 def _row_text_share(left: list[Line], right: list[Line], rest: list[Line]) -> float:
@@ -154,9 +154,9 @@ def _row_text_share(left: list[Line], right: list[Line], rest: list[Line]) -> fl
 
 def _label(block: list[Line], others: list[Line]) -> Line | None:
     x0, y0, x1, _ = _box(block)
-    near = [l for l in others if y0 - _LABEL_REACH <= l.bbox[3] <= y0 + 1
-            and l.bbox[0] < x1 and l.bbox[2] > x0 and len(l.text.split()) <= _LABEL_WORDS]
-    return max(near, key=lambda l: l.bbox[3]) if near else None
+    near = [ln for ln in others if y0 - _LABEL_REACH <= ln.bbox[3] <= y0 + 1
+            and ln.bbox[0] < x1 and ln.bbox[2] > x0 and len(ln.text.split()) <= _LABEL_WORDS]
+    return max(near, key=lambda ln: ln.bbox[3]) if near else None
 
 
 def find_code_pairs(blocks: list[Block], rules_for=None) -> list[TableCandidate]:
@@ -169,7 +169,7 @@ def find_code_pairs(blocks: list[Block], rules_for=None) -> list[TableCandidate]
             by_page[ln.page_num].extend(_pieces(ln))
     out: list[TableCandidate] = []
     for page, pieces in sorted(by_page.items()):
-        mono = sorted((p for p in pieces if _mono(p)), key=lambda l: (l.bbox[1], l.bbox[0]))
+        mono = sorted((p for p in pieces if _mono(p)), key=lambda ln: (ln.bbox[1], ln.bbox[0]))
         rest = [p for p in pieces if not _mono(p)]
         rules = rules_for(page) if (rules_for and mono) else []
         code_blocks = [b for b in _blocks(mono, rules) if len(b) >= 2]
@@ -222,8 +222,8 @@ def find_code_pairs(blocks: list[Block], rules_for=None) -> list[TableCandidate]
                 top, bot = sorted((w, k), key=lambda p: _box(p[0])[1])
                 gap_lo = max(_box(top[0])[3], _box(top[1])[3])
                 gap_hi = min(_box(bot[0])[1], _box(bot[1])[1])
-                between = any(gap_lo + 1 < (l.bbox[1] + l.bbox[3]) / 2 < gap_hi - 1 and
-                              l.bbox[0] < _box(w[1])[2] and l.bbox[2] > _box(w[0])[0] for l in rest)
+                between = any(gap_lo + 1 < (ln.bbox[1] + ln.bbox[3]) / 2 < gap_hi - 1 and
+                              ln.bbox[0] < _box(w[1])[2] and ln.bbox[2] > _box(w[0])[0] for ln in rest)
                 if same_cols and 0 <= gap_hi - gap_lo <= 60 and not between:
                     current().record.feature("codepair", page, _box(w[0]), "stacked on a kept pair", "words", 1.0)
                     kept.append(w)
@@ -246,8 +246,8 @@ def find_code_pairs(blocks: list[Block], rules_for=None) -> list[TableCandidate]
             top, bot = max(_box(last[0])[3], _box(last[1])[3]), min(_box(p[0])[1], _box(p[1])[1])
             x0, x1 = _box(p[0])[0], _box(p[1])[2]
             skip = {id(c[0]) for c in (labs or [])}
-            return any(top + 1 < (l.bbox[1] + l.bbox[3]) / 2 < bot - 1 and l.bbox[0] < x1 and l.bbox[2] > x0
-                       and id(l) not in skip for l in rest)
+            return any(top + 1 < (ln.bbox[1] + ln.bbox[3]) / 2 < bot - 1 and ln.bbox[0] < x1 and ln.bbox[2] > x0
+                       and id(ln) not in skip for ln in rest)
 
         # stacked pairs with the same column starts are rows of one table; text
         # between them splits the table; a recurring label pair inside a table
@@ -272,14 +272,15 @@ def find_code_pairs(blocks: list[Block], rules_for=None) -> list[TableCandidate]
             rows = [p for _, p in group]
             header = cells[:1] if group[0][0] else []
             lines = [ln for r in cells for c in r for ln in c]
-            bbox = (min(l.bbox[0] for l in lines), min(l.bbox[1] for l in lines),
-                    max(l.bbox[2] for l in lines), max(l.bbox[3] for l in lines))
+            bbox = (min(ln.bbox[0] for ln in lines), min(ln.bbox[1] for ln in lines),
+                    max(ln.bbox[2] for ln in lines), max(ln.bbox[3] for ln in lines))
             cells = [[[_spaced(ln) for ln in c] for c in r] for r in cells]
             cand = TableCandidate("codepair", cells, {page: bbox})
             cand.flags = ["same-code=%.2f" % min(s for _, _, s in rows)] + (["labelled"] if header else [])
             out.append(cand)
     # page furniture: the same pair text recurring page after page
-    key = lambda c: re.sub(r"\s+", "", " ".join(c.text_rows()[-1]))[:200]
+    def key(c):
+        return re.sub(r"\s+", "", " ".join(c.text_rows()[-1]))[:200]
     seen = defaultdict(set)
     for c in out:
         seen[key(c)].add(c.pages[0])

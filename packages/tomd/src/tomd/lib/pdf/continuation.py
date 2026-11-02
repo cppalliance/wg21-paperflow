@@ -82,7 +82,7 @@ def annotate(doc, tables) -> int:
     n = 0
     for first_a, last_a, ext_a, a in pieces:
         # a must be the last table on its last page; b the first on the next page
-        if any(f <= last_a <= l and e[0] > ext_a[0] and s is not a for f, l, e, s in pieces if l == last_a):
+        if any(f <= last_a <= end and e[0] > ext_a[0] and s is not a for f, end, e, s in pieces if end == last_a):
             continue
         nxt = [(e[0], s) for f, _, e, s in pieces if f == last_a + 1]
         if not nxt:

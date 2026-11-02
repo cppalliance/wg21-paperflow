@@ -26,7 +26,7 @@ import logging
 import re
 
 from .pagecache import rawdict as _rawdict
-from .ruled import _chars_to_lines, _page_words, _text_lines, _word_chars
+from .ruled import _chars_to_lines, _page_words, _word_chars
 from .select import VOTE_LABELS, vote_header
 from .types import TableCandidate
 

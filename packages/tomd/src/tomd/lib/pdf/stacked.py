@@ -62,10 +62,6 @@ def _code_block(cell: list[Line]) -> bool:
 def split_stacked(cand: TableCandidate) -> TableCandidate:
     if cand.source not in _SOURCES or len(cand.rows) < 2:
         return cand
-    ncol = max(len(r) for r in cand.rows)
-    # each column's right edge: the furthest any of its lines reaches, over the whole table
-    right = [max((ln.bbox[2] for r in cand.rows if c < len(r) for ln in r[c] if ln.text.strip()), default=0.0)
-             for c in range(ncol)]
     out: list[list[list[Line]]] = []
     changed = False
     for ri, row in enumerate(cand.rows):
@@ -115,7 +111,6 @@ def split_stacked(cand: TableCandidate) -> TableCandidate:
                 if a.text.rstrip().endswith(("-", ",", "(")):
                     strong = True
                     break
-                space = 0.3 * max(a.font_size, 1.0)
                 # only lists of code names are split: one identifier-like token on the line
                 # above and one below ("Mohammad" over "Nejati" is a name that wrapped; a
                 # token starting "(" continues the line above)

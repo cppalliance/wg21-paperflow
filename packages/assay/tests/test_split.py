@@ -24,7 +24,9 @@ def _p1122r3_line() -> str:
         / "snapshots"
         / "p1122r3.md"
     )
-    return path.read_text(encoding="utf-8").splitlines()[308].strip()
+    # find the line by its text: the snapshot is re-blessed when tomd's output changes
+    return next(ln.strip() for ln in path.read_text(encoding="utf-8").splitlines()
+                if ln.startswith("1. Effects: Begins an RCU reader."))
 
 
 @pytest.mark.parametrize(

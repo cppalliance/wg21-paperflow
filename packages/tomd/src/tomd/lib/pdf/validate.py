@@ -63,7 +63,7 @@ def cell_text(cell) -> str:
         else:
             cur.append(s.text)
     lines.append("".join(cur))
-    return " ".join(l.strip() for l in lines if l.strip())
+    return " ".join(ln.strip() for ln in lines if ln.strip())
 
 
 def _tokens(words: list[str]) -> list[str]:

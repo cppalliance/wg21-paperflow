@@ -32,7 +32,6 @@ disagreement with the other extractors.
 """
 
 import logging
-import re
 from collections import Counter
 
 from .mono import classify_monospace
@@ -250,7 +249,8 @@ def _chars_to_lines(chars: list[tuple], page_num: int) -> list[Line]:
             rows.append([yc, [ch]])
     for ch in small:
         def overlap(row):
-            top = min(c[1][1] for c in row[1]); bot = max(c[1][3] for c in row[1])
+            top = min(c[1][1] for c in row[1])
+            bot = max(c[1][3] for c in row[1])
             return min(bot, ch[1][3]) - max(top, ch[1][1])
         best = max(rows, key=overlap, default=None)
         if best is not None and overlap(best) > 0:
@@ -311,8 +311,10 @@ def _chars_to_lines(chars: list[tuple], page_num: int) -> list[Line]:
             prev = ch
         spans = [s for s in spans if s.text]
         if spans and "".join(s.text for s in spans).strip():
-            x0 = min(s.bbox[0] for s in spans); x1 = max(s.bbox[2] for s in spans)
-            y0 = min(s.bbox[1] for s in spans); y1 = max(s.bbox[3] for s in spans)
+            x0 = min(s.bbox[0] for s in spans)
+            x1 = max(s.bbox[2] for s in spans)
+            y0 = min(s.bbox[1] for s in spans)
+            y1 = max(s.bbox[3] for s in spans)
             lines.append(Line(spans=spans, bbox=(x0, y0, x1, y1), page_num=page_num))
     return lines
 
@@ -803,7 +805,8 @@ def _text_lines(words):
         yc = (w[1] + w[3]) / 2
         if lines and yc - lines[-1][3] < 2.5:
             lines[-1][2].append(w)
-            lines[-1][0] = min(lines[-1][0], w[1]); lines[-1][1] = max(lines[-1][1], w[3])
+            lines[-1][0] = min(lines[-1][0], w[1])
+            lines[-1][1] = max(lines[-1][1], w[3])
             lines[-1][3] = yc
         else:
             lines.append([w[1], w[3], [w], yc])
@@ -871,7 +874,8 @@ def _column_starts(row_words: list[list]) -> list[float]:
                 if gap_before > 0.9 * size or gap_before < -_OVERPRINT:
                     k = round(w[0] / _COL_START_TOL)
                     if k not in seen:
-                        seen.add(k); starts[k] += 1
+                        seen.add(k)
+                        starts[k] += 1
     # A wide gap in the header (first) row starts a column when some data
     # row also starts a word there: in short tables with overrunning cells
     # the header is often the only row whose gaps are visible.
@@ -1099,7 +1103,8 @@ def _bands_to_table(page_num, in_x, bands, x0, x1, header_above,
     if not header_above:
         above = [w for w in in_x if top - 18.0 < (w[1] + w[3]) / 2 < top]
         if above:
-            col_of = lambda w: sum(1 for s in seps if w[0] >= s) - 1
+            def col_of(w):
+                return sum(1 for s in seps if w[0] >= s) - 1
             col_x: dict[int, float] = {}
             for w in (w for ws in row_words for w in ws):
                 col_x[col_of(w)] = min(col_x.get(col_of(w), w[0]), w[0])
