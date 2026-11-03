@@ -48,7 +48,7 @@ from tomd.domain.image import ExtractedImage, ImageSource
 if TYPE_CHECKING:
     import pymupdf
 
-    from .types import Block
+    from tomd.lib.pdf.types import Block
 
 _log = logging.getLogger(__name__)
 

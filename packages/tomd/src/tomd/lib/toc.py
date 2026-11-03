@@ -7,8 +7,8 @@ No dependency on PDF or HTML converter types.
 import logging
 import re
 
-from . import SECTION_NUM_PREFIX_RE
-from .similarity import similar
+from tomd.lib.shared import SECTION_NUM_PREFIX_RE
+from tomd.lib.similarity import similar
 
 _log = logging.getLogger(__name__)
 

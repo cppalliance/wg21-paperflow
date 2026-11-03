@@ -5,19 +5,21 @@ import os
 import re
 from pathlib import Path
 
-from .. import (
+from tomd.domain.front_matter import is_blank_value
+
+from tomd.lib.metadata_yaml.format import format_front_matter
+from tomd.lib.shared import (
     DOC_NUM_RE,
     apply_strip_leading_h1,
     dedup_paragraphs,
-    format_front_matter,
     override_revision_from_filename,
     strip_orphan_toc_list,
     strip_redundant_body_meta,
 )
-from . import extract as _extract
-from . import render as _render
-from .images import HtmlImagesResult
-from ..pdf.images import TRUNCATION_MARKER_TEMPLATE
+from tomd.lib.html import extract as _extract
+from tomd.lib.html import render as _render
+from tomd.lib.html.images import HtmlImagesResult
+from tomd.lib.pdf.images import TRUNCATION_MARKER_TEMPLATE
 
 _log = logging.getLogger(__name__)
 
@@ -77,14 +79,15 @@ def convert_html(
             )
         )
 
-    if metadata and "title" not in metadata:
+    if metadata and is_blank_value(metadata.get("title")):
         h_match = re.search(r"^##\s+(.+)$", body_md, re.MULTILINE)
         if h_match:
             metadata["title"] = h_match.group(1).strip()
 
     parts = []
-    if metadata:
-        parts.append(format_front_matter(metadata))
+    front_matter = format_front_matter(metadata)
+    if front_matter:
+        parts.append(front_matter)
 
     body_stripped = body_md.strip()
     while body_stripped.startswith("---") and (

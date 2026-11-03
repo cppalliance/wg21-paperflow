@@ -11,6 +11,7 @@ from tomd.domain.elements import Heading, ImageElement, Paragraph
 from tomd.domain.metadata import PaperMetadata
 from tomd.domain.span import CodeSpan, StrongSpan, TextSpan
 from tomd.domain.table import CodeCell, Table, TableRow, TextCell
+from tomd.lib.metadata_yaml.format import format_front_matter
 from tomd.writers import MarkdownWriter
 
 
@@ -80,32 +81,29 @@ def test_markdown_writer_skips_image_elements():
 
 
 def test_markdown_writer_skipped_document():
-    doc = PaperDocument(paper_id="P0000R0", is_skipped=True)
-    writer = MarkdownWriter()
-    assert writer.write(doc) == ""
-
-
-def test_markdown_writer_emits_hybrid_body_with_normalizers():
-    meta = PaperMetadata(title="Sample Paper", document="P0123R0", date="2026-03-01")
-    raw_body = (
-        "---\n"
-        "title: Sample Paper\n"
-        "---\n\n"
-        "# Sample Paper\n\n"
-        "## Contents\n"
-        "1. Introduction\n\n"
-        "## Introduction\n\n"
-        "Body content.\n"
-    )
     doc = PaperDocument(
-        paper_id="P0123R0",
-        metadata=meta,
-        body=raw_body,
+        paper_id="P0000R0",
+        metadata=PaperMetadata(title="Slides", document="P0000R0"),
+        elements=[Paragraph.from_text("Body.")],
+        is_skipped=True,
     )
-    writer = MarkdownWriter()
-    out = writer.write(doc)
-    assert "document: P0123R0" in out
-    assert "date: 2026-03-01" in out
-    assert "\n# Sample Paper\n" not in out
-    assert "## Contents" not in out
-    assert "## Introduction" in out
+    assert MarkdownWriter().write(doc) == ""
+
+
+def test_markdown_writer_renders_exactly_document_metadata():
+    meta = PaperMetadata(title="Info: Status", document="D0123R0", reply_to=["Alice"])
+    doc = PaperDocument(paper_id="P0123R0", metadata=meta)
+    assert MarkdownWriter().write(doc) == format_front_matter(meta.to_dict()) + "\n"
+
+
+def test_markdown_writer_empty_document_writes_empty_string():
+    assert MarkdownWriter().write(PaperDocument(paper_id="P0000R0")) == ""
+
+
+def test_markdown_writer_document_whose_elements_render_empty():
+    image = ImageElement(caption="Figure 1", alt="Diagram", stored_filename="fig1.png")
+    assert MarkdownWriter().write(PaperDocument(paper_id="P0000R0", elements=[image])) == ""
+
+    meta = PaperMetadata(title="Figures", document="P0000R0")
+    doc = PaperDocument(paper_id="P0000R0", metadata=meta, elements=[image])
+    assert MarkdownWriter().write(doc) == format_front_matter(meta.to_dict()) + "\n"

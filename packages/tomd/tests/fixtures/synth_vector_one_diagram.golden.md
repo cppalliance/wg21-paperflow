@@ -1,7 +1,5 @@
 ---
 title: "Synthetic Vector Diagram Fixture"
-reply-to:
-
 ---
 
 This is a synthetic test fixture used by the tomd test suite. It contains exactly one vector diagram drawn as PDF path operators below this paragraph.

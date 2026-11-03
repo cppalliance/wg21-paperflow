@@ -1,7 +1,5 @@
 ---
 title: "Synthetic Sub-Figure Merge Fixture"
-reply-to:
-
 ---
 
 This fixture tests that two vertically-stacked vector clusters separated by a sub-caption line are merged into a single image by the _merge_sub_figure_clusters pass in vector_images.py.

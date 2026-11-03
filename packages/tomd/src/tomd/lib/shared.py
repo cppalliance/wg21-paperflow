@@ -6,6 +6,7 @@ import unicodedata
 from pathlib import Path
 from collections import Counter
 
+from tomd.domain.metadata import EMAIL_RE
 from tomd.lib.metadata_yaml.format import FRONT_MATTER_RE
 
 _NAMED_ENTITIES = {
@@ -695,8 +696,6 @@ def _strip_metadata_table(md: str) -> str:
 
 
 ALLOWED_LINK_SCHEMES = frozenset({"http", "https", "mailto"})
-
-EMAIL_RE = re.compile(r"[\w.+-]+@[\w.-]+\.\w+")
 
 _deobfuscate_log = _logging.getLogger(__name__)
 

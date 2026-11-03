@@ -1,21 +1,10 @@
-#
-# Copyright (c) 2026 Sean Parsons (seanpatrick2013@gmail.com)
-#
-# Distributed under the Boost Software License, Version 1.0. (See accompanying
-# file LICENSE_1_0.txt or copy at http://www.boost.org/LICENSE_1_0.txt)
-#
-# Official repository: https://github.com/cppalliance/wg21-paperflow
-#
-
-"""Deterministic structural comparator for golden QA.
-
-Parses two Markdown strings into a normalized block tree and scores how
-well they match across six independent axes (front-matter, heading, list,
-code, table, per-block text). Pure: no I/O, no LLM, no pipeline state.
-Same inputs always give the same score.
 """
+Distributed under the Boost Software License, Version 1.0. (See accompanying
 
-from __future__ import annotations
+file LICENSE_1_0.txt or copy at http://www.boost.org/LICENSE_1_0.txt)
+
+Official repository: https://github.com/cppalliance/wg21-paperflow
+"""
 
 import difflib
 import re
@@ -23,7 +12,7 @@ from dataclasses import dataclass, field
 
 import mistune
 
-from tomd.lib.metadata_yaml.format import FRONT_MATTER_ORDER
+from tomd.domain.front_matter import FRONT_MATTER_ORDER
 from tomd.lib.similarity import word_jaccard
 
 _AST = mistune.create_markdown(renderer="ast", plugins=["table"])

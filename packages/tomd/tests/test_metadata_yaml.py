@@ -4,20 +4,20 @@
 
 """Unit tests for metadata_yaml strip and format modules."""
 
+import pytest
+
 from conftest import make_section
-from tomd.lib.pdf.types import SectionKind
-from tomd.lib.metadata_yaml.strip import (
-    _matches_author_name,
-    _is_content_heading,
-    strip_metadata_headings,
-    strip_pre_heading_fragments,
-    strip_pre_content_paragraphs,
-)
 from tomd.lib.metadata_yaml.extract import extract_metadata
-from tomd.lib.metadata_yaml.format import (
-    format_front_matter,
-    sanitize_metadata,
+from tomd.lib.metadata_yaml.format import format_front_matter
+from tomd.lib.metadata_yaml.sanitize import sanitize_metadata
+from tomd.lib.metadata_yaml.strip import (
+    _is_content_heading,
+    _matches_author_name,
+    strip_metadata_headings,
+    strip_pre_content_paragraphs,
+    strip_pre_heading_fragments,
 )
+from tomd.lib.pdf.types import SectionKind
 
 
 class TestMatchesAuthorName:
@@ -321,6 +321,80 @@ class TestFormatFrontMatter:
         doc_pos = result.find("document:")
         date_pos = result.find("date:")
         assert title_pos < doc_pos < date_pos
+
+    def test_canonical_order_and_quoting(self):
+        metadata = {
+            "reply-to": ["Author Name <author@example.com>"],
+            "audience": ["LEWG", "SG1"],
+            "intent": "explore",
+            "date": "2026-03-01",
+            "document": "P1234R0",
+            "title": "Sample Proposal",
+        }
+        assert format_front_matter(metadata) == (
+            "---\n"
+            'title: "Sample Proposal"\n'
+            "document: P1234R0\n"
+            "date: 2026-03-01\n"
+            "intent: explore\n"
+            "audience:\n"
+            '  - "LEWG"\n'
+            '  - "SG1"\n'
+            "reply-to:\n"
+            '  - "Author Name <author@example.com>"\n'
+            "---"
+        )
+
+    def test_extra_keys_precede_reply_to(self):
+        metadata = {
+            "title": "Extras",
+            "reply-to": ["A <a@example.com>"],
+            "project": "ISO C++",
+            "document": "P9999R1",
+        }
+        assert format_front_matter(metadata) == (
+            '---\ntitle: "Extras"\ndocument: P9999R1\nproject: ISO C++\nreply-to:\n  - "A <a@example.com>"\n---'
+        )
+
+    def test_title_is_normalized(self):
+        assert format_front_matter({"title": "std :: execution  Senders"}) == (
+            '---\ntitle: "std::execution Senders"\n---'
+        )
+
+
+class TestFormatFrontMatterBlankValues:
+    """A blank value (empty, whitespace-only, or a list of blanks) is never emitted."""
+
+    @pytest.mark.parametrize(
+        ("fields", "fragment"),
+        [
+            pytest.param({"document": ""}, None, id="empty-scalar"),
+            pytest.param({"intent": "  "}, None, id="whitespace-scalar"),
+            pytest.param({"project": "  "}, None, id="whitespace-extra-scalar"),
+            pytest.param({"reply-to": []}, None, id="empty-list"),
+            pytest.param({"reply-to": ()}, None, id="empty-tuple"),
+            pytest.param({"reply-to": [""]}, None, id="all-blank-list"),
+            pytest.param({"reply-to": ["a", ""]}, 'reply-to:\n  - "a"', id="blank-list-item"),
+            pytest.param({"reply-to": ["a", "  "]}, 'reply-to:\n  - "a"', id="whitespace-list-item"),
+            pytest.param({"audience": ("LEWG", "SG1")}, 'audience:\n  - "LEWG"\n  - "SG1"', id="tuple"),
+            pytest.param({"project": ("a", "")}, 'project:\n  - "a"', id="tuple-extra-blank-item"),
+        ],
+    )
+    def test_blank_values_are_skipped(self, fields, fragment):
+        expected = '---\ntitle: "T"\n' + (fragment + "\n" if fragment else "") + "---"
+        assert format_front_matter({"title": "T", **fields}) == expected
+
+    def test_only_blank_values_returns_empty(self):
+        assert format_front_matter({"title": ""}) == ""
+        assert format_front_matter({"title": "   ", "audience": "", "reply-to": [""]}) == ""
+
+    def test_title_blank_after_normalization_is_skipped(self):
+        assert format_front_matter({"title": " \n ", "document": "P1R0"}) == "---\ndocument: P1R0\n---"
+
+    def test_blank_intent_still_inferred_from_title(self):
+        assert format_front_matter({"title": "Info: Status", "intent": ""}) == (
+            '---\ntitle: "Info: Status"\nintent: info\n---'
+        )
 
 
 class TestSanitizeMetadata:

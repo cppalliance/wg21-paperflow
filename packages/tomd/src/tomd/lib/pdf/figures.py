@@ -16,7 +16,7 @@ of HEADING.
 
 import logging
 import math
-from .types import FigureRegion, FigureGraph, FigureNode, FigureEdge
+from tomd.lib.pdf.types import FigureRegion, FigureGraph, FigureNode, FigureEdge
 
 _log = logging.getLogger(__name__)
 

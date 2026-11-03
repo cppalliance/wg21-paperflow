@@ -2,8 +2,6 @@
 title: "REALLY_CONVERTIBLE_TO DEFINITION"
 document: P4012R0
 date: 2026-06-03
-reply-to:
-
 ---
 
 #### In [simd.ctore], change:
