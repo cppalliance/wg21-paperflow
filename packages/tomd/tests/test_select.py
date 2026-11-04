@@ -1,0 +1,160 @@
+# Copyright (c) 2026 Rob Beeston (rob@cppalliance.org)
+# Distributed under the Boost Software License, Version 1.0.
+# https://www.boost.org/LICENSE_1_0.txt
+
+"""Table trust: one reader is never enough for HIGH; conservation, order and damage checks."""
+
+from pathlib import Path
+
+import pytest
+
+from tomd.lib.pdf import run_pipeline
+from tomd.lib.pdf.select import (
+    candidate_from_section,
+    candidates_agree,
+    conservation_error,
+    partial_reading,
+    select_tables,
+)
+from tomd.lib.pdf.types import Block, Confidence, Line, Section, SectionKind, Span
+from tomd.lib.pdf import select as select_mod
+from tomd.lib.pdf.classify import withhold_trust
+
+@pytest.fixture(autouse=True)
+def _agreement_logic_only(monkeypatch):
+    """These tests pin the agreement logic itself (tomd-tables' rules); the port's
+    sequencing guard on paperflow's reader is tested in test_select.py."""
+    monkeypatch.setattr(select_mod, "TRUST_EXCLUDES_PAPERFLOW_READER", False)
+
+
+_GOLDEN = Path(__file__).resolve().parent / "fixtures" / "golden"
+
+
+def _span(text, x0, y0, x1=None, bold=False):
+    return Span(text=text, bbox=(x0, y0, x1 if x1 is not None else x0 + 6 * len(text), y0 + 10), bold=bold)
+
+
+def _table(cells, page=0, x0=100.0, y0=100.0, col_w=120.0, row_h=14.0):
+    """A TABLE section whose cells are single spans laid out on a grid."""
+    columns, lines = [], []
+    for r, row in enumerate(cells):
+        out_row = []
+        for c, text in enumerate(row):
+            sp = _span(text, x0 + c * col_w, y0 + r * row_h) if text else None
+            out_row.append([sp] if sp else [])
+        columns.append(out_row)
+        spans = [cell[0] for cell in out_row if cell]
+        lines.append(Line(spans=spans, page_num=page,
+                          bbox=(min(s.bbox[0] for s in spans), min(s.bbox[1] for s in spans),
+                                max(s.bbox[2] for s in spans), max(s.bbox[3] for s in spans))))
+    sec = Section(kind=SectionKind.TABLE, text="", columns=columns, lines=lines, page_num=page)
+    return sec, Block(lines=lines, page_num=page)
+
+
+def test_candidate_from_section_keeps_cells_and_area():
+    sec, _ = _table([["a", "b"], ["c", ""]])
+    cand = candidate_from_section(sec)
+    assert cand.source == "tomd" and cand.text_rows() == [["a", "b"], ["c", ""]]
+    assert cand.pages == [0] and cand.shape == (2, 2)
+
+
+def test_conserved_table_has_no_error():
+    sec, blk = _table([["Name", "Value"], ["alpha", "1"], ["beta", "2"]])
+    assert conservation_error(candidate_from_section(sec), [blk]) == ""
+
+
+def test_lost_text_is_a_conservation_error():
+    sec, blk = _table([["Name", "Value"], ["alpha", "1"], ["beta", "2"]])
+    sec.columns[2][0] = []            # the table dropped "beta", the page still has it
+    msg = conservation_error(candidate_from_section(sec), [blk])
+    assert msg.startswith("Text conservation failed: 4 characters")
+
+
+def test_agreement_is_cell_for_cell():
+    a = candidate_from_section(_table([["x", "y"], ["1", "2"]])[0])
+    b = candidate_from_section(_table([["x", "y"], ["1", "2"]])[0])
+    c = candidate_from_section(_table([["x", "y"], ["1", "3"]])[0])
+    assert candidates_agree(a, b) and not candidates_agree(a, c)
+
+
+def test_partial_reading_needs_a_ruled_primary():
+    full = candidate_from_section(_table([["h1", "h2"], ["a", "b"], ["c", "d"]])[0])
+    part = candidate_from_section(_table([["h1", "h2"], ["a", "b"]])[0])
+    assert not partial_reading(full, part)
+    full.source = "rules"
+    assert partial_reading(full, part)
+
+
+def test_single_source_table_is_uncertain_with_reasons():
+    sec, blk = _table([["Name", "Value"], ["alpha", "1"]])
+    [out] = select_tables([sec], [], [], [blk])
+    assert out.confidence == Confidence.UNCERTAIN
+    assert out.metadata["table_agreement"] == "none"
+    assert out.metadata["uncertain_reasons"] == ["single-source"]
+    assert [[sp.text for sp in cell] for cell in out.columns[1]] == [["alpha"], ["1"]]
+
+
+def test_two_readers_agreeing_make_a_table_high():
+    sec, blk = _table([["Name", "Value"], ["alpha", "1"]])
+    tagged = candidate_from_section(_table([["Name", "Value"], ["alpha", "1"]])[0])
+    tagged.source = "tags"
+    [out] = select_tables([sec], [], [tagged], [blk])
+    assert out.confidence == Confidence.HIGH
+    assert out.metadata["table_agreement"] == "exact"
+
+
+def test_paperflow_reading_keeps_its_rendering_strategy():
+    sec, blk = _table([["Name", "Value"], ["alpha", "1"]])
+    sec.table_kind, sec.table_strategy, sec.table_source = "spec_table", "html_table", "pass1"
+    [out] = select_tables([sec], [], [], [blk])
+    assert (out.table_kind, out.table_strategy, out.table_source) == ("spec_table", "html_table", "pass1")
+    assert out.metadata["table_source"] == "tomd"
+
+
+def test_damaged_text_layer_is_a_reason():
+    sec, blk = _table([["Name", "ᴀx"], ["alpha", "1"]])
+    [out] = select_tables([sec], [], [], [blk])
+    assert "damaged" in out.metadata["uncertain_reasons"]
+
+
+def test_a_trusted_table_has_agreement():
+    pdf = _GOLDEN / "p4012r0-page-6.pdf"
+    if not pdf.is_file():
+        pytest.skip(f"missing PDF fixture: {pdf.name}")
+    tables = [s for s in run_pipeline(pdf).sections if s.kind == SectionKind.TABLE]
+    assert tables, "fixture should hold a table"
+    for sec in tables:
+        if sec.confidence == Confidence.HIGH:
+            assert sec.metadata["table_agreement"] in ("exact", "subset")
+        else:
+            assert sec.metadata["uncertain_reasons"]
+
+
+
+def test_paperflow_reader_agreement_is_not_trusted_during_the_port(monkeypatch):
+    """Sequencing guard: paperflow's reader agreeing with one of ours does not make HIGH."""
+    monkeypatch.setattr(select_mod, "TRUST_EXCLUDES_PAPERFLOW_READER", True)
+    sec, blk = _table([["Name", "Value"], ["alpha", "1"]])
+    tagged = candidate_from_section(_table([["Name", "Value"], ["alpha", "1"]])[0])
+    tagged.source = "tags"
+    [out] = select_tables([sec], [], [tagged], [blk])
+    assert out.metadata["trust_withheld"] == ["paperflow-reader"]
+    withhold_trust([out])
+    assert out.confidence == Confidence.UNCERTAIN
+    assert out.metadata["table_agreement"] == "exact"
+    assert "paperflow-reader" in out.metadata["uncertain_reasons"]
+
+
+def test_paperflow_rendering_is_not_trusted_during_the_port():
+    """Sequencing guard: a table paperflow renders its own way (HTML) is never HIGH."""
+    sec, blk = _table([["Name", "Value"], ["alpha", "1"]])
+    sec.table_kind, sec.table_strategy = "spec_table", "html_table"
+    tagged = candidate_from_section(_table([["Name", "Value"], ["alpha", "1"]])[0])
+    tagged.source = "tags"
+    tagged.section = sec            # the emitted reading is paperflow's, rendered as HTML
+    [out] = select_tables([], [], [tagged], [blk], polls=[candidate_from_section(
+        _table([["Name", "Value"], ["alpha", "1"]])[0])])
+    assert out.table_strategy == "html_table"
+    withhold_trust([out])
+    assert out.confidence == Confidence.UNCERTAIN
+    assert "rendering" in out.metadata["uncertain_reasons"]

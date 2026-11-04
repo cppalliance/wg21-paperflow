@@ -1,6 +1,7 @@
 """PDF to Markdown converter - pipeline entry point."""
 
 import fitz
+import functools
 import logging
 import re
 from bisect import bisect_right
@@ -55,10 +56,10 @@ from ..metadata_yaml.extract import (
 )
 from .table import (
     detect_tables, exclude_table_regions, _rot_bbox, _rot_midpoint,
-    _filter_phantom_mupdf_tables, _cluster_x_positions,
+    _filter_phantom_mupdf_tables, _cluster_x_positions, TableStrategy,
 )
 from .wg21 import extract_metadata_from_blocks
-from .emit import emit_markdown, emit_prompts, _escape_italic_text
+from .emit import emit_markdown, emit_prompts, renumber_uncertain_markers, table_use, _escape_italic_text
 from .types import (
     KNOWN_SECTIONS,
     Section,
@@ -95,6 +96,27 @@ from .docling_backend import (
     discover_tables_with_docling as _discover_tables_with_docling,
 )
 from ._fitz_lock import _FITZ_LOCK
+from .runctx import current, run_scope
+from .select import _is_bad, _to_section, page_furniture, remove_table_regions, select_tables, stitch_pages
+from .tagged import extract_tagged_tables
+from .ruled import extract_ruled_tables, page_hrules
+from .poll import extract_poll_tables
+from .codepair import find_code_pairs
+from .classify import gate_tables, withhold_trust
+from .content import content_candidates
+from .visibility import (check_page, discards as hidden_discards, hide_recorded,
+                         recorded_regions, remove_hidden_text, summary as hidden_summary)
+from .continuation import annotate as annotate_continuations
+from .figure_tables import label_figure_tables
+from .docmeasure import hyphenates as doc_hyphenates, measure as doc_measure
+from .extent import extend as extend_readings
+from .flag import (aligned_regions, dropped_uncovered, flag_possible_tables, gutter_regions,
+                   outside_view_regions, rejected_regions, text_regions)
+from .records import records_candidates
+from .scan import run_scan
+from .rowbands import merge_rule_bands
+from .levels import assign as assign_level
+from .summary import build as build_summary, generator as pdf_generator, header_comment, prompt_elements
 
 __all__ = ["run_pipeline", "PipelineResult"]
 
@@ -1062,6 +1084,175 @@ _SECTION_INSIDE_VECTOR_THRESHOLD = 0.5
 # cluster bbox).
 _STRUCTURAL_INSIDE_VECTOR_THRESHOLD = 0.8
 
+# Possible-table marks (L5): content a reader proposed as a table that is not
+# emitted as one. The reason travels in Section.metadata["possible_table"].
+# Reader-error stages that cannot change a table's content: listed for the
+# paper, they lower no table.
+_ERROR_NO_TABLE = frozenset({"generator", "region scan", "figure labels", "wording lines",
+                             "continuation notes", "visibility check", "paper summary"})
+# Recorded for a rotated page the drawn-rule readers skip.
+_ROTATED_NOT_READ = "rotated page: not read by the drawn-rule readers"
+_MARK_DOT_LEADER = "a table with dot leaders, demoted as contents"
+_MARK_FALSE_POSITIVE = "a table the classifier judged not a table, kept as text"
+
+# Dropped nominations that get no possible-table mark: rules that say the area
+# is not a table at all, not a table read wrongly.
+_DROP_NO_MARK = ("no column gaps between rules", "too few rule bands", "monospace prose", "page furniture")
+_DROP_NO_MARK_FLAGS = frozenset({"bullet-list", "numbered-list", "code-comment-column", "reference-list",
+                                 "constant-first-column"})
+# A nominated area smaller than this (pt squared) is a glyph, not a table.
+_MIN_MARK_AREA = 50.0
+# Two boxes are the same area when they share this share of the smaller one.
+_SAME_AREA = 0.3
+# An aligned region that overlaps a located region by more than this is that region.
+_ALIGNED_OVERLAP = 0.3
+# Approximate line height (pt) for estimating the rows of a marked area.
+_MARK_LINE_HEIGHT = 12
+
+
+def _overlap(a, b) -> bool:
+    """Two boxes share at least _SAME_AREA of the smaller one's area."""
+    w = min(a[2], b[2]) - max(a[0], b[0])
+    h = min(a[3], b[3]) - max(a[1], b[1])
+    if w <= 0 or h <= 0:
+        return False
+    small = min((a[2] - a[0]) * (a[3] - a[1]), (b[2] - b[0]) * (b[3] - b[1]))
+    return w * h >= _SAME_AREA * max(small, 1e-6)
+
+
+_ONLY_DOTS = re.compile(r"^[\s.·…]*$")
+
+
+def _leader_text(sec: Section) -> str:
+    """A table's text for the dot-leader test: a cell holding only dots is data
+    (a table of punctuation: "...." | Ellipsis), not a leader between a title
+    and its page number."""
+    if not sec.columns:
+        return sec.text
+    rows = [[" ".join(sp.text for sp in cell if sp.text != "\n").strip() for cell in row] for row in sec.columns]
+    return "\n".join(" | ".join(c for c in row if not _ONLY_DOTS.match(c)) for row in rows)
+
+
+def dropped_nomination_regions(record, tables) -> list:
+    """Every area a reader or scan nominated and a rule then excluded, where no
+    kept table covers it, as a possible-table region: a drop never leaves the
+    text silent, except for the rules that say it is not a table at all.
+    (page, bbox, reason, rows) like every mark region."""
+    taken = [(pg, bb) for t in tables
+             for pg, bb in ((t.metadata.get("page_bboxes") or {}).items() or
+                            ([t.metadata["region_bbox"]] if t.metadata.get("region_bbox") else []))]
+    out, seen = [], set()
+    for e in record.entries:
+        if e.kind != "excluded" or e.scan in ("mark", "mark-build"):
+            continue
+        rule = e.rule or ""
+        if any(k in rule for k in _DROP_NO_MARK) or rule == _ROTATED_NOT_READ:
+            continue
+        if "dropped:" in rule or "failed checks:" in rule:
+            flags = {f.strip() for f in rule.split(":", 1)[1].split(",") if f.strip()}
+            if flags and flags <= _DROP_NO_MARK_FLAGS:
+                continue
+        x0, y0, x1, y1 = e.bbox
+        if (x1 - x0) * (y1 - y0) < _MIN_MARK_AREA:
+            continue
+        key = (e.page, tuple(round(v / 10) for v in e.bbox))
+        if key in seen or any(pg == e.page and _overlap(tuple(e.bbox), tuple(bb)) for pg, bb in taken):
+            continue
+        seen.add(key)
+        out.append((e.page, tuple(e.bbox), f"the {e.scan} reader nominated this area and a rule dropped it "
+                    f"({rule[:80]})", max(2, int((y1 - y0) / _MARK_LINE_HEIGHT))))
+    return out
+
+
+def _content_readings(pages, located, tomd_sections, blocks, page_rules) -> list:
+    """The content-first builder's and the records reader's readings of every
+    region a reader located (kept or not), the grids the rule reader excluded,
+    and the areas aligned like a table that no reader proposed. Only pages in
+    `pages` (read upright) are read."""
+    try:
+        regions = [(c.pages[0], c.bboxes[c.pages[0]]) for c in located if len(c.pages) == 1]
+        regions += [(s.page_num, (min(ln.bbox[0] for ln in s.lines), min(ln.bbox[1] for ln in s.lines),
+                                  max(ln.bbox[2] for ln in s.lines), max(ln.bbox[3] for ln in s.lines)))
+                    for s in tomd_sections if s.lines and len({ln.page_num for ln in s.lines}) == 1]
+        # a grid whose reading failed the rule reader's checks (a struck word read as a
+        # rule): its words are read here, and that reading is checked like any other
+        regions += [(c.pages[0], c.bboxes[c.pages[0]]) for c in current().excluded_grids if len(c.pages) == 1]
+        aligned = set()
+        for pg, bb, _why, _n in aligned_regions(blocks):
+            if not any(p == pg and _overlap_share(bb, b) > _ALIGNED_OVERLAP for p, b in regions):
+                regions.append((pg, bb))
+                aligned.add((pg, tuple(round(v) for v in bb)))
+        regions = [(pg, bb) for pg, bb in regions if pg in pages]
+        cpages = {pg: pages[pg] for pg in {pg for pg, _ in regions}}
+        out = content_candidates(cpages, regions, rules_by_page=page_rules)
+        for c in out:
+            if len(c.pages) == 1 and getattr(c, "region", None) in aligned:
+                c.flags = list(c.flags) + ["aligned-region"]
+        # the record-pattern reading of the same regions: an alternative only
+        return out + records_candidates(cpages, regions)
+    except Exception as exc:  # never let the builder break conversion; never silently
+        current().reader_error("content reader", None, exc)
+        return []
+
+
+def _overlap_share(a, b) -> float:
+    """Intersection over the smaller box's area."""
+    ix = max(0.0, min(a[2], b[2]) - max(a[0], b[0])) * max(0.0, min(a[3], b[3]) - max(a[1], b[1]))
+    return ix / max(1e-6, min((a[2] - a[0]) * (a[3] - a[1]), (b[2] - b[0]) * (b[3] - b[1])))
+
+
+def _build_scan_tables(path, builds, blocks, page_rotations):
+    """The scan's build band: an area likely to be a table that no reader kept
+    is read by the content-first builder (pieces on consecutive pages joined by
+    the same continuation step as every reader), emitted UNCERTAIN and gated
+    like every table. An area the builder cannot read as a grid, or reads as
+    contents or label: value entries, stays a possible-table mark.
+    Returns (sections, marks for the areas not built)."""
+    built, unbuilt, cands, info = [], [], [], {}
+    with _FITZ_LOCK:  # see _fitz_lock.py for why this lock is required
+        doc = fitz.open(str(path))
+        hide_recorded(doc)
+        try:
+            pages = {pg: doc[pg] for pg in {b[0] for b in builds} if pg not in page_rotations}
+            for page, bbox, p, why, nrows in builds:
+                reason = f"the region scan rates this area a likely table (p={p:.2f}; {why})"
+                got = ([c for c in content_candidates(pages, [(page, bbox)]) if not _is_bad(c)]
+                       if page in pages else [])
+                if not got:
+                    unbuilt.append((page, bbox, reason, nrows))
+                    continue
+                first = got[0].pages[0]
+                info[(first, tuple(round(v) for v in got[0].bboxes[first]))] = (p, why, reason, bbox, nrows)
+                cands.append(got[0])
+            for cand in stitch_pages(cands, blocks, page_furniture(blocks)):
+                first = cand.pages[0]
+                p, why, reason, bbox, nrows = info[(first, tuple(round(v) for v in cand.bboxes[first]))]
+                sec = _to_section(cand, Confidence.UNCERTAIN, [])
+                if table_use(sec.columns) != "table":
+                    unbuilt.append((first, bbox, reason, nrows))  # contents, label: value: not tables
+                    continue
+                sec.metadata["region_bbox"] = (first, tuple(cand.bboxes[first]))
+                if len(cand.pages) > 1:
+                    sec.metadata["page_bboxes"] = dict(cand.bboxes)
+                    if getattr(cand, "pieces", None):
+                        sec.metadata["pieces"] = cand.pieces
+                sec.metadata["uncertain_reasons"] = ["single-source", "scan-build"]
+                sec.metadata["table_note"] = ("No reader kept a table here; the region scan rates the area a "
+                                              f"likely table (p={p:.2f}) and the content-first builder read it.")
+                sec.metadata["scan"] = {"p": p, "band": "build", "top": why}
+                built.append(sec)
+            if built:
+                gpages = {pg: doc[pg] for s in built
+                          for pg in ([s.page_num] + list(s.metadata.get("page_bboxes") or {}))
+                          if pg not in page_rotations}
+                gate_tables(doc, gpages, built)
+        finally:
+            doc.close()
+    return built, unbuilt
+# Removed-content entries: examples shown per entry, and their length.
+_DISCARD_EXAMPLES = 3
+_DISCARD_DETAIL_CHARS = 120
+
 # Depth of the caption band below a vector cluster, used for the
 # section-level caption-shaped drop and sub-caption capture (NOT for
 # rasterisation, NOT for the per-line PARAGRAPH filter, NOT for the
@@ -1632,6 +1823,13 @@ def _filter_sections_inside_vector_images(
                 for im in page_vectors
             )
             if mostly_inside:
+                # recorded, never silent: the paper summary lists removed content
+                current().record.exclude(
+                    "vector-images", sec.page_num, sec_bbox,
+                    f"{sec.kind.value} inside an extracted vector figure", "paths")
+                current().discards.append((
+                    "vector figure", f"a {sec.kind.value} section on page {sec.page_num + 1} lies "
+                    "inside an extracted vector figure", sec.text[:_DISCARD_DETAIL_CHARS]))
                 continue
             kept.append(sec)
             continue
@@ -1801,6 +1999,13 @@ class PipelineResult:
     images_truncated: bool = False
     vector_uncertainty: VectorUncertaintyStats | None = None
     glyph_stats: GlyphPassStats | None = None
+    # Table readers and checks that raised during the run (runctx.RunContext.reader_error):
+    # recorded instead of failing the paper, never swallowed silently.
+    reader_errors: list[dict] = field(default_factory=list)
+    # Content removed on purpose: (what, why, an example). Never silent.
+    discards: list[tuple[str, str, str]] = field(default_factory=list)
+    # The paper summary (summary.build); None for a skipped paper.
+    summary: dict | None = None
 
     @classmethod
     def for_skip(
@@ -1886,6 +2091,33 @@ def _parse_pdf_info_date(raw: str) -> str:
     return ""
 
 
+def _insert_after_front_matter(md: str, line: str) -> str:
+    """Insert one line after the YAML front matter (at the top when there is
+    none), and point the uncertainty markers at their text again."""
+    if md.startswith("---\n") and "\n---\n" in md[4:]:
+        end = md.index("\n---\n", 4) + len("\n---\n")
+        md = md[:end] + "\n" + line + "\n" + md[end:]
+    else:
+        md = line + "\n\n" + md
+    return renumber_uncertain_markers(md)
+
+
+def _in_run_scope(fn):
+    """Run ``fn`` inside a fresh run context (``runctx.run_scope``): everything the
+    table readers record belongs to this call only, also when papers convert on
+    several threads. Reader errors recorded during the run are returned on
+    ``PipelineResult.reader_errors``."""
+    @functools.wraps(fn)
+    def wrapper(*args, **kwargs) -> PipelineResult:
+        with run_scope() as ctx:
+            result = fn(*args, **kwargs)
+            result.reader_errors = list(ctx.record.errors)
+            result.discards = list(ctx.discards)
+        return result
+    return wrapper
+
+
+@_in_run_scope
 def run_pipeline(
     path: Path,
     *,
@@ -1951,6 +2183,8 @@ def run_pipeline(
             # Rotated pages: pg -> rotation matrix (page space -> reading
             # space).  Used for reading-order sorting and table insertion.
             page_rotations: dict[int, tuple] = {}
+            # every page's words, for the prose measure (docmeasure.py)
+            page_words: list[list] = []
             per_page_image_candidates: list = []
             # Sub-threshold raster glyphs (font-replacement emoji) and the
             # text-layer emoji bboxes used to skip coincident positions.
@@ -1962,6 +2196,11 @@ def run_pipeline(
 
             for pg_num in range(result.page_count):
                 page = doc[pg_num]
+                # text the page does not show (invisible, transparent, clipped, tiny,
+                # under an image, the colour of its background): removed from the
+                # in-memory page before any reader sees it, and listed in the summary
+                if remove_hidden_text(page, check_page(page)):
+                    page = doc[pg_num]
                 page_widths[pg_num] = page.rect.width
                 if page.rotation:
                     page_rotations[pg_num] = tuple(page.rotation_matrix)
@@ -2023,6 +2262,9 @@ def run_pipeline(
 
             page_drawings: dict[int, list] = {}
             page_mupdf_tables: dict[int, list[dict]] = {}
+            ruled_tables: list = []
+            poll_tables: list = []
+            page_rules: dict[int, list] = {}         # drawn horizontal rules per page
             all_figure_regions = []
             for pg_num in range(result.page_count):
                 page = doc[pg_num]
@@ -2034,6 +2276,26 @@ def run_pipeline(
                 page_figures = detect_figure_regions(
                     raw_drawings, pg_num, page.rect.width)
                 all_figure_regions.extend(page_figures)
+
+                # Table readers from the drawn lines: grids ruled both ways,
+                # column-rule tables, and tables bounded by horizontal rules
+                # (booktabs, shaded bands). They read the page upright; a
+                # rotated page is not read by them yet (recorded).
+                words = page.get_text("words")
+                page_words.append(words)
+                if pg_num in page_rotations:
+                    current().record.exclude("rules", pg_num, tuple(page.rect), _ROTATED_NOT_READ, "paths")
+                else:
+                    try:
+                        page_rules[pg_num] = page_hrules(page, raw_drawings)
+                        ruled_tables.extend(extract_ruled_tables(page, pg_num, raw_drawings))
+                    except Exception as exc:  # a failing table reader must not fail the paper: recorded
+                        current().reader_error("ruled", pg_num, exc)
+                    # Table reader: WG21 straw polls ("SF F N A SA" over the counts).
+                    try:
+                        poll_tables.extend(extract_poll_tables(page, pg_num, words))
+                    except Exception as exc:  # a failing table reader must not fail the paper: recorded
+                        current().reader_error("poll", pg_num, exc)
 
                 # Intentional: runs unconditionally (independent of ml_tables).
                 # Three table-detection passes rely on the MuPDF signal:
@@ -2095,6 +2357,14 @@ def run_pipeline(
             if all_figure_regions:
                 _log.info("Detected %d figure region(s)", len(all_figure_regions))
 
+            # Table reader: the PDF's accessibility tags (structure tree), the
+            # author's own table markup, for tagged PDFs.
+            try:
+                tagged_tables = extract_tagged_tables(doc)
+            except Exception as exc:  # a failing table reader must not fail the paper: recorded
+                current().reader_error("tagged", None, exc)
+                tagged_tables = []
+
             pdf_info_date = _parse_pdf_info_date(doc.metadata.get("creationDate", ""))
             pdf_info_title = (doc.metadata.get("title") or "").strip()
             doc_metadata = dict(doc.metadata)
@@ -2109,6 +2379,8 @@ def run_pipeline(
             total_hidden,
             len(all_hidden),
         )
+        current().discards.append(("hidden", f"text under {total_hidden} covered region(s) "
+                                   f"on {len(all_hidden)} page(s) removed", ""))
         all_mupdf_blocks = strip_hidden_blocks(all_mupdf_blocks, all_hidden)
         all_spatial_blocks = strip_hidden_blocks(all_spatial_blocks, all_hidden)
 
@@ -2166,6 +2438,9 @@ def run_pipeline(
     repeating = detect_repeating(all_edge_items, result.page_count, page_height)
     if repeating:
         _log.info("Stripping %d repeating header/footer patterns", len(repeating))
+        current().discards.append(("headers", f"{len(repeating)} repeating header/footer "
+                                   "pattern(s) removed",
+                                   ", ".join(sorted(map(str, repeating))[:_DISCARD_EXAMPLES])[:_DISCARD_DETAIL_CHARS]))
         all_mupdf_blocks = strip_repeating(all_mupdf_blocks, repeating)
         all_spatial_blocks = strip_repeating(all_spatial_blocks, repeating)
 
@@ -2193,8 +2468,11 @@ def run_pipeline(
     if two_column_pages:
         _log.debug("Two-column pages: %s", sorted(two_column_pages))
 
-    all_mupdf_blocks = cleanup_text(all_mupdf_blocks)
-    all_spatial_blocks = cleanup_text(all_spatial_blocks)
+    # A line-end hyphen inside a region a table reader located is the cell's, decided
+    # when the cell is rendered: the document-wide pass leaves it.
+    reader_regions = [(pg, bb) for c in ruled_tables + tagged_tables + poll_tables for pg, bb in c.bboxes.items()]
+    all_mupdf_blocks = cleanup_text(all_mupdf_blocks, keep_hyphens=reader_regions)
+    all_spatial_blocks = cleanup_text(all_spatial_blocks, keep_hyphens=reader_regions)
 
     all_mupdf_blocks = normalize_spans(all_mupdf_blocks)
     all_spatial_blocks = normalize_spans(all_spatial_blocks)
@@ -2203,20 +2481,127 @@ def run_pipeline(
         all_mupdf_blocks, text_colors=page0_colors
     )
 
-    # Snapshot for Docling enrichment: detect_tables consumes blocks,
-    # but the enrichment needs access to ALL page spans (including
-    # those consumed but dropped from sec.lines by the rule-based
-    # detector) to correctly populate Docling cell grids.
-    pre_detect_blocks = list(all_mupdf_blocks) if ml_tables else []
+    # Snapshot of every page block before detect_tables consumes them:
+    # the table trust check counts the text of each table's area in it
+    # (select.conservation_error), and the Docling enrichment needs ALL
+    # page spans (including those consumed but dropped from sec.lines by
+    # the rule-based detector) to correctly populate Docling cell grids.
+    pre_detect_blocks = list(all_mupdf_blocks)
 
-    table_sections, all_mupdf_blocks = detect_tables(
-        all_mupdf_blocks,
-        page_mupdf_tables=page_mupdf_tables,
-        two_column_pages=two_column_pages,
-    )
+    # Every table reader proposes readings; select_tables picks one reading
+    # per region and trusts it (HIGH) only when another kind of evidence
+    # agrees. detect_tables is the text-position reader ("tomd"); its own
+    # consumption of blocks is not used: the text of each selected table's
+    # region leaves the prose afterwards (remove_table_regions), and a line
+    # whose words are not in the table stays.
+    try:
+        tomd_sections, _ = detect_tables(
+            list(all_mupdf_blocks),
+            page_mupdf_tables=page_mupdf_tables,
+            two_column_pages=two_column_pages,
+        )
+    except Exception as exc:  # a failing table reader must not fail the paper: recorded, its text kept as prose
+        current().reader_error("detect_tables", None, exc)
+        tomd_sections = []
+    # Table reader: side-by-side code blocks of the same code (a before/after pair).
+    try:
+        code_pairs = find_code_pairs(pre_detect_blocks, lambda pg: page_rules.get(pg, []))
+    except Exception as exc:  # a failing table reader must not fail the paper: recorded
+        current().reader_error("codepair", None, exc)
+        code_pairs = []
+    # What ordinary prose looks like in this document, for the region scan.
+    current().record.doc_measure = doc_measure(page_words)
+    current().hyphenates = doc_hyphenates(page_words)
+    # The steps around selection reopen the PDF (the readers' first session
+    # closed above). The content-first builder and the records reader read every
+    # region any reader located (kept or not) and the areas aligned like a table
+    # that no reader proposed; the extent step looks just outside each reading
+    # for rows it missed and records why it stopped; the gate checks every
+    # selected table against its page and classifies it. Rotated pages are not
+    # read upright yet.
+    rejected: list = []
+    with _FITZ_LOCK:  # see _fitz_lock.py for why this lock is required
+        tdoc = fitz.open(str(path))
+        hide_recorded(tdoc)
+        try:
+            tpages = {pg: tdoc[pg] for pg in range(tdoc.page_count) if pg not in page_rotations}
+            content_tables = _content_readings(
+                tpages, ruled_tables + tagged_tables + poll_tables + code_pairs, tomd_sections,
+                pre_detect_blocks, page_rules)
+            readings = [c for c in ruled_tables + tagged_tables + poll_tables + code_pairs + content_tables
+                        if c.bboxes and all(pg in tpages for pg in c.pages)]
+            try:
+                extend_readings(readings, tpages)
+            except Exception as exc:  # the extent step only adds evidence; never fail on it, never silently
+                current().reader_error("extent step", None, exc)
+            table_sections = select_tables(tomd_sections, ruled_tables, tagged_tables, pre_detect_blocks,
+                                           poll_tables, rejected, code_pairs, content_tables,
+                                           generator=pdf_generator(doc_metadata))
+            try:
+                gate_tables(tdoc, tpages, table_sections)
+            except Exception as exc:  # the gate only lowers trust; never fail on it, never silently
+                current().reader_error("table classification", None, exc)
+            withhold_trust(table_sections)
+        finally:
+            tdoc.close()
+    # Rows bounded by drawn rules: a record the reader cut into rows is joined.
+    for ts in table_sections:
+        pages = {ln.page_num for ln in ts.lines or []}
+        if len(pages) == 1:
+            try:
+                merge_rule_bands(ts, page_rules.get(next(iter(pages)), []))
+            except Exception as exc:  # a join only; never fail on it, never silently
+                current().reader_error("rule-band rows", next(iter(pages)), exc, table=ts)
+    all_mupdf_blocks = remove_table_regions(pre_detect_blocks, table_sections)
+    all_spatial_blocks = remove_table_regions(all_spatial_blocks, table_sections)
     if table_sections:
-        _log.info("Detected %d table(s)", len(table_sections))
-        all_spatial_blocks = exclude_table_regions(all_spatial_blocks, table_sections)
+        _log.info("Selected %d table(s)", len(table_sections))
+    if table_sections:
+        # A note on pieces that may continue the previous page's table (never a
+        # join), and the figure label of a table drawn inside a figure.
+        with _FITZ_LOCK:  # see _fitz_lock.py for why this lock is required
+            kdoc = fitz.open(str(path))
+            hide_recorded(kdoc)
+            try:
+                try:
+                    annotate_continuations(kdoc, table_sections)
+                except Exception as exc:  # a note only; never fail on it, never silently
+                    current().reader_error("continuation notes", None, exc)
+                try:
+                    label_figure_tables(kdoc, table_sections)
+                except Exception as exc:  # a label only; never fail on it, never silently
+                    current().reader_error("figure labels", None, exc)
+            finally:
+                kdoc.close()
+
+    # Nothing a reader found leaves the text silently: grids the rule reader
+    # excluded and readings that failed the checks are listed for the paper,
+    # and those no kept table covers become possible-table marks below.
+    rejected += current().excluded_grids
+    dropped = dropped_uncovered(rejected, table_sections)
+    if dropped:
+        current().discards.append(("dropped table candidates", f"{len(dropped)} reading(s) failed the "
+                                   "checks and no kept table covers them: " + "; ".join(dropped[:12])
+                                   + ("; ..." if len(dropped) > 12 else ""), ""))
+    # The region scan scores every area any reader nominated or a rule
+    # excluded: a likely table no reader kept is built by the content-first
+    # builder (flagged) or marked; an emitted table gets its likelihood.
+    scan_regions: list = []
+    try:
+        builds: list = []
+        scan_regions = run_scan(path, current().record, table_sections, builds)
+        if builds:
+            built, unbuilt = _build_scan_tables(path, builds, all_mupdf_blocks, page_rotations)
+            scan_regions += unbuilt
+            if built:
+                table_sections += built
+                all_mupdf_blocks = remove_table_regions(all_mupdf_blocks, built)
+                all_spatial_blocks = remove_table_regions(all_spatial_blocks, built)
+    except Exception as exc:  # the scan only adds marks, builds and doubts; never fail on it, never silently
+        current().reader_error("region scan", None, exc)
+    possible_tables = (scan_regions + rejected_regions(rejected, table_sections)
+                       + text_regions(all_mupdf_blocks) + gutter_regions(all_mupdf_blocks)
+                       + dropped_nomination_regions(current().record, table_sections))
 
     # --- Optional Docling ML table processing ---
     # When ml_tables=True and Docling is available:
@@ -2282,6 +2667,13 @@ def run_pipeline(
     for k, v in body_metadata.items():
         if k not in metadata:
             metadata[k] = v
+
+    # Text a reader or the layout says is probably a table, not emitted as one:
+    # marked where it stands (possible tables, L5), its text kept. Marked after
+    # body structuring, so a mark is on the final section (code lines merged
+    # into one block keep it).
+    flag_possible_tables(sections, possible_tables)
+    flag_possible_tables(sections, outside_view_regions(sections))
 
     # Glyph placeholders that attached (before structure ran) to a line
     # now classified CODE or folded into a TABLE are removed: a U+FFFD in
@@ -2452,8 +2844,12 @@ def run_pipeline(
     # can misclassify TOC entries (section number + title + page number
     # on the same y-line) as table rows; reverting them here lets the
     # existing find_toc_indices / label-anchored logic strip them.
+    # A table two kinds of evidence agree on is exempt; a demoted table
+    # carries a possible-table mark, so the demotion is never silent.
     for sec in sections:
-        if sec.kind == SectionKind.TABLE and has_dot_leader(sec.text):
+        if (sec.kind == SectionKind.TABLE and has_dot_leader(_leader_text(sec))
+                and sec.confidence != Confidence.HIGH):
+            sec.metadata["possible_table"] = _MARK_DOT_LEADER
             sec.kind = SectionKind.PARAGRAPH
             sec.table_kind = None
             sec.table_strategy = None
@@ -2641,7 +3037,13 @@ def run_pipeline(
                 ],
             )
             toc_indices -= protected
+        # A selected table is never a contents entry: removing it would lose the
+        # table silently. What is removed is listed for the paper.
+        toc_indices = {i for i in toc_indices if sections[i].kind != SectionKind.TABLE}
         if toc_indices:
+            first = sections[min(toc_indices)].text.split("\n")[0][:80]
+            current().discards.append(("contents", f"{len(toc_indices)} section(s) taken for a table "
+                                       "of contents", first))
             sections[:] = [s for i, s in enumerate(sections) if i not in toc_indices]
 
     sections[:] = [
@@ -2661,6 +3063,32 @@ def run_pipeline(
     # duplicate headings and title-like paragraph/list entries, plus the
     # non-recurring stragglers (front-region only) that fragment the block.
     sections = drop_leaked_toc_entries(sections)
+
+    # A reader or check that raised: every table its stage could have touched
+    # is at most UNCERTAIN (a per-table check's failure touches only its table;
+    # stages that cannot change a table's content touch none).
+    touching = [e for e in current().record.errors if e["stage"] not in _ERROR_NO_TABLE]
+    error_pages = {e["page"] for e in touching if not e.get("table")}
+    for sec in sections:
+        if sec.kind != SectionKind.TABLE:
+            continue
+        on = {sec.page_num} | {ln.page_num for ln in (sec.lines or [])}
+        if None in error_pages or on & error_pages or sec.metadata.get("reader_errors"):
+            sec.confidence = Confidence.UNCERTAIN
+            reasons = sec.metadata.setdefault("uncertain_reasons", [])
+            if "reader error" not in reasons:
+                reasons.append("reader error")
+
+    # Every table gets a graded level (L0-L5, levels.py): how a flagged table
+    # may be wrong. A table classified as not a table (rendered as text) is a
+    # possible-table mark instead.
+    for sec in sections:
+        if sec.kind != SectionKind.TABLE:
+            continue
+        if sec.table_strategy == TableStrategy.SKIP.value:
+            sec.metadata["possible_table"] = _MARK_FALSE_POSITIVE
+        else:
+            sec.metadata["level"] = assign_level(sec)
 
     md = emit_markdown(
         metadata,
@@ -2683,6 +3111,23 @@ def run_pipeline(
             for problem in wording_problems
         ]
         prompts = (prompts or []) + wording_prompts
+
+    # The paper summary: what was done with the tables, what was removed and
+    # why, which readers raised. One comment after the front matter; the
+    # removed content, reader errors and summary as prompt elements when the
+    # paper has prompts at all.
+    ctx = current()
+    # hidden text removed from the pages: listed in the summary and prompts (open question 4)
+    hidden_regions = recorded_regions()
+    ctx.discards.extend(hidden_discards(hidden_regions))
+    summary = build_summary(sections, ctx.discards, ctx.record.errors, pdf_generator(doc_metadata))
+    if hidden_regions:
+        summary["visibility"] = hidden_summary(hidden_regions)
+    if md.strip():
+        md = _insert_after_front_matter(md, header_comment(summary))
+    if prompts:
+        prompts = prompts + prompt_elements(summary, ctx.discards, ctx.record.errors)
+    result.summary = summary
 
     result.md = md
     result.prompts = prompts

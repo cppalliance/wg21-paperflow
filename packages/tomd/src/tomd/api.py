@@ -53,6 +53,7 @@ from tomd.domain.image import ExtractedImage
 from tomd.lib.html import convert_html
 from tomd.lib.html.images import load_html_images
 from tomd.lib.pdf import PipelineResult, run_pipeline
+from tomd.lib.pdf.emit import renumber_uncertain_markers
 
 __all__ = ["ConvertedPaper", "convert_paper", "convert_paper_full"]
 
@@ -83,6 +84,9 @@ class ConvertedPaper:
     skip_reason: SkipReason | None = None
     source_raster_count: int = 0
     source_vector_count: int = 0
+    # The PDF paper summary (tables trusted, flagged and marked, removed
+    # content, reader errors); None for HTML and skipped papers.
+    summary: dict | None = None
 
     @classmethod
     def skipped_from(cls, raw: PipelineResult) -> "ConvertedPaper":
@@ -295,6 +299,7 @@ class _RawConversion:
     skip_reason: SkipReason | None
     source_raster_count: int = 0
     source_vector_count: int = 0
+    summary: dict | None = None
 
 
 def _convert_with_tomd_full(
@@ -337,6 +342,7 @@ def _convert_with_tomd_full(
             skip_reason=r.skip_reason,
             source_raster_count=raster,
             source_vector_count=vector,
+            summary=r.summary,
         )
     if suffix in (".html", ".htm"):
         html_result = None
@@ -448,6 +454,8 @@ def convert_paper_full(
         md = apply_strip_leading_h1(md, title)
 
     md = _strip_toc(md)
+    # the rewrites above shift lines: point uncertainty markers at their text again
+    md = renumber_uncertain_markers(md)
 
     extracted_intent = _extract_intent_from_front_matter(md)
     return ConvertedPaper(
@@ -461,6 +469,7 @@ def convert_paper_full(
         skip_reason=None,
         source_raster_count=raw.source_raster_count,
         source_vector_count=raw.source_vector_count,
+        summary=raw.summary,
     )
 
 

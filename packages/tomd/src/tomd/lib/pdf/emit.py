@@ -1,5 +1,6 @@
 """Markdown and companion prompts file generation."""
 
+import dataclasses
 import html as _html
 import logging
 import re
@@ -25,7 +26,10 @@ from .glyphs import (
     UNKNOWN_GLYPH,
 )
 from .images import TRUNCATION_MARKER_TEMPLATE
+from .levels import SHOWN_FROM, comment as level_comment
+from .runctx import current
 from .types import Line, Span, Section, SectionKind, BULLET_CHARS, BULLET_RE, NUMBERED_LIST_RE, FALLBACK_FONT_SIZE
+from tomd.domain.elements import Confidence
 from .vector_images import format_uncertainty_marker, should_emit_marker
 _log = logging.getLogger(__name__)
 
@@ -951,21 +955,89 @@ def _render_html_table(sec: Section) -> str:
     return "\n".join(parts)
 
 
-_CELL_WRAP_RE = re.compile(r"\s*\n\s*")
+# Side-by-side code (a code comparison) is written as paired fenced blocks
+# under the column headers: a pipe table cannot hold multi-line code.
+_CODE_SHARE = 0.8       # body text this monospace...
+_CODE_LINES = 3         # ...with a cell this many lines long: a code comparison
+_CODE_MAX_COLS = 3
+_CODE_MAX_ROWS = 2      # a header row and one row of code blocks
+_BACKSLASH = re.compile(r"\\(?=[!-/:-@\[-`{-~])")
 
 
-def _flatten_cell(text: str) -> str:
-    """Collapse a soft-wrapped cell onto one line for pipe-table rendering.
+def _escape_angle(text: str) -> str:
+    """Escape "<" outside code spans so "<a@b.org>" is not read as a link or
+    HTML, and a backslash before punctuation, which Markdown would read as an
+    escape and drop."""
+    parts = re.split(r"(`[^`]*`|<br>)", text)
+    return "".join(p if i % 2 else _BACKSLASH.sub(r"\\\\", p).replace("<", "\\<") for i, p in enumerate(parts))
 
-    Only whitespace runs containing a newline are collapsed, so how much
-    space surrounds the wrap point does not matter and space runs elsewhere
-    (inline code) are left alone.
-    """
-    return _CELL_WRAP_RE.sub(" ", text).strip()
+
+def _code_cell_lines(cell) -> list[list]:
+    out, cur = [], []
+    for s in cell:
+        if s.text == "\n":
+            out.append(cur)
+            cur = []
+        else:
+            cur.append(s)
+    out.append(cur)
+    return [ln for ln in out if any(s.text.strip() for s in ln)]
+
+
+def is_code_comparison(rows) -> bool:
+    """Side-by-side code: at most 3 columns and 2 rows (header + code), the
+    body (nearly) all monospace, some cell several lines long."""
+    if not rows or max(len(r) for r in rows) > _CODE_MAX_COLS or len(rows) > _CODE_MAX_ROWS:
+        return False
+    body = rows[1:] if len(rows) == _CODE_MAX_ROWS else rows
+    spans = [s for r in body for c in r for s in c if s.text.strip() and s.text != "\n"]
+    chars = sum(len(s.text.strip()) for s in spans)
+    mono = sum(len(s.text.strip()) for s in spans if s.monospace)
+    return (chars > 0 and mono >= _CODE_SHARE * chars and len([c for c in body[0] if c]) >= 2
+            and max(len(_code_cell_lines(c)) for r in body for c in r) >= _CODE_LINES)
+
+
+def _code_text(cell) -> str:
+    """A code cell's lines exactly: indentation rebuilt from x offsets."""
+    lines = _code_cell_lines(cell)
+    widths = [(s.bbox[2] - s.bbox[0]) / len(s.text) for ln in lines for s in ln
+              if s.monospace and s.text and s.bbox and s.bbox[2] > s.bbox[0]]
+    em = sorted(widths)[len(widths) // 2] if widths else 0.0
+    left = min((ln[0].bbox[0] for ln in lines if ln and ln[0].bbox), default=0.0)
+    out = []
+    for ln in lines:
+        text = "".join(s.text for s in ln).rstrip()
+        indent = int(round((ln[0].bbox[0] - left) / em)) if em and ln[0].bbox else 0
+        out.append(" " * max(indent, 0) + text.lstrip())
+    return "\n".join(out)
+
+
+def _render_paired_code(rows) -> str:
+    """Paired fenced code blocks under the column headers, after a marker that
+    records the structure."""
+    header = rows[0] if len(rows) == _CODE_MAX_ROWS else [[] for _ in rows[0]]
+    body = rows[-1]
+    parts = [f"<!-- tomd:table kind=code-comparison cols={len(body)} -->"]
+    for h, cell in zip(list(header) + [[]] * (len(body) - len(header)), body):
+        # spans carry their own spacing: joined as they are within a line, lines with a space
+        title = _escape_angle(" ".join("".join(s.text for s in ln).strip() for ln in _code_cell_lines(h)).strip())
+        if title:
+            parts.append(f"**{title}**")
+        parts.append("```cpp\n" + _code_text(cell) + "\n```")
+    return "\n\n".join(parts)
+
+
+def _separator_row(row) -> bool:
+    """A row of dashes ("- | - | -"): a Markdown table's separator line that the program
+    which made the PDF printed as text under the header."""
+    cells = ["".join(s.text for s in cell).strip() for cell in row]
+    return sum(1 for c in cells if c) >= 2 and all(not c or _SEPARATOR_CELL.match(c) for c in cells)
 
 
 def _render_table(sec: Section) -> str:
     """Render a table section according to its assigned strategy."""
+    if sec.columns and is_code_comparison(sec.columns):
+        return _render_paired_code(sec.columns)
     if sec.table_strategy == "code_blocks":
         return _render_code_comparison(sec)
     if sec.table_strategy == "html_table":
@@ -986,7 +1058,7 @@ def _render_table(sec: Section) -> str:
     else:
         header = rows[0]
         header_cells = [
-            _flatten_cell(_render_cell_spans(cell, suppress_bold=True))
+            _render_table_cell(cell, suppress_bold=True)
             for cell in header
         ]
         while len(header_cells) < num_cols:
@@ -994,10 +1066,14 @@ def _render_table(sec: Section) -> str:
         lines.append("| " + " | ".join(header_cells) + " |")
         lines.append("| " + " | ".join(["---"] * num_cols) + " |")
         data_rows = rows[1:]
+        # the source's own separator line, printed: it is the line above. A dash row
+        # with no body under it is the table's content ("-" for no votes)
+        if len(data_rows) > 1 and _separator_row(data_rows[0]):
+            data_rows = data_rows[1:]
 
     for row in data_rows:
         cells = [
-            _flatten_cell(_render_cell_spans(cell))
+            _render_table_cell(cell)
             for cell in row
         ]
         while len(cells) < num_cols:
@@ -1007,6 +1083,7 @@ def _render_table(sec: Section) -> str:
     return "\n".join(lines)
 
 
+_SEPARATOR_CELL = re.compile(r"^:?-+:?$")      # "-", "---", ":--:"
 _ITALIC_INLINE_ESCAPE_RE = re.compile(r"([\\*_`])")
 # Leading characters that would otherwise be parsed as a list marker,
 # blockquote, ATX heading, or ordered-list start. The synthesised
@@ -1214,6 +1291,7 @@ def emit_markdown(
     duplicate-paragraph collapse) so it matches a grep of the output.
     """
     _assign_emdash_nesting(sections)
+    set_lexicon(sections)
 
     # Pre-pass: fold cross-page table continuations into the preceding
     # table so they render as a single HTML/pipe table.  The detection
@@ -1271,6 +1349,31 @@ def emit_markdown(
         if sec.kind in (SectionKind.TITLE, SectionKind.HEADING):
             if not rendered.lstrip("#").strip():
                 continue
+        if sec.kind == SectionKind.TABLE:
+            note = _table_notes(sec)
+            if note:
+                # notes that go before a table: a possible continuation (never a
+                # join) and the figure the table is drawn in
+                parts.append(note)
+                line_num += note.count("\n") + 2
+        if is_flagged_table(sec) or sec.metadata.get("possible_table"):
+            # A table no second kind of evidence confirmed, or text that may be a
+            # table no reader produced: marked like any uncertain region, its
+            # rendering kept. A table's level comment (levels.py) says how it may
+            # be wrong; the marker touches the table.
+            head = []
+            lv = sec.metadata.get("level") if sec.kind == SectionKind.TABLE else None
+            if lv and lv.get("level", 0) >= SHOWN_FROM and not sec.metadata.get("possible_table"):
+                head.append(level_comment(lv))
+            text_lines = rendered.count("\n") + 1
+            text_start = line_num + 2 * len(head) + 2
+            block = head + [f"<!-- tomd:uncertain:L{text_start}-L{text_start + text_lines - 1} -->", rendered]
+            if annotate:
+                parts.append(_annotate_wrap("\n\n".join(block), sec))
+            else:
+                parts.extend(block)
+            line_num += 2 * len(head) + text_lines + 3
+            continue
         if annotate:
             rendered = _annotate_wrap(rendered, sec)
         parts.append(rendered)
@@ -1339,7 +1442,38 @@ def emit_markdown(
             )
 
     md = md.rstrip() + "\n"
+    if not annotate:
+        md = renumber_uncertain_markers(md)
     return md
+
+
+def is_flagged_table(sec: Section) -> bool:
+    """A TABLE section no second kind of evidence confirmed (select.trust_tables)."""
+    return sec.kind == SectionKind.TABLE and sec.confidence == Confidence.UNCERTAIN
+
+
+_UNCERTAIN_MARKER_RE = re.compile(r"^<!-- tomd:uncertain:L(\d+)-L(\d+) -->$")
+# Lines from an uncertainty marker to the first line it covers: the marker, then a blank line.
+_MARKER_TO_TEXT = 2
+
+
+def renumber_uncertain_markers(md: str) -> str:
+    """Point every ``tomd:uncertain:L{a}-L{b}`` marker at the lines under it.
+
+    Emit numbers the markers as it writes them; later rewrites (duplicate
+    paragraphs collapsed, the table style block, front matter normalized,
+    the contents stripped) shift lines. Each marker keeps the number of lines
+    it covers and is renumbered from its own position: the covered text
+    starts two lines below the marker.
+    """
+    lines = md.split("\n")
+    for i, ln in enumerate(lines):
+        m = _UNCERTAIN_MARKER_RE.match(ln)
+        if m:
+            span = int(m.group(2)) - int(m.group(1))
+            start = i + 1 + _MARKER_TO_TEXT
+            lines[i] = f"<!-- tomd:uncertain:L{start}-L{start + span} -->"
+    return "\n".join(lines)
 
 
 def emit_prompts(sections: list[Section]) -> list[str] | None:
@@ -1350,7 +1484,12 @@ def emit_prompts(sections: list[Section]) -> list[str] | None:
     """
     uncertain = [(idx, s) for idx, s in enumerate(sections)
                  if s.kind == SectionKind.UNCERTAIN]
-    if not uncertain:
+    # Flagged tables and possible tables follow the reconcile prompts, in
+    # section order: one self-contained element each.
+    flagged = [(idx, s) for idx, s in enumerate(sections)
+               if s.kind != SectionKind.UNCERTAIN
+               and (is_flagged_table(s) or s.metadata.get("possible_table"))]
+    if not uncertain and not flagged:
         return None
 
     prompts: list[str] = []
@@ -1401,4 +1540,241 @@ def emit_prompts(sections: list[Section]) -> list[str] | None:
 
         prompts.append("\n".join(parts))
 
+    prompts.extend(_table_prompt(sections, idx) for idx, _ in flagged)
     return prompts
+
+
+_CONTEXT_CHARS = 200       # characters of a neighbouring section quoted as context
+
+
+def _is_flagged(sec: Section) -> bool:
+    return (sec.kind == SectionKind.UNCERTAIN or is_flagged_table(sec)
+            or bool(sec.metadata.get("possible_table")))
+
+
+def _table_prompt(sections: list[Section], idx: int) -> str:
+    """One self-contained prompt for a flagged table or a possible table."""
+    sec = sections[idx]
+    ctx_before = ""
+    ctx_after = ""
+    if idx > 0 and not _is_flagged(sections[idx - 1]):
+        ctx_before = sections[idx - 1].text[:_CONTEXT_CHARS].strip()
+    if idx + 1 < len(sections) and not _is_flagged(sections[idx + 1]):
+        ctx_after = sections[idx + 1].text[:_CONTEXT_CHARS].strip()
+    parts: list[str] = [
+        "You are checking a table extracted from a PDF.",
+        "",
+        "CRITICAL: Keep ALL data verbatim. Do not summarize, omit, or paraphrase "
+        "any text. Every word from the source must appear in your output. You are "
+        "only fixing structure (rows, columns, cells) - never content.",
+        "",
+        f"This region is on page {sec.page_num}.",
+        "",
+    ]
+    if ctx_before:
+        parts += ["Context (preceding confident section):", f"> {ctx_before}", ""]
+    if sec.metadata.get("possible_table"):
+        parts += ["This text may be a table that was not extracted as one",
+                  f"({sec.metadata['possible_table']}). If it is a table,",
+                  "rebuild it as one Markdown table; otherwise keep it as it is.",
+                  "", "```", _render_section_md(sec), "```"]
+    else:
+        parts += ["This is a table no second kind of evidence confirmed. Check its rows,",
+                  "columns and cell text against the page and produce one correct Markdown table.",
+                  ""]
+        if sec.metadata.get("table_note"):
+            parts += [sec.metadata["table_note"], ""]
+        versions = sec.metadata.get("table_versions") or [(sec.table_source or "tomd", _render_section_md(sec))]
+        for i, (source, table_md) in enumerate(versions):
+            label = "emitted" if i == 0 else "alternative"
+            parts += [f"Table from the {source} extractor ({label}):", "```", table_md, "```", ""]
+        parts.pop()
+    if ctx_after:
+        parts += ["", "Context (following confident section):", f"> {ctx_after}"]
+    return "\n".join(parts)
+
+
+_LABEL_CELL = re.compile(r"^[A-Za-z][\w ./()-]{0,40}:$")
+_PAGE_CELL = re.compile(r"^\d{1,4}$")
+_SECTION_LEAD = re.compile(r"^\s*(\d+(\.\d+)*\.?|[A-Z](\.\d+)*\.?|n\.m(\.\d+)*|\?\?(\.\?+)*)\s+\S")
+_STABLE_NAME = re.compile(r"^\s*\[[a-z][\w.:-]*\]\s*$")
+
+
+def table_use(rows) -> str:
+    """What a grid is used for (conventions decided by a person, 2026-10-19):
+    "label-value" - repeated per-item "label: value" entries (not a table);
+    "contents" - a contents page or reference list laid out in a grid (not a table);
+    "heading" - a numbered heading of the standard's wording and its stable name;
+    "table" - everything else."""
+    texts = [[" ".join(s.text for s in c if s.text != "\n").strip() for c in r] for r in rows]
+    if not texts:
+        return "table"
+    ncol = max(len(r) for r in texts)
+    labels = [r[0] for r in texts if r and r[0]]
+    if ncol == 2 and labels and sum(bool(_LABEL_CELL.match(t)) for t in labels) >= 0.6 * len(texts):
+        return "label-value"
+    last = [r[-1] for r in texts if r and r[-1]]
+    nums = [int(t) for t in last if _PAGE_CELL.match(t)]
+    if ncol <= 3 and len(nums) >= 3 and len(nums) >= 0.7 * len(texts) and nums == sorted(nums):
+        return "contents"
+    # the standard's own contents style: a section number and title, then its stable name
+    # ("13.10 Function template specializations | [temp.fct.spec]"), with no page numbers
+    if (ncol <= 3 and len(texts) >= 3
+            and sum(1 for r in texts if r and _SECTION_LEAD.match(r[0]) and _STABLE_NAME.search(r[-1] or ""))
+            >= 0.7 * len(texts)):
+        return "contents"
+    # a heading of the standard's wording read as a row: "7.2 Properties of expressions",
+    # its stable name "[expr.prop]" set at the right margin
+    if (len(texts) <= 2 and ncol <= 3
+            and all(r and _SECTION_LEAD.match(r[0]) and _STABLE_NAME.search(r[-1] or "")
+                    and all(not c for c in r[1:-1]) for r in texts)):
+        return "heading"
+    return "table"
+
+
+# Pipe-table cells (tomd-tables' cell renderer): a wrapped cell keeps its lines
+# (joined with <br>), a line-end hyphen is decided by how the paper writes the
+# word, and "|", "<", a backslash and a literal "*" cannot change the table.
+_HYPHEN_END = re.compile(r"([A-Za-z_][\w]*(?:-[\w]+)*)-(\*\*|\*)?$")
+_LEX_WORD = re.compile(r"[A-Za-z]+(?:-[A-Za-z]+)*")
+_STAR = "\x00"      # a literal asterisk in cell text, escaped once the cell is rendered
+_CELL_WRAP = re.compile(r"[ \t]*\n\s*")
+# Prefixes that form compounds: a line-end hyphen after one is kept ("non-" + "enforced").
+COMPOUND_PREFIXES = frozenset({
+    "self", "non", "well", "cross", "pre", "post", "re", "co", "anti",
+    "multi", "semi", "sub", "inter", "intra", "over", "under", "out",
+})
+# A hyphen-split part this short (or a continuation this short) is a syllable break.
+_SYLLABLE_PREFIX = 3
+_SYLLABLE_SUFFIX = 4
+
+
+def set_lexicon(sections: list[Section]) -> None:
+    """Count the running-text words of the paper (tables excluded) for cell hyphens."""
+    lex = current().lexicon
+    lex.clear()
+    for sec in sections:
+        if sec.kind != SectionKind.TABLE:
+            lex.update(w.lower() for w in _LEX_WORD.findall(sec.text))
+
+
+def _join_hyphenated(line: str, nxt: str, prefix: str) -> str:
+    """Join a cell line ending in "word-" with the next line.
+
+    The paper's own text decides first: if it writes "automatically" and
+    never "automati-cally", the hyphen was a line break; if it writes
+    "non-enforced", the hyphen is part of the word. Otherwise a syllable
+    break drops the hyphen ("com-" + "patibility"): the part before it is a
+    short fragment or the continuation is short. A compound keeps it
+    ("non-" + "enforced", "effect-" + "parameterized").
+    """
+    lex = current().lexicon
+    suffix = re.match(r"[A-Za-z]*", nxt).group(0)
+    joined, hyphened = (prefix + suffix).lower(), f"{prefix}-{suffix}".lower()
+    if suffix and (lex[joined] or lex[hyphened]):
+        return (line if lex[hyphened] >= lex[joined] else line[:-1]) + nxt
+    if "-" in prefix:
+        return line + nxt                 # inside a hyphenated chain: "warnings-as-" + "errors"
+    if not current().hyphenates:
+        return line + nxt                 # a maker that never hyphenates: the hyphen is the word's
+    p = prefix.lower()
+    acronym = len(prefix) >= 2 and prefix.isupper()     # "ABI-" + "independent" is a compound
+    syllable = (not acronym and p not in COMPOUND_PREFIXES
+                and (len(p) <= _SYLLABLE_PREFIX or len(suffix) <= _SYLLABLE_SUFFIX))
+    return (line[:-1] if syllable else line) + nxt
+
+
+def _mark_asterisks(spans: list) -> list:
+    """Asterisks in plain text ("/*...*/" in a cell of prose) would read as
+    emphasis and vanish; code spans keep theirs literally."""
+    return [s if s.monospace or "*" not in s.text else dataclasses.replace(s, text=s.text.replace("*", _STAR))
+            for s in spans]
+
+
+def _coalesce(spans: list) -> list:
+    """Neighbouring spans with the same style as one span: rendered apart,
+    two italic runs touch as "*a**b*", which Markdown reads as bold."""
+    out: list = []
+    for s in spans:
+        p = out[-1] if out else None
+        if (p is not None and (p.bold, p.italic, p.monospace, p.link_url) == (s.bold, s.italic, s.monospace, s.link_url)
+                and (s.bold or s.italic) and not s.monospace and not s.link_url):
+            out[-1] = dataclasses.replace(p, text=p.text + s.text,
+                                          bbox=(min(p.bbox[0], s.bbox[0]), min(p.bbox[1], s.bbox[1]),
+                                                max(p.bbox[2], s.bbox[2]), max(p.bbox[3], s.bbox[3])))
+        else:
+            out.append(s)
+    return out
+
+
+def _bridge_code_spaces(spans: list) -> list:
+    """One code span per run of code words: readers that build cells from
+    words put a plain space span between them, which would split a signature
+    into a code span per word."""
+    out: list = []
+    for i, s in enumerate(spans):
+        p = out[-1] if out else None
+        bridge = not s.text.strip() and i + 1 < len(spans) and spans[i + 1].monospace
+        joins = (p is not None and p.monospace and not p.link_url and not s.link_url
+                 and (bridge or s.monospace and (p.bold, p.italic) == (s.bold, s.italic)))
+        if joins:
+            out[-1] = dataclasses.replace(p, text=p.text + s.text,
+                                          bbox=(min(p.bbox[0], s.bbox[0]), min(p.bbox[1], s.bbox[1]),
+                                                max(p.bbox[2], s.bbox[2]), max(p.bbox[3], s.bbox[3])))
+        else:
+            out.append(s)
+    return out
+
+
+def _render_table_cell(spans: list, suppress_bold: bool = False) -> str:
+    """Render a pipe-table cell's spans with inline formatting.
+
+    A whitespace span holding a newline separates the lines of a wrapped cell;
+    they are joined with <br>. Pipes are escaped so they cannot split the cell
+    (GFM honours the escape inside code spans too).
+    """
+    parts: list[list] = [[]]
+    for s in (_decode_dingbats(s) for s in spans):
+        if not s.text.strip() and "\n" in s.text:
+            parts.append([])
+            continue
+        # a wrap point inside a span ("integers \nSlides") separates lines too:
+        # a pipe-table cell never holds a literal newline
+        pieces = _CELL_WRAP.split(s.text)
+        for k, piece in enumerate(pieces):
+            if k:
+                parts.append([])
+            if piece:
+                parts[-1].append(s if len(pieces) == 1 else dataclasses.replace(s, text=piece))
+    rendered = [r for r in (_render_line_spans(Line(spans=_bridge_code_spaces(_coalesce(_mark_asterisks(p)))),
+                                               suppress_bold=suppress_bold).strip()
+                            for p in parts if p) if r]
+    if len(rendered) > 1 and all(len(r) == 1 and r.isalpha() for r in rendered):
+        return "".join(rendered)          # letters stacked in a narrow cell: "S" / "F" -> "SF"
+    out = rendered[:1]
+    for r in rendered[1:]:
+        # "word-" at the end of a line, possibly inside bold/italic that
+        # continues on the next line ("ap-**" + "**plied"). Code is never
+        # dehyphenated: a "-" ending a code line is part of the code.
+        m = _HYPHEN_END.search(out[-1])
+        n = re.match(r"(\*\*|\*)?(?=[a-z])", r)
+        if m and n and (m.group(2) or "") == (n.group(1) or ""):
+            mark = m.group(2) or ""
+            head = out[-1][:len(out[-1]) - len(mark)]
+            out[-1] = _join_hyphenated(head, r[len(mark):], m.group(1))
+        else:
+            out.append(r)
+    return _escape_angle("<br>".join(out)).replace("|", "\\|").replace(_STAR, "\\*")
+
+
+def _table_notes(sec: Section) -> str:
+    """The comment and label lines written before a table (continuation.py, figure_tables.py)."""
+    out = []
+    cont = sec.metadata.get("continues_from")
+    if cont:
+        out.append(f"<!-- tomd:continues page={cont['page']} (may continue the table on page "
+                   f"{cont['page']}: {'; '.join(cont['reasons'])}; not merged) -->")
+    label = sec.metadata.get("figure_label") if sec.columns else None
+    if label:
+        out.append("*" + label.replace("*", "\\*") + "*")
+    return "\n\n".join(out)
