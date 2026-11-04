@@ -36,6 +36,7 @@ from .runctx import current
 from .stacked import split_stacked
 from .table import _STRATEGY_MAP, TableStrategy, _classify_table, _compute_table_signals
 from tomd.domain.elements import Confidence
+from tomd.writers.markdown.escape import escape_pipe_in_cell
 from .types import BULLET_CHARS, Block, Line, Section, SectionKind, Span, TableCandidate
 
 _log = logging.getLogger(__name__)
@@ -1020,7 +1021,7 @@ def _as_markdown_rows(cand: TableCandidate) -> str:
     width = cand.shape[1]
     lines = []
     for i, r in enumerate(rows):
-        cells = [c.replace("|", "\\|") for c in r] + [""] * (width - len(r))
+        cells = [escape_pipe_in_cell(c) for c in r] + [""] * (width - len(r))
         lines.append("| " + " | ".join(cells) + " |")
         if i == 0:
             lines.append("| " + " | ".join(["---"] * width) + " |")

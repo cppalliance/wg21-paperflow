@@ -10,6 +10,7 @@ from dataclasses import FrozenInstanceError
 import pytest
 
 from tomd.api import ConvertedPaper
+from tomd.domain import RawBlock
 from tomd.domain.diagnostics import (
     Diagnostics,
     GlyphPassStats,
@@ -99,6 +100,7 @@ def test_enums_and_base_types():
     assert ElementKind.THEMATIC_BREAK == "thematic_break"
     assert ElementKind.IMAGE == "image"
     assert ElementKind.UNCERTAIN == "uncertain"
+    assert ElementKind.RAW == "raw"
 
     # SkipReason enumeration (canonical legacy values)
     assert SkipReason.EMPTY_PDF == "empty pdf"
@@ -303,6 +305,12 @@ def test_block_elements_hierarchy():
     assert unc.provenance is None
     assert "This region is on page 4." in unc.get_reconciliation_prompt()
     assert isinstance(unc, BlockElement)
+
+    raw = RawBlock(markdown="## Raw Heading\n\nBody", origin="html")
+    assert raw.markdown == "## Raw Heading\n\nBody"
+    assert raw.origin == "html"
+    assert raw.text == "## Raw Heading\n\nBody"
+    assert isinstance(raw, BlockElement)
 
 
 def test_provenance_and_confidence():

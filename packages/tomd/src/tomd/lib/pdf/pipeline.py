@@ -59,7 +59,8 @@ from .table import (
     _filter_phantom_mupdf_tables, _cluster_x_positions, TableStrategy,
 )
 from .wg21 import extract_metadata_from_blocks
-from .emit import emit_markdown, emit_prompts, renumber_uncertain_markers, table_use, _escape_italic_text
+from .emit import emit_markdown, emit_prompts, renumber_uncertain_markers, table_use
+from tomd.writers.markdown.escape import escape_italic_wrapper
 from .types import (
     KNOWN_SECTIONS,
     Section,
@@ -2741,7 +2742,7 @@ def run_pipeline(
                         new_sections.append(
                             Section(
                                 kind=SectionKind.PARAGRAPH,
-                                text=("*" + _escape_italic_text(unwrapped) + "*"),
+                                text=("*" + escape_italic_wrapper(unwrapped) + "*"),
                                 confidence=Confidence.MEDIUM,
                                 page_num=sec.page_num,
                             )

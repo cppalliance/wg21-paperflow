@@ -14,6 +14,7 @@ from tomd.domain.elements import (
     ListBlock,
     ListItem,
     Paragraph,
+    RawBlock,
     ThematicBreak,
     UncertainElement,
     WordingBlock,
@@ -45,6 +46,9 @@ def test_write_paragraph():
 
     p2 = Paragraph(spans=[TextSpan("See "), CodeSpan("std::format"), TextSpan(".")])
     assert write_element(p2) == "See `std::format`."
+
+    p3 = Paragraph.from_text("# include <header>")
+    assert write_element(p3) == r"\# include <header>"
 
 
 def test_write_code_block():
@@ -112,3 +116,9 @@ def test_write_uncertain_element():
         text="$$E=mc^2$$",
     )
     assert write_element(unc) == "<!-- tomd:uncertain:L3-L3 -->\n\n$$E=mc^2$$"
+
+
+def test_write_raw_block():
+    raw = RawBlock(markdown="Line 1  \n\nLine 3", origin="pdf")
+    assert write_element(raw) == "Line 1  \n\nLine 3"
+

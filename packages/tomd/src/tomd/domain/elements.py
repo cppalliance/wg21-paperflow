@@ -52,6 +52,7 @@ class ElementKind(StrEnum):
     THEMATIC_BREAK = "thematic_break"
     IMAGE = "image"
     UNCERTAIN = "uncertain"
+    RAW = "raw"
 
 
 @dataclass
@@ -264,3 +265,16 @@ class UncertainElement(BlockElement):
     def get_reconciliation_prompt(self) -> str:
         """Build the self-contained LLM reconciliation prompt for this region."""
         return render_prompt("uncertain_element.md.j2", **asdict(self))
+
+
+@dataclass
+class RawBlock(BlockElement):
+    """Temporary migration scaffolding block emitted verbatim until P28/P29."""
+
+    markdown: str
+    origin: str
+
+    @property
+    def text(self) -> str:
+        return self.markdown
+

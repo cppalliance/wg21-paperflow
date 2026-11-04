@@ -116,3 +116,13 @@ def test_write_table_never_emits_html():
 
 def test_write_table_empty():
     assert write_table(Table()) == ""
+
+
+def test_write_table_escapes_caption():
+    table = Table(
+        headers=[TextCell.from_text("Col")],
+        rows=[TableRow(cells=[TextCell.from_text("Val")])],
+        caption="Table 1: a_b * c",
+    )
+    assert write_table(table).endswith("\n\n*Table 1: a\\_b \\* c*")
+
