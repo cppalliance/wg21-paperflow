@@ -97,6 +97,42 @@ def _blocks(lines: list[Line], rules=()) -> list[list[Line]]:
     return [sorted(g, key=lambda ln: (ln.bbox[1], ln.bbox[0])) for g in groups.values()]
 
 
+def _bridged(blocks: list[list[Line]], rest: list[Line], rules=()) -> list[list[Line]]:
+    """A gap in one column is not the end of its block while a block beside it
+    runs across the gap, give or take a line at either end (the two sides of
+    a comparison differ in length, so their gaps fall at different heights).
+    Nothing but space may sit in the gap: no text, no drawn rule."""
+    blocks = [list(b) for b in blocks]
+    merged = True
+    while merged:
+        merged = False
+        blocks.sort(key=lambda b: _box(b)[1])
+        for i, a in enumerate(blocks):
+            ba = _box(a)
+            for c in blocks[i + 1:]:
+                bc = _box(c)
+                if bc[1] <= ba[3] or min(ba[2], bc[2]) <= max(ba[0], bc[0]):
+                    continue                          # not below a, or not in a's column
+                lo, hi = ba[3], bc[1]
+                x0, x1 = min(ba[0], bc[0]), max(ba[2], bc[2])
+                if any(lo < (ln.bbox[1] + ln.bbox[3]) / 2 < hi and ln.bbox[0] < x1 and ln.bbox[2] > x0
+                       for ln in rest):
+                    break                             # text in the gap: a new block
+                if any(lo - 1 <= y <= hi + 1 and rx0 <= x1 and rx1 >= x0 for y, rx0, rx1 in rules):
+                    break
+                h = max(ln.bbox[3] - ln.bbox[1] for ln in a + c)
+                if any(o is not a and o is not c and _box(o)[1] <= lo + h and _box(o)[3] >= hi - h
+                       and (_box(o)[0] >= x1 or _box(o)[2] <= x0) for o in blocks):
+                    a.extend(c)
+                    a.sort(key=lambda ln: (ln.bbox[1], ln.bbox[0]))
+                    blocks.remove(c)
+                    merged = True
+                break                                 # only the next block in the column
+            if merged:
+                break
+    return blocks
+
+
 def _spaced(line: Line) -> Line:
     """A copy of the line with a space where the PDF leaves a word-sized gap
     between two runs and encodes no space ("int" "f(int" "x)" -> "int f(int x)")."""
@@ -172,7 +208,7 @@ def find_code_pairs(blocks: list[Block], rules_for=None) -> list[TableCandidate]
         mono = sorted((p for p in pieces if _mono(p)), key=lambda ln: (ln.bbox[1], ln.bbox[0]))
         rest = [p for p in pieces if not _mono(p)]
         rules = rules_for(page) if (rules_for and mono) else []
-        code_blocks = [b for b in _blocks(mono, rules) if len(b) >= 2]
+        code_blocks = [b for b in _bridged(_blocks(mono, rules), rest, rules) if len(b) >= 2]
         pairs = []
         weak = []                     # pairs whose sides share too little code on their own
         for i, a in enumerate(code_blocks):
