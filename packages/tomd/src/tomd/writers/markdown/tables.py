@@ -6,8 +6,6 @@ file LICENSE_1_0.txt or copy at http://www.boost.org/LICENSE_1_0.txt)
 Official repository: https://github.com/cppalliance/wg21-paperflow
 """
 
-from __future__ import annotations
-
 import re
 
 from tomd.domain.table import (
@@ -16,6 +14,10 @@ from tomd.domain.table import (
     CodeCell,
     Table,
     TextCell,
+)
+from tomd.writers.markdown.escape import (
+    escape_italic_wrapper,
+    escape_pipe_in_cell,
 )
 from tomd.writers.markdown.spans import format_code_span, write_spans
 
@@ -37,9 +39,7 @@ def _format_pipe_cell(cell: Cell) -> str:
     raw = raw.replace("\r\n", "\n").replace("\r", "\n")
     raw = re.sub(r"\n+", "<br>", raw)
 
-    # Escape unescaped pipe characters
-    escaped = re.sub(r"(?<!\\)\|", r"\|", raw)
-    return escaped.strip()
+    return escape_pipe_in_cell(raw).strip()
 
 
 def write_table(table: Table) -> str:
@@ -92,6 +92,6 @@ def write_table(table: Table) -> str:
     result = "\n".join(lines)
 
     if table.caption:
-        result = f"{result}\n\n*{table.caption}*"
+        result = f"{result}\n\n*{escape_italic_wrapper(table.caption)}*"
 
     return result
