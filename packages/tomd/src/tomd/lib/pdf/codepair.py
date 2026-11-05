@@ -99,9 +99,10 @@ def _blocks(lines: list[Line], rules=()) -> list[list[Line]]:
 
 def _bridged(blocks: list[list[Line]], rest: list[Line], rules=()) -> list[list[Line]]:
     """A gap in one column is not the end of its block while a block beside it
-    runs across the gap, give or take a line at either end (the two sides of
-    a comparison differ in length, so their gaps fall at different heights).
-    Nothing but space may sit in the gap: no text, no drawn rule."""
+    runs alongside the block above the gap (for at least a line) and on across
+    the gap, give or take a line at its foot (the two sides of a comparison
+    differ in length, so their gaps fall at different heights). Only a gap is
+    bridged, and nothing but space may sit in it: no text, no drawn rule."""
     blocks = [list(b) for b in blocks]
     merged = True
     while merged:
@@ -121,7 +122,9 @@ def _bridged(blocks: list[list[Line]], rest: list[Line], rules=()) -> list[list[
                 if any(lo - 1 <= y <= hi + 1 and rx0 <= x1 and rx1 >= x0 for y, rx0, rx1 in rules):
                     break
                 h = max(ln.bbox[3] - ln.bbox[1] for ln in a + c)
-                if any(o is not a and o is not c and _box(o)[1] <= lo + h and _box(o)[3] >= hi - h
+                if hi - lo <= _JOIN_GAP * h:
+                    break                             # not split by a gap (a dedent, say)
+                if any(o is not a and o is not c and _box(o)[1] <= lo - h and _box(o)[3] >= hi - h
                        and (_box(o)[0] >= x1 or _box(o)[2] <= x0) for o in blocks):
                     a.extend(c)
                     a.sort(key=lambda ln: (ln.bbox[1], ln.bbox[0]))

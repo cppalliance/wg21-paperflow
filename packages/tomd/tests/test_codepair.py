@@ -53,3 +53,19 @@ def test_a_drawn_rule_in_the_gap_keeps_the_blocks_apart():
 def test_a_lone_column_is_not_bridged():
     out = _bridged([[_line(60, 100), _line(60, 111)], [_line(60, 160), _line(60, 171)]], rest=[])
     assert len(out) == 2
+
+
+def test_a_block_beside_that_starts_at_the_gap_does_not_bridge_it():
+    # two snippets on the left, one on the right set between them: rows, not one cell
+    left = [[_line(60, 100), _line(60, 111), _line(60, 122)], [_line(60, 168), _line(60, 179)]]
+    right = [[_line(300, 134), _line(300, 145), _line(300, 156)]]
+    out = _bridged(left + right, rest=[])
+    assert len(out) == 3
+
+
+def test_blocks_split_without_a_gap_are_not_bridged():
+    # a dedented closing line right under its block is not this rule's business
+    left = [[_line(80, 100), _line(80, 111)], [_line(60, 122, text="}", width=5)]]
+    right = [[_line(300, y) for y in range(90, 140, 11)]]
+    out = _bridged(left + right, rest=[])
+    assert len(out) == 3
