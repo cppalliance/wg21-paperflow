@@ -17,6 +17,8 @@ clap = { version = "4.6.6", features = ["derive"] }
 # vendor/runvil submodule and pinned to the commit the crate is built against.
 harness = { path = "../../vendor/runvil/crates/harness" }
 harness-gateway-client = { path = "../../vendor/runvil/crates/harness-gateway-client" }
+# The Engine facade, for the universal error code a run's output carries.
+runvil = { path = "../../vendor/runvil/crates/runvil" }
 paperstore = { version = "0.1.0", path = "../paperstore" }
 paperstore-sqlite = { version = "0.1.0", path = "../paperstore-sqlite" }
 serde_json = "1"
