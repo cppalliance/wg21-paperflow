@@ -408,6 +408,10 @@ fn env_optional(name: &str) -> Result<Option<String>> {
 }
 
 #[cfg(test)]
+#[path = "offline-run-tests.rs"]
+mod offline_run_tests;
+
+#[cfg(test)]
 mod tests {
     use std::path::Path;
 

@@ -3,10 +3,9 @@ name: paperweight
 description: Report on the evidence a WG21 paper provides for its need of standardization
 runvil: 0
 models:
-  writer:
-    keywords: [no-thinking]
+  default:
     min_context: 32768
-    description: A careful analysis model suited to structured reasoning and long-context review
+    thinking: false
 input:
   path: paper.md
   description: The WG21 paper markdown to analyze
@@ -17,16 +16,6 @@ output:
 
 # Paperweight
 
-```lua
--- Keep this section free of prose: prose here would make it a section with a
--- prompt body, needing a model binding that the next statement is what
--- declares. Globals defined here do NOT survive into any section, so this
--- chunk holds the model binding and nothing else. Every other Lua block in
--- this file is self-contained and passes data through the store.
-
-models.default("writer")
-```
-
 ## Assess
 
 ```lua
@@ -35,7 +24,7 @@ models.default("writer")
 -- criteria to the store, and hands the head of the paper to the triage turn.
 -- ===========================================================================
 
-models.use("writer", { temperature = 0.3 })
+models.use("default", { temperature = 0.3 })
 
 -- --- tunables ---------------------------------------------------------------
 -- SAMPLES must be odd. Units are H2 sections, so SECTION_BUDGET only bites on
@@ -1085,7 +1074,7 @@ store.write("diagnostics.md", table.concat(diag, "\n"))
 ### Grade
 
 ```lua
-models.use("writer", { temperature = 0.3 })
+models.use("default", { temperature = 0.3 })
 local c, k = item:match("^(%d+)|(%d+)|%d+$")
 var.criterion = store.read("pg_criterion_" .. c .. ".md")
 var.guidance = store.read("pg_guidance_" .. c .. ".md")
@@ -1137,7 +1126,7 @@ store.write("pg_reply_" .. item:gsub("|", "_") .. ".md", reply)
 ## Analyze
 
 ```lua
-models.use("writer", { temperature = 0.3 })
+models.use("default", { temperature = 0.3 })
 var.findings = untrusted(store.read("findings.md"))
 ```
 
