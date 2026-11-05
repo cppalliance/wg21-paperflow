@@ -1,6 +1,6 @@
 # tomd API surface
 
-118 modules, 92 classes, 305 functions, 92 methods, 380 fields. Typed: 940 of 1208 functions and methods (77%).
+119 modules, 93 classes, 308 functions, 93 methods, 383 fields. Typed: 943 of 1212 functions and methods (77%).
 
 ## Contents
 
@@ -10,7 +10,7 @@
 - [`domain/__init__.py`](#domain-init-py)
 - [`domain/diagnostics.py`](#domain-diagnostics-py): Diagnostics, GlyphPassStats, VectorUncertaintyStats
 - [`domain/document.py`](#domain-document-py): PaperDocument, SkipReason
-- [`domain/elements.py`](#domain-elements-py): BlockElement, Blockquote, CodeBlock, Confidence, ElementKind, Heading, ImageElement, ListBlock, ListItem, Paragraph, Provenance, ThematicBreak, ...
+- [`domain/elements.py`](#domain-elements-py): BlockElement, Blockquote, CodeBlock, Confidence, ElementKind, Heading, ImageElement, ListBlock, ListItem, Paragraph, Provenance, RawBlock, ...
 - [`domain/image.py`](#domain-image-py): ExtractedImage
 - [`domain/metadata.py`](#domain-metadata-py): PaperMetadata
 - [`domain/span.py`](#domain-span-py): CodeSpan, ContainerSpan, DeletedSpan, EmphasisSpan, InsertedSpan, LineBreakSpan, LinkSpan, Span, StrongSpan, SubscriptSpan, SuperscriptSpan, TextSpan
@@ -53,7 +53,7 @@
 - [`lib/pdf/checks/wordgap.py`](#lib-pdf-checks-wordgap-py): run, CHECK
 - [`lib/pdf/classify.py`](#lib-pdf-classify-py): gate_tables, image_share, predict, region_features, text_rows, withhold_trust, FLAGS, GENERATORS, IMAGE_GRID_SHARE, SOURCES
 - [`lib/pdf/classify_trees.py`](#lib-pdf-classify-trees-py): LAYOUT_TREE, TABLE_TREE
-- [`lib/pdf/cleanup.py`](#lib-pdf-cleanup-py): DehyphenatedPair, HyphenEvidence, cleanup_text, collect_hyphen_evidence, dehyphenate_pair, detect_repeating, escape_leading_atx, find_hidden_regions, get_edge_items, normalize_whitespace, strip_hidden_blocks, strip_repeating
+- [`lib/pdf/cleanup.py`](#lib-pdf-cleanup-py): DehyphenatedPair, HyphenEvidence, cleanup_text, collect_hyphen_evidence, dehyphenate_pair, detect_repeating, find_hidden_regions, get_edge_items, normalize_whitespace, strip_hidden_blocks, strip_repeating
 - [`lib/pdf/code_format.py`](#lib-pdf-code-format-py): is_diagram_block, maybe_normalize_code_line, normalize_code_line
 - [`lib/pdf/code_grid.py`](#lib-pdf-code-grid-py): CodeGrid
 - [`lib/pdf/codepair.py`](#lib-pdf-codepair-py): find_code_pairs, same_code
@@ -116,6 +116,7 @@
 - [`writers/base.py`](#writers-base-py): DocumentWriter
 - [`writers/markdown/__init__.py`](#writers-markdown-init-py)
 - [`writers/markdown/blocks.py`](#writers-markdown-blocks-py): format_uncertain_element, strip_redundant_roles, write_element
+- [`writers/markdown/escape.py`](#writers-markdown-escape-py): escape_italic_wrapper, escape_leading_atx, escape_pipe_in_cell, escape_wording_angle_brackets
 - [`writers/markdown/front_matter.py`](#writers-markdown-front-matter-py): write_front_matter
 - [`writers/markdown/markers.py`](#writers-markdown-markers-py): append_trailer_markers
 - [`writers/markdown/normalizers.py`](#writers-markdown-normalizers-py): normalize_front_matter, strip_body_metadata_text, strip_toc
@@ -389,7 +390,7 @@ class SkipReason(StrEnum):
 
 ## `domain/elements.py` ([source](../../src/tomd/domain/elements.py))
 
-Typed: 29 of 29 functions and methods (100%).
+Typed: 30 of 30 functions and methods (100%).
 
 ```python
 """Block-level AST nodes for WG21 paper documents.
@@ -461,6 +462,7 @@ class ElementKind(StrEnum):
     THEMATIC_BREAK = 'thematic_break'
     IMAGE = 'image'
     UNCERTAIN = 'uncertain'
+    RAW = 'raw'
 
 @dataclass
 class Heading(BlockElement):
@@ -530,6 +532,14 @@ class Provenance:
     """Source page and confidence metadata for a block element."""
     page: int
     confidence: Confidence
+
+@dataclass
+class RawBlock(BlockElement):
+    """Temporary migration scaffolding block emitted verbatim until P28/P29."""
+    markdown: str
+    origin: str
+    @property
+    def text(self) -> str: ...
 
 @dataclass
 class ThematicBreak(BlockElement):
@@ -2409,7 +2419,7 @@ TABLE_TREE = ...
 
 ## `lib/pdf/cleanup.py` ([source](../../src/tomd/lib/pdf/cleanup.py))
 
-Typed: 16 of 17 functions and methods (94%).
+Typed: 15 of 16 functions and methods (93%).
 
 ```python
 """Header/footer detection and text cleanup for PDF extraction."""
@@ -2517,17 +2527,6 @@ def detect_repeating(all_edge_items: list[list[PageEdgeItem]], total_pages: int,
     """
     # calls: _y_bucket
     # called by: pipeline.run_pipeline
-
-def escape_leading_atx(text: str) -> str:
-    """Backslash-escape a "#" that would turn a body block into a heading.
-
-    The text is unchanged for readers; only Markdown's block parser is
-    affected. Text already backslash-escaped upstream (the sub-caption path in
-    ``emit._escape_italic_text``) does not match and is left alone. Shared by
-    the paragraph and wording-prose renderers, the two emit paths that flatten
-    PDF lines into a single body block.
-    """
-    # called by: emit._render_paragraph_spans, wording_emit._render_wording_section, blocks._format_wording_paragraph
 
 def find_hidden_regions(page, body_fonts: set[str] | None = None) -> set[tuple[float, float, float, float]]:
     """Find regions of hidden text on a page.
@@ -2766,7 +2765,7 @@ class CodeGrid:
 
 ## `lib/pdf/codepair.py` ([source](../../src/tomd/lib/pdf/codepair.py))
 
-Typed: 10 of 13 functions and methods (76%).
+Typed: 10 of 14 functions and methods (71%).
 
 ```python
 """Side-by-side code comparisons, found from geometry and confirmed by content.
@@ -2793,7 +2792,7 @@ def find_code_pairs(blocks: list[Block], rules_for=None) -> list[TableCandidate]
     separates them (rows of a ruled comparison are not one block).
     """
     # untyped: rules_for
-    # calls: _pieces, _mono, _blocks, _box, runctx.current, _comment_share, _row_text_share, _code_like, same_code, _label, _spaced, types.TableCandidate
+    # calls: _pieces, _mono, _bridged, _blocks, _box, runctx.current, _comment_share, _row_text_share, _code_like, same_code, _label, _spaced, +1 more
     # called by: pipeline.run_pipeline
 
 def same_code(left: list[Line], right: list[Line]) -> float:
@@ -2801,7 +2800,7 @@ def same_code(left: list[Line], right: list[Line]) -> float:
     # calls: _grams
     # called by: find_code_pairs
 
-# + 11 private module-level names
+# + 12 private module-level names
 ```
 
 <a id="lib-pdf-content-py"></a>
@@ -3161,7 +3160,7 @@ MODEL = ...
 
 ## `lib/pdf/emit.py` ([source](../../src/tomd/lib/pdf/emit.py))
 
-Typed: 49 of 55 functions and methods (89%).
+Typed: 48 of 54 functions and methods (88%).
 
 ```python
 """Markdown and companion prompts file generation."""
@@ -3255,7 +3254,7 @@ COMPOUND_PREFIXES = ...
 # stray bullet glyph survives mid-text (#303).
 LIST_BULLET = '-'
 
-# + 48 private module-level names
+# + 47 private module-level names
 ```
 
 <a id="lib-pdf-emoji-data-py"></a>
@@ -4910,7 +4909,7 @@ def select_tables(tomd_sections: list[Section], ruled: list[TableCandidate], tag
     candidates from the drawing and tag sources are appended to `rejected`
     when given: their area probably is a table, so flag.py marks it.
     """
-    # calls: candidate_from_section, page_furniture, stitch_pages, cross_reader_continuation, split_at_headers, join_split_words, stacked.split_stacked, runctx.current, table_flags, _is_bad, _row_top, _split_at_repeated_header, +16 more
+    # calls: candidate_from_section, page_furniture, stitch_pages, cross_reader_continuation, split_at_headers, join_split_words, stacked.split_stacked, runctx.current, table_flags, _is_bad, _same_region, _row_top, +16 more
     # called by: pipeline.run_pipeline
 
 def sparse_mapping(t) -> bool:
@@ -6120,7 +6119,7 @@ def is_wording_rgb(r: float, g: float, b: float) -> bool:
 
 ## `lib/pdf/wording_emit.py` ([source](../../src/tomd/lib/pdf/wording_emit.py))
 
-Typed: 9 of 9 functions and methods (100%).
+Typed: 8 of 8 functions and methods (100%).
 
 ```python
 """Wording-section rendering for the PDF emitter.
@@ -6140,7 +6139,7 @@ were noise in the converted Markdown. Which shape a section takes, and
 which inline tags survive, is unchanged.
 """
 
-# + 9 private module-level names
+# + 8 private module-level names
 ```
 
 <a id="lib-shared-py"></a>
@@ -6742,7 +6741,7 @@ Official repository: https://github.com/cppalliance/wg21-paperflow
 
 ## `writers/markdown/blocks.py` ([source](../../src/tomd/writers/markdown/blocks.py))
 
-Typed: 27 of 27 functions and methods (100%).
+Typed: 28 of 28 functions and methods (100%).
 
 ```python
 """Distributed under the Boost Software License, Version 1.0. (See accompanying
@@ -6766,7 +6765,66 @@ def write_element(element: BlockElement) -> str:
     """Format a single BlockElement into Markdown text."""
     # called by: _format_blockquote, _format_list_item, _format_wording_child, writer.MarkdownWriter.write_body
 
-# + 24 private module-level names
+# + 25 private module-level names
+```
+
+<a id="writers-markdown-escape-py"></a>
+
+## `writers/markdown/escape.py` ([source](../../src/tomd/writers/markdown/escape.py))
+
+Typed: 4 of 4 functions and methods (100%).
+
+```python
+"""Distributed under the Boost Software License, Version 1.0. (See accompanying
+
+file LICENSE_1_0.txt or copy at http://www.boost.org/LICENSE_1_0.txt)
+
+Official repository: https://github.com/cppalliance/wg21-paperflow
+"""
+
+def escape_italic_wrapper(text: str) -> str:
+    """Escape characters that would break a ``*...*`` italic wrapper.
+
+    Used by the caption and sub-caption rendering paths (emitted as
+    ``*<escaped>*``). Escapes:
+
+    - ``\`` so a trailing backslash doesn't eat the closing ``*``.
+    - ``*``, ``_``, and backticks so they don't terminate the wrapper
+      or open a code span.
+    - A leading list/quote/heading character so the paragraph doesn't
+      render as a list item, blockquote, or heading once the italics
+      wrapper is in place.
+    """
+    # called by: emit._render_image, pipeline.run_pipeline, tables.write_table
+
+def escape_leading_atx(text: str) -> str:
+    """Backslash-escape a "#" that would turn a body block into a heading.
+
+    The text is unchanged for readers; only Markdown's block parser is
+    affected. Text already backslash-escaped upstream (the sub-caption path in
+    ``escape_italic_wrapper``) does not match and is left alone. Shared by
+    the paragraph and wording-prose renderers, the two emit paths that flatten
+    lines into a single body block.
+    """
+    # called by: emit._render_paragraph_spans, wording_emit._render_wording_section, blocks._format_wording_paragraph, blocks._write_paragraph
+
+def escape_pipe_in_cell(text: str) -> str:
+    """Escape literal pipe characters inside a GFM pipe-table cell."""
+    # called by: render._denormalize_table, render._render_table, render._render_table_flat, emit._render_cell_spans, emit._render_table_cell, select._as_markdown_rows, tables._format_pipe_cell
+
+def escape_wording_angle_brackets(text: str) -> str:
+    """HTML-escape literal (non-tag, non-backtick) text in a wording line.
+
+    Wording lines render where ``<ins>`` / ``<del>`` are real HTML tags, so
+    the surrounding content sits in an HTML context. A literal ``<`` / ``>``
+    in the code (the ``<float>`` in ``vec<float>``) is otherwise parsed as a
+    stray HTML tag and silently dropped by the renderer. Escaping makes those
+    angle brackets render literally. Backtick code spans are left untouched:
+    the Markdown renderer already escapes their contents, and escaping them
+    here would surface the raw entities. The ``<ins>`` / ``<del>`` tags
+    themselves are emitted around the escaped text, never through this helper.
+    """
+    # called by: wording_emit._render_wording_line, wording_emit._role_tag
 ```
 
 <a id="writers-markdown-front-matter-py"></a>
@@ -6890,7 +6948,7 @@ Official repository: https://github.com/cppalliance/wg21-paperflow
 
 def write_table(table: Table) -> str:
     """Format a Table AST node as a pure Markdown GFM pipe table."""
-    # calls: _format_pipe_cell
+    # calls: _format_pipe_cell, escape.escape_italic_wrapper
     # called by: blocks._write_table
 
 # + 1 private module-level name
@@ -7073,7 +7131,10 @@ class MarkdownWriter:
 - `Entry`: [`lib/pdf/evidence.py`](#lib-pdf-evidence-py)
 - `ERROR_MESSAGE_LIMIT`: [`lib/pdf/runctx.py`](#lib-pdf-runctx-py)
 - `escalate`: [`lib/pdf/validate.py`](#lib-pdf-validate-py)
-- `escape_leading_atx`: [`lib/pdf/cleanup.py`](#lib-pdf-cleanup-py)
+- `escape_italic_wrapper`: [`writers/markdown/escape.py`](#writers-markdown-escape-py)
+- `escape_leading_atx`: [`writers/markdown/escape.py`](#writers-markdown-escape-py)
+- `escape_pipe_in_cell`: [`writers/markdown/escape.py`](#writers-markdown-escape-py)
+- `escape_wording_angle_brackets`: [`writers/markdown/escape.py`](#writers-markdown-escape-py)
 - `exclude_table_regions`: [`lib/pdf/table.py`](#lib-pdf-table-py)
 - `extend`: [`lib/pdf/extent.py`](#lib-pdf-extent-py)
 - `EXTENT_RULE`: [`lib/pdf/extent.py`](#lib-pdf-extent-py)
@@ -7257,6 +7318,7 @@ class MarkdownWriter:
 - `Provenance`: [`domain/elements.py`](#domain-elements-py)
 - `QABatchResult`: [`lib/pdf/qa.py`](#lib-pdf-qa-py)
 - `QAMetrics`: [`lib/pdf/qa.py`](#lib-pdf-qa-py)
+- `RawBlock`: [`domain/elements.py`](#domain-elements-py)
 - `rawdict`: [`lib/pdf/pagecache.py`](#lib-pdf-pagecache-py)
 - `read_lines`: [`lib/pdf/checks/codereader.py`](#lib-pdf-checks-codereader-py)
 - `read_region`: [`lib/pdf/records.py`](#lib-pdf-records-py)
