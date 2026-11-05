@@ -19,15 +19,16 @@ use std::time::Duration;
 
 use anyhow::{Context, Result, bail};
 use clap::Parser;
-use harness::plugin::{HostContext, HostServices, PluginRegistry};
+use harness::pack::{HostContext, HostServices, PackRegistry};
 use harness::record::{
     Record, RecordKind, RecorderFuture, RunId, RunMeta, RunOutcome, RunRecorder,
 };
 use harness::vfs::VfsRef;
-use harness::{BoxFuture, Harness, HostSnapshot, OutputError, Timer};
+use harness::{BoxFuture, Harness, HostSnapshot, Timer};
 use harness_gateway_client::{GatewayBroker, GatewayEndpoint, SecretString};
 use paperstore::{PaperNum, StorageBackend};
 use paperstore_sqlite::SqliteBackend;
+use runvil::error::ErrorCode;
 use tokio::sync::oneshot;
 
 /// The embedded paperweight prompt, vendored from the runvil prompts.
@@ -35,6 +36,9 @@ const DEFAULT_PROMPT: &str = include_str!("../paperweight.md");
 
 /// The name the embedded prompt runs under.
 const DEFAULT_PROMPT_NAME: &str = "paperweight";
+
+/// The file the embedded prompt came from, which the run's failures name.
+const DEFAULT_PROMPT_FILE: &str = "paperweight.md";
 
 /// The command-line interface; `run_cli` sets the program name.
 #[derive(Debug, Parser)]
@@ -174,13 +178,14 @@ pub(crate) async fn run(request: RunRequest<'_>) -> Result<()> {
         Arc::new(ProgressRecorder),
         Arc::new(GatewayBroker::new(endpoint, key)),
         Arc::new(TokioTimer),
-        Arc::new(HostContext::new(PluginRegistry::new(), HostServices::new())),
+        Arc::new(HostContext::new(PackRegistry::new(), HostServices::new())),
         HostServices::new(),
     );
     let control = harness.control();
     let run = harness.run(harness::RunRequest {
         name: name.clone(),
         source,
+        file: prompt_file(prompt),
         args: args.to_owned(),
         input_text: Some(paper_md),
         vfs: VfsRef::default(),
@@ -211,7 +216,7 @@ pub(crate) async fn run(request: RunRequest<'_>) -> Result<()> {
     }
     let report = match report.output {
         Ok(report) => report,
-        Err(error @ OutputError::Missing { .. }) => {
+        Err(error) if error.code == ErrorCode::NotFound => {
             return Err(error).context("the prompt did not produce its declared output");
         }
         Err(error) => return Err(error).context("read the run's declared output"),
@@ -345,6 +350,15 @@ fn prompt_name(prompt: Option<&Path>) -> Result<String> {
         .filter(|stem| !stem.is_empty())
         .map(str::to_owned)
         .with_context(|| format!("the prompt path {} has no usable file name", path.display()))
+}
+
+/// Returns the file the run's failures name: the `--prompt` path as given,
+/// or [`DEFAULT_PROMPT_FILE`] for the embedded prompt.
+fn prompt_file(prompt: Option<&Path>) -> String {
+    prompt.map_or_else(
+        || DEFAULT_PROMPT_FILE.to_owned(),
+        |path| path.display().to_string(),
+    )
 }
 
 /// Reads the gateway environment, requiring both variables.
