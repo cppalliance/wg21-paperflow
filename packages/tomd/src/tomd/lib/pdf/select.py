@@ -1124,8 +1124,11 @@ def select_tables(tomd_sections: list[Section],
 
     # A code pair inside a drawn table that is clearly larger is a fragment of
     # that table, not a comparison of its own: the table's cells are its extent.
-    # Only a usable table claims it (a reading the checks drop claims nothing).
-    drawn = [c for c in cands if c.source in ("rules", "grid") and len(c.bboxes) == 1 and not _is_bad(c)]
+    # Only a table some reader reads usably claims it: when every reading of
+    # the drawn table's region fails the checks, the pair is the best reading.
+    usable = [k for k in cands if k.source != "codepair" and not _is_bad(k)]
+    drawn = [c for c in cands if c.source in ("rules", "grid") and len(c.bboxes) == 1
+             and any(_same_region(c, k) and _same_region(k, c) for k in usable)]
     for c in [c for c in cands if c.source == "codepair"]:
         pg, bb = c.pages[0], c.bboxes[c.pages[0]]
         for d in drawn:
