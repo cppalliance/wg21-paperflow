@@ -94,7 +94,24 @@ def _blocks(lines: list[Line], rules=()) -> list[list[Line]]:
     groups: dict = defaultdict(list)
     for i, ln in enumerate(lines):
         groups[find(i)].append(ln)
-    return [sorted(g, key=lambda ln: (ln.bbox[1], ln.bbox[0])) for g in groups.values()]
+    blocks = [sorted(g, key=lambda ln: (ln.bbox[1], ln.bbox[0])) for g in groups.values()]
+    # a line set back to the left of the line above it ("}" closing an indented
+    # body) overlaps none of its neighbours, yet it starts inside its block's
+    # column: directly under a block, it belongs to that block
+    blocks.sort(key=lambda b: _box(b)[1])
+    out: list[list[Line]] = []
+    for c in blocks:
+        top = c[0]
+        h = max(top.bbox[3] - top.bbox[1], 1.0)
+        above = [a for a in out if 0 <= top.bbox[1] - _box(a)[3] <= _JOIN_GAP * h
+                 and _box(a)[0] <= top.bbox[0] < _box(a)[2] and not _ruled_between(a[-1], top, rules)]
+        if above:
+            a = max(above, key=lambda a: _box(a)[3])
+            a.extend(c)
+            a.sort(key=lambda ln: (ln.bbox[1], ln.bbox[0]))
+        else:
+            out.append(c)
+    return out
 
 
 def _bridged(blocks: list[list[Line]], rest: list[Line], rules=()) -> list[list[Line]]:

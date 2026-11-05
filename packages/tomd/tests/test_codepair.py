@@ -69,3 +69,9 @@ def test_blocks_split_without_a_gap_are_not_bridged():
     right = [[_line(300, y) for y in range(90, 140, 11)]]
     out = _bridged(left + right, rest=[])
     assert len(out) == 3
+
+
+def test_a_dedented_closing_line_joins_the_block_above_it():
+    from tomd.lib.pdf.codepair import _blocks
+    lines = [_line(60, 100, "int main() {"), _line(80, 111, "f(x);", width=60), _line(60, 122, "}", width=5)]
+    assert [len(b) for b in _blocks(lines)] == [3]
