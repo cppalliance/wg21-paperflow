@@ -59,7 +59,14 @@ from .table import (
     _filter_phantom_mupdf_tables, _cluster_x_positions, TableStrategy,
 )
 from .wg21 import extract_metadata_from_blocks
-from .emit import emit_markdown, emit_prompts, renumber_uncertain_markers, table_use
+from .emit import (
+    assign_emdash_nesting,
+    emit_markdown,
+    emit_prompts,
+    fold_table_continuations,
+    renumber_uncertain_markers,
+    table_use,
+)
 from tomd.writers.markdown.escape import escape_italic_wrapper
 from .types import (
     KNOWN_SECTIONS,
@@ -2007,6 +2014,8 @@ class PipelineResult:
     discards: list[tuple[str, str, str]] = field(default_factory=list)
     # The paper summary (summary.build); None for a skipped paper.
     summary: dict | None = None
+    extra_prompts: tuple[str, ...] = ()
+    hyphenates: bool = True
 
     @classmethod
     def for_skip(
@@ -2092,7 +2101,7 @@ def _parse_pdf_info_date(raw: str) -> str:
     return ""
 
 
-def _insert_after_front_matter(md: str, line: str) -> str:
+def insert_after_front_matter(md: str, line: str) -> str:
     """Insert one line after the YAML front matter (at the top when there is
     none), and point the uncertainty markers at their text again."""
     if md.startswith("---\n") and "\n---\n" in md[4:]:
@@ -2101,6 +2110,9 @@ def _insert_after_front_matter(md: str, line: str) -> str:
     else:
         md = line + "\n\n" + md
     return renumber_uncertain_markers(md)
+
+
+_insert_after_front_matter = insert_after_front_matter
 
 
 def _in_run_scope(fn):
@@ -2114,6 +2126,7 @@ def _in_run_scope(fn):
             result = fn(*args, **kwargs)
             result.reader_errors = list(ctx.record.errors)
             result.discards = list(ctx.discards)
+            result.hyphenates = ctx.hyphenates
         return result
     return wrapper
 
@@ -3091,6 +3104,9 @@ def run_pipeline(
         else:
             sec.metadata["level"] = assign_level(sec)
 
+    assign_emdash_nesting(sections)
+    sections = fold_table_continuations(sections)
+
     md = emit_markdown(
         metadata,
         sections,
@@ -3100,6 +3116,7 @@ def run_pipeline(
         glyph_stats=result.glyph_stats,
     )
     prompts = emit_prompts(sections)
+    extra_prompts: list[str] = []
 
     if wording_problems:
         wording_prompts = [
@@ -3112,6 +3129,7 @@ def run_pipeline(
             for problem in wording_problems
         ]
         prompts = (prompts or []) + wording_prompts
+        extra_prompts.extend(wording_prompts)
 
     # The paper summary: what was done with the tables, what was removed and
     # why, which readers raised. One comment after the front matter; the
@@ -3125,10 +3143,13 @@ def run_pipeline(
     if hidden_regions:
         summary["visibility"] = hidden_summary(hidden_regions)
     if md.strip():
-        md = _insert_after_front_matter(md, header_comment(summary))
+        md = insert_after_front_matter(md, header_comment(summary))
     if prompts:
-        prompts = prompts + prompt_elements(summary, ctx.discards, ctx.record.errors)
+        summary_prompts = prompt_elements(summary, ctx.discards, ctx.record.errors)
+        prompts = prompts + summary_prompts
+        extra_prompts.extend(summary_prompts)
     result.summary = summary
+    result.extra_prompts = tuple(extra_prompts)
 
     result.md = md
     result.prompts = prompts
