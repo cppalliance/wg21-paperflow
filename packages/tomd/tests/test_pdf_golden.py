@@ -11,7 +11,8 @@ import json
 from pathlib import Path
 
 import pytest
-from tomd.lib.pdf import run_pipeline
+
+from pipeline_runs import shared_run_pipeline
 
 _GOLDEN = Path(__file__).resolve().parent / "fixtures" / "golden"
 _STEMS_DIR = _GOLDEN / "stems"
@@ -48,7 +49,7 @@ def test_convert_pdf_matches_golden(stem: str):
     if not pdf_path.is_file():
         pytest.skip(f"missing PDF fixture: {stem}.pdf")
 
-    result = run_pipeline(pdf_path)
+    result = shared_run_pipeline(pdf_path)
     md, prompts = result.md, result.prompts
     # Originals use snapshots/<stem>.md; newer stems use <stem>.golden.md.
     snapshot_md = _GOLDEN / "snapshots" / f"{stem}.md"
@@ -92,7 +93,7 @@ def test_p4024r0_closing_paragraph_present():
     pdf_path = _GOLDEN / "p4024r0.pdf"
     if not pdf_path.is_file():
         pytest.skip(f"missing PDF fixture: {pdf_path}")
-    md = run_pipeline(pdf_path).md
+    md = shared_run_pipeline(pdf_path).md
     assert _P4024R0_CLOSING in md
 
 
@@ -116,7 +117,7 @@ def test_highlighter_palette_keeps_genuine_wording(rel, absent, present):
     pdf_path = _GOLDEN / rel
     if not pdf_path.is_file():
         pytest.skip(f"missing PDF fixture: {pdf_path}")
-    md = run_pipeline(pdf_path).md
+    md = shared_run_pipeline(pdf_path).md
     for needle in absent:
         assert needle not in md, f"{rel}: unexpected {needle!r}"
     for needle in present:

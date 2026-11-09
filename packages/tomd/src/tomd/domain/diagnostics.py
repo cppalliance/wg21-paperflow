@@ -6,10 +6,9 @@ file LICENSE_1_0.txt or copy at http://www.boost.org/LICENSE_1_0.txt)
 Official repository: https://github.com/cppalliance/wg21-paperflow
 """
 
-from __future__ import annotations
-
 from collections.abc import Mapping
 from dataclasses import dataclass
+from typing import Any
 
 
 @dataclass(frozen=True)
@@ -69,6 +68,7 @@ class Diagnostics:
     vector_uncertainty: VectorUncertaintyStats | None = None
     glyph_stats: GlyphPassStats | None = None
     extra_prompts: tuple[str, ...] = ()
+    summary: dict[str, Any] | None = None
 
     def dropped_image_count(self, kept_image_count: int) -> int:
         """Return number of truncated images to disclose, or 0 when not truncated."""
