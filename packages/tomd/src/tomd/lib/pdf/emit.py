@@ -1170,7 +1170,7 @@ def _section_min_x0(sec: Section) -> float:
     return min(x0s) if x0s else 0.0
 
 
-def _assign_emdash_nesting(sections: list[Section]) -> None:
+def assign_emdash_nesting(sections: list[Section]) -> None:
     """Pre-pass: set indent_level on consecutive em-dash bullet sections.
 
     Groups of adjacent em-dash PARAGRAPH sections are identified.
@@ -1203,6 +1203,86 @@ def _assign_emdash_nesting(sections: list[Section]) -> None:
                 ) + 1
         for sec, x0 in zip(group, x0s):
             sec.indent_level = level_map.get(x0, 0)
+
+
+def fold_table_continuations(sections: list[Section]) -> list[Section]:
+    """Pre-pass: fold cross-page table continuations into the preceding table.
+
+    The detection layer marks the continuation with table_continuation=True
+    and has already stripped its duplicate header row.
+    """
+    folded: set[int] = set()
+    for i in range(len(sections) - 1, 0, -1):
+        sec = sections[i]
+        if (sec.kind == SectionKind.TABLE
+                and sec.table_continuation
+                and sec.columns):
+            for j in range(i - 1, -1, -1):
+                prev = sections[j]
+                if prev.kind == SectionKind.TABLE and prev.columns:
+                    prev.columns.extend(sec.columns)
+                    prev.text = "\n".join(
+                        " | ".join(
+                            "".join(s.text for s in cell).strip()
+                            for cell in row)
+                        for row in prev.columns)
+                    sec.table_continuation = False
+                    folded.add(i)
+                    break
+    if folded:
+        sections[:] = [s for i, s in enumerate(sections) if i not in folded]
+    return sections
+
+
+_TABLE_CSS = (
+    "<style>\n"
+    "table, th, td { border: 1px solid #999; "
+    "border-collapse: collapse; padding: 6px 10px; }\n"
+    "th { background: #f5f5f5; }\n"
+    "</style>"
+)
+
+
+def inject_table_css(md: str) -> str:
+    """Inject a <style> block for table borders when HTML tables are present.
+
+    VS Code / Cursor markdown preview strips inline style attributes but
+    honours embedded <style> tags.
+    """
+    if "<table " not in md:
+        return md
+    insert_after = None
+    fm_end = _find_front_matter_end(md)
+    if fm_end is not None:
+        line_end = md.find("\n", fm_end)
+        if line_end >= 0:
+            insert_after = line_end + 1
+    if insert_after is not None:
+        return md[:insert_after] + "\n" + _TABLE_CSS + "\n" + md[insert_after:]
+    return _TABLE_CSS + "\n\n" + md
+
+
+def render_section_block(sec: Section) -> str:
+    """Render a non-uncertain section to Markdown, including table notes, level comments, and uncertainty markers."""
+    rendered = _render_section_md(sec)
+    if not rendered.strip():
+        return ""
+    if sec.kind in (SectionKind.TITLE, SectionKind.HEADING):
+        if not rendered.lstrip("#").strip():
+            return ""
+    parts: list[str] = []
+    if sec.kind == SectionKind.TABLE:
+        note = _table_notes(sec)
+        if note:
+            parts.append(note)
+    if is_flagged_table(sec) or sec.metadata.get("possible_table"):
+        lv = sec.metadata.get("level") if sec.kind == SectionKind.TABLE else None
+        if lv and lv.get("level", 0) >= SHOWN_FROM and not sec.metadata.get("possible_table"):
+            parts.append(level_comment(lv))
+        text_lines = rendered.count("\n") + 1
+        parts.append(f"<!-- tomd:uncertain:L1-L{text_lines} -->")
+    parts.append(rendered)
+    return "\n\n".join(parts)
 
 
 def _annotate_wrap(rendered: str, sec: Section) -> str:
@@ -1259,35 +1339,9 @@ def emit_markdown(
     ``placeholders`` count is taken from the finished body (after
     duplicate-paragraph collapse) so it matches a grep of the output.
     """
-    _assign_emdash_nesting(sections)
+    assign_emdash_nesting(sections)
     set_lexicon(sections)
-
-    # Pre-pass: fold cross-page table continuations into the preceding
-    # table so they render as a single HTML/pipe table.  The detection
-    # layer marks the continuation with table_continuation=True and has
-    # already stripped its duplicate header row.
-    folded: set[int] = set()
-    for i in range(len(sections) - 1, 0, -1):
-        sec = sections[i]
-        if (sec.kind == SectionKind.TABLE
-                and getattr(sec, "table_continuation", False)
-                and sec.columns):
-            # Walk backwards to find the preceding TABLE section
-            # (skipping any interleaved non-table sections like page
-            # numbers or headings that the pipeline may have inserted).
-            for j in range(i - 1, -1, -1):
-                prev = sections[j]
-                if prev.kind == SectionKind.TABLE and prev.columns:
-                    prev.columns.extend(sec.columns)
-                    prev.text = "\n".join(
-                        " | ".join(
-                            "".join(s.text for s in cell).strip()
-                            for cell in row)
-                        for row in prev.columns)
-                    folded.add(i)
-                    break
-    if folded:
-        sections = [s for i, s in enumerate(sections) if i not in folded]
+    sections = fold_table_continuations(sections)
 
     parts: list[str] = []
 
@@ -1368,28 +1422,7 @@ def emit_markdown(
     md = strip_redundant_body_meta(md)
     md = strip_orphan_toc_list(md)
 
-    # Inject a <style> block for table borders when the document
-    # contains HTML tables. VS Code / Cursor markdown preview strips
-    # inline style attributes but honours embedded <style> tags.
-    if "<table " in md:
-        _TABLE_CSS = (
-            "<style>\n"
-            "table, th, td { border: 1px solid #999; "
-            "border-collapse: collapse; padding: 6px 10px; }\n"
-            "th { background: #f5f5f5; }\n"
-            "</style>"
-        )
-        insert_after = None
-        if fm:
-            fm_end = _find_front_matter_end(md)
-            if fm_end is not None:
-                line_end = md.find("\n", fm_end)
-                if line_end >= 0:
-                    insert_after = line_end + 1
-        if insert_after is not None:
-            md = md[:insert_after] + "\n" + _TABLE_CSS + "\n" + md[insert_after:]
-        else:
-            md = _TABLE_CSS + "\n\n" + md
+    md = inject_table_css(md)
 
     if fm:
         md = apply_strip_leading_h1(md, metadata.get("title", ""))
@@ -1445,6 +1478,16 @@ def renumber_uncertain_markers(md: str) -> str:
     return "\n".join(lines)
 
 
+def emit_table_prompts(sections: list[Section]) -> list[str]:
+    """Generate self-contained LLM prompts for flagged tables and possible-table regions."""
+    return [
+        _table_prompt(sections, idx)
+        for idx, s in enumerate(sections)
+        if s.kind != SectionKind.UNCERTAIN
+        and (is_flagged_table(s) or s.metadata.get("possible_table"))
+    ]
+
+
 def emit_prompts(sections: list[Section]) -> list[str] | None:
     """Generate self-contained LLM reconcile prompts for uncertain regions.
 
@@ -1453,12 +1496,8 @@ def emit_prompts(sections: list[Section]) -> list[str] | None:
     """
     uncertain = [(idx, s) for idx, s in enumerate(sections)
                  if s.kind == SectionKind.UNCERTAIN]
-    # Flagged tables and possible tables follow the reconcile prompts, in
-    # section order: one self-contained element each.
-    flagged = [(idx, s) for idx, s in enumerate(sections)
-               if s.kind != SectionKind.UNCERTAIN
-               and (is_flagged_table(s) or s.metadata.get("possible_table"))]
-    if not uncertain and not flagged:
+    flagged_prompts = emit_table_prompts(sections)
+    if not uncertain and not flagged_prompts:
         return None
 
     prompts: list[str] = []
@@ -1509,7 +1548,7 @@ def emit_prompts(sections: list[Section]) -> list[str] | None:
 
         prompts.append("\n".join(parts))
 
-    prompts.extend(_table_prompt(sections, idx) for idx, _ in flagged)
+    prompts.extend(flagged_prompts)
     return prompts
 
 
