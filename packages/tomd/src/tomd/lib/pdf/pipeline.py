@@ -9,7 +9,7 @@ from collections import Counter, defaultdict
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 
-from .cleanup import (
+from tomd.lib.pdf.cleanup import (
     get_edge_items,
     detect_repeating,
     strip_repeating,
@@ -21,103 +21,101 @@ from tomd.domain.diagnostics import GlyphPassStats, VectorUncertaintyStats
 from tomd.domain.document import SkipReason
 from tomd.domain.elements import Confidence
 from tomd.domain.image import ExtractedImage
-
-from .extract import extract_mupdf, extract_spatial, collect_links, attach_links
-from .images import (
+from tomd.lib.pdf.extract import extract_mupdf, extract_spatial, collect_links, attach_links
+from tomd.lib.pdf.images import (
     _CAPTION_LABEL_RE,
     _CAPTION_SEARCH_RADIUS_BELOW_PT,
     _VectorExtractionStats,
     extract_page_images,
     finalize_extraction,
 )
-from .vector_images import extract_page_vector_images
-from .glyphs import (
+from tomd.lib.pdf.vector_images import extract_page_vector_images
+from tomd.lib.pdf.glyphs import (
     collect_glyph_candidates,
     collect_text_emoji_bboxes,
     drop_glyphs_in_code_and_tables,
     filter_coincident,
     inject_glyph_spans,
 )
-from .mono import propagate_monospace
-from .figures import detect_figure_regions
-from .wording import classify_wording, collect_line_drawings
-from .spans import normalize_spans
-from .structure import (
+from tomd.lib.pdf.mono import propagate_monospace
+from tomd.lib.pdf.figures import detect_figure_regions
+from tomd.lib.pdf.wording import classify_wording, collect_line_drawings
+from tomd.lib.pdf.spans import normalize_spans
+from tomd.lib.pdf.structure import (
     compare_extractions,
     drop_leaked_toc_entries,
     structure_body,
     _is_known_section,
     _TITLE_PID_PREFIX_RE,
 )
-from ..metadata_yaml.extract import (
+from tomd.lib.metadata_yaml.extract import (
     apply_pdf_metadata_fallbacks as _apply_pdf_metadata_fallbacks,
     enrich_pdf_reply_to as _enrich_pdf_reply_to,
     extract_metadata as _extract_metadata_yaml,
 )
-from .table import (
+from tomd.lib.pdf.table import (
     detect_tables, exclude_table_regions, _rot_bbox, _rot_midpoint,
     _filter_phantom_mupdf_tables, _cluster_x_positions, TableStrategy,
 )
-from .wg21 import extract_metadata_from_blocks
-from .emit import emit_markdown, emit_prompts, renumber_uncertain_markers, table_use
+from tomd.lib.pdf.wg21 import extract_metadata_from_blocks
+from tomd.lib.pdf.emit import emit_markdown, emit_prompts, renumber_uncertain_markers, table_use
 from tomd.writers.markdown.escape import escape_italic_wrapper
-from .types import (
+from tomd.lib.pdf.types import (
     KNOWN_SECTIONS,
     Section,
     SectionKind,
     is_readable,
 )
-from .. import DOC_NUM_RE
-from ..shared import override_revision_from_filename
-from ..toc import find_toc_indices, has_dot_leader, is_toc_label
-from ..metadata_yaml.strip import (
+from tomd.lib.shared import DOC_NUM_RE, override_revision_from_filename
+from tomd.lib.toc import find_toc_indices, has_dot_leader, is_toc_label
+from tomd.lib.metadata_yaml.strip import (
     strip_metadata_headings as _strip_metadata_headings_new,
     strip_pre_heading_fragments as _strip_pre_heading_fragments,
     strip_pre_content_paragraphs as _strip_pre_content_paragraphs,
 )
-from ..body.abstract import dedup_abstract as _dedup_abstract_new
-from ..body.abstract import (
+from tomd.lib.body.abstract import dedup_abstract as _dedup_abstract_new
+from tomd.lib.body.abstract import (
     promote_abstract_from_uncertain as _promote_abstract_from_uncertain,
 )
-from ..body.abstract import (
+from tomd.lib.body.abstract import (
     reorder_abstract_in_uncertain as _reorder_abstract_in_uncertain,
 )
-from ..body.abstract import (
+from tomd.lib.body.abstract import (
     rescue_stranded_abstract_body as _rescue_stranded_abstract_body,
 )
-from ..body.abstract import (
+from tomd.lib.body.abstract import (
     strip_metadata_from_uncertain as _strip_metadata_from_uncertain,
 )
 
-from .docling_backend import (
+from tomd.lib.pdf.docling_backend import (
     docling_available as _docling_available,
     extract_docling_tables as _extract_docling_tables,
     enrich_tables_with_docling as _enrich_tables_with_docling,
     absorb_cross_page_spec_rows as _absorb_cross_page_spec_rows,
     discover_tables_with_docling as _discover_tables_with_docling,
 )
-from ._fitz_lock import _FITZ_LOCK
-from .runctx import current, run_scope
-from .select import _is_bad, _to_section, page_furniture, remove_table_regions, select_tables, stitch_pages
-from .tagged import extract_tagged_tables
-from .ruled import extract_ruled_tables, page_hrules
-from .poll import extract_poll_tables
-from .codepair import find_code_pairs
-from .classify import gate_tables, withhold_trust
-from .content import content_candidates
-from .visibility import (check_page, discards as hidden_discards, hide_recorded,
+from tomd.lib.pdf._fitz_lock import _FITZ_LOCK
+from tomd.lib.pdf.runctx import current, run_scope
+from tomd.lib.pdf.select import _is_bad, _to_section, page_furniture, remove_table_regions, select_tables, stitch_pages
+from tomd.lib.pdf.tagged import extract_tagged_tables
+from tomd.lib.pdf.ruled import extract_ruled_tables, page_hrules
+from tomd.lib.pdf.poll import extract_poll_tables
+from tomd.lib.pdf.codepair import find_code_pairs
+from tomd.lib.pdf.classify import gate_tables, withhold_trust
+from tomd.lib.pdf.content import content_candidates
+from tomd.lib.pdf.visibility import (check_page, discards as hidden_discards, hide_recorded,
                          recorded_regions, remove_hidden_text, summary as hidden_summary)
-from .continuation import annotate as annotate_continuations
-from .figure_tables import label_figure_tables
-from .docmeasure import hyphenates as doc_hyphenates, measure as doc_measure
-from .extent import extend as extend_readings
-from .flag import (aligned_regions, dropped_uncovered, flag_possible_tables, gutter_regions,
+from tomd.lib.pdf.continuation import annotate as annotate_continuations
+from tomd.lib.pdf.figure_tables import label_figure_tables
+from tomd.lib.pdf.docmeasure import hyphenates as doc_hyphenates, measure as doc_measure
+from tomd.lib.pdf.extent import extend as extend_readings
+from tomd.lib.pdf.flag import (aligned_regions, dropped_uncovered, flag_possible_tables, gutter_regions,
                    outside_view_regions, rejected_regions, text_regions)
-from .records import records_candidates
-from .scan import run_scan
-from .rowbands import merge_rule_bands
-from .levels import assign as assign_level
-from .summary import build as build_summary, generator as pdf_generator, header_comment, prompt_elements
+from tomd.lib.pdf.records import records_candidates
+from tomd.lib.pdf.scan import run_scan
+from tomd.lib.pdf.rowbands import merge_rule_bands
+from tomd.lib.pdf.levels import assign as assign_level
+from tomd.lib.pdf.summary import build as build_summary, generator as pdf_generator, header_comment, prompt_elements
 
 __all__ = ["run_pipeline", "PipelineResult"]
 

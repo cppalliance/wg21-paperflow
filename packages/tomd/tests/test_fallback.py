@@ -186,3 +186,29 @@ class TestMetadataFallback:
         assert "From Mailing" in result
         assert result.endswith("Body text.\n") or "Body text." in result
         assert "# comment only" not in result
+
+
+class TestBlankValuesCountAsMissing:
+    def test_empty_title_filled_from_mailing(self):
+        md = '---\ntitle: ""\ndocument: P0001R0\n---\n\nBody\n'
+        result = _normalize_front_matter(md, {"title": "Mailing Title"})
+        assert 'title: "Mailing Title"' in result
+        assert 'title: ""' not in result
+
+    def test_title_sanitized_to_empty_filled_from_mailing(self):
+        md = '---\ntitle: "Title: Date: 2024"\ndocument: P0001R0\n---\n\nBody\n'
+        result = _normalize_front_matter(md, {"title": "Mailing Title"})
+        assert 'title: "Mailing Title"' in result
+
+    def test_all_blank_front_matter_without_mailing_is_dropped(self):
+        md = '---\ntitle: ""\n---\n\nBody\n'
+        assert _normalize_front_matter(md, None) == "Body\n"
+
+    def test_empty_title_without_mailing_is_omitted(self):
+        md = '---\ntitle: ""\ndocument: P0001R0\n---\n\nBody\n'
+        assert _normalize_front_matter(md, None) == "---\ndocument: P0001R0\n---\n\nBody\n"
+
+    def test_blank_mailing_subgroup_falls_through_to_target_group(self):
+        md = "---\ntitle: T\n---\n\nBody\n"
+        result = _normalize_front_matter(md, {"subgroup": "  ", "target_group": "LEWG"})
+        assert "audience: LEWG" in result

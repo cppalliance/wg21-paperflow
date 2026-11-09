@@ -10,7 +10,8 @@ import re
 from dataclasses import replace
 from pathlib import Path
 
-from tomd.lib.shared import DATE_RE, DOC_NUM_RE, EMAIL_RE, override_revision_from_filename
+from tomd.domain.metadata import EMAIL_RE
+from tomd.lib.shared import DATE_RE, DOC_NUM_RE, override_revision_from_filename
 from tomd.lib.pdf.types import (
     Section, SectionKind,
     SECTION_NUM_RE, DOC_FIELD_RE, REPLY_TO_RE, AUDIENCE_RE,

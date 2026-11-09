@@ -6,11 +6,13 @@ import re
 
 from bs4 import BeautifulSoup, Tag
 
-from .. import (
-    DOC_NUM_RE, EMAIL_RE, parse_author_lines,
+from tomd.domain.metadata import EMAIL_RE
+
+from tomd.lib.shared import (
+    DOC_NUM_RE, parse_author_lines,
     deobfuscate_email, enrich_reply_to_names, normalize_date,
 )
-from ..similarity import fuzzy_match_label
+from tomd.lib.similarity import fuzzy_match_label
 
 _log = logging.getLogger(__name__)
 

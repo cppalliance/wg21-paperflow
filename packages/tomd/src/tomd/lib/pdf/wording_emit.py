@@ -26,13 +26,13 @@ which inline tags survive, is unchanged.
 
 from __future__ import annotations
 
-from .. import DEFAULT_FENCE_LANG
-from ..wording_cleanup import strip_redundant_tags
-from ..wording_policy import UNIFORM_ROLE_THRESHOLD, implicit_role_for
-from .cleanup import normalize_whitespace
-from .code_format import normalize_code_line
-from .code_grid import CodeGrid
-from .types import Line, Span, Section
+from tomd.lib.shared import DEFAULT_FENCE_LANG
+from tomd.lib.wording_cleanup import strip_redundant_tags
+from tomd.lib.wording_policy import UNIFORM_ROLE_THRESHOLD, implicit_role_for
+from tomd.lib.pdf.cleanup import normalize_whitespace
+from tomd.lib.pdf.code_format import normalize_code_line
+from tomd.lib.pdf.code_grid import CodeGrid
+from tomd.lib.pdf.types import Line, Span, Section
 from tomd.writers.markdown.escape import (
     escape_leading_atx,
     escape_wording_angle_brackets,

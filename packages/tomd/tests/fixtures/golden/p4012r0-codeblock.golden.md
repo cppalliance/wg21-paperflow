@@ -2,8 +2,6 @@
 title: "REALLY_CONVERTIBLE_TO DEFINITION"
 document: P4012R0
 date: 2026-06-03
-reply-to:
-
 ---
 
 <!-- tomd:summary tables=0 trusted=0 flagged=0 likely=0 marked=0 confidence=n/a unfamiliarity=0.40 -->
