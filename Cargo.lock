@@ -199,10 +199,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "build-ceiling"
-version = "0.3.0"
-
-[[package]]
 name = "bumpalo"
 version = "3.20.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -743,6 +739,7 @@ version = "0.3.0"
 dependencies = [
  "libloading",
  "runvil-plugin",
+ "runvil-plugin-sys",
 ]
 
 [[package]]
@@ -754,7 +751,6 @@ dependencies = [
  "runvil",
  "runvil-plugin",
  "serde_json",
- "sha2",
  "tracing",
 ]
 
@@ -1815,7 +1811,6 @@ dependencies = [
 name = "runvil"
 version = "0.3.0"
 dependencies = [
- "build-ceiling",
  "runvil-engine",
  "runvil-lua",
  "runvil-model-client",
@@ -1828,7 +1823,6 @@ dependencies = [
 name = "runvil-engine"
 version = "0.3.0"
 dependencies = [
- "build-ceiling",
  "mlua",
  "regex",
  "runvil-lua",
@@ -1838,13 +1832,13 @@ dependencies = [
  "runvil-vfs",
  "serde",
  "serde_json",
+ "tracing",
 ]
 
 [[package]]
 name = "runvil-lua"
 version = "0.3.0"
 dependencies = [
- "build-ceiling",
  "mlua",
  "runvil-model-client",
  "runvil-types",
@@ -1857,7 +1851,6 @@ dependencies = [
 name = "runvil-model-client"
 version = "0.3.0"
 dependencies = [
- "build-ceiling",
  "runvil-types",
  "serde",
  "serde_json",
@@ -1867,17 +1860,20 @@ dependencies = [
 name = "runvil-plugin"
 version = "0.3.0"
 dependencies = [
- "build-ceiling",
  "runvil-types",
  "runvil-vfs",
  "serde_json",
 ]
 
 [[package]]
+name = "runvil-plugin-sys"
+version = "0.2.0"
+source = "git+https://github.com/cppalliance/runvil-plugin-api?rev=63a2403761b925b1f52bcf361c97b4fb04c04d74#63a2403761b925b1f52bcf361c97b4fb04c04d74"
+
+[[package]]
 name = "runvil-prompt"
 version = "0.3.0"
 dependencies = [
- "build-ceiling",
  "pulldown-cmark",
  "runvil-lua",
  "runvil-types",
@@ -1889,7 +1885,6 @@ dependencies = [
 name = "runvil-types"
 version = "0.3.0"
 dependencies = [
- "build-ceiling",
  "serde",
  "serde_json",
  "sha2",

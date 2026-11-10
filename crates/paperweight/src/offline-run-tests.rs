@@ -5,18 +5,17 @@
 use std::num::NonZeroU32;
 use std::sync::{Arc, Mutex};
 
-use harness::pack::{HostContext, HostServices, PackRegistry};
-use harness::record::{MemoryRecorder, RunErrorKind, RunOutcome};
-use harness::vfs::VfsRef;
-use harness::{BoxFuture, Harness, HostSnapshot, InferenceBroker, RunReport, RunRequest, Timer};
+use harness::pack::{PackRegistry, Packs};
+use harness::record::MemoryRecorder;
+use harness::{BoxFuture, Harness, Host, InferenceBroker, RunReport, RunSetup, Timer};
 use runvil::effect::Round;
-use runvil::error::Error;
 use runvil::model::{
     Completion, CompletionOptions, CompletionResult, Message, ModelBinding, ModelCatalog, ModelId,
     ModelInfo, Temperature, ThinkingMode, ToolSchema,
 };
+use runvil::{Error, ErrorCode, Prompt};
 
-use super::{DEFAULT_PROMPT, DEFAULT_PROMPT_FILE, DEFAULT_PROMPT_NAME, TokioTimer};
+use super::{DEFAULT_PROMPT, DEFAULT_PROMPT_FILE, OnePrompt, TokioTimer};
 
 /// A small paper with two H2 sections, enough for the prompt to split.
 const PAPER: &str = "# P9999R0: An offline paper\n\n## Motivation\n\n\
@@ -79,34 +78,33 @@ async fn run_offline(context: u32, thinking: ThinkingMode) -> (RunReport, Vec<Se
         sent: Arc::clone(&sent),
     };
     let timer: Arc<dyn Timer> = Arc::new(TokioTimer);
-    let harness = Harness::new(
-        Arc::new(MemoryRecorder::new()),
-        Arc::new(broker),
-        timer,
-        Arc::new(HostContext::new(PackRegistry::new(), HostServices::new())),
-        HostServices::new(),
-    );
-    let report = harness
-        .run(RunRequest {
-            name: DEFAULT_PROMPT_NAME.to_owned(),
-            source: DEFAULT_PROMPT.to_owned(),
+    let host = Arc::new(Host {
+        packs: Packs::new(PackRegistry::new()),
+        prompts: Arc::new(OnePrompt {
             file: DEFAULT_PROMPT_FILE.to_owned(),
-            args: String::new(),
-            input_text: Some(PAPER.to_owned()),
-            vfs: VfsRef::default(),
-            host: HostSnapshot::default(),
-        })
+            source: DEFAULT_PROMPT.to_owned(),
+        }),
+        timer,
+    });
+    let (prompt, _events) = Prompt::parse(&*host.prompts, DEFAULT_PROMPT_FILE);
+    let prompt = prompt.unwrap_or_else(|e| panic!("parse the embedded prompt: {e}"));
+    let setup = RunSetup {
+        input_text: Some(PAPER.to_owned()),
+        ..RunSetup::new(Arc::new(MemoryRecorder::new()), Arc::new(broker))
+    };
+    let report = Harness::new(host, prompt, setup)
+        .run()
         .await
         .unwrap_or_else(|e| panic!("record the run: {e}"));
     let sent = sent.lock().unwrap_or_else(|e| panic!("lock: {e}")).clone();
     (report, sent)
 }
 
-/// Returns the kind and message of a failed run, panicking on any other
-/// outcome.
-fn failure(report: &RunReport) -> (RunErrorKind, &str) {
-    match &report.outcome {
-        RunOutcome::Failed { kind, message } => (*kind, message.as_str()),
+/// Returns the code and located message of a failed run, panicking on a
+/// completed or canceled one.
+fn failure(report: &RunReport) -> (ErrorCode, String) {
+    match &report.result {
+        Err(error) if !error.is_canceled() => (error.code, error.located_message()),
         other => panic!("expected a failed run, got {other:?}"),
     }
 }
@@ -116,9 +114,9 @@ async fn embedded_prompt_runs_to_its_report_offline() {
     let (report, sent) = run_offline(65536, ThinkingMode::Switchable).await;
 
     assert!(
-        matches!(report.outcome, RunOutcome::Completed { .. }),
+        report.result.is_ok(),
         "the run must complete, got {:?}",
-        report.outcome
+        report.result
     );
     let output = report
         .output
@@ -146,7 +144,7 @@ async fn embedded_prompt_refuses_a_model_below_its_context_minimum() {
     let (report, sent) = run_offline(16000, ThinkingMode::Switchable).await;
 
     let (kind, message) = failure(&report);
-    assert_eq!(kind, RunErrorKind::RequirementsUnmet, "message: {message}");
+    assert_eq!(kind, ErrorCode::RequirementsUnmet, "message: {message}");
     assert!(
         message.contains("role 'default': requires a context of at least 32768 tokens"),
         "message: {message}"
@@ -159,7 +157,7 @@ async fn embedded_prompt_refuses_an_always_thinking_model() {
     let (report, sent) = run_offline(65536, ThinkingMode::Always).await;
 
     let (kind, message) = failure(&report);
-    assert_eq!(kind, RunErrorKind::RequirementsUnmet, "message: {message}");
+    assert_eq!(kind, ErrorCode::RequirementsUnmet, "message: {message}");
     assert!(
         message.contains("role 'default': requires 'thinking: false'"),
         "message: {message}"

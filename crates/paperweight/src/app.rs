@@ -17,18 +17,15 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
-use anyhow::{Context, Result, bail};
+use anyhow::{Context, Result, anyhow, bail};
 use clap::Parser;
-use harness::pack::{HostContext, HostServices, PackRegistry};
-use harness::record::{
-    Record, RecordKind, RecorderFuture, RunId, RunMeta, RunOutcome, RunRecorder,
-};
-use harness::vfs::VfsRef;
-use harness::{BoxFuture, Harness, HostSnapshot, Timer};
+use harness::pack::{PackRegistry, Packs};
+use harness::record::{Record, RecordKind, RecorderFuture, RunId, RunMeta, RunRecorder};
+use harness::{BoxFuture, Harness, Host, PromptFinder, RunSetup, Timer};
 use harness_gateway_client::{GatewayBroker, GatewayEndpoint, SecretString};
 use paperstore::{PaperNum, StorageBackend};
 use paperstore_sqlite::SqliteBackend;
-use runvil::error::ErrorCode;
+use runvil::{Error, ErrorCode, Prompt};
 use tokio::sync::oneshot;
 
 /// The embedded paperweight prompt, vendored from the runvil prompts.
@@ -37,7 +34,8 @@ const DEFAULT_PROMPT: &str = include_str!("../paperweight.md");
 /// The name the embedded prompt runs under.
 const DEFAULT_PROMPT_NAME: &str = "paperweight";
 
-/// The file the embedded prompt came from, which the run's failures name.
+/// The file the embedded prompt came from, which the run's failures name:
+/// the name the Host finds the embedded prompt by.
 const DEFAULT_PROMPT_FILE: &str = "paperweight.md";
 
 /// The command-line interface; `run_cli` sets the program name.
@@ -174,26 +172,28 @@ pub(crate) async fn run(request: RunRequest<'_>) -> Result<()> {
     // before any network call.
     let paper_md = load_input_markdown(input).await?;
 
-    let harness = Harness::new(
-        Arc::new(ProgressRecorder),
-        Arc::new(GatewayBroker::new(endpoint, key)),
-        Arc::new(TokioTimer),
-        Arc::new(HostContext::new(PackRegistry::new(), HostServices::new())),
-        HostServices::new(),
-    );
-    let control = harness.control();
-    let run = harness.run(harness::RunRequest {
-        name: name.clone(),
-        source,
-        file: prompt_file(prompt),
+    let file = prompt_file(prompt);
+    let host = Arc::new(Host {
+        packs: Packs::new(PackRegistry::new()),
+        prompts: Arc::new(OnePrompt {
+            file: file.clone(),
+            source,
+        }),
+        timer: Arc::new(TokioTimer),
+    });
+    let parsed = parse_prompt(&host, &file, &name)?;
+    let setup = RunSetup {
         args: args.to_owned(),
         input_text: Some(paper_md),
-        vfs: VfsRef::default(),
-        host: HostSnapshot {
-            selected_model: model,
-            workspace_roots: Vec::new(),
-        },
-    });
+        selected_model: model,
+        ..RunSetup::new(
+            Arc::new(ProgressRecorder { name: name.clone() }),
+            Arc::new(GatewayBroker::new(endpoint, key)),
+        )
+    };
+    let harness = Harness::new(host, parsed, setup);
+    let control = harness.control();
+    let run = harness.run();
     tokio::pin!(run);
     let mut cancel_requested = false;
     // A failed Ctrl-C listener drops the sender; the pattern then disables
@@ -209,10 +209,10 @@ pub(crate) async fn run(request: RunRequest<'_>) -> Result<()> {
     }
     .with_context(|| format!("run the {name} prompt"))?;
 
-    match report.outcome {
-        RunOutcome::Completed { .. } => {}
-        RunOutcome::Cancelled => return Err(Cancelled.into()),
-        RunOutcome::Failed { message, .. } => bail!("run failed: {message}"),
+    match report.result {
+        Ok(_) => {}
+        Err(error) if error.is_canceled() => return Err(Cancelled.into()),
+        Err(error) => bail!("run failed: {}", error.located_message()),
     }
     let report = match report.output {
         Ok(report) => report,
@@ -233,11 +233,62 @@ pub(crate) async fn run(request: RunRequest<'_>) -> Result<()> {
     Ok(())
 }
 
-/// The run's recorder: prints one progress line to stderr for each event
-/// and keeps no history, since the CLI reads the run's result from its
-/// report.
+/// Serves the run's one prompt source under `file`, the name the Host
+/// finds it by and its failures cite.
+struct OnePrompt {
+    file: String,
+    source: String,
+}
+
+impl fmt::Debug for OnePrompt {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("OnePrompt")
+            .field("file", &self.file)
+            .finish_non_exhaustive()
+    }
+}
+
+impl PromptFinder for OnePrompt {
+    fn find(&self, name: &str) -> std::result::Result<String, Error> {
+        if name == self.file {
+            return Ok(self.source.clone());
+        }
+        let code = ErrorCode::NotFound;
+        Err(Error::new(
+            code,
+            format!("no prompt named {name}"),
+            code.prose(),
+        ))
+    }
+}
+
+/// Finds the prompt `file` through the Host's finder and parses it,
+/// printing a progress line under the run's `name` for each parse event.
+///
+/// It parses with `Prompt::parse`, not `Host::parse`, because `Host::parse`
+/// sends the parse events only to `tracing`. A `uses:` the Host cannot
+/// serve is still refused, by the run's first step, as the run's failure.
+///
+/// # Errors
+/// Returns `run failed: ` and the parser's message when the prompt does not
+/// parse.
+fn parse_prompt(host: &Host, file: &str, name: &str) -> Result<Prompt> {
+    let (parsed, events) = Prompt::parse(&*host.prompts, file);
+    for event in &events {
+        let event = serde_json::to_value(event).context("record a parse event")?;
+        print_progress(name, &event);
+    }
+    parsed.map_err(|error| anyhow!("run failed: {}", error.message))
+}
+
+/// The run's recorder: prints one progress line to stderr for each event,
+/// under the run's `name`, and keeps no history, since the CLI reads the
+/// run's result from its report.
 #[derive(Debug)]
-struct ProgressRecorder;
+struct ProgressRecorder {
+    name: String,
+}
 
 impl RunRecorder for ProgressRecorder {
     fn begin_run(&self, _meta: RunMeta) -> RecorderFuture<'_, RunId> {
@@ -246,12 +297,16 @@ impl RunRecorder for ProgressRecorder {
 
     fn append(&self, _run: RunId, record: Record) -> RecorderFuture<'_, ()> {
         if matches!(record.kind, RecordKind::Event) {
-            print_progress(&record.payload);
+            print_progress(&self.name, &record.payload);
         }
         Box::pin(async { Ok(()) })
     }
 
-    fn end_run(&self, _run: RunId, _outcome: RunOutcome) -> RecorderFuture<'_, ()> {
+    fn end_run(
+        &self,
+        _run: RunId,
+        _result: std::result::Result<String, Error>,
+    ) -> RecorderFuture<'_, ()> {
         Box::pin(async { Ok(()) })
     }
 }
@@ -266,14 +321,13 @@ impl Timer for TokioTimer {
     }
 }
 
-/// Writes one progress line for a run event to stderr.
-fn print_progress(event: &serde_json::Value) {
+/// Writes one progress line for an event of the run `name` to stderr.
+fn print_progress(name: &str, event: &serde_json::Value) {
     // Progress is a side channel, so a failed write to stderr is
     // deliberately dropped rather than surfaced.
     let _ignored = writeln!(
         io::stderr(),
-        "[{}] {}: {}",
-        event_field(event, "execution"),
+        "[{name}] {}: {}",
         event_field(event, "section"),
         event_field(event, "kind"),
     );
@@ -340,7 +394,7 @@ fn selected_model(model: Option<&str>) -> Option<String> {
 /// Returns the name the run takes from its prompt: the `--prompt` file stem,
 /// or [`DEFAULT_PROMPT_NAME`] for the embedded prompt.
 ///
-/// The name becomes the run's `execution` field in every progress line.
+/// The name heads every progress line, in brackets.
 fn prompt_name(prompt: Option<&Path>) -> Result<String> {
     let Some(path) = prompt else {
         return Ok(DEFAULT_PROMPT_NAME.to_owned());
@@ -352,8 +406,9 @@ fn prompt_name(prompt: Option<&Path>) -> Result<String> {
         .with_context(|| format!("the prompt path {} has no usable file name", path.display()))
 }
 
-/// Returns the file the run's failures name: the `--prompt` path as given,
-/// or [`DEFAULT_PROMPT_FILE`] for the embedded prompt.
+/// Returns the file the run's failures name, which the Host finds the
+/// prompt by: the `--prompt` path as given, or [`DEFAULT_PROMPT_FILE`] for
+/// the embedded prompt.
 fn prompt_file(prompt: Option<&Path>) -> String {
     prompt.map_or_else(
         || DEFAULT_PROMPT_FILE.to_owned(),
