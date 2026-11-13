@@ -1121,16 +1121,126 @@ def _bands_to_table(page_num, in_x, bands, x0, x1, header_above,
             cells[sum(1 for s in seps if w[0] >= s) - 1].append(w)
         rows.append([_chars_to_lines(_word_chars(cw), page_num) for cw in cells])
     rows = _drop_empty(rows)
+    grouped = False
     if per_line:
         rows = _join_wrapped_lines(rows)
+    else:
+        before = len(rows)
+        rows = _split_grouped_bands(rows)
+        grouped = len(rows) > before
     if len(rows) < min_rows or max(len(r) for r in rows) < 2:
         return excluded("too few rows or columns after cleaning")
     return TableCandidate("rules", rows, {page_num: (x0, top, x1, bands[-1][1])},
-                          flags=["sparse-under-header"] if sparse else [])
+                          flags=(["sparse-under-header"] if sparse else [])
+                          + (["grouped-bands"] if grouped else []))
 
 
+_CLOSING = set("{)]};,.")
+_UNFINISHED = set(",:(")
+_AT_EDGE = 1.5           # pt: a line ending this close to its column's right edge was broken there
+_GROUPED_MAX_WRAPS = 0.5  # this share of wrapped line breaks in the bands: one record per band
 _CODE_BODY = 0.8          # this share of monospace body text: a before/after code pair...
 _CODE_STATEMENTS = 0.3    # ...when this share of its lines has a brace or semicolon
+
+
+def _code_body(lines) -> bool:
+    """Lines that are a code listing: mostly monospace, many statements."""
+    chars = sum(len(s.text.strip()) for ln in lines for s in ln.spans)
+    mono = sum(len(s.text.strip()) for ln in lines for s in ln.spans if s.monospace)
+    stmt = sum(1 for ln in lines if any(ch in ln.text for ch in "{};"))
+    return bool(chars) and mono >= _CODE_BODY * chars and stmt >= _CODE_STATEMENTS * len(lines)
+
+
+def _first_word_width(ln) -> float:
+    text = ln.text.strip()
+    word = text.split()[0] if text else ""
+    return (ln.bbox[2] - ln.bbox[0]) * len(word) / max(len(text), 1)
+
+
+def _split_grouped_bands(rows):
+    """Split rule bands that hold several records (2026-11-13).
+
+    Rules every few records (a group per rule band, not one rule per row) leave several
+    records in one band. Each body band is cut into its text lines (lines on shared
+    baselines across cells). A cell continues a wrap when its line above is paragraph
+    text (two words or more) and the next line's first word would not have fitted after
+    it. Only breaks to a line with text in two cells or more can start a record; a table
+    in which at least half of those continue a wrap in some cell has one record per band
+    and stays as it is. Otherwise its bands are split at every line break, except where
+    every cell of the next line continues a wrap. A table with lines of neighbouring cells
+    off each other's baselines (closer than a line pitch) holds independent text per cell
+    and stays as it is. The header band and code listings stay whole.
+    """
+    if len(rows) < 2:
+        return rows
+    ncol = max(len(r) for r in rows)
+    rows = [r + [[] for _ in range(ncol - len(r))] for r in rows]
+    right = [max((ln.bbox[2] for r in rows for ln in r[c]), default=0.0) for c in range(ncol)]
+
+    def wrapped_cell(last, lr, c, edge: bool = True) -> bool:
+        # the cell's line above runs into the column's edge, or is paragraph text (two words
+        # or more) and the next line's first word would not have fitted after it; or the line above is unfinished
+        # (ends in ",", ":" or "(") or the next opens with a brace or closing punctuation
+        # ("{};" under a declaration): neither starts a record
+        if not last[c]:
+            return False
+        if lr[c][0].text.lstrip()[:1] in _CLOSING or last[c][-1].text.rstrip()[-1:] in _UNFINISHED:
+            return True
+        room = right[c] - last[c][-1].bbox[2]
+        if edge and room < _AT_EDGE:     # ran into the column's edge: a forced break ("read_som" / "e()")
+            return True
+        return len(last[c][-1].text.split()) >= 2 and room < _first_word_width(lr[c][0]) + 2.0
+
+    def wraps(last, lr) -> bool:
+        filled = [c for c in range(ncol) if lr[c]]
+        return bool(filled) and all(wrapped_cell(last, lr, c) for c in filled)
+
+    bands = []                           # per body band: its line rows, or None to keep whole
+    breaks = wrapped = 0
+    for r in rows[1:]:
+        lines = [(c, ln) for c in range(ncol) for ln in r[c]]
+        if len(lines) < 2 or _code_body([ln for _, ln in lines]):
+            bands.append(None)
+            continue
+        clusters: list[list] = []        # [(centre, [(c, ln)])], by y-centre
+        for c, ln in sorted(lines, key=lambda x: (x[1].bbox[1] + x[1].bbox[3]) / 2):
+            yc = (ln.bbox[1] + ln.bbox[3]) / 2
+            if clusters and yc - clusters[-1][0] < 0.5 * (ln.bbox[3] - ln.bbox[1]):
+                clusters[-1][1].append((c, ln))
+            else:
+                clusters.append([yc, [(c, ln)]])
+        # lines of neighbouring cells off each other's baselines (closer than a line
+        # pitch): the cells hold independent text, one record per band
+        if any(b[0] - a[0] < 0.8 * min(a[1][0][1].bbox[3] - a[1][0][1].bbox[1],
+                                       b[1][0][1].bbox[3] - b[1][0][1].bbox[1])
+               for a, b in zip(clusters, clusters[1:])):
+            return rows
+        line_rows = [[[ln for cc, ln in cl if cc == c] for c in range(ncol)] for _, cl in clusters]
+        for a, b in zip(line_rows, line_rows[1:]):
+            filled = [c for c in range(ncol) if b[c]]
+            if len(filled) < 2:
+                continue                 # a lone cell's line never decides it
+            breaks += 1
+            # the widest entry of a column always reaches its edge: the edge test only
+            # joins lines (every cell agreeing), it never decides the table
+            wrapped += any(wrapped_cell(a, b, c, edge=False) for c in filled)
+        bands.append(line_rows if len(line_rows) > 1 else None)
+    if not breaks or wrapped >= _GROUPED_MAX_WRAPS * breaks:
+        return rows
+    out = [rows[0]]
+    for r, line_rows in zip(rows[1:], bands):
+        if line_rows is None:
+            out.append(r)
+            continue
+        band = [line_rows[0]]
+        for last, lr in zip(line_rows, line_rows[1:]):
+            if wraps(last, lr):
+                for c in range(ncol):
+                    band[-1][c] = band[-1][c] + lr[c]
+            else:
+                band.append(lr)
+        out.extend(band)
+    return out
 
 
 def _join_wrapped_lines(rows):

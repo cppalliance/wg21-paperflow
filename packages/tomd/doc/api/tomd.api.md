@@ -1,6 +1,6 @@
 # tomd API surface
 
-120 modules, 93 classes, 313 functions, 93 methods, 385 fields. Typed: 948 of 1218 functions and methods (77%).
+120 modules, 93 classes, 313 functions, 93 methods, 385 fields. Typed: 948 of 1221 functions and methods (77%).
 
 ## Contents
 
@@ -4571,7 +4571,7 @@ MIN_SEGMENT = 15.0  # pt: shorter strokes are not row separators
 
 ## `lib/pdf/ruled.py` ([source](../../src/tomd/lib/pdf/ruled.py))
 
-Typed: 8 of 42 functions and methods (19%).
+Typed: 8 of 45 functions and methods (17%).
 
 ```python
 """Table detection from ruling lines (vector drawings).
@@ -4619,7 +4619,7 @@ def page_hrules(page, drawings=None) -> list[tuple[float, float, float]]:
     # untyped: page, drawings
     # called by: classify.gate_tables, pipeline.run_pipeline
 
-# + 39 private module-level names
+# + 42 private module-level names
 ```
 
 <a id="lib-pdf-runctx-py"></a>

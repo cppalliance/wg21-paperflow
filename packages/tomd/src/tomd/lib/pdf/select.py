@@ -424,8 +424,12 @@ def table_flags(cand: TableCandidate) -> list[str]:
     # usual (not in a grid ruled both ways, where lines fix the cells), rows
     # with an empty key cell (a wrapped line taken for a row), or a lone cell
     # in a wide table. Fewer filled cells is normal: "TLS | (none found) | ".
-    keyed = sum(1 for r in body if r and r[0]) >= len(body) / 2
-    extra = cand.source != "grid"
+    # Rule bands split into records (ruled._split_grouped_bands) are bounded by drawn
+    # rules and have joined their wrapped lines back, as a drawn grid fixes its cells:
+    # fuller rows and empty key cells there are records of a sparse or grouped table.
+    grouped = "grouped-bands" in (getattr(cand, "flags", None) or [])
+    keyed = sum(1 for r in body if r and r[0]) >= len(body) / 2 and not grouped
+    extra = cand.source != "grid" and not grouped
     ragged = sum(1 for r, f in zip(body, filled)
                  if (extra and f > mode) or (keyed and r and not r[0])
                  or (sum(1 for c in r if c) == 1 and ncol >= 3))
