@@ -1,6 +1,6 @@
 # tomd API surface
 
-120 modules, 93 classes, 313 functions, 93 methods, 385 fields. Typed: 948 of 1221 functions and methods (77%).
+120 modules, 93 classes, 313 functions, 93 methods, 385 fields. Typed: 950 of 1223 functions and methods (77%).
 
 ## Contents
 
@@ -4774,7 +4774,7 @@ MODEL = ...
 
 ## `lib/pdf/select.py` ([source](../../src/tomd/lib/pdf/select.py))
 
-Typed: 44 of 55 functions and methods (80%).
+Typed: 46 of 57 functions and methods (80%).
 
 ```python
 """Table selection: one reading per region, trusted only when another kind of evidence agrees.
@@ -4996,7 +4996,7 @@ TRUST_ONLY_PIPE_RENDERING = True
 # "SF F N A SA", "SF WF N WA SA", "F N A", "Strongly Favor ... Strongly Against".
 VOTE_LABELS = ...
 
-# + 37 private module-level names
+# + 39 private module-level names
 ```
 
 <a id="lib-pdf-spans-py"></a>

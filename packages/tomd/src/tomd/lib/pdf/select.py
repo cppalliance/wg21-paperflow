@@ -174,6 +174,8 @@ _LEAD_CONT_RE = re.compile(r"^\s*(&&|\|\||[)>\]},.;=]|::)")
 _PAGE_NUM_CELL_RE = re.compile(r"^\d{1,4}$")
 # a cell holding only a reference or pointer qualifier ("&&", "const&", "*") is a value
 # in a table of qualifiers, not a code line split at an operator
+# a half-open range "[first, last)" opens with one bracket and closes with another
+_HALF_OPEN = re.compile(r"\[[^\[\](){}]*,[^\[\](){}]*\)")
 _QUALIFIER_CELL = re.compile(r"^\s*((const|volatile)\s*)*[&*]{0,2}\s*$")
 # a function type ending in its ref-qualifier ("R(Args...) &&", "F() const&&") is a whole
 # declaration, not a line cut at "&&"
@@ -323,8 +325,9 @@ def _split_code_cell(c: str) -> bool:
     selection weakness to fix first - so the check is unchanged; REPORT.md, round 1.)"""
     if _QUALIFIER_CELL.match(c) or _QUALIFIED_FUNCTION_CELL.match(c):
         return False
+    inner = _HALF_OPEN.sub("", c)
     return bool(_TRAIL_OP_RE.search(c) or _LEAD_CONT_RE.search(c)
-                or any(c.count(o) != c.count(k) for o, k in ("()", "[]", "{}")))
+                or any(inner.count(o) != inner.count(k) for o, k in ("()", "[]", "{}")))
 
 
 def _order_contradiction(cand: TableCandidate) -> str:
@@ -442,8 +445,14 @@ def table_flags(cand: TableCandidate) -> list[str]:
     cells = [c for r in rows for c in r] + [""] * sum(ncol - len(r) for r in rows)
     if sum(1 for c in cells if not c) / max(1, len(cells)) > 0.4:
         flags.append("empty-cells")
-    split = sum(1 for c in cells if c and _split_code_cell(c))
-    if split >= 2 or (cells and split / len(cells) >= 0.1):
+    # counted page by page: a table joined across a page break is judged as its
+    # pieces were, not on a count that grows with every page it spans
+    split: dict = defaultdict(lambda: [0, 0])
+    for raw, r in zip(cand.rows, rows):
+        pg = next((ln.page_num for cell in raw for ln in cell if ln.text.strip()), None)
+        split[pg][0] += sum(1 for c in r if c and _split_code_cell(c))
+        split[pg][1] += ncol
+    if any(s >= 2 or (n and s / n >= 0.1) for s, n in split.values()):
         flags.append("split-code")
     # A (nearly) constant row-key column is a margin label beside code.
     if len(rows) >= 4:
@@ -657,8 +666,13 @@ def _overlap(a: TableCandidate, b: TableCandidate) -> float:
 
 def _text_outside(blocks: list[Block], page: int, below: float | None = None,
                   above: float | None = None, furniture: frozenset = frozenset()) -> bool:
-    """True if any text line on the page lies below/above the given y
-    (page furniture - running headers, page numbers - does not count)."""
+    """True if any text line on the page lies below/above the given y, at a page
+    break between two pieces of a table. Not counted: page furniture (running
+    headers, page numbers); below the first piece, footnotes (the page's last
+    lines, in a smaller font than its body text, opening with a note marker);
+    above the second piece, a caption of at most three lines that says the table
+    continues ("Table 1: ... (continued)"): the author states the join."""
+    lines = []
     for blk in blocks:
         if blk.page_num != page:
             continue
@@ -666,8 +680,33 @@ def _text_outside(blocks: list[Block], page: int, below: float | None = None,
             yc = (ln.bbox[1] + ln.bbox[3]) / 2
             if (below is not None and yc > below) or (above is not None and yc < above):
                 if ln.text.strip() and _furniture_key(ln) not in furniture:
-                    return True
-    return False
+                    lines.append(ln)
+    if not lines:
+        return False
+    lines.sort(key=lambda ln: (ln.bbox[1], ln.bbox[0]))
+    if below is not None and _footnotes(lines, blocks, page):
+        return False
+    if above is not None and _continued_caption(lines):
+        return False
+    return True
+
+
+_NOTE_MARK = re.compile(r"\s*(\d{1,2}|[*†‡])(?!\d)")
+
+
+def _footnotes(lines: list, blocks: list[Block], page: int) -> bool:
+    """The lines are footnotes: each in a font at least 1 pt smaller than the
+    page's body text (the median line size), the first opening with a note marker."""
+    sizes = sorted(ln.font_size for b in blocks if b.page_num == page for ln in b.lines if ln.text.strip())
+    body = sizes[len(sizes) // 2] if sizes else 0.0
+    return (body > 0 and all(0 < ln.font_size <= body - 1.0 for ln in lines)
+            and bool(_NOTE_MARK.match(lines[0].text)))
+
+
+def _continued_caption(lines: list) -> bool:
+    """At most three text rows that say the table continues."""
+    rows = {round(ln.bbox[1]) for ln in lines}
+    return len(rows) <= 3 and bool(_CONT.search(" ".join(ln.text for ln in lines)))
 
 
 _DIGITS = re.compile(r"\d+")
