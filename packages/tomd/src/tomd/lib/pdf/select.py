@@ -424,8 +424,12 @@ def table_flags(cand: TableCandidate) -> list[str]:
     # usual (not in a grid ruled both ways, where lines fix the cells), rows
     # with an empty key cell (a wrapped line taken for a row), or a lone cell
     # in a wide table. Fewer filled cells is normal: "TLS | (none found) | ".
-    keyed = sum(1 for r in body if r and r[0]) >= len(body) / 2
-    extra = cand.source != "grid"
+    # Rule bands split into records (ruled._split_grouped_bands) are bounded by drawn
+    # rules and have joined their wrapped lines back, as a drawn grid fixes its cells:
+    # fuller rows and empty key cells there are records of a sparse or grouped table.
+    grouped = "grouped-bands" in (getattr(cand, "flags", None) or [])
+    keyed = sum(1 for r in body if r and r[0]) >= len(body) / 2 and not grouped
+    extra = cand.source != "grid" and not grouped
     ragged = sum(1 for r, f in zip(body, filled)
                  if (extra and f > mode) or (keyed and r and not r[0])
                  or (sum(1 for c in r if c) == 1 and ncol >= 3))
@@ -1124,7 +1128,11 @@ def select_tables(tomd_sections: list[Section],
 
     # A code pair inside a drawn table that is clearly larger is a fragment of
     # that table, not a comparison of its own: the table's cells are its extent.
-    drawn = [c for c in cands if c.source in ("rules", "grid") and len(c.bboxes) == 1]
+    # Only a table some reader reads usably claims it: when every reading of
+    # the drawn table's region fails the checks, the pair is the best reading.
+    usable = [k for k in cands if k.source != "codepair" and not _is_bad(k)]
+    drawn = [c for c in cands if c.source in ("rules", "grid") and len(c.bboxes) == 1
+             and any(_same_region(c, k) and _same_region(k, c) for k in usable)]
     for c in [c for c in cands if c.source == "codepair"]:
         pg, bb = c.pages[0], c.bboxes[c.pages[0]]
         for d in drawn:
