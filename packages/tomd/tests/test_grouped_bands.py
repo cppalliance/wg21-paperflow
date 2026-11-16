@@ -115,3 +115,24 @@ def test_identifier_broken_at_the_column_edge_continues():
                  (1, "e()", 56))
     out = _split_grouped_bands([HEADER, body])
     assert _texts(out)[-1] == ["Ours", "ReadStream::read_som e()", "ok"]
+
+
+def test_single_band_grid_splits_at_each_key():
+    from tomd.lib.pdf.ruled import _split_keyed_band
+    body = _band((0, "5", 20), (1, "IsConsPre", 20), (2, "Consistent with current practice", 20),
+                 (0, "8", 32), (1, "MaxTeach", 32), (2, "Easy to teach", 32),
+                 (2, "and to learn", 44),
+                 (0, "16", 56), (1, "MaxTest", 56), (2, "Facilitates testing", 56))
+    out = _split_keyed_band([HEADER, body])
+    assert _texts(out)[1:] == [["5", "IsConsPre", "Consistent with current practice"],
+                               ["8", "MaxTeach", "Easy to teach and to learn"],
+                               ["16", "MaxTest", "Facilitates testing"]]
+
+
+def test_single_band_grid_without_a_key_column_stays_whole():
+    from tomd.lib.pdf.ruled import _split_keyed_band
+    # side-by-side prose: lines share baselines but the first column is not a key
+    body = _band((0, "User calls A.release()", 20), (1, "User retires A", 20),
+                 (0, "A's count goes from 1 to 0", 32), (1, "User retires B", 32),
+                 (0, "A is automatically retired", 44), (1, "User retires C", 44))
+    assert _texts(_split_keyed_band([HEADER, body])) == _texts([HEADER, body])

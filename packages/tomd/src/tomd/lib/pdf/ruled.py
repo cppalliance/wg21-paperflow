@@ -689,8 +689,15 @@ def _grid_tables_in(page, page_num, chars, clip, drawings=()) -> list[TableCandi
             rows = _split_stacked_cells(visual)
         if len(rows) < 2 or max(len(r) for r in rows) < 2:
             continue
+        # a grid drawn with column lines and a header rule but no rules in its body holds
+        # every record in one band; where rules mark the body's rows, a band is one record
+        grouped = False
+        if len(rows) == 2:
+            rows = _split_keyed_band(rows)
+            grouped = len(rows) > 2
         closed = bool(drawings) and _closed_frame(tuple(t.bbox), drawings) and not _merged_holds_columns(t, chars)
-        out.append(TableCandidate("grid", rows, {page_num: tuple(t.bbox)}, flags=["closed-grid"] if closed else []))
+        out.append(TableCandidate("grid", rows, {page_num: tuple(t.bbox)},
+                                  flags=(["closed-grid"] if closed else []) + (["grouped-bands"] if grouped else [])))
     return out
 
 
@@ -1155,6 +1162,32 @@ def _first_word_width(ln) -> float:
     text = ln.text.strip()
     word = text.split()[0] if text else ""
     return (ln.bbox[2] - ln.bbox[0]) * len(word) / max(len(text), 1)
+
+
+_KEY_MAX_WORDS = 3
+
+
+def _split_keyed_band(rows):
+    """A grid with a header rule and no rules in its body (2026-11-15): every record sits in
+    the one body band. Where the first column is a key (each of its lines a short value of
+    at most three words, on at least three lines), each key starts a record and the lines
+    below it, down to the next key, belong to it. Without a key column (side-by-side prose
+    or code) lines in neighbouring columns share baselines whether or not they are records,
+    so the band stays whole."""
+    head, body = rows
+    keys = [ln for ln in body[0] if ln.text.strip()] if body else []
+    if len(keys) < 3 or any(len(ln.text.split()) > _KEY_MAX_WORDS for ln in keys) \
+            or _code_body([ln for c in body for ln in c]):
+        return rows
+    tops = sorted(ln.bbox[1] for ln in keys)
+    h = min(ln.bbox[3] - ln.bbox[1] for ln in keys)
+    out = [[[] for _ in body] for _ in tops]
+    for c, cell in enumerate(body):
+        for ln in cell:
+            # the record whose key starts at or above this line (a little slack for baselines)
+            i = max((k for k, t in enumerate(tops) if t <= ln.bbox[1] + 0.5 * h), default=0)
+            out[i][c].append(ln)
+    return [head] + out
 
 
 def _split_grouped_bands(rows):
