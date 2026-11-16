@@ -1009,7 +1009,9 @@ def _rule_band_tables(page_num, words_all, group, header_above,
         step = min(b - a for a, b in zip(ys, ys[1:])) if len(ys) > 1 else 14.0
         step = min(max(step, 11.0), 16.0)
         ys = [ys[0] - _HEADER_ABOVE] + ys + [ys[-1] + step]
-    in_x = [w for w in words_all if w[0] >= x0 and w[2] <= x1]
+    # a word belongs where it starts: one overrunning the rules' right end (a long
+    # code line, an identifier) is the last cell's text, as in the grid reader
+    in_x = [w for w in words_all if x0 <= w[0] < x1]
     words = [w for w in in_x if ys[0] < (w[1] + w[3]) / 2 < ys[-1]]
     if not words:
         return []

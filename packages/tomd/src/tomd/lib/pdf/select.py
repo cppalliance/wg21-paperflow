@@ -1458,12 +1458,14 @@ def select_tables(tomd_sections: list[Section],
             sec.metadata["page_bboxes"] = dict(primary.bboxes)
             if getattr(primary, "pieces", None):
                 sec.metadata["pieces"] = primary.pieces
-        # every other source's reading of this region (rejected ones too):
-        # escalation may switch to one when the primary fails verification
+        # every other source's usable reading of this region: escalation may
+        # switch to one when the primary fails verification. A reading that
+        # failed the rule checks stays out - the verifier checks positions, not
+        # the cut code or broken records that rejected it
         sec.metadata["alternatives"] = [
             (c.source, [[_cell_spans(cell) for cell in row] for row in c.rows])
             for c in settled if c is not primary and c.source != primary.source
-            and c.pages == primary.pages]
+            and c.pages == primary.pages and not _is_bad(c)]
         out.append(sec)
         _log.debug("Table p%d %dx%d from %s: %s", primary.pages[0], *primary.shape,
                    primary.source, conf.value)

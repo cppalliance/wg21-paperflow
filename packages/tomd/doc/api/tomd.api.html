@@ -3711,13 +3711,13 @@ a.t{color:inherit;text-decoration:underline dotted}a.ln{color:var(--mut);font-si
     <span class="c u"># untyped: page, columns, spans</span>
     <span class="c"># calls: </span>_segments<span class="c"></span>
 
-<span class="k">def </span><span class="n" id="lib.pdf.ruled.extract_ruled_tables">extract_ruled_tables</span>(page, page_num: int, drawings=None) -&gt; list[<a class="t" href="#lib.pdf.types.TableCandidate">TableCandidate</a>]:<a class="ln" href="../../src/tomd/lib/pdf/ruled.py#L1423">ruled.py:1423</a>
+<span class="k">def </span><span class="n" id="lib.pdf.ruled.extract_ruled_tables">extract_ruled_tables</span>(page, page_num: int, drawings=None) -&gt; list[<a class="t" href="#lib.pdf.types.TableCandidate">TableCandidate</a>]:<a class="ln" href="../../src/tomd/lib/pdf/ruled.py#L1425">ruled.py:1425</a>
 <span class="d">    &quot;&quot;&quot;All tables on one page that ruling lines reveal.&quot;&quot;&quot;</span>
     <span class="c u"># untyped: page, drawings</span>
     <span class="c"># calls: </span>_unrotate, <a class="t" href="#lib.pdf.pagecache.rawdict">pagecache.rawdict</a>, _page_chars, _page_words, _grid_tables, _column_ruled_tables, _bad_flags, <a class="t" href="#lib.pdf.runctx.current">runctx.current</a>, <a class="t" href="#lib.pdf.select.table_flags">select.table_flags</a>, _horizontal_rules, _rule_groups, _overlaps<span class="c">, +2 more</span>
     <span class="c"># called by: </span><a class="t" href="#lib.pdf.pipeline.run_pipeline">pipeline.run_pipeline</a><span class="c"></span>
 
-<span class="k">def </span><span class="n" id="lib.pdf.ruled.page_hrules">page_hrules</span>(page, drawings=None) -&gt; list[tuple[float, float, float]]:<a class="ln" href="../../src/tomd/lib/pdf/ruled.py#L1475">ruled.py:1475</a>
+<span class="k">def </span><span class="n" id="lib.pdf.ruled.page_hrules">page_hrules</span>(page, drawings=None) -&gt; list[tuple[float, float, float]]:<a class="ln" href="../../src/tomd/lib/pdf/ruled.py#L1477">ruled.py:1477</a>
 <span class="d">    &quot;&quot;&quot;Drawn horizontal separators on the page: (y, x0, x1).&quot;&quot;&quot;</span>
     <span class="c u"># untyped: page, drawings</span>
     <span class="c"># called by: </span><a class="t" href="#lib.pdf.classify.gate_tables">classify.gate_tables</a>, <a class="t" href="#lib.pdf.pipeline.run_pipeline">pipeline.run_pipeline</a><span class="c"></span>
@@ -3872,7 +3872,7 @@ a.t{color:inherit;text-decoration:underline dotted}a.ln{color:var(--mut);font-si
     <span class="c"># calls: </span>_cells_agree<span class="c"></span>
     <span class="c"># called by: </span><a class="t" href="#lib.pdf.select.select_tables">select_tables</a><span class="c"></span>
 
-<span class="k">def </span><span class="n" id="lib.pdf.select.class_check">class_check</span>(cand: <a class="t" href="#lib.pdf.types.TableCandidate">TableCandidate</a>) -&gt; str:<a class="ln" href="../../src/tomd/lib/pdf/select.py#L1546">select.py:1546</a>
+<span class="k">def </span><span class="n" id="lib.pdf.select.class_check">class_check</span>(cand: <a class="t" href="#lib.pdf.types.TableCandidate">TableCandidate</a>) -&gt; str:<a class="ln" href="../../src/tomd/lib/pdf/select.py#L1548">select.py:1548</a>
 <span class="d">    &quot;&quot;&quot;Why this table can be trusted from one source, or &quot;&quot;.</span>
 <span class="d"></span>
 <span class="d">    Each check is specific to how the table was built, and only used when</span>
@@ -3960,7 +3960,7 @@ a.t{color:inherit;text-decoration:underline dotted}a.ln{color:var(--mut);font-si
     <span class="c"># calls: </span>_cells_agree, _all_bold<span class="c"></span>
     <span class="c"># called by: </span><a class="t" href="#lib.pdf.select.select_tables">select_tables</a><span class="c"></span>
 
-<span class="k">def </span><span class="n" id="lib.pdf.select.remove_table_regions">remove_table_regions</span>(blocks: list[<a class="t" href="#lib.golden_compare.Block">Block</a>], tables: list[<a class="t" href="#lib.pdf.types.Section">Section</a>]) -&gt; list[<a class="t" href="#lib.golden_compare.Block">Block</a>]:<a class="ln" href="../../src/tomd/lib/pdf/select.py#L1581">select.py:1581</a>
+<span class="k">def </span><span class="n" id="lib.pdf.select.remove_table_regions">remove_table_regions</span>(blocks: list[<a class="t" href="#lib.golden_compare.Block">Block</a>], tables: list[<a class="t" href="#lib.pdf.types.Section">Section</a>]) -&gt; list[<a class="t" href="#lib.golden_compare.Block">Block</a>]:<a class="ln" href="../../src/tomd/lib/pdf/select.py#L1583">select.py:1583</a>
 <span class="d">    &quot;&quot;&quot;Drop the lines that fall inside any chosen table&#x27;s region.</span>
 <span class="d"></span>
 <span class="d">    A line inside the region whose text is not in the table is kept, so it</span>
@@ -4030,7 +4030,7 @@ a.t{color:inherit;text-decoration:underline dotted}a.ln{color:var(--mut);font-si
 <span class="d">    &quot;&quot;&quot;These cell texts form a poll header (see VOTE_LABELS).&quot;&quot;&quot;</span>
     <span class="c"># called by: </span>poll._header_prefix, <a class="t" href="#lib.pdf.poll.extract_poll_tables">poll.extract_poll_tables</a>, <a class="t" href="#lib.pdf.select.class_check">class_check</a><span class="c"></span>
 
-<span class="k">def </span><span class="n" id="lib.pdf.select.witness">witness</span>(primary: <a class="t" href="#lib.pdf.types.TableCandidate">TableCandidate</a>, agreeing: list[<a class="t" href="#lib.pdf.types.TableCandidate">TableCandidate</a>], cands: list[<a class="t" href="#lib.pdf.types.TableCandidate">TableCandidate</a>], blocks: list[<a class="t" href="#lib.golden_compare.Block">Block</a>]) -&gt; dict:<a class="ln" href="../../src/tomd/lib/pdf/select.py#L1531">select.py:1531</a>
+<span class="k">def </span><span class="n" id="lib.pdf.select.witness">witness</span>(primary: <a class="t" href="#lib.pdf.types.TableCandidate">TableCandidate</a>, agreeing: list[<a class="t" href="#lib.pdf.types.TableCandidate">TableCandidate</a>], cands: list[<a class="t" href="#lib.pdf.types.TableCandidate">TableCandidate</a>], blocks: list[<a class="t" href="#lib.golden_compare.Block">Block</a>]) -&gt; dict:<a class="ln" href="../../src/tomd/lib/pdf/select.py#L1533">select.py:1533</a>
 <span class="d">    &quot;&quot;&quot;Per property, the distinct information sources behind the agreeing readings.&quot;&quot;&quot;</span>
     <span class="c"># calls: </span>_extent_open<span class="c"></span>
     <span class="c"># called by: </span><a class="t" href="#lib.pdf.select.select_tables">select_tables</a><span class="c"></span>
