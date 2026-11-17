@@ -316,14 +316,126 @@ fn env_optional(name: &str) -> Result<Option<String>> {
 
 #[cfg(test)]
 mod tests {
+    use std::num::NonZeroU32;
     use std::path::Path;
+    use std::sync::Arc;
 
     use clap::Parser;
     use paperstore::PaperNum;
     use paperstore_sqlite::SqliteBackend;
+    use runvil::effect::Round;
+    use runvil::harness::{FindTextPrompt, InferenceBroker, MemoryRecorder, Packs};
+    use runvil::model::{
+        Completion, CompletionOptions, CompletionResult, Message, ModelBinding, ModelCatalog,
+        ModelId, ModelInfo, ThinkingMode, ToolSchema,
+    };
+    use runvil::plugin::PackRegistry;
+    use runvil::{BoxFuture, Error, Harness, Host, RunSetup};
     use tempfile::TempDir;
 
-    use super::{Cli, DEFAULT_PROMPT, gateway_origin, load_paper_md, paper_args, prompt_name};
+    use super::{
+        Cli, DEFAULT_PROMPT, TokioTimer, gateway_origin, load_paper_md, paper_args, prompt_name,
+    };
+
+    /// The embedded prompt as the engine sees it.
+    fn host() -> Arc<Host> {
+        Arc::new(Host {
+            packs: Packs::new(PackRegistry::new()),
+            prompts: Arc::new(FindTextPrompt::new("paperweight", DEFAULT_PROMPT)),
+            timer: Arc::new(TokioTimer),
+        })
+    }
+
+    #[test]
+    fn embedded_prompt_parses() {
+        if let Err(error) = host().parse("paperweight") {
+            panic!("the embedded prompt does not parse: {error}");
+        }
+    }
+
+    /// A made-up paper. Only the Motivation section holds evidence.
+    const PAPER: &str = "\
+# P0000R0: A Test Proposal
+
+## Abstract
+
+This paper proposes adding std::example to the standard library.
+
+## Motivation
+
+A survey of 40 projects found 23 incompatible hand-written implementations of the same container.
+
+## Wording
+
+Add a new subclause to [containers].
+";
+
+    /// The sentence every grade that credits the paper quotes.
+    const EVIDENCE: &str = "A survey of 40 projects found 23 incompatible hand-written implementations of the same container.";
+
+    /// A gateway that gives the same answer to the same question every time.
+    struct FakeGateway;
+
+    impl InferenceBroker for FakeGateway {
+        fn models(&self) -> BoxFuture<'static, Result<ModelCatalog, Error>> {
+            Box::pin(async {
+                let context = NonZeroU32::MIN.saturating_add(131_071);
+                let model = ModelInfo::new(
+                    ModelId::gateway("fake")?,
+                    "fake",
+                    context,
+                    ThinkingMode::Never,
+                );
+                ModelCatalog::new([model])
+            })
+        }
+
+        fn chat(
+            &self,
+            _binding: ModelBinding,
+            messages: Vec<Message>,
+            _tools: Vec<ToolSchema>,
+            _options: CompletionOptions,
+            _round: Round,
+        ) -> BoxFuture<'static, Result<Box<Completion>, Error>> {
+            let prompt: String = messages.iter().map(Message::content).collect();
+            let reply = if prompt.contains("`PROPOSAL` or `NOT_PROPOSAL`") {
+                "PROPOSAL".to_owned()
+            } else if prompt.contains("SCORE: <0, 1 or 2>") && prompt.contains(EVIDENCE) {
+                format!("SCORE: 2\nQUOTE: {EVIDENCE}")
+            } else if prompt.contains("SCORE: <0, 1 or 2>") {
+                "SCORE: 0\nQUOTE:".to_owned()
+            } else {
+                "Fixed commentary.\n\n- Fixed bullet.".to_owned()
+            };
+            Box::pin(async move {
+                Completion::from_result(CompletionResult::Text(reply), "fake").map(Box::new)
+            })
+        }
+    }
+
+    #[tokio::test]
+    async fn embedded_prompt_runs_on_a_fixed_paper() {
+        let host = host();
+        let prompt = host
+            .parse("paperweight")
+            .unwrap_or_else(|e| panic!("parse: {e}"));
+        let setup = RunSetup {
+            args: paper_args(PAPER),
+            ..RunSetup::new(Arc::new(MemoryRecorder::new()), Arc::new(FakeGateway))
+        };
+        let report = Harness::new(host, prompt, setup)
+            .run()
+            .await
+            .unwrap_or_else(|e| panic!("run: {e}"))
+            .result
+            .unwrap_or_else(|e| panic!("the run failed: {}", e.message));
+
+        assert_eq!(
+            report,
+            "Weight: Heavy (8/14)\n\nFixed commentary.\n\n- Fixed bullet.\n"
+        );
+    }
 
     fn paper_num() -> PaperNum {
         PaperNum::parse("P4003R2").unwrap_or_else(|e| panic!("parse: {e}"))
