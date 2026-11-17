@@ -1,3 +1,3 @@
 [submodule "vendor/runvil"]
 	path = vendor/runvil
-	url = https://github.com/cppalliance/runvil.git
+	url = https://github.com/cppalliance/runvil-harness.git
