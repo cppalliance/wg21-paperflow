@@ -6,6 +6,7 @@ import logging
 import re
 from bisect import bisect_right
 from collections import Counter, defaultdict
+from collections.abc import Mapping
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 
@@ -98,6 +99,7 @@ from .docling_backend import (
 )
 from ._fitz_lock import _FITZ_LOCK
 from .runctx import current, run_scope
+from .table_gate import gate_requests, inside_vetoed, veto_tables, vetoed_boxes
 from .select import _is_bad, _to_section, page_furniture, remove_table_regions, select_tables, stitch_pages
 from .tagged import extract_tagged_tables
 from .ruled import extract_ruled_tables, page_hrules
@@ -2007,6 +2009,8 @@ class PipelineResult:
     discards: list[tuple[str, str, str]] = field(default_factory=list)
     # The paper summary (summary.build); None for a skipped paper.
     summary: dict | None = None
+    # One request per emitted table for an outside table/not-table resolver (table_gate).
+    gate_requests: list[dict] = field(default_factory=list)
 
     @classmethod
     def for_skip(
@@ -2126,6 +2130,7 @@ def run_pipeline(
     visualize: bool = False,
     extract_vector: bool = False,
     whiteout_text: bool = False,
+    table_gate: Mapping[str, bool] | None = None,
 ) -> PipelineResult:
     """Run the full PDF conversion pipeline, returning all intermediate data.
 
@@ -2138,6 +2143,11 @@ def run_pipeline(
 
     ``whiteout_text`` is forwarded to the vector driver and has no
     effect when ``extract_vector`` is False.
+
+    ``table_gate`` holds outside table/not-table answers keyed by gate id
+    (:mod:`tomd.lib.pdf.table_gate`): an emitted table answered False is
+    vetoed and its text stays prose. ``result.gate_requests`` lists every
+    emitted table's id and page pieces, for a resolver to answer.
     labels inside vector figures render as pixels alongside body text.
     """
     path = Path(path)
@@ -2545,6 +2555,11 @@ def run_pipeline(
             withhold_trust(table_sections)
         finally:
             tdoc.close()
+    # Outside answers (opt-in): a table answered "not a table" is vetoed before its
+    # text leaves the prose; every selected table is listed for a resolver.
+    gate_reqs = gate_requests(table_sections)
+    table_sections, vetoed = veto_tables(table_sections, table_gate)
+    vboxes = vetoed_boxes(vetoed)
     # Rows bounded by drawn rules: a record the reader cut into rows is joined.
     for ts in table_sections:
         pages = {ln.page_num for ln in ts.lines or []}
@@ -2591,18 +2606,30 @@ def run_pipeline(
     try:
         builds: list = []
         scan_regions = run_scan(path, current().record, table_sections, builds)
+        # a vetoed area is neither rebuilt nor marked
+        builds[:] = [b for b in builds if not inside_vetoed(b[0], b[1], vboxes)]
         if builds:
             built, unbuilt = _build_scan_tables(path, builds, all_mupdf_blocks, page_rotations)
             scan_regions += unbuilt
+            gate_reqs += gate_requests(built)
+            built, more = veto_tables(built, table_gate)
+            vetoed += more
+            vboxes = vetoed_boxes(vetoed)
             if built:
                 table_sections += built
                 all_mupdf_blocks = remove_table_regions(all_mupdf_blocks, built)
                 all_spatial_blocks = remove_table_regions(all_spatial_blocks, built)
     except Exception as exc:  # the scan only adds marks, builds and doubts; never fail on it, never silently
         current().reader_error("region scan", None, exc)
-    possible_tables = (scan_regions + rejected_regions(rejected, table_sections)
+    # a vetoed table still covers its area: the answer decided it, so it is not marked
+    possible_tables = (scan_regions + rejected_regions(rejected, table_sections + vetoed)
                        + text_regions(all_mupdf_blocks) + gutter_regions(all_mupdf_blocks)
-                       + dropped_nomination_regions(current().record, table_sections))
+                       + dropped_nomination_regions(current().record, table_sections + vetoed))
+    if vetoed:
+        possible_tables = [r for r in possible_tables if not inside_vetoed(r[0], r[1], vboxes)]
+        current().discards.append(("vetoed tables", f"{len(vetoed)} table(s) the outside answers call "
+                                   "not a table; their text stays prose", "; ".join(
+                                       f"p{pg + 1}" for pg, _ in vboxes[:12])))
 
     # --- Optional Docling ML table processing ---
     # When ml_tables=True and Docling is available:
@@ -3132,6 +3159,7 @@ def run_pipeline(
 
     result.md = md
     result.prompts = prompts
+    result.gate_requests = gate_reqs
     result.sections = sections
     result.metadata = metadata
     result.nesting_corrections = nesting_corrections

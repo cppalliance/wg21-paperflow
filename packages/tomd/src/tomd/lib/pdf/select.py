@@ -174,6 +174,8 @@ _LEAD_CONT_RE = re.compile(r"^\s*(&&|\|\||[)>\]},.;=]|::)")
 _PAGE_NUM_CELL_RE = re.compile(r"^\d{1,4}$")
 # a cell holding only a reference or pointer qualifier ("&&", "const&", "*") is a value
 # in a table of qualifiers, not a code line split at an operator
+# a half-open range "[first, last)" opens with one bracket and closes with another
+_HALF_OPEN = re.compile(r"\[[^\[\](){}]*,[^\[\](){}]*\)")
 _QUALIFIER_CELL = re.compile(r"^\s*((const|volatile)\s*)*[&*]{0,2}\s*$")
 # a function type ending in its ref-qualifier ("R(Args...) &&", "F() const&&") is a whole
 # declaration, not a line cut at "&&"
@@ -323,8 +325,9 @@ def _split_code_cell(c: str) -> bool:
     selection weakness to fix first - so the check is unchanged; REPORT.md, round 1.)"""
     if _QUALIFIER_CELL.match(c) or _QUALIFIED_FUNCTION_CELL.match(c):
         return False
+    inner = _HALF_OPEN.sub("", c)
     return bool(_TRAIL_OP_RE.search(c) or _LEAD_CONT_RE.search(c)
-                or any(c.count(o) != c.count(k) for o, k in ("()", "[]", "{}")))
+                or any(inner.count(o) != inner.count(k) for o, k in ("()", "[]", "{}")))
 
 
 def _order_contradiction(cand: TableCandidate) -> str:
@@ -424,8 +427,12 @@ def table_flags(cand: TableCandidate) -> list[str]:
     # usual (not in a grid ruled both ways, where lines fix the cells), rows
     # with an empty key cell (a wrapped line taken for a row), or a lone cell
     # in a wide table. Fewer filled cells is normal: "TLS | (none found) | ".
-    keyed = sum(1 for r in body if r and r[0]) >= len(body) / 2
-    extra = cand.source != "grid"
+    # Rule bands split into records (ruled._split_grouped_bands) are bounded by drawn
+    # rules and have joined their wrapped lines back, as a drawn grid fixes its cells:
+    # fuller rows and empty key cells there are records of a sparse or grouped table.
+    grouped = "grouped-bands" in (getattr(cand, "flags", None) or [])
+    keyed = sum(1 for r in body if r and r[0]) >= len(body) / 2 and not grouped
+    extra = cand.source != "grid" and not grouped
     ragged = sum(1 for r, f in zip(body, filled)
                  if (extra and f > mode) or (keyed and r and not r[0])
                  or (sum(1 for c in r if c) == 1 and ncol >= 3))
@@ -438,8 +445,14 @@ def table_flags(cand: TableCandidate) -> list[str]:
     cells = [c for r in rows for c in r] + [""] * sum(ncol - len(r) for r in rows)
     if sum(1 for c in cells if not c) / max(1, len(cells)) > 0.4:
         flags.append("empty-cells")
-    split = sum(1 for c in cells if c and _split_code_cell(c))
-    if split >= 2 or (cells and split / len(cells) >= 0.1):
+    # counted page by page: a table joined across a page break is judged as its
+    # pieces were, not on a count that grows with every page it spans
+    split: dict = defaultdict(lambda: [0, 0])
+    for raw, r in zip(cand.rows, rows):
+        pg = next((ln.page_num for cell in raw for ln in cell if ln.text.strip()), None)
+        split[pg][0] += sum(1 for c in r if c and _split_code_cell(c))
+        split[pg][1] += ncol
+    if any(s >= 2 or (n and s / n >= 0.1) for s, n in split.values()):
         flags.append("split-code")
     # A (nearly) constant row-key column is a margin label beside code.
     if len(rows) >= 4:
@@ -653,8 +666,13 @@ def _overlap(a: TableCandidate, b: TableCandidate) -> float:
 
 def _text_outside(blocks: list[Block], page: int, below: float | None = None,
                   above: float | None = None, furniture: frozenset = frozenset()) -> bool:
-    """True if any text line on the page lies below/above the given y
-    (page furniture - running headers, page numbers - does not count)."""
+    """True if any text line on the page lies below/above the given y, at a page
+    break between two pieces of a table. Not counted: page furniture (running
+    headers, page numbers); below the first piece, footnotes (the page's last
+    lines, in a smaller font than its body text, opening with a note marker);
+    above the second piece, a caption of at most three lines that says the table
+    continues ("Table 1: ... (continued)"): the author states the join."""
+    lines = []
     for blk in blocks:
         if blk.page_num != page:
             continue
@@ -662,8 +680,33 @@ def _text_outside(blocks: list[Block], page: int, below: float | None = None,
             yc = (ln.bbox[1] + ln.bbox[3]) / 2
             if (below is not None and yc > below) or (above is not None and yc < above):
                 if ln.text.strip() and _furniture_key(ln) not in furniture:
-                    return True
-    return False
+                    lines.append(ln)
+    if not lines:
+        return False
+    lines.sort(key=lambda ln: (ln.bbox[1], ln.bbox[0]))
+    if below is not None and _footnotes(lines, blocks, page):
+        return False
+    if above is not None and _continued_caption(lines):
+        return False
+    return True
+
+
+_NOTE_MARK = re.compile(r"\s*(\d{1,2}|[*†‡])(?!\d)")
+
+
+def _footnotes(lines: list, blocks: list[Block], page: int) -> bool:
+    """The lines are footnotes: each in a font at least 1 pt smaller than the
+    page's body text (the median line size), the first opening with a note marker."""
+    sizes = sorted(ln.font_size for b in blocks if b.page_num == page for ln in b.lines if ln.text.strip())
+    body = sizes[len(sizes) // 2] if sizes else 0.0
+    return (body > 0 and all(0 < ln.font_size <= body - 1.0 for ln in lines)
+            and bool(_NOTE_MARK.match(lines[0].text)))
+
+
+def _continued_caption(lines: list) -> bool:
+    """At most three text rows that say the table continues."""
+    rows = {round(ln.bbox[1]) for ln in lines}
+    return len(rows) <= 3 and bool(_CONT.search(" ".join(ln.text for ln in lines)))
 
 
 _DIGITS = re.compile(r"\d+")
@@ -1124,7 +1167,11 @@ def select_tables(tomd_sections: list[Section],
 
     # A code pair inside a drawn table that is clearly larger is a fragment of
     # that table, not a comparison of its own: the table's cells are its extent.
-    drawn = [c for c in cands if c.source in ("rules", "grid") and len(c.bboxes) == 1]
+    # Only a table some reader reads usably claims it: when every reading of
+    # the drawn table's region fails the checks, the pair is the best reading.
+    usable = [k for k in cands if k.source != "codepair" and not _is_bad(k)]
+    drawn = [c for c in cands if c.source in ("rules", "grid") and len(c.bboxes) == 1
+             and any(_same_region(c, k) and _same_region(k, c) for k in usable)]
     for c in [c for c in cands if c.source == "codepair"]:
         pg, bb = c.pages[0], c.bboxes[c.pages[0]]
         for d in drawn:
@@ -1411,12 +1458,14 @@ def select_tables(tomd_sections: list[Section],
             sec.metadata["page_bboxes"] = dict(primary.bboxes)
             if getattr(primary, "pieces", None):
                 sec.metadata["pieces"] = primary.pieces
-        # every other source's reading of this region (rejected ones too):
-        # escalation may switch to one when the primary fails verification
+        # every other source's usable reading of this region: escalation may
+        # switch to one when the primary fails verification. A reading that
+        # failed the rule checks stays out - the verifier checks positions, not
+        # the cut code or broken records that rejected it
         sec.metadata["alternatives"] = [
             (c.source, [[_cell_spans(cell) for cell in row] for row in c.rows])
             for c in settled if c is not primary and c.source != primary.source
-            and c.pages == primary.pages]
+            and c.pages == primary.pages and not _is_bad(c)]
         out.append(sec)
         _log.debug("Table p%d %dx%d from %s: %s", primary.pages[0], *primary.shape,
                    primary.source, conf.value)
