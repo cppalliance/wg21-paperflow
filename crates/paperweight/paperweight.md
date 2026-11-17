@@ -3,26 +3,22 @@ name: paperweight
 description: Report on the evidence a WG21 paper provides for its need of standardization
 runvil: 0
 models:
-  writer:
-    keywords: [no-thinking]
+  default:
+    thinking: false
     min_context: 32768
-    description: A careful analysis model suited to structured reasoning and long-context review
-input:
-  path: paper.md
-  description: The WG21 paper markdown to analyze
-output:
-  path: report.md
-  description: The report produced by analysis
+args:
+  type: object
+  properties:
+    paper: { type: string, description: The WG21 paper markdown to analyze }
+  required: [paper]
 ---
-
-# Paperweight
 
 Prose under this heading that no fence reads never reaches a model. The fence below only sets the default model, and its globals do not reach any section. Sections share data only through the store, and fences within one section share globals.
 
 ---
 
 ```lua
-models.default("writer")
+models.use("default")
 ```
 
 ## Assess
@@ -34,7 +30,7 @@ models.default("writer")
 ---
 
 ```lua
-models.use("writer", { temperature = 0.3 })
+models.use("default", { temperature = 0.3 })
 
 SAMPLES = 3
 SECTION_BUDGET = 30000
@@ -146,6 +142,7 @@ Everything before the first H2 becomes a front-matter unit, so the title and abs
 ---
 
 ```lua
+store.write("paper.md", args.paper)
 local text = store.read("paper.md")
 
 lines = {}
@@ -481,7 +478,7 @@ end
 
 replies = nil
 if #jobs > 0 then
-    replies = tasks.fanout("### Grade", jobs)
+    replies = tasks.fanout("Grade", jobs)
 end
 ```
 
@@ -1034,7 +1031,7 @@ store.write("diagnostics.md", table.concat(diag, "\n"))
 ### Grade
 
 ```lua
-models.use("writer", { temperature = 0.3 })
+models.use("default", { temperature = 0.3 })
 local c, k = item:match("^(%d+)|(%d+)|%d+$")
 var.criterion = store.read("pg_criterion_" .. c .. ".md")
 var.guidance = store.read("pg_guidance_" .. c .. ".md")
@@ -1086,7 +1083,7 @@ store.write("pg_reply_" .. item:gsub("|", "_") .. ".md", reply)
 ## Analyze
 
 ```lua
-models.use("writer", { temperature = 0.3 })
+models.use("default", { temperature = 0.3 })
 var.findings = untrusted(store.read("findings.md"))
 ```
 
@@ -1142,5 +1139,5 @@ local appendix = diag:find("%S")
 
 ```lua
 store.write("report.md", weight_line .. "\n\n" .. body .. "\n")
-return "Done."
+return store.read("report.md")
 ```

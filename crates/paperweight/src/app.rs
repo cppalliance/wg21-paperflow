@@ -6,9 +6,9 @@
 //! (the embedded paperweight prompt by default, `--prompt` from disk otherwise),
 //! loads the paper markdown (from the SQLite paper store for a paper number,
 //! verbatim from disk for `--file`), and runs the prompt through one harness
-//! run whose model rounds go to the gateway. The harness stages the paper at
-//! the prompt's declared input and hands back its declared output, which is
-//! written to `--output`, or to stdout when no path is given.
+//! run whose model rounds go to the gateway. The paper reaches the prompt as
+//! its `paper` argument, and the value the prompt returns is written to
+//! `--output`, or to stdout when no path is given.
 
 use std::ffi::OsStr;
 use std::fmt;
@@ -19,15 +19,14 @@ use std::time::Duration;
 
 use anyhow::{Context, Result, bail};
 use clap::Parser;
-use harness::plugin::{HostContext, HostServices, PluginRegistry};
-use harness::record::{
-    Record, RecordKind, RecorderFuture, RunId, RunMeta, RunOutcome, RunRecorder,
-};
-use harness::vfs::VfsRef;
-use harness::{BoxFuture, Harness, HostSnapshot, OutputError, Timer};
 use harness_gateway_client::{GatewayBroker, GatewayEndpoint, SecretString};
 use paperstore::{PaperNum, StorageBackend};
 use paperstore_sqlite::SqliteBackend;
+use runvil::harness::{
+    FindTextPrompt, Packs, Record, RecordKind, RunId, RunMeta, RunRecorder, Timer,
+};
+use runvil::plugin::PackRegistry;
+use runvil::{BoxFuture, Error as RunError, Harness, Host, RunSetup};
 use tokio::sync::oneshot;
 
 /// The embedded paperweight prompt, vendored from the runvil prompts.
@@ -59,8 +58,8 @@ pub(crate) struct Cli {
     /// first chat model the gateway lists.
     #[arg(long, value_name = "ID")]
     pub(crate) model: Option<String>,
-    /// The prompt's arguments, passed verbatim: a JSON object for a prompt
-    /// that declares `args:`, or plain text.
+    /// The prompt's arguments as a JSON object; the paper is added to them
+    /// as `paper`.
     #[arg(long, value_name = "TEXT", default_value = "")]
     pub(crate) args: String,
 }
@@ -102,7 +101,7 @@ pub(crate) struct RunRequest<'a> {
     /// The gateway model id to bind; `None` binds the gateway's first chat
     /// model.
     pub(crate) model: Option<&'a str>,
-    /// The prompt's arguments, passed verbatim.
+    /// The prompt's arguments as a JSON object, or empty for none.
     pub(crate) args: &'a str,
     /// Resolves once when Ctrl-C asks the run to end.
     pub(crate) cancel: oneshot::Receiver<()>,
@@ -142,8 +141,8 @@ impl std::error::Error for Cancelled {}
 /// converted markdown, or the `--file` path unreadable), the harness cannot
 /// resolve the run's model (the gateway model list cannot be fetched, lists
 /// no model, or lacks the selected one), the run fails, the run is cancelled
-/// ([`Cancelled`]), the prompt did not produce its declared output, or the
-/// `--prompt` path has no usable file name.
+/// ([`Cancelled`]), `--args` is not a JSON object, or the `--prompt` path
+/// has no usable file name.
 pub(crate) async fn run(request: RunRequest<'_>) -> Result<()> {
     let RunRequest {
         input,
@@ -169,26 +168,27 @@ pub(crate) async fn run(request: RunRequest<'_>) -> Result<()> {
     // Load before the run: a store miss or an unreadable file fails fast,
     // before any network call.
     let paper_md = load_input_markdown(input).await?;
+    let args = run_args(args, paper_md)?;
 
-    let harness = Harness::new(
-        Arc::new(ProgressRecorder),
-        Arc::new(GatewayBroker::new(endpoint, key)),
-        Arc::new(TokioTimer),
-        Arc::new(HostContext::new(PluginRegistry::new(), HostServices::new())),
-        HostServices::new(),
-    );
-    let control = harness.control();
-    let run = harness.run(harness::RunRequest {
-        name: name.clone(),
-        source,
-        args: args.to_owned(),
-        input_text: Some(paper_md),
-        vfs: VfsRef::default(),
-        host: HostSnapshot {
-            selected_model: model,
-            workspace_roots: Vec::new(),
-        },
+    let host = Arc::new(Host {
+        packs: Packs::new(PackRegistry::new()),
+        prompts: Arc::new(FindTextPrompt::new(name.clone(), source)),
+        timer: Arc::new(TokioTimer),
     });
+    let prompt = host
+        .parse(&name)
+        .with_context(|| format!("parse the {name} prompt"))?;
+    let setup = RunSetup {
+        selected_model: model,
+        args,
+        ..RunSetup::new(
+            Arc::new(ProgressRecorder),
+            Arc::new(GatewayBroker::new(endpoint, key)),
+        )
+    };
+    let harness = Harness::new(host, prompt, setup);
+    let control = harness.control();
+    let run = harness.run();
     tokio::pin!(run);
     let mut cancel_requested = false;
     // A failed Ctrl-C listener drops the sender; the pattern then disables
@@ -204,17 +204,10 @@ pub(crate) async fn run(request: RunRequest<'_>) -> Result<()> {
     }
     .with_context(|| format!("run the {name} prompt"))?;
 
-    match report.outcome {
-        RunOutcome::Completed { .. } => {}
-        RunOutcome::Cancelled => return Err(Cancelled.into()),
-        RunOutcome::Failed { message, .. } => bail!("run failed: {message}"),
-    }
-    let report = match report.output {
+    let report = match report.result {
         Ok(report) => report,
-        Err(error @ OutputError::Missing { .. }) => {
-            return Err(error).context("the prompt did not produce its declared output");
-        }
-        Err(error) => return Err(error).context("read the run's declared output"),
+        Err(error) if error.is_canceled() => return Err(Cancelled.into()),
+        Err(error) => bail!("run failed: {}", error.message),
     };
     match output {
         Some(path) => {
@@ -235,18 +228,22 @@ pub(crate) async fn run(request: RunRequest<'_>) -> Result<()> {
 struct ProgressRecorder;
 
 impl RunRecorder for ProgressRecorder {
-    fn begin_run(&self, _meta: RunMeta) -> RecorderFuture<'_, RunId> {
+    fn begin_run(&self, _meta: RunMeta) -> BoxFuture<'_, Result<RunId, RunError>> {
         Box::pin(async { Ok(RunId::from_raw(1)) })
     }
 
-    fn append(&self, _run: RunId, record: Record) -> RecorderFuture<'_, ()> {
+    fn append(&self, _run: RunId, record: Record) -> BoxFuture<'_, Result<(), RunError>> {
         if matches!(record.kind, RecordKind::Event) {
             print_progress(&record.payload);
         }
         Box::pin(async { Ok(()) })
     }
 
-    fn end_run(&self, _run: RunId, _outcome: RunOutcome) -> RecorderFuture<'_, ()> {
+    fn end_run(
+        &self,
+        _run: RunId,
+        _result: Result<String, RunError>,
+    ) -> BoxFuture<'_, Result<(), RunError>> {
         Box::pin(async { Ok(()) })
     }
 }
@@ -256,9 +253,25 @@ impl RunRecorder for ProgressRecorder {
 struct TokioTimer;
 
 impl Timer for TokioTimer {
-    fn sleep(&self, duration: Duration) -> BoxFuture<()> {
+    fn sleep(&self, duration: Duration) -> BoxFuture<'static, ()> {
         Box::pin(tokio::time::sleep(duration))
     }
+}
+
+/// Returns the run's arguments: the `--args` object, or `{}` when it is
+/// empty, with the paper markdown added as `paper`.
+fn run_args(args: &str, paper_md: String) -> Result<String> {
+    let args = args.trim();
+    let mut object = if args.is_empty() {
+        serde_json::Map::new()
+    } else {
+        match serde_json::from_str(args).context("parse --args as JSON")? {
+            serde_json::Value::Object(object) => object,
+            _ => bail!("--args must be a JSON object"),
+        }
+    };
+    object.insert("paper".to_owned(), serde_json::Value::String(paper_md));
+    Ok(serde_json::Value::Object(object).to_string())
 }
 
 /// Writes one progress line for a run event to stderr.
@@ -404,7 +417,7 @@ mod tests {
 
     use super::{
         Cli, DEFAULT_PROMPT, PaperInput, gateway_origin, load_input_markdown, load_paper_md,
-        prompt_name, selected_model,
+        prompt_name, run_args, selected_model,
     };
 
     fn paper_num() -> PaperNum {
@@ -550,8 +563,20 @@ mod tests {
     #[test]
     fn embedded_prompt_declares_io() {
         assert!(DEFAULT_PROMPT.contains("\nrunvil: 0\n"));
-        assert!(DEFAULT_PROMPT.contains("path: paper.md"));
-        assert!(DEFAULT_PROMPT.contains("path: report.md"));
+        assert!(DEFAULT_PROMPT.contains("    paper: { type: string"));
+        assert!(DEFAULT_PROMPT.contains(r#"return store.read("report.md")"#));
+    }
+
+    #[test]
+    fn run_args_add_the_paper() {
+        let args = |text: &str| run_args(text, "# Paper".to_owned()).ok();
+        assert_eq!(args("").as_deref(), Some(r##"{"paper":"# Paper"}"##));
+        assert_eq!(
+            args(r#"{"id": "P4003R2"}"#).as_deref(),
+            Some(r##"{"id":"P4003R2","paper":"# Paper"}"##)
+        );
+        assert!(args("plain text").is_none(), "non-JSON --args is refused");
+        assert!(args("[1]").is_none(), "a non-object --args is refused");
     }
 
     #[test]

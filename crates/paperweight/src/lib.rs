@@ -2,7 +2,7 @@
 //!
 //! `<bin> [PAPER_NUM] [--file <PATH>] [--output <PATH>] [--prompt <PATH>]
 //! [--model <ID>] [--args <TEXT>]` runs a runvil prompt against one WG21
-//! paper as one harness run and writes the prompt's declared output to
+//! paper as one harness run and writes the value the prompt returns to
 //! stdout, or to `--output` when given. The prompt is the embedded paperweight
 //! prompt unless `--prompt` names a file; the run takes its name from the
 //! prompt's file stem (`paperweight` for the embedded one). Exactly one input is

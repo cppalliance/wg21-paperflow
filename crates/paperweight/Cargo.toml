@@ -15,10 +15,10 @@ anyhow = "1.0.104"
 clap = { version = "4.6.6", features = ["derive"] }
 # The runvil harness and its gateway client, vendored through the
 # vendor/runvil submodule and pinned to the commit the crate is built against.
-harness = { path = "../../vendor/runvil/crates/harness" }
 harness-gateway-client = { path = "../../vendor/runvil/crates/harness-gateway-client" }
 paperstore = { version = "0.1.0", path = "../paperstore" }
 paperstore-sqlite = { version = "0.1.0", path = "../paperstore-sqlite" }
+runvil = { path = "../../vendor/runvil/crates/runvil" }
 serde_json = "1"
 tokio = { version = "1.53.1", features = ["rt", "macros", "signal", "fs", "sync", "time"] }
 

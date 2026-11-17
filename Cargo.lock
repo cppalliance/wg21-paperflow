@@ -199,10 +199,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "build-ceiling"
-version = "0.3.0"
-
-[[package]]
 name = "bumpalo"
 version = "3.20.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -712,29 +708,28 @@ dependencies = [
 ]
 
 [[package]]
-name = "harness"
-version = "0.3.0"
-dependencies = [
- "harness-runner",
- "runvil",
- "runvil-plugin",
-]
-
-[[package]]
 name = "harness-gateway-client"
 version = "0.3.0"
 dependencies = [
  "async-trait",
  "bytes",
- "harness",
  "plugin-web",
  "reqwest",
  "runvil",
  "serde",
  "serde_json",
- "thiserror",
  "tokio",
  "url",
+]
+
+[[package]]
+name = "harness-plugin-loader"
+version = "0.3.0"
+dependencies = [
+ "libloading",
+ "runvil-plugin",
+ "runvil-plugin-sys",
+ "serde_json",
 ]
 
 [[package]]
@@ -743,11 +738,9 @@ version = "0.3.0"
 dependencies = [
  "futures-util",
  "rand 0.9.5",
- "runvil",
+ "runvil-engine",
  "runvil-plugin",
  "serde_json",
- "sha2",
- "thiserror",
  "tracing",
 ]
 
@@ -1132,6 +1125,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3eaf3ede3fee6db1a4c2ee091bf8a8b4dccdc6d17f656fb07896ee72867612f2"
 
 [[package]]
+name = "libloading"
+version = "0.8.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d7c4b02199fee7c5d21a5ae7d8cfa79a6ef5bb2fc834d6e9058e89c825efdc55"
+dependencies = [
+ "cfg-if",
+ "windows-link",
+]
+
+[[package]]
 name = "libsqlite3-sys"
 version = "0.38.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1372,10 +1375,10 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "clap",
- "harness",
  "harness-gateway-client",
  "paperstore",
  "paperstore-sqlite",
+ "runvil",
  "rusqlite",
  "serde_json",
  "tempfile",
@@ -1797,85 +1800,102 @@ dependencies = [
 name = "runvil"
 version = "0.3.0"
 dependencies = [
- "build-ceiling",
+ "harness-plugin-loader",
+ "harness-runner",
  "runvil-engine",
- "runvil-lua",
- "runvil-model-client",
- "runvil-parser",
- "runvil-types",
- "runvil-vfs",
+ "runvil-plugin",
 ]
 
 [[package]]
 name = "runvil-engine"
 version = "0.3.0"
 dependencies = [
- "build-ceiling",
- "mlua",
  "runvil-lua",
  "runvil-model-client",
- "runvil-parser",
+ "runvil-prompt",
+ "runvil-runtime",
  "runvil-types",
  "runvil-vfs",
- "serde",
- "serde_json",
- "thiserror",
- "tracing",
 ]
 
 [[package]]
 name = "runvil-lua"
 version = "0.3.0"
 dependencies = [
- "build-ceiling",
  "mlua",
+ "runvil-markdown",
  "runvil-model-client",
  "runvil-types",
  "runvil-vfs",
  "serde",
  "serde_json",
- "thiserror",
+]
+
+[[package]]
+name = "runvil-markdown"
+version = "0.3.0"
+dependencies = [
+ "pulldown-cmark",
+ "serde_json",
+ "serde_yaml_ng",
 ]
 
 [[package]]
 name = "runvil-model-client"
 version = "0.3.0"
 dependencies = [
- "build-ceiling",
  "runvil-types",
  "serde",
  "serde_json",
- "thiserror",
-]
-
-[[package]]
-name = "runvil-parser"
-version = "0.3.0"
-dependencies = [
- "build-ceiling",
- "pulldown-cmark",
- "runvil-lua",
- "runvil-types",
- "serde",
- "serde_yaml_ng",
- "thiserror",
 ]
 
 [[package]]
 name = "runvil-plugin"
 version = "0.3.0"
 dependencies = [
- "build-ceiling",
  "runvil-types",
  "runvil-vfs",
  "serde_json",
 ]
 
 [[package]]
+name = "runvil-plugin-sys"
+version = "0.4.0"
+source = "git+https://github.com/cppalliance/runvil-plugin-api?rev=03a9fa37d2fe690d42ee0aa5c7a8289173e8e0f2#03a9fa37d2fe690d42ee0aa5c7a8289173e8e0f2"
+
+[[package]]
+name = "runvil-prompt"
+version = "0.3.0"
+dependencies = [
+ "pulldown-cmark",
+ "runvil-lua",
+ "runvil-types",
+ "serde",
+ "serde_json",
+ "serde_yaml_ng",
+]
+
+[[package]]
+name = "runvil-runtime"
+version = "0.3.0"
+dependencies = [
+ "mlua",
+ "regex",
+ "runvil-lua",
+ "runvil-markdown",
+ "runvil-model-client",
+ "runvil-prompt",
+ "runvil-types",
+ "runvil-vfs",
+ "serde",
+ "serde_json",
+ "tracing",
+]
+
+[[package]]
 name = "runvil-types"
 version = "0.3.0"
 dependencies = [
- "build-ceiling",
  "serde",
  "serde_json",
  "sha2",
