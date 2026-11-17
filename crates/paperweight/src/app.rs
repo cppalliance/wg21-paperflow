@@ -316,9 +316,10 @@ fn env_optional(name: &str) -> Result<Option<String>> {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeSet;
     use std::num::NonZeroU32;
     use std::path::Path;
-    use std::sync::Arc;
+    use std::sync::{Arc, Mutex, PoisonError};
 
     use clap::Parser;
     use paperstore::PaperNum;
@@ -373,8 +374,46 @@ Add a new subclause to [containers].
     /// The sentence every grade that credits the paper quotes.
     const EVIDENCE: &str = "A survey of 40 projects found 23 incompatible hand-written implementations of the same container.";
 
-    /// A gateway that gives the same answer to the same question every time.
-    struct FakeGateway;
+    /// A gateway that gives the same answer to the same question every time,
+    /// and records the criterion block of each grading request: the
+    /// criterion and its guidance, as the grader sees them.
+    #[derive(Default)]
+    struct FakeGateway {
+        criteria: Mutex<BTreeSet<String>>,
+    }
+
+    /// Returns the text between `start` and `end` in `text`, trimmed.
+    fn between<'a>(text: &'a str, start: &str, end: &str) -> Option<&'a str> {
+        let rest = &text[text.find(start)? + start.len()..];
+        Some(rest[..rest.find(end)?].trim())
+    }
+
+    /// The opening words of each criterion and of its guidance, if it has
+    /// one, in the order the prompt declares them.
+    const CRITERIA: [(&str, Option<&str>); 7] = [
+        (
+            "Describes the reason, motivation or justification",
+            Some("The motivating passage"),
+        ),
+        ("Quantifies the usage or the size", None),
+        (
+            "Identifies specific design alternatives",
+            Some("Naming earns"),
+        ),
+        ("Explains why the C++ standard specifically", None),
+        ("Identifies a concrete coordination problem", None),
+        (
+            "Shows why solutions outside the standard",
+            Some("The commonest error"),
+        ),
+        (
+            "Describes implementation, field or deployment",
+            Some("Grade on checkability"),
+        ),
+    ];
+
+    /// The header the prompt puts above every criterion's guidance.
+    const GUIDANCE_HEADER: &str = "Notes on applying this criterion.";
 
     impl InferenceBroker for FakeGateway {
         fn models(&self) -> BoxFuture<'static, Result<ModelCatalog, Error>> {
@@ -399,6 +438,12 @@ Add a new subclause to [containers].
             _round: Round,
         ) -> BoxFuture<'static, Result<Box<Completion>, Error>> {
             let prompt: String = messages.iter().map(Message::content).collect();
+            if let Some(block) = between(&prompt, "The criterion:", "The text to assess.") {
+                self.criteria
+                    .lock()
+                    .unwrap_or_else(PoisonError::into_inner)
+                    .insert(block.to_owned());
+            }
             let reply = if prompt.contains("`PROPOSAL` or `NOT_PROPOSAL`") {
                 "PROPOSAL".to_owned()
             } else if prompt.contains("SCORE: <0, 1 or 2>") && prompt.contains(EVIDENCE) {
@@ -420,9 +465,10 @@ Add a new subclause to [containers].
         let prompt = host
             .parse("paperweight")
             .unwrap_or_else(|e| panic!("parse: {e}"));
+        let gateway = Arc::new(FakeGateway::default());
         let setup = RunSetup {
             args: paper_args(PAPER),
-            ..RunSetup::new(Arc::new(MemoryRecorder::new()), Arc::new(FakeGateway))
+            ..RunSetup::new(Arc::new(MemoryRecorder::new()), gateway.clone())
         };
         let report = Harness::new(host, prompt, setup)
             .run()
@@ -435,6 +481,33 @@ Add a new subclause to [containers].
             report,
             "Weight: Heavy (8/14)\n\nFixed commentary.\n\n- Fixed bullet.\n"
         );
+
+        let seen = gateway
+            .criteria
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone();
+        assert_eq!(
+            seen.len(),
+            CRITERIA.len(),
+            "one distinct block per criterion"
+        );
+        for (criterion, guidance) in CRITERIA {
+            let block = seen
+                .iter()
+                .find(|block| block.starts_with(criterion))
+                .unwrap_or_else(|| panic!("no grading request has the criterion {criterion:?}"));
+            match guidance {
+                Some(guidance) => assert!(
+                    block.contains(GUIDANCE_HEADER) && block.contains(guidance),
+                    "the criterion {criterion:?} lacks its guidance {guidance:?}: {block:?}",
+                ),
+                None => assert!(
+                    !block.contains(GUIDANCE_HEADER),
+                    "the criterion {criterion:?} has guidance it should not: {block:?}",
+                ),
+            }
+        }
     }
 
     fn paper_num() -> PaperNum {
