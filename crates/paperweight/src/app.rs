@@ -2,13 +2,12 @@
 //!
 //! `run_cli` owns the process boundary (argument parsing, signal installation,
 //! exit status). This module owns everything between: it validates the gateway
-//! environment and model selection, resolves the prompt source and its name
-//! (the embedded paperweight prompt by default, `--prompt` from disk otherwise),
-//! loads the paper markdown (from the SQLite paper store for a paper number,
-//! verbatim from disk for `--file`), and runs the prompt through one harness
-//! run whose model rounds go to the gateway. The paper reaches the prompt as
-//! its `paper` argument, and the value the prompt returns is written to
-//! `--output`, or to stdout when no path is given.
+//! environment, resolves the prompt source and its name (the embedded
+//! paperweight prompt by default, `--prompt` from disk otherwise), loads the
+//! paper markdown from the SQLite paper store, and runs the prompt through one
+//! harness run whose model rounds go to the gateway. The paper reaches the
+//! prompt as its `paper` argument, and the value the prompt returns is written
+//! to `--output`, or to stdout when no path is given.
 
 use std::ffi::OsStr;
 use std::fmt;
@@ -37,72 +36,26 @@ const DEFAULT_PROMPT_NAME: &str = "paperweight";
 
 /// The command-line interface; `run_cli` sets the program name.
 #[derive(Debug, Parser)]
-#[command(
-    version,
-    about = "Run a runvil prompt against a WG21 paper",
-    group = clap::ArgGroup::new("input").args(["paper", "file"]).required(true)
-)]
+#[command(version, about = "Run a runvil prompt against a WG21 paper")]
 pub(crate) struct Cli {
     /// The WG21 paper number to analyze, resolved through the paper store.
-    pub(crate) paper: Option<PaperNum>,
-    /// Analyze the paper markdown file at PATH instead of a store lookup.
-    #[arg(long, value_name = "PATH")]
-    pub(crate) file: Option<PathBuf>,
+    pub(crate) paper: PaperNum,
     /// Write the prompt's output to PATH instead of stdout.
     #[arg(long, value_name = "PATH")]
     pub(crate) output: Option<PathBuf>,
     /// Read the prompt from PATH instead of the embedded paperweight prompt.
     #[arg(long, value_name = "PATH")]
     pub(crate) prompt: Option<PathBuf>,
-    /// The gateway model id the prompt's model roles bind to; defaults to the
-    /// first chat model the gateway lists.
-    #[arg(long, value_name = "ID")]
-    pub(crate) model: Option<String>,
-    /// The prompt's arguments as a JSON object; the paper is added to them
-    /// as `paper`.
-    #[arg(long, value_name = "TEXT", default_value = "")]
-    pub(crate) args: String,
-}
-
-impl Cli {
-    /// Returns the selected paper input.
-    ///
-    /// The `input` arg group rejects the both/neither states as usage errors
-    /// at parse time, so they cannot occur here.
-    pub(crate) fn input(&self) -> PaperInput {
-        match (&self.paper, &self.file) {
-            (Some(num), None) => PaperInput::Number(num.clone()),
-            (None, Some(path)) => PaperInput::File(path.clone()),
-            _ => unreachable!("the `input` group requires exactly one of PAPER_NUM or --file"),
-        }
-    }
-}
-
-/// The paper to analyze: exactly one source per run.
-///
-/// The clap `input` group enforces the invariant at parse time; this type
-/// carries it, so no downstream code can observe a both/neither state.
-#[derive(Debug)]
-pub(crate) enum PaperInput {
-    /// A paper number resolved through the SQLite-backed paper store.
-    Number(PaperNum),
-    /// A markdown file read verbatim from disk.
-    File(PathBuf),
 }
 
 /// A single analysis run: what to read, where to write, and cancellation.
 pub(crate) struct RunRequest<'a> {
-    /// The paper input to analyze.
-    pub(crate) input: &'a PaperInput,
+    /// The paper to analyze.
+    pub(crate) paper: &'a PaperNum,
     /// Where the analysis report is written; stdout when `None`.
     pub(crate) output: Option<&'a Path>,
     /// An optional prompt file overriding the embedded default.
     pub(crate) prompt: Option<&'a Path>,
-    /// The gateway model id to bind; `None` binds the gateway's first chat
-    /// model.
-    pub(crate) model: Option<&'a str>,
-    /// The prompt's arguments as a JSON object, or empty for none.
-    pub(crate) args: &'a str,
     /// Resolves once when Ctrl-C asks the run to end.
     pub(crate) cancel: oneshot::Receiver<()>,
 }
@@ -111,11 +64,9 @@ impl std::fmt::Debug for RunRequest<'_> {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter
             .debug_struct("RunRequest")
-            .field("input", &self.input)
+            .field("paper", &self.paper)
             .field("output", &self.output)
             .field("prompt", &self.prompt)
-            .field("model", &self.model)
-            .field("args", &self.args)
             .finish_non_exhaustive()
     }
 }
@@ -136,20 +87,16 @@ impl std::error::Error for Cancelled {}
 ///
 /// # Errors
 /// Returns an error if either gateway variable is unset, blank, or not a
-/// usable gateway URL or key, the paper input cannot be loaded
-/// (`WG21_DATA_DIR` unset, the number missing from the store or without
-/// converted markdown, or the `--file` path unreadable), the harness cannot
-/// resolve the run's model (the gateway model list cannot be fetched, lists
-/// no model, or lacks the selected one), the run fails, the run is cancelled
-/// ([`Cancelled`]), `--args` is not a JSON object, or the `--prompt` path
-/// has no usable file name.
+/// usable gateway URL or key, the paper cannot be loaded (`WG21_DATA_DIR`
+/// unset, the number missing from the store or without converted markdown),
+/// the harness cannot resolve the run's model (the gateway model list cannot
+/// be fetched or lists no model), the run fails, the run is cancelled
+/// ([`Cancelled`]), or the `--prompt` path has no usable file name.
 pub(crate) async fn run(request: RunRequest<'_>) -> Result<()> {
     let RunRequest {
-        input,
+        paper,
         output,
         prompt,
-        model,
-        args,
         mut cancel,
     } = request;
     let name = prompt_name(prompt)?;
@@ -157,7 +104,6 @@ pub(crate) async fn run(request: RunRequest<'_>) -> Result<()> {
     let endpoint = GatewayEndpoint::new(&format!("{base_url}/v1"))
         .with_context(|| format!("use the gateway at {base_url}"))?;
     let key = SecretString::new(key).context("use the gateway API key")?;
-    let model = selected_model(model);
 
     let source = match prompt {
         Some(path) => tokio::fs::read_to_string(path)
@@ -165,10 +111,11 @@ pub(crate) async fn run(request: RunRequest<'_>) -> Result<()> {
             .with_context(|| format!("read prompt file {}", path.display()))?,
         None => DEFAULT_PROMPT.to_owned(),
     };
-    // Load before the run: a store miss or an unreadable file fails fast,
-    // before any network call.
-    let paper_md = load_input_markdown(input).await?;
-    let args = run_args(args, paper_md)?;
+    // Load before the run: a store miss fails fast, before any network call.
+    // One indexed SQLite lookup plus one file read, trivial next to the model
+    // calls that follow.
+    let backend = SqliteBackend::from_env()?;
+    let args = paper_args(&load_paper_md(&backend, paper)?);
 
     let host = Arc::new(Host {
         packs: Packs::new(PackRegistry::new()),
@@ -179,7 +126,6 @@ pub(crate) async fn run(request: RunRequest<'_>) -> Result<()> {
         .parse(&name)
         .with_context(|| format!("parse the {name} prompt"))?;
     let setup = RunSetup {
-        selected_model: model,
         args,
         ..RunSetup::new(
             Arc::new(ProgressRecorder),
@@ -258,20 +204,10 @@ impl Timer for TokioTimer {
     }
 }
 
-/// Returns the run's arguments: the `--args` object, or `{}` when it is
-/// empty, with the paper markdown added as `paper`.
-fn run_args(args: &str, paper_md: String) -> Result<String> {
-    let args = args.trim();
-    let mut object = if args.is_empty() {
-        serde_json::Map::new()
-    } else {
-        match serde_json::from_str(args).context("parse --args as JSON")? {
-            serde_json::Value::Object(object) => object,
-            _ => bail!("--args must be a JSON object"),
-        }
-    };
-    object.insert("paper".to_owned(), serde_json::Value::String(paper_md));
-    Ok(serde_json::Value::Object(object).to_string())
+/// Returns the run's arguments: a JSON object holding the paper markdown as
+/// `paper`.
+fn paper_args(paper_md: &str) -> String {
+    serde_json::json!({ "paper": paper_md }).to_string()
 }
 
 /// Writes one progress line for a run event to stderr.
@@ -307,23 +243,6 @@ fn write_stdout(bytes: &[u8]) -> Result<()> {
         .context("write the report to stdout")
 }
 
-/// Loads the paper markdown for the selected input.
-///
-/// The store branch is synchronous: one indexed SQLite lookup plus one file
-/// read, matching the Python tool, and trivial next to the model calls that
-/// follow. The `File` branch never touches `WG21_DATA_DIR`.
-async fn load_input_markdown(input: &PaperInput) -> Result<String> {
-    match input {
-        PaperInput::Number(num) => {
-            let backend = SqliteBackend::from_env()?;
-            Ok(load_paper_md(&backend, num)?)
-        }
-        PaperInput::File(path) => tokio::fs::read_to_string(path)
-            .await
-            .with_context(|| format!("read paper file {}", path.display())),
-    }
-}
-
 /// Loads the converted markdown for `num` through `backend`.
 ///
 /// `meta` runs first so an unknown number surfaces `MissingPaper`; a bare
@@ -332,17 +251,6 @@ async fn load_input_markdown(input: &PaperInput) -> Result<String> {
 fn load_paper_md(backend: &impl StorageBackend, num: &PaperNum) -> paperstore::Result<String> {
     backend.meta(num)?;
     backend.paper_md(num)
-}
-
-/// Returns the explicit model selection, trimmed.
-///
-/// A missing or blank selection is `None`, which the harness resolves
-/// against the gateway's model list.
-fn selected_model(model: Option<&str>) -> Option<String> {
-    model
-        .map(str::trim)
-        .filter(|model| !model.is_empty())
-        .map(str::to_owned)
 }
 
 /// Returns the name the run takes from its prompt: the `--prompt` file stem,
@@ -415,10 +323,7 @@ mod tests {
     use paperstore_sqlite::SqliteBackend;
     use tempfile::TempDir;
 
-    use super::{
-        Cli, DEFAULT_PROMPT, PaperInput, gateway_origin, load_input_markdown, load_paper_md,
-        prompt_name, run_args, selected_model,
-    };
+    use super::{Cli, DEFAULT_PROMPT, gateway_origin, load_paper_md, paper_args, prompt_name};
 
     fn paper_num() -> PaperNum {
         PaperNum::parse("P4003R2").unwrap_or_else(|e| panic!("parse: {e}"))
@@ -454,14 +359,12 @@ mod tests {
     #[test]
     fn parser_accepts_a_paper_number_and_normalizes_case() {
         let cli = Cli::parse_from(["paperweight", "p4003r2"]);
-        assert_eq!(cli.paper.as_ref().map(PaperNum::as_str), Some("P4003R2"));
-        assert_eq!(cli.file, None);
+        assert_eq!(cli.paper.as_str(), "P4003R2");
         assert_eq!(
             cli.output, None,
             "no --output means the report goes to stdout"
         );
         assert_eq!(cli.prompt, None);
-        assert_eq!(cli.args, "", "no --args launches with empty arguments");
 
         let cli = Cli::parse_from([
             "paperweight",
@@ -470,33 +373,16 @@ mod tests {
             "out/analysis.md",
             "--prompt",
             "custom.md",
-            "--model",
-            "writer-model",
-            "--args",
-            r#"{"id": "P4003R2"}"#,
         ]);
-        assert_eq!(cli.args, r#"{"id": "P4003R2"}"#);
         assert_eq!(cli.output.as_deref(), Some(Path::new("out/analysis.md")));
         assert_eq!(cli.prompt.as_deref(), Some(Path::new("custom.md")));
-        assert_eq!(cli.model.as_deref(), Some("writer-model"));
     }
 
     #[test]
-    fn parser_accepts_file_alone() {
-        let cli = Cli::parse_from(["paperweight", "--file", "paper.md"]);
-        assert_eq!(cli.paper, None);
-        assert_eq!(cli.file.as_deref(), Some(Path::new("paper.md")));
-    }
-
-    #[test]
-    fn parser_rejects_both_inputs_and_neither() {
-        assert!(
-            Cli::try_parse_from(["paperweight", "P4003R2", "--file", "paper.md"]).is_err(),
-            "the input group must reject a number together with --file",
-        );
+    fn parser_requires_a_paper_number() {
         assert!(
             Cli::try_parse_from(["paperweight"]).is_err(),
-            "the input group must require exactly one input",
+            "a run needs a paper number",
         );
     }
 
@@ -521,13 +407,6 @@ mod tests {
             "clap must reject a trailing argument instead of silently dropping it",
         );
         assert!(Cli::try_parse_from(["paperweight", "--bogus", "P4003R2"]).is_err());
-    }
-
-    #[test]
-    fn selected_model_trims_or_defers() {
-        assert_eq!(selected_model(None), None);
-        assert_eq!(selected_model(Some("  ")), None);
-        assert_eq!(selected_model(Some(" writer ")).as_deref(), Some("writer"));
     }
 
     #[test]
@@ -568,15 +447,11 @@ mod tests {
     }
 
     #[test]
-    fn run_args_add_the_paper() {
-        let args = |text: &str| run_args(text, "# Paper".to_owned()).ok();
-        assert_eq!(args("").as_deref(), Some(r##"{"paper":"# Paper"}"##));
+    fn paper_args_hold_the_paper() {
         assert_eq!(
-            args(r#"{"id": "P4003R2"}"#).as_deref(),
-            Some(r##"{"id":"P4003R2","paper":"# Paper"}"##)
+            paper_args("# Paper\n\"quoted\""),
+            r##"{"paper":"# Paper\n\"quoted\""}"##
         );
-        assert!(args("plain text").is_none(), "non-JSON --args is refused");
-        assert!(args("[1]").is_none(), "a non-object --args is refused");
     }
 
     #[test]
@@ -639,19 +514,5 @@ mod tests {
             Ok(text) => panic!("expected an error, got {text:?}"),
         };
         assert_eq!(error.to_string(), "no converted markdown for paper P4003R2");
-    }
-
-    #[tokio::test]
-    async fn file_input_reads_the_file_verbatim() {
-        let dir = TempDir::new().unwrap_or_else(|e| panic!("create temp dir: {e}"));
-        let path = dir.path().join("paper.md");
-        let contents = "# Paper\n\nunicode \u{201c}quotes\u{201d} and trailing space \n\n";
-        std::fs::write(&path, contents).unwrap_or_else(|e| panic!("write paper: {e}"));
-
-        let text = load_input_markdown(&PaperInput::File(path))
-            .await
-            .unwrap_or_else(|e| panic!("load: {e}"));
-
-        assert_eq!(text, contents);
     }
 }

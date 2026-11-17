@@ -69,23 +69,23 @@ Point it at a gateway and run it on a paper:
 ```bash
 export RUNVIL_GATEWAY_URL=http://127.0.0.1:8085
 export RUNVIL_GATEWAY_API_KEY=...       # the gateway's server.api_key
-paperweight --file paper.md                    # or: paperweight P4003R2
+export WG21_DATA_DIR=...                # the paperflow workspace
+paperweight P4003R2
 ```
 
 - The gateway can be one you run yourself (the runvil release
   installer's Gateway component) or a shared one reached over an SSH tunnel,
   for example `ssh -L 8085:127.0.0.1:8085 <user>@stage.wg21.org`.
-- A paper number is looked up in the paper store under `WG21_DATA_DIR`;
-  `--file` reads a markdown file and needs no workspace.
-- `--model <id>` picks the gateway model. Without it, paperweight uses the
-  first chat model the gateway lists.
+- The paper number is looked up in the paper store under `WG21_DATA_DIR`.
+- `--prompt <path>` runs another version of the prompt instead of the
+  embedded one, with no rebuild.
+- paperweight uses the first chat model the gateway lists.
 - The report goes to stdout, or to `--output <path>`. Its first line is the
   `Weight:`.
 - `paperweight --help` lists the rest.
 
 To move runvil, check out the new commit inside `vendor/runvil`,
-fix the crate against it, and commit both in one PR. The pin must not be
-newer than the runvil commit the deployed gateway runs.
+fix the crate against it, and commit both in one PR.
 
 ## Tests
 

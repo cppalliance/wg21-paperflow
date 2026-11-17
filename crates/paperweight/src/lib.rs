@@ -1,22 +1,17 @@
 //! Run a runvil prompt against one WG21 paper from the command line.
 //!
-//! `<bin> [PAPER_NUM] [--file <PATH>] [--output <PATH>] [--prompt <PATH>]
-//! [--model <ID>] [--args <TEXT>]` runs a runvil prompt against one WG21
-//! paper as one harness run and writes the value the prompt returns to
+//! `paperweight <PAPER_NUM> [--output <PATH>] [--prompt <PATH>]` resolves the
+//! paper number through the SQLite paper store, which needs `WG21_DATA_DIR`
+//! pointing at the paperflow workspace, and runs a runvil prompt on the
+//! paper's markdown as one harness run. The value the prompt returns goes to
 //! stdout, or to `--output` when given. The prompt is the embedded paperweight
-//! prompt unless `--prompt` names a file; the run takes its name from the
-//! prompt's file stem (`paperweight` for the embedded one). Exactly one input is
-//! required: a paper number resolved through the SQLite paper store, or
-//! `--file` to read a markdown file verbatim. A paper number needs
-//! `WG21_DATA_DIR` pointing at the paperflow workspace; `--file` never touches
-//! it. The gateway credentials `RUNVIL_GATEWAY_URL` (the gateway origin; a
-//! trailing `/v1` is dropped) and `RUNVIL_GATEWAY_API_KEY` must both be
-//! set: the prompt binds its models through the gateway, so a local-only run
-//! can only fail. `--model` selects the gateway model; without it, the run
-//! binds the first chat model the gateway lists.
-//!
-//! The crate builds two binaries, `paperweight` and `runvil-cli`, both thin
-//! wrappers over [`run_cli`].
+//! prompt unless `--prompt` names a file, so another version of the prompt
+//! runs without rebuilding; the run takes its name from the prompt's file stem
+//! (`paperweight` for the embedded one). The gateway credentials
+//! `RUNVIL_GATEWAY_URL` (the gateway origin; a trailing `/v1` is dropped) and
+//! `RUNVIL_GATEWAY_API_KEY` must both be set: the prompt binds its models
+//! through the gateway, so a local-only run can only fail. The run binds the
+//! first chat model the gateway lists.
 
 use std::error::Error;
 use std::process::ExitCode;
@@ -45,13 +40,10 @@ pub async fn run_cli(name: &'static str) -> ExitCode {
         Err(error) => error.exit(),
     };
     let cancel = install_cancel();
-    let input = cli.input();
     let request = RunRequest {
-        input: &input,
+        paper: &cli.paper,
         output: cli.output.as_deref(),
         prompt: cli.prompt.as_deref(),
-        model: cli.model.as_deref(),
-        args: &cli.args,
         cancel,
     };
     match app::run(request).await {
