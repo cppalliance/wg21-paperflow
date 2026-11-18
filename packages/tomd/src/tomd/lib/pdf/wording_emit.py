@@ -55,6 +55,29 @@ _CODE_PROMOTION_MIN_LINES = 2
 # lines are pinned to column zero instead of indented across the page.
 _MAX_CODE_DIFF_INDENT = 24
 
+# Share of a wording section's lines that are code lines (``_is_code_line``) at or above which
+# it reads as code, whatever its monospace share.
+_CODE_LINE_SHARE = 0.8
+_COMMENT_START = ("//", "/*")
+
+
+def _is_code_line(line: Line) -> bool:
+    """A line of code: all of its text monospace; a comment ("//", "/*"), in whatever font;
+    or monospace code followed by a trailing comment set in a text font."""
+    spans = [s for s in line.spans if s.text.strip()]
+    if not spans:
+        return False
+    text = "".join(s.text for s in line.spans).strip()
+    if text.startswith(_COMMENT_START):
+        return True
+    i = 0
+    while i < len(spans) and spans[i].monospace:
+        i += 1
+    if i == len(spans):
+        return True
+    rest = "".join(s.text for s in spans[i:]).lstrip()
+    return i > 0 and rest.startswith(("//", "/*"))
+
 
 def _group_wording_spans(line: Line) -> list[tuple[str | None, list[Span]]]:
     """Partition a line's spans into ordered role / non-role segments.
@@ -334,10 +357,13 @@ def _render_wording_section(sec: Section) -> str:
     )
     monospace_dominant = total > 0 and mono / total >= _MONO_DOMINANT_THRESHOLD
 
-    nonblank_lines = sum(
-        1 for ln in sec.lines if any(s.text.strip() for s in ln.spans)
-    )
-    code_shaped = monospace_dominant and nonblank_lines >= _CODE_PROMOTION_MIN_LINES
+    nonblank = [ln for ln in sec.lines if any(s.text.strip() for s in ln.spans)]
+    nonblank_lines = len(nonblank)
+    # WG21 code examples set their comments in proportional italic: a section whose lines are
+    # code lines is code even when the comments pull its monospace share under the threshold
+    code_lines = sum(1 for ln in nonblank if _is_code_line(ln))
+    code_shaped = nonblank_lines >= _CODE_PROMOTION_MIN_LINES and (
+        monospace_dominant or code_lines >= _CODE_LINE_SHARE * nonblank_lines)
 
     if code_shaped and uniform_role:
         lang = sec.fence_lang or DEFAULT_FENCE_LANG

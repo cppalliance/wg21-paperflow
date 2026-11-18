@@ -1,6 +1,6 @@
 # tomd API surface
 
-120 modules, 93 classes, 313 functions, 93 methods, 385 fields. Typed: 950 of 1225 functions and methods (77%).
+120 modules, 93 classes, 313 functions, 93 methods, 385 fields. Typed: 951 of 1226 functions and methods (77%).
 
 ## Contents
 
@@ -6188,7 +6188,7 @@ def is_wording_rgb(r: float, g: float, b: float) -> bool:
 
 ## `lib/pdf/wording_emit.py` ([source](../../src/tomd/lib/pdf/wording_emit.py))
 
-Typed: 8 of 9 functions and methods (88%).
+Typed: 9 of 10 functions and methods (90%).
 
 ```python
 """Wording-section rendering for the PDF emitter.
@@ -6208,7 +6208,7 @@ were noise in the converted Markdown. Which shape a section takes, and
 which inline tags survive, is unchanged.
 """
 
-# + 9 private module-level names
+# + 10 private module-level names
 ```
 
 <a id="lib-shared-py"></a>
