@@ -30,9 +30,6 @@ All paths are under `packages/tomd/src/tomd/`.
 - **B. The converter's own tail post-pass** (end of `convert_html`; tail of `run_pipeline`; `emit.py`).
 - **C. api.py format-agnostic post-pass** — front-matter canonicalization, body-metadata stripping, TOC stripping.
 
-> The package `CLAUDE.md` File Map says `_canonicalize_front_matter`; the code
-> now has `_normalize_front_matter`. Docs drift — trust the code.
-
 ---
 
 ## 2. PDF spine — `lib/pdf/pipeline.py:run_pipeline`
@@ -66,7 +63,7 @@ All paths are under `packages/tomd/src/tomd/`.
 25. Merge metadata: `{**structure_metadata, **wg21_metadata}` (wg21 wins).
 26. `drop_glyphs_in_code_and_tables(sections)`.
 27. Vector-image filters (3 passes) if images present.
-28. Metadata fallbacks: document from filename stem; date from PDF info; `_override_revision_from_filename`; title from first non-known HEADING or PDF-info title; strip paper-ID prefix via `_TITLE_PID_PREFIX_RE`; reply-to from PDF author; `_enrich_pdf_reply_to` (page-0 email scan).
+28. Metadata fallbacks: document from filename stem; date from PDF info; `shared.py:override_revision_from_filename`; title from first non-known HEADING or PDF-info title; strip paper-ID prefix via `_TITLE_PID_PREFIX_RE`; reply-to from PDF author; `_enrich_pdf_reply_to` (page-0 email scan).
 29. TOC stripping: `_toc_structural_hints` / `find_toc_indices` → drop TOC section indices (IMAGE sections never dropped).
 30. `emit_markdown(metadata, sections, ...)` → md (see §6 emit).
 31. `emit_prompts(sections)` → prompts; append `wording_prompts`.
@@ -82,9 +79,9 @@ All paths are under `packages/tomd/src/tomd/`.
 1. Read text UTF-8 (errors="replace").
 2. `parse_html(text)` → BeautifulSoup (`html.parser`, forgiving — source of misnesting repairs in render.py).
 3. `detect_generator(soup)` → one of: `mpark`, `bikeshed`, `dascandy/fiets`, `hackmd`, `hand-written`, `wg21`, `schultke`, `unknown` (first-match order in `extract.py:detect_generator`).
-4. `extract_metadata(soup, generator)` → per-generator extractor + `_enrich_reply_to`; document fallback from filename; `_override_revision_from_filename`.
+4. `extract_metadata(soup, generator)` → per-generator extractor + `_enrich_reply_to`; document fallback from filename; `shared.py:override_revision_from_filename`.
 5. `strip_boilerplate(soup, generator)` → decomposes nav/TOC/header/title nodes in place; returns `problems` (→ prompts). Unknown generator adds a problem unless metadata was found.
-6. Optional `rewrite_imgs_via_manifest` (img src → on-disk filename).
+6. Image manifest: `images.py:load_html_images` feeds sidecar accounting and the truncation marker only (the renderer drops every `<img>`).
 7. **`render_body(soup, generator)`** → markdown body (DOM walk; see §5).
 8. Optional truncation marker if images capped.
 9. Title fallback from first `^##\s+` heading (note: expects H2 — see heading bug below).
@@ -154,7 +151,7 @@ then `_render_children`/`_render_element` dispatch by tag.
   `:::wording-add` / `:::wording-remove`.
 - **Inline:** `_inline_text` — code/strong/em/links (scheme-filtered; fragment `#`
   links flattened); `ins/del/sub/sup` preserved as raw HTML; `br` → `\n`.
-- **Images:** `_render_img` (suppresses empty `src`); `rewrite_imgs_via_manifest`.
+- **Images:** every `<img>` is dropped, block and inline; visible captions render via the normal DOM walk.
 
 ---
 
@@ -223,7 +220,7 @@ Key constants in types.py: spatial ratios `WORD_GAP_RATIO=0.3`, `LINE_SPACING_RA
 | Field label not mapped (wg21) | HTML | `extract.py:_match_field` / `_FIELD_SYNONYMS` (other generators use inline substring checks) |
 | TOC leaking into body / real headings stripped as TOC | both | `lib/toc.py:find_toc_indices` (`_MIN_TOC_RUN=3`, `_MAX_GAP=3`, `_MAX_FUZZY_HEADINGS=200`); api.py `_strip_toc` |
 | Slide deck / standards draft wrongly skipped (or not) | PDF | `pipeline.py:_is_slide_deck` / `_is_standards_draft` |
-| Image dropped / wrong alt / cap | both | PDF `images.py:finalize_extraction` (`_MAX_IMAGES_PER_PAPER=20`); HTML `images.py:load_html_images` + `render.py:rewrite_imgs_via_manifest`/`_render_img` |
+| Image dropped / wrong alt / cap | both | PDF `images.py:finalize_extraction` (`_MAX_IMAGES_PER_PAPER=20`); HTML `images.py:load_html_images` (cap only; the renderer drops `<img>`) |
 | Whole valid paper → empty/garbage md | PDF | `types.py:is_readable` gate; or a mis-fired `_is_slide_deck`/`_is_standards_draft` |
 | `--check-content` coverage/drift surprises | both | `lib/check_content.py` (HTML reuses `detect_generator`+`strip_boilerplate` for source text) |
 | QA score off / standardese flagged as code | n/a | `lib/pdf/qa.py` (`_STANDARDESE_PREFIX_RE`, `_looks_like_code`) |

@@ -307,12 +307,7 @@ lowest verdict still considered acceptable for exit 0 (default `review`).
 The hard gate (structural gates + `UNIGRAM_COVERAGE_FAIL_EDGE`) is the
 trustworthy verdict; the reference advisory edge (`REF_NID_ADVISORY_EDGE` 0.85,
 adopted from edgeparse's NID CI floor) only steers a pass to review when tomd and
-the oracle disagree on text. Two earlier designs over-failed: hard-gating on
-`ref_nid` collapsed to near-all-fail (fixed by `clean_string` + advisory demotion),
-and hard-gating on the shingle `coverage` failed 43 papers where tomd had
-correctly reflowed multi-column text (95% of words present, 66% sequential). The
-fix moved the content gate to the order-invariant `unigram_coverage`, matching
-how every benchmark repo separates content from reading order. The unigram edges
+the oracle disagree on text. The unigram edges
 (0.85 fail / 0.95 review) mirror DP-Bench/Docling clean-conversion recall norms
 but remain provisional, not yet fitted on our own labeled corpus. A `calibrate`
 step (label 30-50 papers, pick max recall at FPR <= 10%, commit fitted edges with
@@ -321,7 +316,7 @@ until then review beats a false pass.
 
 ## Comprehension corpus + one-time LLM read-back (Lane 3 in CI)
 
-Lane 3 now runs in CI against a real corpus member, not just engine unit tests.
+Lane 3 runs in CI against a real corpus member, not just engine unit tests.
 `tests/test_comprehension_corpus.py` is the hermetic gate: it reads the committed
 `corpus/<pid>.expected.md` (the substrate) and `corpus/<pid>.facts.jsonl`, runs
 `check_facts`, and asserts every `checked: verified` fact holds, that at least one
@@ -329,8 +324,8 @@ verified fact exists (no vacuous green), and that a deliberately scrambled
 snapshot FAILS (a canary, so the gate has teeth). It needs no backend and no
 `data/`, so it gates in CI where the `whisker facts` CLI cannot: the CLI reads the
 candidate from the paperstore backend (`backend.get_paper_md`), which is absent in
-CI. whisker is now in the `.github/workflows/tests.yml` package matrix (it was
-missing); the hermetic suite passes with no `WG21_DATA_DIR`.
+CI. whisker is in the `.github/workflows/tests.yml` package matrix; the hermetic
+suite passes with no `WG21_DATA_DIR`.
 
 First corpus member: **P4182R0** (8 verified facts: 4 `present`, 1 `absent`,
 1 `order`, 2 `table`; `math` is honestly N/A, the paper has no formulas). Its

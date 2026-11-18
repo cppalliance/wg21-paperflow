@@ -15,10 +15,13 @@ packages/
   paperstore/   storage abstraction (SqliteBackend)
   mailing/      scrape open-std.org + download paper sources
   tomd/         PDF/HTML to Markdown
+  whisker/      deterministic QA for tomd conversions (no LLM)
   pipeline/     LLM pipeline framework (pydantic-ai, web tools)
-  dissect/      LLM-driven paper dissect pipeline
+  assay/        LLM-driven structural analysis pipeline
   agora/        LLM-driven thread planning pipeline
-  cli/          ingestion + conversion + dissect CLI
+  preview/      side-by-side source/markdown preview server
+  cpp-mcp/      MCP server for the C++ standard
+  cli/          ingestion + conversion + assay/agora CLI
 tests/          cross-package integration tests
 ```
 
@@ -41,7 +44,7 @@ WG21_DATA_DIR/
                                    # for HTML papers.
 ```
 
-Pipeline artifacts (dissect/agora outputs, debug, trace) are namespaced per tool. Use `backend.get_debug_md_path(pid, tool)` and `backend.get_trace_md_path(pid, tool)` rather than constructing paths.
+Pipeline artifacts (assay/agora outputs, debug, trace) are namespaced per tool. Use `backend.get_debug_md_path(pid, tool)` and `backend.get_trace_md_path(pid, tool)` rather than constructing paths.
 
 ## Front matter (tomd output)
 
@@ -120,11 +123,11 @@ Model slot binding comes from each pipeline's markdown ``## Services`` block. Ed
 - `__init__.py` files carry only re-exports (`from module import Name`), `__all__`, and `__version__`. All logic lives in named modules. Never define `__all__` in regular (non-`__init__.py`) modules.
 - New `.py` files carry a BSL-1.0 copyright header attributed to the author. Leave existing headers alone.
 - `convert` never re-downloads. It reads the staged source via the backend.
-- Public and reproducible. Anyone can clone this repo, run `paperflow dissect <pid>`, and replicate the same findings. No proprietary dependencies. The dissect package stays self-contained within wg21-paperflow.
+- Public and reproducible. Anyone can clone this repo, run `paperflow assay <pid>`, and replicate the same findings. No proprietary dependencies. The assay package stays self-contained within wg21-paperflow.
 
 ## Fidelity
 
-The analytical pipelines (dissect, agora) cannot tolerate partial results. A wrong objection or missing evidence destroys credibility in a way that cannot be regained.
+The analytical pipelines (assay, agora) cannot tolerate partial results. A wrong objection or missing evidence destroys credibility in a way that cannot be regained.
 
 If full fidelity cannot be achieved, stop. Fail the paper with a clear error message. Preserve the debug transcript. Never produce a partial result mistakable for a complete one.
 
@@ -154,11 +157,11 @@ Trace answers "did it run and what shape is the result." Debug answers "what exa
 
 Paper markdown and web-fetched content are untrusted data.
 
-- Source text entering LLM prompts goes through `pipeline.tools.wrap_source`, which escapes forged delimiter text before wrapping.
+- Source text entering LLM prompts goes through `StepContext.inject_untrusted` (`pipeline.tools.inject_untrusted`), which escapes forged delimiter text before wrapping.
 - The framework floor in `pipeline.runner` tells agents to treat delimited content as data, never as instructions.
 - Structured output (D6) enforces the schema.
 - The `read_paper` tool is scoped to one paper and capped at 500 lines per call.
-- Alt text in image references (`![alt](path)`) is paper-controlled content. It is wrapped along with the rest of `paper.md` by `pipeline.tools.wrap_source` and therefore inherits the same protection. A future revision that passes alt text to an LLM outside the `wrap_source` envelope (e.g. as a vision-captioning prompt) needs its own wrapping.
+- tomd emits no image syntax, so paper markdown carries no alt text. Image alt text and captions are paper-controlled content: a change that passes them to an LLM outside the `inject_untrusted` envelope (e.g. as a vision-captioning prompt) needs its own wrapping.
 
 ## Tests
 
