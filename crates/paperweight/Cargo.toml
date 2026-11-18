@@ -10,6 +10,11 @@ repository.workspace = true
 [lints]
 workspace = true
 
+# The runvil-gateway commit paperweight is tested against. The deployed
+# gateway must contain it; Cargo ignores this table.
+[package.metadata.runvil-gateway]
+commit = "fe136b4491fae14a5de63f421f79763d904e9ac2"
+
 [dependencies]
 anyhow = "1.0.104"
 clap = { version = "4.6.6", features = ["derive"] }
