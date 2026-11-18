@@ -57,8 +57,8 @@ the full reference). The load-bearing structural rules to review against:
   `Revision History`, `References`, `Acknowledgements`, `Motivation`, `Wording`)
   are top-level `##`. The leading section number is stripped from heading text
   (`## Introduction`, not `## 2 Introduction`).
-- **Lists** are nested bullets using the source marker (`-` for bullets, `1.` for
-  ordered), two spaces of indent per nesting level.
+- **Lists** use `-` for every unordered bullet whatever the source glyph, and
+  keep ordinal markers (`1.`, `b)`), two spaces of indent per nesting level.
 - **Code** is fenced with a language label (` ```cpp `). One source listing is
   one fenced block: never split a listing across fences, never merge two listings
   into one, never drop the language label.

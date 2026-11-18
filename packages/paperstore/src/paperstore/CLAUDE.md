@@ -20,8 +20,8 @@ WG21_DATA_DIR/
     <pid>.html-images.json         # typed manifest written by mailing,
                                    # consumed by tomd's HTML path. Schema:
                                    # paperstore.html_manifest.HtmlImagesManifest
-    <pid>.<tool>.debug.md          # per-tool debug transcript (--debug)
-    <pid>.<tool>.trace.md          # per-tool pipeline trace (--trace)
+    <pid>.debug.<tool>.md          # per-tool debug transcript (--debug)
+    <pid>.trace.<tool>.md          # per-tool pipeline trace (--trace)
 ```
 
 Per-tool debug/trace artifacts are namespaced by `<tool>` (e.g. `agora`, future `herald`) so multiple pipelines coexist without filename collisions. Every consumer routes through `backend.get_debug_md_path(pid, tool)` and `backend.get_trace_md_path(pid, tool)`; no tool reinvents path construction.

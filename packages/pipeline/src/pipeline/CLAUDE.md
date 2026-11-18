@@ -1,6 +1,6 @@
 # pipeline
 
-Shared framework for the LLM analytical pipelines (`agora`). It depends only on third-party libraries and must not import from any internal/workspace package. Project-wide rules and the determinism rule numbering live in the root `CLAUDE.md`. Sampling and concurrency rationale lives in `MODELS.md`.
+Shared framework for the LLM analytical pipelines (`assay`, `agora`). It depends only on third-party libraries and must not import from any internal/workspace package. Project-wide rules and the determinism rule numbering live in the root `CLAUDE.md`. Sampling and concurrency rationale lives in `MODELS.md`.
 
 ## Modules
 
