@@ -140,12 +140,40 @@ def _render_wording_line(line: Line) -> str:
         elif role is None:
             parts.extend(escape_wording_angle_brackets(s.text) for s in spans)
         else:
-            parts.append("".join(
-                f"`{s.text.strip()}`" if s.monospace and s.text.strip()
-                else escape_wording_angle_brackets(s.text)
-                for s in spans
-            ))
+            parts.append(_backtick_mono_runs(spans))
     return "".join(parts)
+
+
+def _backtick_mono_runs(spans) -> str:
+    """Prose with each run of consecutive monospace spans in one pair of backticks
+    (whitespace between two monospace spans stays inside the run)."""
+    out: list[str] = []
+    run: list[str] = []       # text of the current monospace run, with its inner whitespace
+    pending = ""              # whitespace after the run, kept until we know whether code follows
+
+    def close():
+        if run:
+            text = "".join(run)
+            out.append(text[:len(text) - len(text.lstrip())] + f"`{text.strip()}`" + text[len(text.rstrip()):])
+            run.clear()
+
+    for s in spans:
+        if s.monospace and s.text.strip():
+            if run:
+                run.append(pending)
+            else:
+                out.append(pending)
+            pending = ""
+            run.append(s.text)
+        elif not s.text.strip():
+            pending += s.text
+        else:
+            close()
+            out.append(pending + escape_wording_angle_brackets(s.text))
+            pending = ""
+    close()
+    out.append(pending)
+    return "".join(out)
 
 
 def _wording_glyph_stats(lines: list[Line]) -> tuple[int, int, dict[str, int]]:

@@ -1,6 +1,6 @@
 # tomd API surface
 
-120 modules, 93 classes, 313 functions, 93 methods, 385 fields. Typed: 950 of 1224 functions and methods (77%).
+120 modules, 93 classes, 313 functions, 93 methods, 385 fields. Typed: 950 of 1225 functions and methods (77%).
 
 ## Contents
 
@@ -6188,7 +6188,7 @@ def is_wording_rgb(r: float, g: float, b: float) -> bool:
 
 ## `lib/pdf/wording_emit.py` ([source](../../src/tomd/lib/pdf/wording_emit.py))
 
-Typed: 8 of 8 functions and methods (100%).
+Typed: 8 of 9 functions and methods (88%).
 
 ```python
 """Wording-section rendering for the PDF emitter.
@@ -6208,7 +6208,7 @@ were noise in the converted Markdown. Which shape a section takes, and
 which inline tags survive, is unchanged.
 """
 
-# + 8 private module-level names
+# + 9 private module-level names
 ```
 
 <a id="lib-shared-py"></a>
@@ -6893,7 +6893,7 @@ def escape_wording_angle_brackets(text: str) -> str:
     here would surface the raw entities. The ``<ins>`` / ``<del>`` tags
     themselves are emitted around the escaped text, never through this helper.
     """
-    # called by: wording_emit._render_wording_line, wording_emit._role_tag
+    # called by: wording_emit._backtick_mono_runs, wording_emit._render_wording_line, wording_emit._role_tag
 ```
 
 <a id="writers-markdown-front-matter-py"></a>

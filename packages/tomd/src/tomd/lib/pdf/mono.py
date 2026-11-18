@@ -49,8 +49,11 @@ _MONO_KEYWORDS = frozenset({
     "mono", "courier", "code", "consolas", "menlo",
     "inconsolata", "iosevka", "hack",
     "jetbrains", "lmtt", "monaco",
-    "cmtt", "cascadia", "zi4", "txtt", "pxtt",
+    "cmtt", "cmitt", "cascadia", "zi4", "txtt", "pxtt",
 })
+# Family names that carry the monospace mark only inside a word: URW's Nimbus Mono L
+# ("NimbusMonL-Regu", the Courier clone of LaTeX's times/pcr setups) splits into "Nimbus Mon L".
+_MONO_FAMILY_PREFIXES = ("nimbusmon",)
 
 _CAMEL_SPLIT_RE = re.compile(
     r"(?<=[a-z])(?=[A-Z])"
@@ -69,7 +72,7 @@ _THIN_CHARS = frozenset("Iil1|!.,;:' ")
 
 def _strip_modifiers(font_name: str) -> str:
     """Remove separators and known style/weight/width modifiers."""
-    name = font_name.replace("-", " ").replace("_", " ")
+    name = font_name.replace("-", " ").replace("_", " ").replace(",", " ")   # "Aptos Mono,Bold" (Word)
     tokens = name.split()
     kept = [t for t in tokens if t.lower() not in _FONT_MODIFIERS]
     return "".join(kept)
@@ -92,7 +95,7 @@ def _font_name_is_monospace(font_name: str) -> bool:
     known monospace family keywords.
     """
     family = _strip_modifiers(font_name)
-    if family.lower() in _MONO_KEYWORDS:
+    if family.lower() in _MONO_KEYWORDS or family.lower().startswith(_MONO_FAMILY_PREFIXES):
         return True
     tokens = _split_camel(family)
     stripped = [_TRAILING_DIGITS_RE.sub("", t) for t in tokens if t]

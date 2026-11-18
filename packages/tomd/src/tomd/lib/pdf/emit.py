@@ -95,11 +95,16 @@ def _render_line_spans(line: Line, in_code_section: bool = False,
 
     groups: list[tuple[bool, list[Span]]] = []
     for span in line.spans:
-        is_mono = span.monospace and span.text.strip()
+        is_mono = bool(span.monospace and span.text.strip())
         if groups and groups[-1][0] == is_mono:
             groups[-1][1].append(span)
         else:
             groups.append((is_mono, [span]))
+    # whitespace between two monospace runs belongs to the code ("std::vector" " " "<int>")
+    for i in range(len(groups) - 2, 0, -1):
+        if (groups[i - 1][0] and groups[i + 1][0] and not groups[i][0]
+                and all(not s.text.strip() for s in groups[i][1])):
+            groups[i - 1:i + 2] = [(True, groups[i - 1][1] + groups[i][1] + groups[i + 1][1])]
 
     parts = []
     for is_mono, spans in groups:
