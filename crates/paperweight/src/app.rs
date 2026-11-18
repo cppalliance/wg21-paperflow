@@ -153,7 +153,7 @@ pub(crate) async fn run(request: RunRequest<'_>) -> Result<()> {
     let report = match report.result {
         Ok(report) => report,
         Err(error) if error.is_canceled() => return Err(Cancelled.into()),
-        Err(error) => bail!("run failed: {}", error.message),
+        Err(error) => bail!("{}", run_failure(&error)),
     };
     match output {
         Some(path) => {
@@ -192,6 +192,16 @@ impl RunRecorder for ProgressRecorder {
     ) -> BoxFuture<'_, Result<(), RunError>> {
         Box::pin(async { Ok(()) })
     }
+}
+
+/// Returns the text of a failed run: its error code, then its message with
+/// the place in the prompt it happened, when known.
+fn run_failure(error: &RunError) -> String {
+    format!(
+        "run failed ({}): {}",
+        error.code.tag(),
+        error.located_message()
+    )
 }
 
 /// Sleeps on the CLI runtime's tokio timer.
@@ -336,15 +346,64 @@ mod tests {
 
     use super::{
         Cli, DEFAULT_PROMPT, TokioTimer, gateway_origin, load_paper_md, paper_args, prompt_name,
+        run_failure,
     };
 
     /// The embedded prompt as the engine sees it.
     fn host() -> Arc<Host> {
+        host_for("paperweight", DEFAULT_PROMPT)
+    }
+
+    /// A host that serves `source` as the prompt `name`.
+    fn host_for(name: &str, source: &str) -> Arc<Host> {
         Arc::new(Host {
             packs: Packs::new(PackRegistry::new()),
-            prompts: Arc::new(FindTextPrompt::new("paperweight", DEFAULT_PROMPT)),
+            prompts: Arc::new(FindTextPrompt::new(name, source)),
             timer: Arc::new(TokioTimer),
         })
+    }
+
+    /// A prompt whose Lua fails on line 11 of the file.
+    const BROKEN: &str = "\
+---
+name: broken
+description: Fails in Lua
+runvil: 0
+---
+
+## Main
+
+```lua
+local missing = nil
+return missing.field
+```
+";
+
+    #[tokio::test]
+    async fn a_failed_run_names_its_code_and_place() {
+        let host = host_for("broken", BROKEN);
+        let prompt = host
+            .parse("broken")
+            .unwrap_or_else(|e| panic!("parse: {e}"));
+        let setup = RunSetup::new(
+            Arc::new(MemoryRecorder::new()),
+            Arc::new(FakeGateway::default()),
+        );
+        let report = Harness::new(host, prompt, setup)
+            .run()
+            .await
+            .unwrap_or_else(|e| panic!("run: {e}"));
+        let Err(error) = report.result else {
+            panic!("the broken prompt must fail");
+        };
+
+        let text = run_failure(&error);
+        assert!(text.starts_with("run failed (lua_runtime): "), "{text}");
+        assert!(
+            text.contains("section `Main` prologue:11:"),
+            "names the section and line: {text}"
+        );
+        assert!(text.contains("attempt to index a nil value"), "{text}");
     }
 
     #[test]
