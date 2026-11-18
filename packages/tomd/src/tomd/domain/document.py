@@ -43,4 +43,5 @@ class PaperDocument:
             for elem in self.elements
             if isinstance(elem, UncertainElement)
         ]
+        prompts.extend(self.diagnostics.extra_prompts)
         return prompts or None
