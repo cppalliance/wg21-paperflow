@@ -13,7 +13,7 @@ args:
   required: [paper]
 ---
 
-Prose under this heading that no fence reads never reaches a model. The fence below only sets the default model, and its globals do not reach any section. Sections share data only through the store, and fences within one section share globals.
+Note: This prompt is tested against the runvil-gateway commit in `crates/paperweight/Cargo.toml`, under`[package.metadata.runvil-gateway]`. When you test it against a different gateway, update that commit.
 
 ---
 
