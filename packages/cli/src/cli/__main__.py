@@ -104,7 +104,7 @@ _COMMANDS = {
 _VERB_FLAGS: dict[str, set[str]] = {
     "mailing":   {"force"},
     "download":  {"force", "concurrency"},
-    "convert":   {"force", "concurrency", "check_content", "check_content_json", "keep_downstream", "yes", "extract_vector_images", "vector_whiteout_text"},
+    "convert":   {"force", "concurrency", "check_content", "check_content_json", "keep_downstream", "yes", "extract_vector_images", "vector_whiteout_text", "judge_tables"},
     "full":      {"force", "verify", "concurrency", "extract_vector_images", "vector_whiteout_text"},
     "agora":     {"debug", "trace", "step", "force", "no_research"},
     "assay":     {"debug", "trace", "step", "force", "rerender"},
@@ -169,6 +169,12 @@ _FLAG_DEFS: list[dict] = [
               "bboxes. Default off; labels inside diagrams render as "
               "pixels alongside body text. Set this only if a downstream "
               "consumer of paper.md is confused by the duplication."),
+    dict(name="judge_tables", flags=["--judge-tables"], choices=["off", "cache", "live"],
+         default="off",
+         help="On convert: where the table readers disagree, let a vision model "
+              "pick the reading from the page crop. 'cache' uses only answers "
+              "stored in <pid>.judge.json; 'live' also asks the model on a miss "
+              "(needs Claude API credentials, and costs money) and stores the answer."),
 ]
 
 _PAPER_ID_RE = re.compile(r"^[PND]\d{3,5}(R\d+)?$", re.IGNORECASE)

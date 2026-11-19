@@ -30,8 +30,10 @@ section's table kind and rendering strategy.
 import logging
 import re
 from collections import Counter, defaultdict
+from collections.abc import Mapping
 from difflib import SequenceMatcher
 
+from .judge import answer_pick, judge_request, region_readings
 from .runctx import current
 from .stacked import split_stacked
 from .table import _STRATEGY_MAP, TableStrategy, _classify_table, _compute_table_signals
@@ -1127,7 +1129,9 @@ def select_tables(tomd_sections: list[Section],
                   rejected: list[TableCandidate] | None = None,
                   codepairs: list[TableCandidate] = (),
                   content: list[TableCandidate] = (),
-                  generator: str = "unknown") -> list[Section]:
+                  generator: str = "unknown",
+                  judge_answers: Mapping[str, Mapping] | None = None,
+                  judge_requests: list[dict] | None = None) -> list[Section]:
     """Choose one table per region from the three extractors.
 
     Primary version by source priority (tags, polls, ruling lines, text positions),
@@ -1143,6 +1147,11 @@ def select_tables(tomd_sections: list[Section],
     dropped, so its blocks flow back into normal processing. Dropped
     candidates from the drawing and tag sources are appended to `rejected`
     when given: their area probably is a table, so flag.py marks it.
+
+    Where a region has two or more distinct readings that pass the checks, a
+    judge request (:mod:`tomd.lib.pdf.judge`) is appended to `judge_requests`
+    when given, and a confident outside answer in `judge_answers` picks the
+    reading in place of source priority.
     """
     tomd = [candidate_from_section(s) for s in tomd_sections]
     # Continuation fragments (the last rows of a table on the next page) only
@@ -1338,6 +1347,24 @@ def select_tables(tomd_sections: list[Section],
         primary = good[0]
         settled = [c for c in remaining
                    if c is primary or _overlap(c, primary) >= _GROUP_OVERLAP]
+        judged = None
+        if judge_requests is not None or judge_answers:
+            # readers disagree on this region: an outside judge may pick the reading
+            jr = judge_request(region_readings(primary, [c for c in settled if not _is_bad(c)]))
+            if jr is not None:
+                req, ordered = jr
+                if judge_requests is not None:
+                    judge_requests.append(req)
+                ans = answer_pick(req, judge_answers)
+                if ans is not None:
+                    pick, judged_conf = ans
+                    rec.feature(ordered[pick].source, ordered[pick].pages[0],
+                                ordered[pick].bboxes[ordered[pick].pages[0]],
+                                f"judged over {primary.source} ({judged_conf})", "meaning", req["id"])
+                    judged = f"{ordered[pick].source} over {primary.source} ({judged_conf})"
+                    primary = ordered[pick]
+                    settled += [c for c in remaining if not any(c is s for s in settled)
+                                and _overlap(c, primary) >= _GROUP_OVERLAP]
         # Alternatives are other sources' readings of the same region: they
         # must pass the rule checks and lie mostly within the primary. A box
         # drawn around a poll is not another reading of the poll.
@@ -1448,6 +1475,8 @@ def select_tables(tomd_sections: list[Section],
                                           "this region (rows from baselines and gaps, columns from gutters) "
                                           "differs from this one.").strip()
         sec.metadata["class_check"] = class_check(primary)
+        if judged:
+            sec.metadata["judged"] = judged
         # what the classifier sees: every source and rule flag in this region
         sec.metadata["region_sources"] = sorted({c.source for c in settled})
         sec.metadata["region_flags"] = sorted({f for c in settled for f in c.flags})

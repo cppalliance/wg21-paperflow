@@ -91,6 +91,9 @@ class ConvertedPaper:
     # PDF only: one request per emitted table for an outside table/not-table
     # resolver (tomd.lib.pdf.table_gate); persisting them is the caller's job.
     gate_requests: list[dict] = field(default_factory=list)
+    # PDF only: one request per table region whose readings disagree, for an
+    # outside reading judge (tomd.lib.pdf.judge); persisting them is the caller's job.
+    judge_requests: list[dict] = field(default_factory=list)
 
     @classmethod
     def skipped_from(cls, raw: PipelineResult) -> "ConvertedPaper":
@@ -305,6 +308,7 @@ class _RawConversion:
     source_vector_count: int = 0
     summary: dict | None = None
     gate_requests: list[dict] = field(default_factory=list)
+    judge_requests: list[dict] = field(default_factory=list)
 
 
 def _convert_with_tomd_full(
@@ -314,6 +318,7 @@ def _convert_with_tomd_full(
     extract_vector: bool = False,
     whiteout_text: bool = False,
     table_gate: Mapping[str, bool] | None = None,
+    reading_judge: Mapping[str, Mapping] | None = None,
 ) -> _RawConversion:
     """Dispatch by file suffix, returning the full pipeline output.
 
@@ -336,6 +341,7 @@ def _convert_with_tomd_full(
             extract_vector=extract_vector,
             whiteout_text=whiteout_text,
             table_gate=table_gate,
+            reading_judge=reading_judge,
         )
         raster = sum(1 for im in r.images if im.source == "raster")
         vector = sum(1 for im in r.images if im.source == "vector")
@@ -351,6 +357,7 @@ def _convert_with_tomd_full(
             source_vector_count=vector,
             summary=r.summary,
             gate_requests=list(r.gate_requests),
+            judge_requests=list(r.judge_requests),
         )
     if suffix in (".html", ".htm"):
         html_result = None
@@ -397,6 +404,7 @@ def convert_paper_full(
     extract_vector: bool = False,
     whiteout_text: bool = False,
     table_gate: Mapping[str, bool] | None = None,
+    reading_judge: Mapping[str, Mapping] | None = None,
 ) -> ConvertedPaper:
     """Convert a staged source file, returning markdown AND image data.
 
@@ -425,6 +433,10 @@ def convert_paper_full(
     ``table_gate`` (PDF only, opt-in) holds outside table/not-table answers
     keyed by gate id; see :mod:`tomd.lib.pdf.table_gate`. The result's
     ``gate_requests`` lists every emitted table for a resolver.
+
+    ``reading_judge`` (PDF only, opt-in) holds outside answers keyed by judge
+    request id; see :mod:`tomd.lib.pdf.judge`. The result's ``judge_requests``
+    lists every table region whose readings disagree, for a resolver.
     """
     raw = _convert_with_tomd_full(
         source_path,
@@ -432,6 +444,7 @@ def convert_paper_full(
         extract_vector=extract_vector,
         whiteout_text=whiteout_text,
         table_gate=table_gate,
+        reading_judge=reading_judge,
     )
 
     if raw.prompts:
@@ -485,6 +498,7 @@ def convert_paper_full(
         source_vector_count=raw.source_vector_count,
         summary=raw.summary,
         gate_requests=raw.gate_requests,
+        judge_requests=raw.judge_requests,
     )
 
 

@@ -12,6 +12,7 @@
 Provides per-paper conversion via ``convert_one_paper``.
 """
 
+from collections.abc import Callable
 from pathlib import Path
 
 from cli.models import ConvertResult, Paper
@@ -27,6 +28,7 @@ def convert_one_paper(
     *,
     extract_vector: bool = False,
     whiteout_text: bool = False,
+    judge: "Callable[[Path, list[dict]], dict[str, dict]] | None" = None,
 ) -> "ConvertResult":
     """Convert a staged paper source to markdown. No LLM, no I/O beyond
     reading the source file.
@@ -39,6 +41,10 @@ def convert_one_paper(
 
     ``extract_vector`` and ``whiteout_text`` are forwarded to the tomd
     PDF pipeline. They default to False; HTML sources ignore them.
+
+    ``judge`` (opt-in, :mod:`cli.reading_judge`) answers tomd's reading-judge
+    requests. When it answers any, the paper is converted a second time with
+    those answers, so the picked table readings are the ones emitted.
 
     Typed PDF skips (``SkipReason``) return a :class:`ConvertResult` with
     ``status="skipped"`` instead of raising.
@@ -76,6 +82,15 @@ def convert_one_paper(
         extract_vector=extract_vector,
         whiteout_text=whiteout_text,
     )
+    if judge is not None and not converted.skipped and converted.judge_requests:
+        answers = judge(source_path, converted.judge_requests)
+        if answers:
+            converted = convert_paper_full(
+                paper_id, source_path, meta,
+                extract_vector=extract_vector,
+                whiteout_text=whiteout_text,
+                reading_judge=answers,
+            )
     if converted.skipped:
         return ConvertResult(
             paper_id=paper_id,

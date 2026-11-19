@@ -2011,6 +2011,8 @@ class PipelineResult:
     summary: dict | None = None
     # One request per emitted table for an outside table/not-table resolver (table_gate).
     gate_requests: list[dict] = field(default_factory=list)
+    # One request per table region whose readings disagree, for an outside reading judge (judge).
+    judge_requests: list[dict] = field(default_factory=list)
 
     @classmethod
     def for_skip(
@@ -2131,6 +2133,7 @@ def run_pipeline(
     extract_vector: bool = False,
     whiteout_text: bool = False,
     table_gate: Mapping[str, bool] | None = None,
+    reading_judge: Mapping[str, Mapping] | None = None,
 ) -> PipelineResult:
     """Run the full PDF conversion pipeline, returning all intermediate data.
 
@@ -2148,10 +2151,16 @@ def run_pipeline(
     (:mod:`tomd.lib.pdf.table_gate`): an emitted table answered False is
     vetoed and its text stays prose. ``result.gate_requests`` lists every
     emitted table's id and page pieces, for a resolver to answer.
+
+    ``reading_judge`` holds outside answers keyed by judge request id
+    (:mod:`tomd.lib.pdf.judge`): where the table readers disagree, a confident
+    answer picks the reading to emit. ``result.judge_requests`` lists every
+    such region, for a resolver to answer.
     labels inside vector figures render as pixels alongside body text.
     """
     path = Path(path)
     result = PipelineResult()
+    judge_reqs: list[dict] = []
     doc = None
     vector_stats = _VectorExtractionStats() if extract_vector else None
     with _FITZ_LOCK:  # see _fitz_lock.py for why this lock is required
@@ -2547,7 +2556,8 @@ def run_pipeline(
                 current().reader_error("extent step", None, exc)
             table_sections = select_tables(tomd_sections, ruled_tables, tagged_tables, pre_detect_blocks,
                                            poll_tables, rejected, code_pairs, content_tables,
-                                           generator=pdf_generator(doc_metadata))
+                                           generator=pdf_generator(doc_metadata),
+                                           judge_answers=reading_judge, judge_requests=judge_reqs)
             try:
                 gate_tables(tdoc, tpages, table_sections)
             except Exception as exc:  # the gate only lowers trust; never fail on it, never silently
@@ -3160,6 +3170,7 @@ def run_pipeline(
     result.md = md
     result.prompts = prompts
     result.gate_requests = gate_reqs
+    result.judge_requests = judge_reqs
     result.sections = sections
     result.metadata = metadata
     result.nesting_corrections = nesting_corrections

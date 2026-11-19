@@ -103,6 +103,12 @@ def test_write_intermediate(store: SqliteBackend, tmp_path: Path):
     assert list((tmp_path / "paperstore").glob("*.partial")) == []
 
 
+def test_read_intermediate_round_trips_and_is_none_when_absent(store: SqliteBackend):
+    assert store.read_intermediate("P1", "judge") is None
+    store.write_intermediate("P1", "judge", {"m/abc": {"pick": 1, "confidence": "high"}})
+    assert store.read_intermediate("p1", "judge") == {"m/abc": {"pick": 1, "confidence": "high"}}
+
+
 def test_upsert_year_and_list_papers(store: SqliteBackend):
     papers = [
         {"paper_id": "P1", "title": "One"},

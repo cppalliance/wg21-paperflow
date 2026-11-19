@@ -35,6 +35,7 @@ import httpx
 from cli.errors import EmptyTargetsError, MixedTargetsError
 from cli.models import Paper
 from cli.orchestrator import convert_one_paper
+from cli.reading_judge import JudgeClient, make_judge
 from cli.targets import MONTH_RE, resolve_pid
 from mailing.download import content_length, default_client, download_paper
 from mailing.scrape import discover_years, fetch_all_mailings_for_year
@@ -249,6 +250,11 @@ async def run_download(
 ) -> dict:
     """Download source files for papers. Workers are async httpx calls.
 
+    ``judge_tables`` (``off`` | ``cache`` | ``live``, :mod:`cli.reading_judge`)
+    answers tomd's reading-judge requests from the paper's ``judge``
+    intermediate (``cache``), calling the model on a miss (``live``); new
+    answers are persisted to that intermediate.
+
     ``on_progress`` is invoked after each task completion with a
     :class:`~paperstore.progress.ProgressEvent`.
     """
@@ -264,6 +270,9 @@ async def run_download(
 
     total = len(to_process)
     semaphore = asyncio.Semaphore(concurrency)
+    judge_client = JudgeClient() if judge_tables == "live" else None
+    # live judging waits on model calls, one per disagreeing table region
+    timeout = 900 if judge_tables == "live" else 120
 
     async with default_client() as http:
 
@@ -371,6 +380,7 @@ async def run_convert(
     write_prompts: bool = True,
     extract_vector: bool = False,
     whiteout_text: bool = False,
+    judge_tables: str = "off",
     on_progress: ProgressCallback | None = None,
 ) -> dict:
     """Convert staged source files to markdown. Workers run in threads.
@@ -423,6 +433,8 @@ async def run_convert(
             in_flight.add(pid)
             try:
                 paper = _make_paper(paper_row)
+                judge_cache = (backend.read_intermediate(pid, "judge") or {}) if judge_tables != "off" else None
+                cached = dict(judge_cache or {})
                 # Worker reads the source but does no backend writes;
                 # the main coroutine persists through the backend below.
                 result = await asyncio.wait_for(
@@ -431,8 +443,9 @@ async def run_convert(
                         paper,
                         extract_vector=extract_vector,
                         whiteout_text=whiteout_text,
+                        judge=make_judge(judge_tables, judge_cache, judge_client),
                     ),
-                    timeout=120,
+                    timeout=timeout,
                 )
                 if result.status == "skipped":
                     if result.skip_reason is None:
@@ -460,6 +473,7 @@ async def run_convert(
                     "title": result.title,
                     "images": result.images,
                     "summary": result.summary,
+                    "judge_cache": judge_cache if judge_cache != cached else None,
                     "status": "ok",
                 }
             except RuntimeError as exc:
@@ -467,7 +481,7 @@ async def run_convert(
                 logger.exception("Convert failed for %s", pid)
                 return {"paper_id": pid, "status": "error", "error": msg}
             except TimeoutError:
-                logger.warning("Skipping %s: conversion timed out (120s)", pid)
+                logger.warning("Skipping %s: conversion timed out (%ds)", pid, timeout)
                 return {"paper_id": pid, "status": "skipped", "reason": "timeout"}
             except Exception as exc:
                 logger.exception("Convert failed for %s", pid)
@@ -509,6 +523,8 @@ async def run_convert(
                 backend.write_intermediate(pid, "prompts", result["prompts"])
             if result.get("summary") is not None:
                 backend.write_intermediate(pid, "summary", result["summary"])
+            if result.get("judge_cache"):
+                backend.write_intermediate(pid, "judge", result["judge_cache"])
             backend.record_markdown(pid, md_path, intent=result["intent"])
             succeeded.append(pid)
         elif result["status"] == "skipped":

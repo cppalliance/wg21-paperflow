@@ -237,6 +237,10 @@ class StorageBackend(ABC):
         """
 
     @abstractmethod
+    def read_intermediate(self, paper_id: str, name: str) -> Any | None:
+        """The payload written by :meth:`write_intermediate`, or None when there is none."""
+
+    @abstractmethod
     def record_source(self, paper_id: str, path: Path | str) -> None:
         """Stamp ``path`` as the staged source file for ``paper_id`` in the index.
 

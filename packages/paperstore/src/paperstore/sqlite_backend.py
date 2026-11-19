@@ -907,6 +907,14 @@ class SqliteBackend(StorageBackend):
             json.dumps(payload, indent=2, ensure_ascii=False),
         )
 
+    def read_intermediate(self, paper_id: str, name: str) -> Any | None:
+        """Read an intermediate artifact JSON, or None when it does not exist."""
+        pid = paper_id.strip().upper()
+        path = self._papers_dir / f"{pid.lower()}.{name}.json"
+        if not path.exists():
+            return None
+        return json.loads(path.read_text(encoding="utf-8"))
+
     def record_source(self, paper_id: str, path: Path | str) -> None:
         """Stamp ``path`` as ``source_file`` for ``paper_id``."""
         pid = paper_id.strip().upper()

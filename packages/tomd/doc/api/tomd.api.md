@@ -1,6 +1,6 @@
 # tomd API surface
 
-120 modules, 93 classes, 313 functions, 93 methods, 385 fields. Typed: 951 of 1226 functions and methods (77%).
+121 modules, 93 classes, 319 functions, 93 methods, 387 fields. Typed: 958 of 1235 functions and methods (77%).
 
 ## Contents
 
@@ -75,6 +75,7 @@
 - [`lib/pdf/fullwidth.py`](#lib-pdf-fullwidth-py): apply, full_width_rows
 - [`lib/pdf/glyphs.py`](#lib-pdf-glyphs-py): GlyphCandidate, collect_glyph_candidates, collect_text_emoji_bboxes, drop_glyphs_in_code_and_tables, filter_coincident, glyph_to_char, inject_glyph_spans, is_glyph_only_block, GLYPH_FONT_SENTINEL, GLYPH_PLACEHOLDER_MARKER_TEMPLATE, UNKNOWN_GLYPH
 - [`lib/pdf/images.py`](#lib-pdf-images-py): ExtractionResult, extract_page_images, finalize_extraction, MIN_IMAGE_DIM_PT, TRUNCATION_MARKER_TEMPLATE
+- [`lib/pdf/judge.py`](#lib-pdf-judge-py): answer_pick, judge_request, norm_rows, prompt_text, region_readings, render_crops, CONFIDENT, CROP_DPI, ID_ROUND, INSTRUCTIONS, LETTERS, MAX_EDGE, ...
 - [`lib/pdf/levels.py`](#lib-pdf-levels-py): assign, cell_markers, comment, NAMES, SHOWN_FROM
 - [`lib/pdf/mono.py`](#lib-pdf-mono-py): classify_monospace, propagate_monospace
 - [`lib/pdf/pagecache.py`](#lib-pdf-pagecache-py): rawdict, words_in
@@ -192,6 +193,9 @@ class ConvertedPaper:
     # PDF only: one request per emitted table for an outside table/not-table
     # resolver (tomd.lib.pdf.table_gate); persisting them is the caller's job.
     gate_requests: list[dict] = field(default_factory=list)
+    # PDF only: one request per table region whose readings disagree, for an
+    # outside reading judge (tomd.lib.pdf.judge); persisting them is the caller's job.
+    judge_requests: list[dict] = field(default_factory=list)
     @classmethod
     def skipped_from(cls, raw: PipelineResult) -> 'ConvertedPaper':
         """Translate a skipped :class:`PipelineResult` into a skipped
@@ -213,7 +217,7 @@ def convert_paper(paper_id: str, source_path: Path, meta: dict) -> tuple[str, li
     """
     # calls: convert_paper_full
 
-def convert_paper_full(paper_id: str, source_path: Path, meta: dict, *, html_images_manifest=None, extract_vector: bool = False, whiteout_text: bool = False, table_gate: Mapping[str, bool] | None = None) -> ConvertedPaper:
+def convert_paper_full(paper_id: str, source_path: Path, meta: dict, *, html_images_manifest=None, extract_vector: bool = False, whiteout_text: bool = False, table_gate: Mapping[str, bool] | None = None, reading_judge: Mapping[str, Mapping] | None = None) -> ConvertedPaper:
     """Convert a staged source file, returning markdown AND image data.
 
     All inputs are pre-fetched by the caller. Reads ``source_path`` from
@@ -241,6 +245,10 @@ def convert_paper_full(paper_id: str, source_path: Path, meta: dict, *, html_ima
     ``table_gate`` (PDF only, opt-in) holds outside table/not-table answers
     keyed by gate id; see :mod:`tomd.lib.pdf.table_gate`. The result's
     ``gate_requests`` lists every emitted table for a resolver.
+
+    ``reading_judge`` (PDF only, opt-in) holds outside answers keyed by judge
+    request id; see :mod:`tomd.lib.pdf.judge`. The result's ``judge_requests``
+    lists every table region whose readings disagree, for a resolver.
     """
     # untyped: html_images_manifest
     # calls: _convert_with_tomd_full, ConvertedPaper.skipped_from, _normalize_front_matter, _strip_body_metadata_text, format.parse_front_matter, _strip_toc, emit.renumber_uncertain_markers, _extract_intent_from_front_matter, ConvertedPaper
@@ -4008,6 +4016,91 @@ TRUNCATION_MARKER_TEMPLATE = ...
 # + 4 private module-level names
 ```
 
+<a id="lib-pdf-judge-py"></a>
+
+## `lib/pdf/judge.py` ([source](../../src/tomd/lib/pdf/judge.py))
+
+Typed: 7 of 9 functions and methods (77%).
+
+```python
+"""Outside reading judge for tables the readers disagree on (opt-in).
+
+tomd makes no model calls. Where two or more readings of a table region pass
+the rule checks and differ, selection lists a *judge request*: the region's
+page pieces and its distinct readings, in an order that does not depend on
+which reader made them. A resolver outside tomd shows the page crop and the
+readings to a model, which picks the reading a person would understand as the
+table. Given those answers on a later run, selection emits the picked reading
+instead of the one source priority chose. With no answers, nothing changes.
+
+Answers only choose among readings tomd already made. They never write cell
+text, so the output keeps the source's words verbatim.
+
+Request: ``{"id", "pieces": [[page, [x0, y0, x1, y1]], ...], "readings":
+[rows, ...], "sources": [...], "today": index}``. ``today`` is the reading
+source priority chose; ``sources`` is diagnosis only and is not shown to the
+judge. Answers: ``{id: {"pick": index, "confidence": "high"|"medium"|"low"}}``.
+A low-confidence answer, a missing id or a malformed answer keeps today's
+choice.
+
+The id hashes the prompt version, the pieces and the readings, so an answer
+applies only to the region and readings it was given for. Measured on dev-side
+regions (2026-11-18): the judge kept a right reading in 59 of 62 regions that
+were right before, and fixed 23 of 25 that were wrong while a right reading existed
+(docs/plans/tomd-tables-port/reading-judge.md).
+"""
+
+def answer_pick(req: dict, answers: Mapping[str, Mapping] | None) -> tuple[int, str] | None:
+    """(index, confidence) of the answer to adopt, or None to keep today's choice."""
+    # called by: select.select_tables
+
+def judge_request(readings: list[TableCandidate]) -> tuple[dict, list[TableCandidate]] | None:
+    """The request for a region's distinct readings (primary first), and the readings in request order.
+
+    None when there is nothing to judge: fewer than two distinct readings, more
+    than the letters allow, or a region spread over more than MAX_PAGES pages.
+    """
+    # calls: _pieces, norm_rows, _digest
+    # called by: select.select_tables
+
+def norm_rows(c: TableCandidate) -> list[list[str]]:
+    # calls: _norm
+    # called by: judge_request, region_readings
+    ...
+
+def prompt_text(req: dict) -> str:
+    """The text half of the judge prompt: instructions and the lettered readings."""
+
+def region_readings(primary: TableCandidate, others: list[TableCandidate]) -> list[TableCandidate]:
+    """The primary first, then each other reading whose rows differ from every earlier one."""
+    # calls: norm_rows
+    # called by: select.select_tables
+
+def render_crops(doc, req: dict) -> list[bytes]:
+    """PNG bytes of each page piece of ``req``, in page order. ``doc`` is an open fitz document."""
+    # untyped: doc
+
+CONFIDENT = ('high', 'medium')
+
+CROP_DPI = 150
+
+ID_ROUND = 1.0  # points: ids survive sub-point jitter in the boxes
+
+INSTRUCTIONS = ...
+
+LETTERS = 'ABCDEFGH'
+
+MAX_EDGE = 1568  # pixels: larger crops are scaled down
+
+MAX_PAGES = 4  # a region spread over more pages keeps today's choice
+
+PAD = 12.0  # points around the readings' union on each page
+
+PROMPT_VERSION = 'reading-judge-1'
+
+# + 3 private module-level names
+```
+
 <a id="lib-pdf-levels-py"></a>
 
 ## `lib/pdf/levels.py` ([source](../../src/tomd/lib/pdf/levels.py))
@@ -4198,6 +4291,8 @@ class PipelineResult:
     summary: dict | None = None
     # One request per emitted table for an outside table/not-table resolver (table_gate).
     gate_requests: list[dict] = field(default_factory=list)
+    # One request per table region whose readings disagree, for an outside reading judge (judge).
+    judge_requests: list[dict] = field(default_factory=list)
     @classmethod
     def for_skip(cls, reason: SkipReason, *, page_count: int = 0, prompts: list[str] | None = None, readable: bool = True) -> 'PipelineResult':
         """Construct a complete skip result.
@@ -4218,7 +4313,7 @@ def dropped_nomination_regions(record, tables) -> list:
     # calls: _overlap
     # called by: run_pipeline
 
-def run_pipeline(path: Path, *, ml_tables: bool = False, visualize: bool = False, extract_vector: bool = False, whiteout_text: bool = False, table_gate: Mapping[str, bool] | None = None) -> PipelineResult:
+def run_pipeline(path: Path, *, ml_tables: bool = False, visualize: bool = False, extract_vector: bool = False, whiteout_text: bool = False, table_gate: Mapping[str, bool] | None = None, reading_judge: Mapping[str, Mapping] | None = None) -> PipelineResult:
     """Run the full PDF conversion pipeline, returning all intermediate data.
 
     ``extract_vector`` opts in to vector-figure extraction (v2.0 default
@@ -4235,6 +4330,11 @@ def run_pipeline(path: Path, *, ml_tables: bool = False, visualize: bool = False
     (:mod:`tomd.lib.pdf.table_gate`): an emitted table answered False is
     vetoed and its text stays prose. ``result.gate_requests`` lists every
     emitted table's id and page pieces, for a resolver to answer.
+
+    ``reading_judge`` holds outside answers keyed by judge request id
+    (:mod:`tomd.lib.pdf.judge`): where the table readers disagree, a confident
+    answer picks the reading to emit. ``result.judge_requests`` lists every
+    such region, for a resolver to answer.
     labels inside vector figures render as pixels alongside body text.
     """
     # calls: PipelineResult, images._VectorExtractionStats, _enforce_skip_contract, PipelineResult.for_skip, _is_slide_deck, _is_standards_draft, visibility.remove_hidden_text, visibility.check_page, extract.extract_mupdf, extract.extract_spatial, cleanup.get_edge_items, extract.collect_links, +106 more
@@ -4907,7 +5007,7 @@ def remove_table_regions(blocks: list[Block], tables: list[Section]) -> list[Blo
     # calls: types.Block
     # called by: pipeline.run_pipeline
 
-def select_tables(tomd_sections: list[Section], ruled: list[TableCandidate], tagged: list[TableCandidate], blocks: list[Block], polls: list[TableCandidate] = (), rejected: list[TableCandidate] | None = None, codepairs: list[TableCandidate] = (), content: list[TableCandidate] = (), generator: str = 'unknown') -> list[Section]:
+def select_tables(tomd_sections: list[Section], ruled: list[TableCandidate], tagged: list[TableCandidate], blocks: list[Block], polls: list[TableCandidate] = (), rejected: list[TableCandidate] | None = None, codepairs: list[TableCandidate] = (), content: list[TableCandidate] = (), generator: str = 'unknown', judge_answers: Mapping[str, Mapping] | None = None, judge_requests: list[dict] | None = None) -> list[Section]:
     """Choose one table per region from the three extractors.
 
     Primary version by source priority (tags, polls, ruling lines, text positions),
@@ -4923,8 +5023,13 @@ def select_tables(tomd_sections: list[Section], ruled: list[TableCandidate], tag
     dropped, so its blocks flow back into normal processing. Dropped
     candidates from the drawing and tag sources are appended to `rejected`
     when given: their area probably is a table, so flag.py marks it.
+
+    Where a region has two or more distinct readings that pass the checks, a
+    judge request (:mod:`tomd.lib.pdf.judge`) is appended to `judge_requests`
+    when given, and a confident outside answer in `judge_answers` picks the
+    reading in place of source priority.
     """
-    # calls: candidate_from_section, page_furniture, stitch_pages, cross_reader_continuation, split_at_headers, join_split_words, stacked.split_stacked, runctx.current, table_flags, _is_bad, _same_region, _row_top, +16 more
+    # calls: candidate_from_section, page_furniture, stitch_pages, cross_reader_continuation, split_at_headers, join_split_words, stacked.split_stacked, runctx.current, table_flags, _is_bad, _same_region, _row_top, +19 more
     # called by: pipeline.run_pipeline
 
 def sparse_mapping(t) -> bool:
@@ -7057,6 +7162,7 @@ class MarkdownWriter:
 - `ALLOWED_REASON_KEYS`: [`lib/pdf/vector_images.py`](#lib-pdf-vector-images-py)
 - `anchors_path`: [`lib/golden_qa.py`](#lib-golden-qa-py)
 - `annotate`: [`lib/pdf/continuation.py`](#lib-pdf-continuation-py)
+- `answer_pick`: [`lib/pdf/judge.py`](#lib-pdf-judge-py)
 - `append_trailer_markers`: [`writers/markdown/markers.py`](#writers-markdown-markers-py)
 - `apply`: [`lib/pdf/fullwidth.py`](#lib-pdf-fullwidth-py)
 - `apply_pdf_metadata_fallbacks`: [`lib/metadata_yaml/extract.py`](#lib-metadata-yaml-extract-py)
@@ -7141,6 +7247,7 @@ class MarkdownWriter:
 - `compute_content_coverage`: [`lib/check_content.py`](#lib-check-content-py)
 - `compute_metrics`: [`lib/pdf/qa.py`](#lib-pdf-qa-py)
 - `Confidence`: [`domain/elements.py`](#domain-elements-py)
+- `CONFIDENT`: [`lib/pdf/judge.py`](#lib-pdf-judge-py)
 - `conservation_error`: [`lib/pdf/select.py`](#lib-pdf-select-py)
 - `ContainerSpan`: [`domain/span.py`](#domain-span-py)
 - `content_candidates`: [`lib/pdf/content.py`](#lib-pdf-content-py)
@@ -7151,6 +7258,7 @@ class MarkdownWriter:
 - `convert_paper`: [`api.py`](#api-py)
 - `convert_paper_full`: [`api.py`](#api-py)
 - `ConvertedPaper`: [`api.py`](#api-py)
+- `CROP_DPI`: [`lib/pdf/judge.py`](#lib-pdf-judge-py)
 - `cross_reader_continuation`: [`lib/pdf/select.py`](#lib-pdf-select-py)
 - `current`: [`lib/pdf/runctx.py`](#lib-pdf-runctx-py)
 - `DATE_RE`: [`lib/shared.py`](#lib-shared-py)
@@ -7284,6 +7392,7 @@ class MarkdownWriter:
 - `HtmlImagesResult`: [`lib/html/images.py`](#lib-html-images-py)
 - `hyphenates`: [`lib/pdf/docmeasure.py`](#lib-pdf-docmeasure-py)
 - `HyphenEvidence`: [`lib/pdf/cleanup.py`](#lib-pdf-cleanup-py)
+- `ID_ROUND`: [`lib/pdf/judge.py`](#lib-pdf-judge-py)
 - `ID_ROUND`: [`lib/pdf/table_gate.py`](#lib-pdf-table-gate-py)
 - `ideal_path`: [`lib/golden_qa.py`](#lib-golden-qa-py)
 - `IMAGE_GRID_SHARE`: [`lib/pdf/classify.py`](#lib-pdf-classify-py)
@@ -7296,6 +7405,7 @@ class MarkdownWriter:
 - `InsertedSpan`: [`domain/span.py`](#domain-span-py)
 - `inside_vetoed`: [`lib/pdf/table_gate.py`](#lib-pdf-table-gate-py)
 - `INSTRUCTIONS`: [`lib/pdf/airepair.py`](#lib-pdf-airepair-py)
+- `INSTRUCTIONS`: [`lib/pdf/judge.py`](#lib-pdf-judge-py)
 - `is_code_comparison`: [`lib/pdf/emit.py`](#lib-pdf-emit-py)
 - `is_diagram_block`: [`lib/pdf/code_format.py`](#lib-pdf-code-format-py)
 - `is_flagged_table`: [`lib/pdf/emit.py`](#lib-pdf-emit-py)
@@ -7309,6 +7419,7 @@ class MarkdownWriter:
 - `is_wording_rgb`: [`lib/pdf/wording.py`](#lib-pdf-wording-py)
 - `issue_for_stem`: [`lib/golden_qa.py`](#lib-golden-qa-py)
 - `join_split_words`: [`lib/pdf/select.py`](#lib-pdf-select-py)
+- `judge_request`: [`lib/pdf/judge.py`](#lib-pdf-judge-py)
 - `KNOWN_GENERATORS`: [`lib/pdf/summary.py`](#lib-pdf-summary-py)
 - `KNOWN_SECTIONS`: [`lib/pdf/types.py`](#lib-pdf-types-py)
 - `label_figure_tables`: [`lib/pdf/figure_tables.py`](#lib-pdf-figure-tables-py)
@@ -7316,6 +7427,7 @@ class MarkdownWriter:
 - `LAYOUT_TREE`: [`lib/pdf/classify_trees.py`](#lib-pdf-classify-trees-py)
 - `LEGACY_FENCE_MARKER`: [`lib/wording_markup.py`](#lib-wording-markup-py)
 - `LEGACY_WORDING_FENCE_RE`: [`lib/wording_markup.py`](#lib-wording-markup-py)
+- `LETTERS`: [`lib/pdf/judge.py`](#lib-pdf-judge-py)
 - `LEVELS`: [`lib/pdf/checks/base.py`](#lib-pdf-checks-base-py)
 - `likelihood`: [`lib/pdf/scan_model.py`](#lib-pdf-scan-model-py)
 - `likelihood_data`: [`lib/pdf/checks/data_or_format.py`](#lib-pdf-checks-data-or-format-py)
@@ -7334,7 +7446,9 @@ class MarkdownWriter:
 - `main`: [`cli.py`](#cli-py)
 - `mark_matrix`: [`lib/pdf/select.py`](#lib-pdf-select-py)
 - `MarkdownWriter`: [`writers/markdown/writer.py`](#writers-markdown-writer-py)
+- `MAX_EDGE`: [`lib/pdf/judge.py`](#lib-pdf-judge-py)
 - `MAX_FILL`: [`lib/pdf/rowbands.py`](#lib-pdf-rowbands-py)
+- `MAX_PAGES`: [`lib/pdf/judge.py`](#lib-pdf-judge-py)
 - `MAX_WORDS`: [`lib/pdf/airepair.py`](#lib-pdf-airepair-py)
 - `maybe_normalize_code_line`: [`lib/pdf/code_format.py`](#lib-pdf-code-format-py)
 - `measure`: [`lib/pdf/docmeasure.py`](#lib-pdf-docmeasure-py)
@@ -7351,6 +7465,7 @@ class MarkdownWriter:
 - `MODEL`: [`lib/pdf/scan_model.py`](#lib-pdf-scan-model-py)
 - `NAMES`: [`lib/pdf/levels.py`](#lib-pdf-levels-py)
 - `NEAR`: [`lib/pdf/continuation.py`](#lib-pdf-continuation-py)
+- `norm_rows`: [`lib/pdf/judge.py`](#lib-pdf-judge-py)
 - `normalize`: [`lib/golden_compare.py`](#lib-golden-compare-py)
 - `normalize_code_line`: [`lib/pdf/code_format.py`](#lib-pdf-code-format-py)
 - `normalize_date`: [`lib/shared.py`](#lib-shared-py)
@@ -7362,6 +7477,7 @@ class MarkdownWriter:
 - `NUMBERED_LIST_RE`: [`lib/pdf/types.py`](#lib-pdf-types-py)
 - `outside_view_regions`: [`lib/pdf/flag.py`](#lib-pdf-flag-py)
 - `override_revision_from_filename`: [`lib/shared.py`](#lib-shared-py)
+- `PAD`: [`lib/pdf/judge.py`](#lib-pdf-judge-py)
 - `page_furniture`: [`lib/pdf/select.py`](#lib-pdf-select-py)
 - `page_hrules`: [`lib/pdf/content.py`](#lib-pdf-content-py)
 - `page_hrules`: [`lib/pdf/ruled.py`](#lib-pdf-ruled-py)
@@ -7386,6 +7502,8 @@ class MarkdownWriter:
 - `predict`: [`lib/pdf/classify.py`](#lib-pdf-classify-py)
 - `promote_abstract_from_uncertain`: [`lib/body/abstract.py`](#lib-body-abstract-py)
 - `prompt_elements`: [`lib/pdf/summary.py`](#lib-pdf-summary-py)
+- `prompt_text`: [`lib/pdf/judge.py`](#lib-pdf-judge-py)
+- `PROMPT_VERSION`: [`lib/pdf/judge.py`](#lib-pdf-judge-py)
 - `PROMPTS_DIR`: [`prompts/render.py`](#prompts-render-py)
 - `propagate_monospace`: [`lib/pdf/mono.py`](#lib-pdf-mono-py)
 - `Provenance`: [`domain/elements.py`](#domain-elements-py)
@@ -7410,12 +7528,14 @@ class MarkdownWriter:
 - `recorded_regions`: [`lib/pdf/visibility.py`](#lib-pdf-visibility-py)
 - `records_candidates`: [`lib/pdf/records.py`](#lib-pdf-records-py)
 - `region_features`: [`lib/pdf/classify.py`](#lib-pdf-classify-py)
+- `region_readings`: [`lib/pdf/judge.py`](#lib-pdf-judge-py)
 - `REGISTRY`: [`lib/pdf/checks/registry.py`](#lib-pdf-checks-registry-py)
 - `rejected_regions`: [`lib/pdf/flag.py`](#lib-pdf-flag-py)
 - `RelationRecord`: [`lib/pdf/relations.py`](#lib-pdf-relations-py)
 - `remove_hidden_text`: [`lib/pdf/visibility.py`](#lib-pdf-visibility-py)
 - `remove_table_regions`: [`lib/pdf/select.py`](#lib-pdf-select-py)
 - `render_body`: [`lib/html/render.py`](#lib-html-render-py)
+- `render_crops`: [`lib/pdf/judge.py`](#lib-pdf-judge-py)
 - `render_pdf_pages`: [`lib/golden_qa.py`](#lib-golden-qa-py)
 - `render_prompt`: [`prompts/render.py`](#prompts-render-py)
 - `renumber_uncertain_markers`: [`lib/pdf/emit.py`](#lib-pdf-emit-py)
