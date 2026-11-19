@@ -170,3 +170,32 @@ fresh10, the reserved pool and the new mailing stay untouched.
   crop. A prompt fix would reach about 5 tables and is not applied.
 
 Next: step 4, one fresh7–9 check against gt16. At the measured rate it costs about $1.50.
+
+## Step 4 result: fresh7–9 check (2026-11-19)
+
+- Pass 1, without answers, matches gt16 exactly.
+- 242 requests, all answered, for $2.15.
+  - The judge kept today's choice in 181 regions.
+  - It switched in 50 at high or medium confidence, and in 11 at low confidence (ignored).
+- With answers: **78.57% → 81.16% (+2.59 pts)**.
+  - 16 tables better, 2 worse (−0.11), both of them now missing tables.
+  - False or formatting tables went from 169 to 158.
+
+| set | gt16 | jt1 | better / worse |
+|---|---|---|---|
+| fresh7 | 80.87 | 86.15 | 9 / 1 |
+| fresh8 | 85.99 | 86.20 | 5 / 1 |
+| fresh9 | 65.26 | 68.77 | 2 / 0 |
+
+The check gains as much as the dev side (+2.33), so the gain generalizes. Total API spend for steps 3–4 was $6.92.
+
+## Open issues after step 4
+
+- Picks that join two stacked tables shown in one crop cause most of the losses: 4 of 5 on the dev side. The two
+  fresh losses are also missing tables and are not yet traced.
+- `anthropic` is installed in the local venv only. It is not yet declared as a `cli` dependency, and `uv.lock` is
+  unchanged.
+- `packages/cli/tests/test_reading_judge.py::test_run_convert_live_persists_new_answers_and_off_passes_no_judge` needs
+  cli's full dependencies. It has not run locally, so CI is its first run.
+- Step 5 is undecided: whether the judge is on by default, and the cost per paper in production (about $0.01 per
+  disagreeing region).
