@@ -13,7 +13,7 @@ args:
   required: [paper]
 ---
 
-Note: This prompt is tested against the runvil-gateway commit in `crates/paperweight/Cargo.toml`, under`[package.metadata.runvil-gateway]`. When you test it against a different gateway, update that commit.
+Note: This prompt is tested against the runvil-gateway commit in `crates/paperweight/Cargo.toml`, under `[package.metadata.runvil-gateway]`. When you test it against a different gateway, update that commit.
 
 ---
 
