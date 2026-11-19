@@ -1,6 +1,6 @@
 # Reading judge: design (2026-11-18)
 
-Status: design. Nothing is built.
+Status: steps 1–3 done (commit 16ca3f2; dev-side run 2026-11-19: +2.33 pts, see Step 3 result).
 
 ## Problem
 
@@ -154,3 +154,19 @@ fresh10, the reserved pool and the new mailing stay untouched.
 - Answers stay stable only through the cache. A model or prompt change invalidates every cached answer and costs a
   full rerun.
 - Running the pipeline needs an API key, and this shell has none in its environment.
+
+## Step 3 result: dev-side gate run (2026-11-19)
+
+- Requests: 436 over the 8 dev-side sets, more than the 285-region trial pool. The run also judges regions with no key
+  table.
+- Pass 1, without answers, matches gd19 exactly.
+- Cache filled live with claude-opus-5-5 at medium effort for $4.77, about $0.011 per call. Every request was answered.
+- Pass 2, with answers: **79.63% → 81.96% (+2.33 pts)**.
+  - 44 tables better, 5 worse (−0.15).
+  - False or formatting tables went from 213 to 204.
+  - 6 of 8 sets gain; dev and fresh are flat; no set loses.
+- The low-confidence rule ignored 9 switches.
+- The 5 losses become missing tables. In 4 of them the judge picked a reading that joins two stacked tables shown in one
+  crop. A prompt fix would reach about 5 tables and is not applied.
+
+Next: step 4, one fresh7–9 check against gt16. At the measured rate it costs about $1.50.
