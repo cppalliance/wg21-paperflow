@@ -1,7 +1,7 @@
 # Page tables: a model reads the page, tomd keeps the words (2026-11-20)
 
 Status: built behind `--page-tables off|cache|live` (default off). The dev-side trial reproduces exactly through the
-pipeline. The fresh7–9 check is next.
+pipeline. fresh7–9 sample check (2026-11-21): about +9.5 pts estimated, no table worse.
 
 ## Problem
 
@@ -61,6 +61,27 @@ Trial: `work/paperflow/tools/mstruct_*.py` in the poc, $10.70.
   - 81.39% on all 294 tables, the same score per table as the trial's add;
   - 85 tables better than today, 0 worse.
 
+## fresh7–9 sample check (2026-11-21)
+
+- Sample, $8.83, 623 pages:
+  - 20 papers drawn in proportion to lost points. They hold 13.9 of fresh7–9's 18.84 lost points.
+  - 10 random papers with no loss today, to catch damage.
+- Run through the pipeline with the committed code (judge answers from the fresh7–9 cache), and compared per table with
+  jt1 (81.16%).
+- Tools: `pt_analyze.py`, `pt_estimate.py` in the poc.
+
+| | |
+|---|---|
+| sample, 166 key tables | 58.22% → 71.50%; 38 tables better, 0 worse |
+| pool estimate | **+9.5 ± 1.9 pts** (81.16% → about 90.7%) |
+| lost points recovered, lossy papers | 51% on average |
+| false or formatting tables in the sample | 24 → 33 |
+
+- The gain is broad: 11 of the 20 lossy papers recover 79–100% of their lost points. 8 recover nothing: their losses are
+  in tables tomd emits wrongly, which add-only does not touch.
+- Unlike the dev side, no single deck carries the result. fresh7–9 has no skipped deck with key tables.
+- This is a sample estimate, not a full run. The ±1.9 is the sampling error of the proportional stratum.
+
 ## Cost
 
 - About $0.017 per page (Opus 5.5, about 3,250 input and 200 output tokens per page).
@@ -69,8 +90,8 @@ Trial: `work/paperflow/tools/mstruct_*.py` in the poc, $10.70.
 
 ## Open issues
 
-- The pool estimate rests on one deck (6.6 of 9.3 points). fresh7–9's 11.16 missed points are spread out (largest paper
-  2.59). The fresh7–9 check measures how much of that add-only recovers.
+- Dev side: the pool estimate rests on one deck (6.6 of 9.3 points). fresh7–9, with no such deck, estimates +9.5.
+- Tables tomd emits wrongly are not touched (replace lost on the dev side). They hold most of what is left.
 - Add creates false tables: 73 in the deck, 1–6 in most other papers. They cost no accuracy points, but they are noise in
   the output. No check filters them yet (e.g. TRUTH_PROTOCOL's not-a-table kinds, or `table_use`).
 - Tokens matched only inside the page text (part of a word) are kept without a box; the cell uses the table's box.
