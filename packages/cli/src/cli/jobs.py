@@ -250,11 +250,6 @@ async def run_download(
 ) -> dict:
     """Download source files for papers. Workers are async httpx calls.
 
-    ``judge_tables`` (``off`` | ``cache`` | ``live``, :mod:`cli.reading_judge`)
-    answers tomd's reading-judge requests from the paper's ``judge``
-    intermediate (``cache``), calling the model on a miss (``live``); new
-    answers are persisted to that intermediate.
-
     ``on_progress`` is invoked after each task completion with a
     :class:`~paperstore.progress.ProgressEvent`.
     """
@@ -270,9 +265,6 @@ async def run_download(
 
     total = len(to_process)
     semaphore = asyncio.Semaphore(concurrency)
-    judge_client = JudgeClient() if judge_tables == "live" else None
-    # live judging waits on model calls, one per disagreeing table region
-    timeout = 900 if judge_tables == "live" else 120
 
     async with default_client() as http:
 
@@ -394,6 +386,11 @@ async def run_convert(
     in extracts vector figures (path-operator clusters) as PNGs
     alongside raster images.
 
+    ``judge_tables`` (``off`` | ``cache`` | ``live``, :mod:`cli.reading_judge`)
+    answers tomd's reading-judge requests from the paper's ``judge``
+    intermediate (``cache``), calling the model on a miss (``live``); new
+    answers are persisted to that intermediate.
+
     ``on_progress`` is invoked after each task completion with a
     :class:`~paperstore.progress.ProgressEvent`.
     """
@@ -424,6 +421,10 @@ async def run_convert(
             source_file=row.source_file,
             markdown_path=row.markdown_path,
         )
+
+    judge_client = JudgeClient() if judge_tables == "live" else None
+    # live judging waits on model calls, one per disagreeing table region
+    timeout = 900 if judge_tables == "live" else 120
 
     in_flight: set[str] = set()
 

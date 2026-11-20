@@ -15,6 +15,7 @@ dependencies = [
     "httpx",
     "pydantic-ai",
     "rich",
+    "anthropic>=0.98",
 ]
 
 [project.scripts]

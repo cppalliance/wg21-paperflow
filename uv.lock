@@ -555,6 +555,7 @@ version = "0.4.1"
 source = { editable = "packages/cli" }
 dependencies = [
     { name = "agora" },
+    { name = "anthropic" },
     { name = "assay" },
     { name = "httpx" },
     { name = "mailing" },
@@ -568,6 +569,7 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "agora", editable = "packages/agora" },
+    { name = "anthropic", specifier = ">=0.98" },
     { name = "assay", editable = "packages/assay" },
     { name = "httpx" },
     { name = "mailing", editable = "packages/mailing" },

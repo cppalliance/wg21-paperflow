@@ -193,9 +193,11 @@ The check gains as much as the dev side (+2.33), so the gain generalizes. Total 
 
 - Picks that join two stacked tables shown in one crop cause most of the losses: 4 of 5 on the dev side. The two
   fresh losses are also missing tables and are not yet traced.
-- `anthropic` is installed in the local venv only. It is not yet declared as a `cli` dependency, and `uv.lock` is
-  unchanged.
-- `packages/cli/tests/test_reading_judge.py::test_run_convert_live_persists_new_answers_and_off_passes_no_judge` needs
-  cli's full dependencies. It has not run locally, so CI is its first run.
+- Fixed after step 4 (2026-11-19):
+  - `anthropic>=0.98` is now declared as a `cli` dependency. `uv.lock` gains two lines, and `uv lock --check` passes.
+    The locked 0.98.1 accepts `output_config`.
+  - The judge setup in `jobs.py` had landed in `run_download` instead of `run_convert`, so both commands raised
+    NameError. The benchmark runs went through the poc tools and missed it. The run_convert test, run in a
+    temporary environment with cli's dependencies, caught it, and it now passes.
 - Step 5 is undecided: whether the judge is on by default, and the cost per paper in production (about $0.01 per
   disagreeing region).
