@@ -29,6 +29,7 @@ def convert_one_paper(
     extract_vector: bool = False,
     whiteout_text: bool = False,
     judge: "Callable[[Path, list[dict]], dict[str, dict]] | None" = None,
+    page_tables: "Callable[[Path], dict[str, dict]] | None" = None,
 ) -> "ConvertResult":
     """Convert a staged paper source to markdown. No LLM, no I/O beyond
     reading the source file.
@@ -45,6 +46,11 @@ def convert_one_paper(
     ``judge`` (opt-in, :mod:`cli.reading_judge`) answers tomd's reading-judge
     requests. When it answers any, the paper is converted a second time with
     those answers, so the picked table readings are the ones emitted.
+
+    ``page_tables`` (opt-in, :mod:`cli.page_tables`) answers tomd's page-table
+    requests before converting; tomd adds the tables read from the page images
+    where it selected none, and a paper tomd skips (slide deck, standards draft)
+    emits its tables instead.
 
     Typed PDF skips (``SkipReason``) return a :class:`ConvertResult` with
     ``status="skipped"`` instead of raising.
@@ -77,10 +83,13 @@ def convert_one_paper(
         "url": paper.url,
     }
 
+    page_answers = (page_tables(source_path) or None) if (
+        page_tables is not None and source_path.suffix.lower() == ".pdf") else None
     converted = convert_paper_full(
         paper_id, source_path, meta,
         extract_vector=extract_vector,
         whiteout_text=whiteout_text,
+        page_tables=page_answers,
     )
     if judge is not None and not converted.skipped and converted.judge_requests:
         answers = judge(source_path, converted.judge_requests)
@@ -90,6 +99,7 @@ def convert_one_paper(
                 extract_vector=extract_vector,
                 whiteout_text=whiteout_text,
                 reading_judge=answers,
+                page_tables=page_answers,
             )
     if converted.skipped:
         return ConvertResult(

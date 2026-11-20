@@ -35,6 +35,7 @@ import httpx
 from cli.errors import EmptyTargetsError, MixedTargetsError
 from cli.models import Paper
 from cli.orchestrator import convert_one_paper
+from cli.page_tables import PageTablesClient, make_page_tables
 from cli.reading_judge import JudgeClient, make_judge
 from cli.targets import MONTH_RE, resolve_pid
 from mailing.download import content_length, default_client, download_paper
@@ -373,6 +374,7 @@ async def run_convert(
     extract_vector: bool = False,
     whiteout_text: bool = False,
     judge_tables: str = "off",
+    page_tables: str = "off",
     on_progress: ProgressCallback | None = None,
 ) -> dict:
     """Convert staged source files to markdown. Workers run in threads.
@@ -390,6 +392,10 @@ async def run_convert(
     answers tomd's reading-judge requests from the paper's ``judge``
     intermediate (``cache``), calling the model on a miss (``live``); new
     answers are persisted to that intermediate.
+
+    ``page_tables`` (``off`` | ``cache`` | ``live``, :mod:`cli.page_tables`)
+    answers tomd's page-table requests the same way, from the paper's
+    ``pagetables`` intermediate.
 
     ``on_progress`` is invoked after each task completion with a
     :class:`~paperstore.progress.ProgressEvent`.
@@ -423,8 +429,10 @@ async def run_convert(
         )
 
     judge_client = JudgeClient() if judge_tables == "live" else None
-    # live judging waits on model calls, one per disagreeing table region
-    timeout = 900 if judge_tables == "live" else 120
+    pages_client = PageTablesClient() if page_tables == "live" else None
+    # live judging waits on model calls, one per disagreeing table region;
+    # live page tables, one per page
+    timeout = 3600 if page_tables == "live" else 900 if judge_tables == "live" else 120
 
     in_flight: set[str] = set()
 
@@ -436,6 +444,8 @@ async def run_convert(
                 paper = _make_paper(paper_row)
                 judge_cache = (backend.read_intermediate(pid, "judge") or {}) if judge_tables != "off" else None
                 cached = dict(judge_cache or {})
+                pages_cache = (backend.read_intermediate(pid, "pagetables") or {}) if page_tables != "off" else None
+                pages_cached = dict(pages_cache or {})
                 # Worker reads the source but does no backend writes;
                 # the main coroutine persists through the backend below.
                 result = await asyncio.wait_for(
@@ -445,6 +455,7 @@ async def run_convert(
                         extract_vector=extract_vector,
                         whiteout_text=whiteout_text,
                         judge=make_judge(judge_tables, judge_cache, judge_client),
+                        page_tables=make_page_tables(page_tables, pages_cache, pages_client),
                     ),
                     timeout=timeout,
                 )
@@ -475,6 +486,7 @@ async def run_convert(
                     "images": result.images,
                     "summary": result.summary,
                     "judge_cache": judge_cache if judge_cache != cached else None,
+                    "pages_cache": pages_cache if pages_cache != pages_cached else None,
                     "status": "ok",
                 }
             except RuntimeError as exc:
@@ -526,6 +538,8 @@ async def run_convert(
                 backend.write_intermediate(pid, "summary", result["summary"])
             if result.get("judge_cache"):
                 backend.write_intermediate(pid, "judge", result["judge_cache"])
+            if result.get("pages_cache"):
+                backend.write_intermediate(pid, "pagetables", result["pages_cache"])
             backend.record_markdown(pid, md_path, intent=result["intent"])
             succeeded.append(pid)
         elif result["status"] == "skipped":

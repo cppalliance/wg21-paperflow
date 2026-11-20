@@ -1,6 +1,6 @@
 # tomd API surface
 
-121 modules, 93 classes, 319 functions, 93 methods, 387 fields. Typed: 958 of 1235 functions and methods (77%).
+122 modules, 93 classes, 324 functions, 93 methods, 387 fields. Typed: 962 of 1247 functions and methods (77%).
 
 ## Contents
 
@@ -78,6 +78,7 @@
 - [`lib/pdf/judge.py`](#lib-pdf-judge-py): answer_pick, judge_request, norm_rows, prompt_text, region_readings, render_crops, CONFIDENT, CROP_DPI, ID_ROUND, INSTRUCTIONS, LETTERS, MAX_EDGE, ...
 - [`lib/pdf/levels.py`](#lib-pdf-levels-py): assign, cell_markers, comment, NAMES, SHOWN_FROM
 - [`lib/pdf/mono.py`](#lib-pdf-mono-py): classify_monospace, propagate_monospace
+- [`lib/pdf/page_tables.py`](#lib-pdf-page-tables-py): model_tables, page_table_requests, render_page, request_id, section_boxes, INSTRUCTIONS, MAX_EDGE, PROMPT_VERSION, RENDER_DPI, SCHEMA, SOURCE
 - [`lib/pdf/pagecache.py`](#lib-pdf-pagecache-py): rawdict, words_in
 - [`lib/pdf/pipeline.py`](#lib-pdf-pipeline-py): PipelineResult, dropped_nomination_regions, run_pipeline
 - [`lib/pdf/poll.py`](#lib-pdf-poll-py): extract_poll_tables
@@ -217,7 +218,7 @@ def convert_paper(paper_id: str, source_path: Path, meta: dict) -> tuple[str, li
     """
     # calls: convert_paper_full
 
-def convert_paper_full(paper_id: str, source_path: Path, meta: dict, *, html_images_manifest=None, extract_vector: bool = False, whiteout_text: bool = False, table_gate: Mapping[str, bool] | None = None, reading_judge: Mapping[str, Mapping] | None = None) -> ConvertedPaper:
+def convert_paper_full(paper_id: str, source_path: Path, meta: dict, *, html_images_manifest=None, extract_vector: bool = False, whiteout_text: bool = False, table_gate: Mapping[str, bool] | None = None, reading_judge: Mapping[str, Mapping] | None = None, page_tables: Mapping[str, Mapping] | None = None) -> ConvertedPaper:
     """Convert a staged source file, returning markdown AND image data.
 
     All inputs are pre-fetched by the caller. Reads ``source_path`` from
@@ -249,6 +250,11 @@ def convert_paper_full(paper_id: str, source_path: Path, meta: dict, *, html_ima
     ``reading_judge`` (PDF only, opt-in) holds outside answers keyed by judge
     request id; see :mod:`tomd.lib.pdf.judge`. The result's ``judge_requests``
     lists every table region whose readings disagree, for a resolver.
+
+    ``page_tables`` (PDF only, opt-in) holds outside answers keyed by page
+    request id; see :mod:`tomd.lib.pdf.page_tables`. Tables read from the page
+    images are added where no selected table sits; a paper tomd would skip
+    (slide deck, standards draft) with answers emits its tables instead.
     """
     # untyped: html_images_manifest
     # calls: _convert_with_tomd_full, ConvertedPaper.skipped_from, _normalize_front_matter, _strip_body_metadata_text, format.parse_front_matter, _strip_toc, emit.renumber_uncertain_markers, _extract_intent_from_front_matter, ConvertedPaper
@@ -4211,6 +4217,82 @@ def propagate_monospace(mupdf_blocks: list[Block], spatial_blocks: list[Block], 
 # + 6 private module-level names
 ```
 
+<a id="lib-pdf-page-tables-py"></a>
+
+## `lib/pdf/page_tables.py` ([source](../../src/tomd/lib/pdf/page_tables.py))
+
+Typed: 4 of 10 functions and methods (40%).
+
+```python
+"""Tables read from the page image by an outside model (opt-in).
+
+tomd makes no model calls. :func:`page_table_requests` lists one request per
+page; a resolver outside tomd shows each page image to a vision model, which
+writes out the tables on it as rows of cells (:data:`INSTRUCTIONS`,
+:data:`SCHEMA`). Given those answers, :func:`model_tables` turns them into
+table sections:
+
+- Words stay verbatim. A cell keeps a token only where the page has it, as a
+  word (each page word used once) or inside the page's text; any other token
+  the model wrote is dropped. The model proposes the structure, never the words.
+- Pieces the model marks as continuing are joined across consecutive pages
+  when their column counts agree. A header repeated at the top of the next
+  piece is dropped.
+- A model table is used only where no table tomd selected overlaps it (the
+  caller passes those). Measured on 23 dev-side papers and one slide deck
+  (2026-11-20): this adds tables where tomd had none, with no key table worse.
+  Letting the model replace tomd's tables lost as often as it won, so it never
+  does (docs/plans/tomd-tables-port/page-tables.md).
+
+Request: ``{"id", "page"}``. The id hashes the prompt version and the rendered
+page PNG, so an answer applies only to the page image it was given for.
+Answer: ``{"tables": [{"rows": [[str]], "continues_from_previous_page": bool,
+"continues_on_next_page": bool}]}``. A missing or malformed answer adds nothing.
+"""
+
+def model_tables(doc, render_doc, answers: Mapping[str, Mapping] | None, existing: list[Section], skip_pages=()) -> list[Section]:
+    """Table sections from the answers, where no existing table overlaps.
+
+    ``doc`` gives the words (hidden text already removed); ``render_doc`` is
+    the unmodified document whose page images the ids were made from.
+    """
+    # untyped: doc, render_doc, skip_pages
+    # calls: section_boxes, _valid, request_id, render_page, _norm, _piece, _overlaps, _cells, types.TableCandidate, select._to_section
+    # called by: pipeline._deck_tables, pipeline._page_model_tables
+
+def page_table_requests(doc) -> list[dict]:
+    """One request per page of an open document."""
+    # untyped: doc
+    # calls: request_id, render_page
+
+def render_page(page) -> bytes:
+    """The page image the model is shown: RENDER_DPI, long edge at most MAX_EDGE pixels."""
+    # untyped: page
+    # called by: model_tables, page_table_requests
+
+def request_id(png: bytes) -> str:
+    # called by: model_tables, page_table_requests
+    ...
+
+def section_boxes(sec: Section) -> dict[int, Box]:
+    """Page -> bounding box of a table section's lines (its region when it has no lines)."""
+    # called by: model_tables
+
+INSTRUCTIONS = ...
+
+MAX_EDGE = 1568  # pixels: larger pages are scaled down
+
+PROMPT_VERSION = 'page-tables-1'
+
+RENDER_DPI = 150
+
+SCHEMA = ...
+
+SOURCE = 'page-model'
+
+# + 5 private module-level names
+```
+
 <a id="lib-pdf-pagecache-py"></a>
 
 ## `lib/pdf/pagecache.py` ([source](../../src/tomd/lib/pdf/pagecache.py))
@@ -4246,7 +4328,7 @@ def words_in(page, bbox):
 
 ## `lib/pdf/pipeline.py` ([source](../../src/tomd/lib/pdf/pipeline.py))
 
-Typed: 30 of 46 functions and methods (65%).
+Typed: 30 of 48 functions and methods (62%).
 
 ```python
 """PDF to Markdown converter - pipeline entry point."""
@@ -4313,7 +4395,7 @@ def dropped_nomination_regions(record, tables) -> list:
     # calls: _overlap
     # called by: run_pipeline
 
-def run_pipeline(path: Path, *, ml_tables: bool = False, visualize: bool = False, extract_vector: bool = False, whiteout_text: bool = False, table_gate: Mapping[str, bool] | None = None, reading_judge: Mapping[str, Mapping] | None = None) -> PipelineResult:
+def run_pipeline(path: Path, *, ml_tables: bool = False, visualize: bool = False, extract_vector: bool = False, whiteout_text: bool = False, table_gate: Mapping[str, bool] | None = None, reading_judge: Mapping[str, Mapping] | None = None, page_tables: Mapping[str, Mapping] | None = None) -> PipelineResult:
     """Run the full PDF conversion pipeline, returning all intermediate data.
 
     ``extract_vector`` opts in to vector-figure extraction (v2.0 default
@@ -4335,11 +4417,17 @@ def run_pipeline(path: Path, *, ml_tables: bool = False, visualize: bool = False
     (:mod:`tomd.lib.pdf.judge`): where the table readers disagree, a confident
     answer picks the reading to emit. ``result.judge_requests`` lists every
     such region, for a resolver to answer.
+
+    ``page_tables`` holds outside answers keyed by page request id
+    (:mod:`tomd.lib.pdf.page_tables`): a table a vision model read from the
+    page image is added where no selected table overlaps it, with only the
+    page's own words. A paper tomd skips (slide deck, standards draft) emits
+    those tables instead when it has answers.
     labels inside vector figures render as pixels alongside body text.
     """
-    # calls: PipelineResult, images._VectorExtractionStats, _enforce_skip_contract, PipelineResult.for_skip, _is_slide_deck, _is_standards_draft, visibility.remove_hidden_text, visibility.check_page, extract.extract_mupdf, extract.extract_spatial, cleanup.get_edge_items, extract.collect_links, +106 more
+    # calls: PipelineResult, images._VectorExtractionStats, _enforce_skip_contract, PipelineResult.for_skip, _is_slide_deck, _deck_tables, _is_standards_draft, visibility.remove_hidden_text, visibility.check_page, extract.extract_mupdf, extract.extract_spatial, cleanup.get_edge_items, +108 more
 
-# + 43 private module-level names
+# + 45 private module-level names
 ```
 
 <a id="lib-pdf-poll-py"></a>
@@ -6126,7 +6214,7 @@ def hide_recorded(doc) -> None:
     """
     # untyped: doc
     # calls: runctx.current, remove_hidden_text
-    # called by: pipeline._build_scan_tables, pipeline.run_pipeline, scan.run_scan
+    # called by: pipeline._build_scan_tables, pipeline._page_model_tables, pipeline.run_pipeline, scan.run_scan
 
 def recorded_regions() -> list[dict]:
     """Every region recorded in this run, in page order."""
@@ -7406,6 +7494,7 @@ class MarkdownWriter:
 - `inside_vetoed`: [`lib/pdf/table_gate.py`](#lib-pdf-table-gate-py)
 - `INSTRUCTIONS`: [`lib/pdf/airepair.py`](#lib-pdf-airepair-py)
 - `INSTRUCTIONS`: [`lib/pdf/judge.py`](#lib-pdf-judge-py)
+- `INSTRUCTIONS`: [`lib/pdf/page_tables.py`](#lib-pdf-page-tables-py)
 - `is_code_comparison`: [`lib/pdf/emit.py`](#lib-pdf-emit-py)
 - `is_diagram_block`: [`lib/pdf/code_format.py`](#lib-pdf-code-format-py)
 - `is_flagged_table`: [`lib/pdf/emit.py`](#lib-pdf-emit-py)
@@ -7447,6 +7536,7 @@ class MarkdownWriter:
 - `mark_matrix`: [`lib/pdf/select.py`](#lib-pdf-select-py)
 - `MarkdownWriter`: [`writers/markdown/writer.py`](#writers-markdown-writer-py)
 - `MAX_EDGE`: [`lib/pdf/judge.py`](#lib-pdf-judge-py)
+- `MAX_EDGE`: [`lib/pdf/page_tables.py`](#lib-pdf-page-tables-py)
 - `MAX_FILL`: [`lib/pdf/rowbands.py`](#lib-pdf-rowbands-py)
 - `MAX_PAGES`: [`lib/pdf/judge.py`](#lib-pdf-judge-py)
 - `MAX_WORDS`: [`lib/pdf/airepair.py`](#lib-pdf-airepair-py)
@@ -7463,6 +7553,7 @@ class MarkdownWriter:
 - `MIXED_TABLE_MARKER`: [`lib/tables.py`](#lib-tables-py)
 - `MODEL`: [`lib/pdf/dvf_model.py`](#lib-pdf-dvf-model-py)
 - `MODEL`: [`lib/pdf/scan_model.py`](#lib-pdf-scan-model-py)
+- `model_tables`: [`lib/pdf/page_tables.py`](#lib-pdf-page-tables-py)
 - `NAMES`: [`lib/pdf/levels.py`](#lib-pdf-levels-py)
 - `NEAR`: [`lib/pdf/continuation.py`](#lib-pdf-continuation-py)
 - `norm_rows`: [`lib/pdf/judge.py`](#lib-pdf-judge-py)
@@ -7482,6 +7573,7 @@ class MarkdownWriter:
 - `page_hrules`: [`lib/pdf/content.py`](#lib-pdf-content-py)
 - `page_hrules`: [`lib/pdf/ruled.py`](#lib-pdf-ruled-py)
 - `PAGE_NUM_RE`: [`lib/pdf/types.py`](#lib-pdf-types-py)
+- `page_table_requests`: [`lib/pdf/page_tables.py`](#lib-pdf-page-tables-py)
 - `page_text`: [`lib/pdf/content.py`](#lib-pdf-content-py)
 - `page_words`: [`lib/pdf/content.py`](#lib-pdf-content-py)
 - `PageEdgeItem`: [`lib/pdf/types.py`](#lib-pdf-types-py)
@@ -7504,6 +7596,7 @@ class MarkdownWriter:
 - `prompt_elements`: [`lib/pdf/summary.py`](#lib-pdf-summary-py)
 - `prompt_text`: [`lib/pdf/judge.py`](#lib-pdf-judge-py)
 - `PROMPT_VERSION`: [`lib/pdf/judge.py`](#lib-pdf-judge-py)
+- `PROMPT_VERSION`: [`lib/pdf/page_tables.py`](#lib-pdf-page-tables-py)
 - `PROMPTS_DIR`: [`prompts/render.py`](#prompts-render-py)
 - `propagate_monospace`: [`lib/pdf/mono.py`](#lib-pdf-mono-py)
 - `Provenance`: [`domain/elements.py`](#domain-elements-py)
@@ -7536,6 +7629,8 @@ class MarkdownWriter:
 - `remove_table_regions`: [`lib/pdf/select.py`](#lib-pdf-select-py)
 - `render_body`: [`lib/html/render.py`](#lib-html-render-py)
 - `render_crops`: [`lib/pdf/judge.py`](#lib-pdf-judge-py)
+- `RENDER_DPI`: [`lib/pdf/page_tables.py`](#lib-pdf-page-tables-py)
+- `render_page`: [`lib/pdf/page_tables.py`](#lib-pdf-page-tables-py)
 - `render_pdf_pages`: [`lib/golden_qa.py`](#lib-golden-qa-py)
 - `render_prompt`: [`prompts/render.py`](#prompts-render-py)
 - `renumber_uncertain_markers`: [`lib/pdf/emit.py`](#lib-pdf-emit-py)
@@ -7545,6 +7640,7 @@ class MarkdownWriter:
 - `REPEATING_THRESHOLD`: [`lib/pdf/types.py`](#lib-pdf-types-py)
 - `REPLY_TO_CONTINUATION_CAP`: [`lib/pdf/wg21.py`](#lib-pdf-wg21-py)
 - `REPLY_TO_RE`: [`lib/pdf/types.py`](#lib-pdf-types-py)
+- `request_id`: [`lib/pdf/page_tables.py`](#lib-pdf-page-tables-py)
 - `rescue_stranded_abstract_body`: [`lib/body/abstract.py`](#lib-body-abstract-py)
 - `resegment_rows`: [`lib/pdf/validate.py`](#lib-pdf-validate-py)
 - `review_ideal`: [`lib/golden_qa.py`](#lib-golden-qa-py)
@@ -7569,11 +7665,13 @@ class MarkdownWriter:
 - `RUNNING_FOOTER_MAX_WORDS`: [`lib/pdf/types.py`](#lib-pdf-types-py)
 - `same_code`: [`lib/pdf/codepair.py`](#lib-pdf-codepair-py)
 - `sanitize_metadata`: [`lib/metadata_yaml/format.py`](#lib-metadata-yaml-format-py)
+- `SCHEMA`: [`lib/pdf/page_tables.py`](#lib-pdf-page-tables-py)
 - `score_report`: [`lib/golden_qa.py`](#lib-golden-qa-py)
 - `score_result`: [`lib/golden_qa.py`](#lib-golden-qa-py)
 - `score_stem`: [`lib/golden_qa.py`](#lib-golden-qa-py)
 - `ScoreResult`: [`lib/golden_qa.py`](#lib-golden-qa-py)
 - `Section`: [`lib/pdf/types.py`](#lib-pdf-types-py)
+- `section_boxes`: [`lib/pdf/page_tables.py`](#lib-pdf-page-tables-py)
 - `SECTION_NUM_PATTERN`: [`lib/shared.py`](#lib-shared-py)
 - `SECTION_NUM_PREFIX_RE`: [`lib/shared.py`](#lib-shared-py)
 - `SECTION_NUM_RE`: [`lib/pdf/types.py`](#lib-pdf-types-py)
@@ -7587,6 +7685,7 @@ class MarkdownWriter:
 - `similar`: [`lib/similarity.py`](#lib-similarity-py)
 - `SIMILARITY_THRESHOLD`: [`lib/pdf/types.py`](#lib-pdf-types-py)
 - `SkipReason`: [`domain/document.py`](#domain-document-py)
+- `SOURCE`: [`lib/pdf/page_tables.py`](#lib-pdf-page-tables-py)
 - `source_dir`: [`lib/golden_qa.py`](#lib-golden-qa-py)
 - `SOURCE_INFO`: [`lib/pdf/checks/nominations.py`](#lib-pdf-checks-nominations-py)
 - `SOURCES`: [`lib/pdf/classify.py`](#lib-pdf-classify-py)

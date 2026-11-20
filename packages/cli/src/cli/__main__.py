@@ -104,7 +104,7 @@ _COMMANDS = {
 _VERB_FLAGS: dict[str, set[str]] = {
     "mailing":   {"force"},
     "download":  {"force", "concurrency"},
-    "convert":   {"force", "concurrency", "check_content", "check_content_json", "keep_downstream", "yes", "extract_vector_images", "vector_whiteout_text", "judge_tables"},
+    "convert":   {"force", "concurrency", "check_content", "check_content_json", "keep_downstream", "yes", "extract_vector_images", "vector_whiteout_text", "judge_tables", "page_tables"},
     "full":      {"force", "verify", "concurrency", "extract_vector_images", "vector_whiteout_text"},
     "agora":     {"debug", "trace", "step", "force", "no_research"},
     "assay":     {"debug", "trace", "step", "force", "rerender"},
@@ -175,6 +175,14 @@ _FLAG_DEFS: list[dict] = [
               "pick the reading from the page crop. 'cache' uses only answers "
               "stored in <pid>.judge.json; 'live' also asks the model on a miss "
               "(needs Claude API credentials, and costs money) and stores the answer."),
+    dict(name="page_tables", flags=["--page-tables"], choices=["off", "cache", "live"],
+         default="off",
+         help="On convert: let a vision model read the tables on each page image; "
+              "tomd adds those it found no table for, with the page's own words, "
+              "and converts the tables of a paper it would skip (slide deck, long draft). 'cache' "
+              "uses only answers stored in <pid>.pagetables.json; 'live' also asks "
+              "the model on a miss (needs Claude API credentials, and costs about "
+              "$0.02 per page) and stores the answer."),
 ]
 
 _PAPER_ID_RE = re.compile(r"^[PND]\d{3,5}(R\d+)?$", re.IGNORECASE)

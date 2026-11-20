@@ -319,6 +319,7 @@ def _convert_with_tomd_full(
     whiteout_text: bool = False,
     table_gate: Mapping[str, bool] | None = None,
     reading_judge: Mapping[str, Mapping] | None = None,
+    page_tables: Mapping[str, Mapping] | None = None,
 ) -> _RawConversion:
     """Dispatch by file suffix, returning the full pipeline output.
 
@@ -342,6 +343,7 @@ def _convert_with_tomd_full(
             whiteout_text=whiteout_text,
             table_gate=table_gate,
             reading_judge=reading_judge,
+            page_tables=page_tables,
         )
         raster = sum(1 for im in r.images if im.source == "raster")
         vector = sum(1 for im in r.images if im.source == "vector")
@@ -405,6 +407,7 @@ def convert_paper_full(
     whiteout_text: bool = False,
     table_gate: Mapping[str, bool] | None = None,
     reading_judge: Mapping[str, Mapping] | None = None,
+    page_tables: Mapping[str, Mapping] | None = None,
 ) -> ConvertedPaper:
     """Convert a staged source file, returning markdown AND image data.
 
@@ -437,6 +440,11 @@ def convert_paper_full(
     ``reading_judge`` (PDF only, opt-in) holds outside answers keyed by judge
     request id; see :mod:`tomd.lib.pdf.judge`. The result's ``judge_requests``
     lists every table region whose readings disagree, for a resolver.
+
+    ``page_tables`` (PDF only, opt-in) holds outside answers keyed by page
+    request id; see :mod:`tomd.lib.pdf.page_tables`. Tables read from the page
+    images are added where no selected table sits; a paper tomd would skip
+    (slide deck, standards draft) with answers emits its tables instead.
     """
     raw = _convert_with_tomd_full(
         source_path,
@@ -445,6 +453,7 @@ def convert_paper_full(
         whiteout_text=whiteout_text,
         table_gate=table_gate,
         reading_judge=reading_judge,
+        page_tables=page_tables,
     )
 
     if raw.prompts:

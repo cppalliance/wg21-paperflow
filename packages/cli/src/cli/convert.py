@@ -32,6 +32,7 @@ def command(args: argparse.Namespace, backend: StorageBackend) -> int:
     extract_vector = getattr(args, "extract_vector_images", False)
     whiteout_text = getattr(args, "vector_whiteout_text", False)
     judge_tables = getattr(args, "judge_tables", "off") or "off"
+    page_tables = getattr(args, "page_tables", "off") or "off"
 
     progress_ctx, on_progress = make_progress_handler("Convert")
 
@@ -44,6 +45,7 @@ def command(args: argparse.Namespace, backend: StorageBackend) -> int:
                 extract_vector=extract_vector,
                 whiteout_text=whiteout_text,
                 judge_tables=judge_tables,
+                page_tables=page_tables,
                 on_progress=on_progress,
             )
         )

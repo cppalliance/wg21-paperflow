@@ -100,6 +100,7 @@ from .docling_backend import (
 from ._fitz_lock import _FITZ_LOCK
 from .runctx import current, run_scope
 from .table_gate import gate_requests, inside_vetoed, veto_tables, vetoed_boxes
+from .page_tables import model_tables
 from .select import _is_bad, _to_section, page_furniture, remove_table_regions, select_tables, stitch_pages
 from .tagged import extract_tagged_tables
 from .ruled import extract_ruled_tables, page_hrules
@@ -1204,6 +1205,35 @@ def _overlap_share(a, b) -> float:
     return ix / max(1e-6, min((a[2] - a[0]) * (a[3] - a[1]), (b[2] - b[0]) * (b[3] - b[1])))
 
 
+def _deck_tables(doc, answers) -> "PipelineResult | None":
+    """A paper tomd skips (a slide deck, or a long paper taken for a standards
+    draft) that has outside page-image answers: its tables, in page order,
+    instead of the skip. None (the paper is skipped) when no table is found."""
+    if not answers:
+        return None
+    secs = model_tables(doc, doc, answers, [])
+    if not secs:
+        return None
+    from .emit import _render_section_md
+    md = ("<!-- tomd: skipped paper (slide deck or long draft); only its tables are converted, read from the page images "
+          "by an outside model with the pages' own words -->\n\n"
+          + "\n\n".join(_render_section_md(s).strip() for s in secs) + "\n")
+    _log.info("Skipped paper (%d pages): %d table(s) from page answers", doc.page_count, len(secs))
+    return PipelineResult(md=md, sections=secs, page_count=doc.page_count)
+
+
+def _page_model_tables(path, answers, existing, skip_pages=()):
+    """Table sections from outside page-image answers (page_tables.model_tables)."""
+    with _FITZ_LOCK:  # see _fitz_lock.py for why this lock is required
+        doc, raw = fitz.open(str(path)), fitz.open(str(path))
+        hide_recorded(doc)
+        try:
+            return model_tables(doc, raw, answers, existing, skip_pages)
+        finally:
+            doc.close()
+            raw.close()
+
+
 def _build_scan_tables(path, builds, blocks, page_rotations):
     """The scan's build band: an area likely to be a table that no reader kept
     is read by the content-first builder (pieces on consecutive pages joined by
@@ -2134,6 +2164,7 @@ def run_pipeline(
     whiteout_text: bool = False,
     table_gate: Mapping[str, bool] | None = None,
     reading_judge: Mapping[str, Mapping] | None = None,
+    page_tables: Mapping[str, Mapping] | None = None,
 ) -> PipelineResult:
     """Run the full PDF conversion pipeline, returning all intermediate data.
 
@@ -2156,6 +2187,12 @@ def run_pipeline(
     (:mod:`tomd.lib.pdf.judge`): where the table readers disagree, a confident
     answer picks the reading to emit. ``result.judge_requests`` lists every
     such region, for a resolver to answer.
+
+    ``page_tables`` holds outside answers keyed by page request id
+    (:mod:`tomd.lib.pdf.page_tables`): a table a vision model read from the
+    page image is added where no selected table overlaps it, with only the
+    page's own words. A paper tomd skips (slide deck, standards draft) emits
+    those tables instead when it has answers.
     labels inside vector figures render as pixels alongside body text.
     """
     path = Path(path)
@@ -2173,6 +2210,9 @@ def run_pipeline(
                 )
 
             if _is_slide_deck(doc):
+                deck = _deck_tables(doc, page_tables)
+                if deck is not None:
+                    return _enforce_skip_contract(deck)
                 _log.info("Detected slide deck (%d pages), skipping conversion",
                            page_count)
                 return _enforce_skip_contract(PipelineResult.for_skip(
@@ -2184,6 +2224,9 @@ def run_pipeline(
                 ))
 
             if _is_standards_draft(doc):
+                deck = _deck_tables(doc, page_tables)
+                if deck is not None:
+                    return _enforce_skip_contract(deck)
                 _log.info("Detected standards draft (%d pages), skipping conversion",
                            page_count)
                 return _enforce_skip_contract(PipelineResult.for_skip(
@@ -2631,6 +2674,17 @@ def run_pipeline(
                 all_spatial_blocks = remove_table_regions(all_spatial_blocks, built)
     except Exception as exc:  # the scan only adds marks, builds and doubts; never fail on it, never silently
         current().reader_error("region scan", None, exc)
+    # Tables an outside model read from the page images (opt-in): only where no
+    # selected table sits, and only with the page's own words.
+    if page_tables:
+        try:
+            added = _page_model_tables(path, page_tables, table_sections, page_rotations)
+            if added:
+                table_sections += added
+                all_mupdf_blocks = remove_table_regions(all_mupdf_blocks, added)
+                all_spatial_blocks = remove_table_regions(all_spatial_blocks, added)
+        except Exception as exc:  # outside answers only add tables; never fail on them, never silently
+            current().reader_error("page-model tables", None, exc)
     # a vetoed table still covers its area: the answer decided it, so it is not marked
     possible_tables = (scan_regions + rejected_regions(rejected, table_sections + vetoed)
                        + text_regions(all_mupdf_blocks) + gutter_regions(all_mupdf_blocks)
