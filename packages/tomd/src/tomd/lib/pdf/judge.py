@@ -42,6 +42,13 @@ CROP_DPI = 150
 MAX_EDGE = 1568          # pixels: larger crops are scaled down
 CONFIDENT = ("high", "medium")
 ID_ROUND = 1.0           # points: ids survive sub-point jitter in the boxes
+SEP = ("=== next table ===",)   # a row between tables in a reading that holds several (page_tables groups)
+_GROUP_NOTE = ("A reading may hold several tables, separated by a row \"=== next table ===\"; prefer the reading "
+               "that splits and joins tables as a person reading the page would. Count as a table: content laid "
+               "out in rows and columns, including poll results, before/after code comparisons, status and "
+               "feature-macro tables, and an unruled block of 2+ label/value rows at the top of a paper "
+               "(\"Document number: | P1234\"). Not a table: code listings, wording insert/delete boxes, a single "
+               "boxed code sample, tables of contents, bullet lists, figures.")
 
 INSTRUCTIONS = """You are judging table extraction from a PDF page.
 
@@ -131,6 +138,9 @@ def answer_pick(req: dict, answers: Mapping[str, Mapping] | None) -> tuple[int, 
 def prompt_text(req: dict) -> str:
     """The text half of the judge prompt: instructions and the lettered readings."""
     parts = [INSTRUCTIONS, ""]
+    if any(list(row) == list(SEP) for rows in req["readings"] for row in rows):
+        parts[0] = INSTRUCTIONS.replace("Below are candidate readings of the table in that region.",
+                                        "Below are candidate readings of the table(s) in that region. " + _GROUP_NOTE)
     for letter, rows in zip(LETTERS, req["readings"]):
         parts.append(f"### Reading {letter} ({len(rows)} rows)")
         parts += [" | ".join(c if c else "·" for c in row) for row in rows]

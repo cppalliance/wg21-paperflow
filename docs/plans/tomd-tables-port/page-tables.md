@@ -97,3 +97,28 @@ Trial: `work/paperflow/tools/mstruct_*.py` in the poc, $10.70.
 - Tokens matched only inside the page text (part of a word) are kept without a box; the cell uses the table's box.
 - Rotated pages are skipped. Skipped papers emit tables only, with no prose.
 - Live mode makes one call per page, so a 2,000-page draft costs about $34. It is opt-in only.
+
+## Judged groups (2026-11-21)
+
+- **Overlapping tables become judge requests.** Where model tables overlap tomd's, the overlapping tables form groups
+  (`combine`). Each group whose readings differ becomes a reading-judge request.
+  - A reading may hold several tables, separated by a `=== next table ===` row, so splits and joins are judged.
+  - The prompt gains the table definition TRUTH_PROTOCOL uses (`judge._GROUP_NOTE`).
+  - Only a high- or medium-confidence answer for the model's reading swaps the group.
+- **Word placement.** Each token now takes the page word nearest the table's area, anchored on words that occur once on
+  the page. Before, it took the first occurrence, so a common word could come from the header and stretch the table's box
+  over the page. A swap then dropped tomd's front-matter table, and the oversized table was lost later. That was the
+  cause of two −1.0 losses on fresh7–9.
+- **Measured with cached page answers** ($3.2 of judge calls over three runs), scored per table against jt1 / ceiling:
+
+| sample | today | add-only | judged groups | better / worse |
+|---|---|---|---|---|
+| dev, 294 tables | 65.72% | 83.92% | 85.20% | 127 / 16 |
+| fresh7–9, 166 tables | 58.22% | 74.16% | 82.83% | 58 / 4 (worst −0.24) |
+
+- The fresh7–9 pool estimate is **+12.4 ± 1.6 pts** over jt1 (81.16% → about 93.5%), with nothing lost on papers with no
+  loss today.
+- Open:
+  - The dev side's p3128r3 loses about 0.3 per table on 10 tables when its group is swapped.
+  - The table definition was added after the fresh7–9 losses were seen. The placement fix was the actual cause; the
+    definition stays as the general alignment with the key's convention.

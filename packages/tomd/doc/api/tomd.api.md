@@ -1,6 +1,6 @@
 # tomd API surface
 
-122 modules, 93 classes, 324 functions, 93 methods, 387 fields. Typed: 962 of 1247 functions and methods (77%).
+122 modules, 93 classes, 327 functions, 93 methods, 387 fields. Typed: 968 of 1254 functions and methods (77%).
 
 ## Contents
 
@@ -78,7 +78,7 @@
 - [`lib/pdf/judge.py`](#lib-pdf-judge-py): answer_pick, judge_request, norm_rows, prompt_text, region_readings, render_crops, CONFIDENT, CROP_DPI, ID_ROUND, INSTRUCTIONS, LETTERS, MAX_EDGE, ...
 - [`lib/pdf/levels.py`](#lib-pdf-levels-py): assign, cell_markers, comment, NAMES, SHOWN_FROM
 - [`lib/pdf/mono.py`](#lib-pdf-mono-py): classify_monospace, propagate_monospace
-- [`lib/pdf/page_tables.py`](#lib-pdf-page-tables-py): model_tables, page_table_requests, render_page, request_id, section_boxes, INSTRUCTIONS, MAX_EDGE, PROMPT_VERSION, RENDER_DPI, SCHEMA, SOURCE
+- [`lib/pdf/page_tables.py`](#lib-pdf-page-tables-py): combine, group_request, model_sections, model_tables, page_table_requests, render_page, request_id, section_boxes, GROUP_VERSION, INSTRUCTIONS, MAX_EDGE, MAX_GROUP_PAGES, ...
 - [`lib/pdf/pagecache.py`](#lib-pdf-pagecache-py): rawdict, words_in
 - [`lib/pdf/pipeline.py`](#lib-pdf-pipeline-py): PipelineResult, dropped_nomination_regions, run_pipeline
 - [`lib/pdf/poll.py`](#lib-pdf-poll-py): extract_poll_tables
@@ -4058,7 +4058,7 @@ were right before, and fixed 23 of 25 that were wrong while a right reading exis
 
 def answer_pick(req: dict, answers: Mapping[str, Mapping] | None) -> tuple[int, str] | None:
     """(index, confidence) of the answer to adopt, or None to keep today's choice."""
-    # called by: select.select_tables
+    # called by: page_tables.combine, select.select_tables
 
 def judge_request(readings: list[TableCandidate]) -> tuple[dict, list[TableCandidate]] | None:
     """The request for a region's distinct readings (primary first), and the readings in request order.
@@ -4103,6 +4103,8 @@ MAX_PAGES = 4  # a region spread over more pages keeps today's choice
 PAD = 12.0  # points around the readings' union on each page
 
 PROMPT_VERSION = 'reading-judge-1'
+
+SEP = ('=== next table ===',)  # a row between tables in a reading that holds several (page_tables groups)
 
 # + 3 private module-level names
 ```
@@ -4221,7 +4223,7 @@ def propagate_monospace(mupdf_blocks: list[Block], spatial_blocks: list[Block], 
 
 ## `lib/pdf/page_tables.py` ([source](../../src/tomd/lib/pdf/page_tables.py))
 
-Typed: 4 of 10 functions and methods (40%).
+Typed: 10 of 17 functions and methods (58%).
 
 ```python
 """Tables read from the page image by an outside model (opt-in).
@@ -4238,11 +4240,11 @@ table sections:
 - Pieces the model marks as continuing are joined across consecutive pages
   when their column counts agree. A header repeated at the top of the next
   piece is dropped.
-- A model table is used only where no table tomd selected overlaps it (the
-  caller passes those). Measured on 23 dev-side papers and one slide deck
-  (2026-11-20): this adds tables where tomd had none, with no key table worse.
-  Letting the model replace tomd's tables lost as often as it won, so it never
-  does (docs/plans/tomd-tables-port/page-tables.md).
+- A model table no table tomd selected overlaps is added. Where they overlap,
+  the tomd and model tables form groups (:func:`combine`); each group whose
+  readings differ becomes a reading-judge request, and only a confident answer
+  for the model's reading swaps the group's tables. Replacing without the judge
+  lost as often as it won (docs/plans/tomd-tables-port/page-tables.md).
 
 Request: ``{"id", "page"}``. The id hashes the prompt version and the rendered
 page PNG, so an answer applies only to the page image it was given for.
@@ -4250,15 +4252,39 @@ Answer: ``{"tables": [{"rows": [[str]], "continues_from_previous_page": bool,
 "continues_on_next_page": bool}]}``. A missing or malformed answer adds nothing.
 """
 
-def model_tables(doc, render_doc, answers: Mapping[str, Mapping] | None, existing: list[Section], skip_pages=()) -> list[Section]:
-    """Table sections from the answers, where no existing table overlaps.
+def combine(model: list[Section], existing: list[Section], judge_answers: Mapping[str, Mapping] | None = None, judge_requests: list[dict] | None = None) -> tuple[list[Section], list[Section]]:
+    """(model tables to add, existing tables to drop).
+
+    A model table no existing table overlaps is added. Overlapping tables form
+    groups (connected through overlaps): each group whose readings differ is a
+    judge request (appended to ``judge_requests``), and a confident answer for
+    the model's reading swaps the group's tables for the model's.
+    """
+    # calls: _meets, section_boxes, group_request, judge.answer_pick
+    # called by: model_tables, pipeline._page_model_tables
+
+def group_request(tomd: list[Section], model: list[Section]) -> dict | None:
+    """The judge request for a group of overlapping tomd and model tables, or None when their
+    readings agree or the group spreads over more than MAX_GROUP_PAGES pages.
+    """
+    # calls: _reading, section_boxes, judge._digest
+    # called by: combine
+
+def model_sections(doc, render_doc, answers: Mapping[str, Mapping] | None, skip_pages=()) -> list[Section]:
+    """Every table in the answers as a section, in page order.
 
     ``doc`` gives the words (hidden text already removed); ``render_doc`` is
     the unmodified document whose page images the ids were made from.
     """
     # untyped: doc, render_doc, skip_pages
-    # calls: section_boxes, _valid, request_id, render_page, _norm, _piece, _overlaps, _cells, types.TableCandidate, select._to_section
-    # called by: pipeline._deck_tables, pipeline._page_model_tables
+    # calls: _valid, request_id, render_page, _norm, _piece, _section
+    # called by: model_tables, pipeline._page_model_tables
+
+def model_tables(doc, render_doc, answers: Mapping[str, Mapping] | None, existing: list[Section], skip_pages=()) -> list[Section]:
+    """The model tables no existing table overlaps (no judging)."""
+    # untyped: doc, render_doc, skip_pages
+    # calls: combine, model_sections
+    # called by: pipeline._deck_tables
 
 def page_table_requests(doc) -> list[dict]:
     """One request per page of an open document."""
@@ -4268,19 +4294,23 @@ def page_table_requests(doc) -> list[dict]:
 def render_page(page) -> bytes:
     """The page image the model is shown: RENDER_DPI, long edge at most MAX_EDGE pixels."""
     # untyped: page
-    # called by: model_tables, page_table_requests
+    # called by: model_sections, page_table_requests
 
 def request_id(png: bytes) -> str:
-    # called by: model_tables, page_table_requests
+    # called by: model_sections, page_table_requests
     ...
 
 def section_boxes(sec: Section) -> dict[int, Box]:
     """Page -> bounding box of a table section's lines (its region when it has no lines)."""
-    # called by: model_tables
+    # called by: _meets, combine, group_request
+
+GROUP_VERSION = 'group-2'  # group requests: judge prompt with the table definition (2026-11-21)
 
 INSTRUCTIONS = ...
 
 MAX_EDGE = 1568  # pixels: larger pages are scaled down
+
+MAX_GROUP_PAGES = 8  # a group of overlapping tables over more pages keeps tomd's tables
 
 PROMPT_VERSION = 'page-tables-1'
 
@@ -4290,7 +4320,7 @@ SCHEMA = ...
 
 SOURCE = 'page-model'
 
-# + 5 private module-level names
+# + 9 private module-level names
 ```
 
 <a id="lib-pdf-pagecache-py"></a>
@@ -4420,8 +4450,9 @@ def run_pipeline(path: Path, *, ml_tables: bool = False, visualize: bool = False
 
     ``page_tables`` holds outside answers keyed by page request id
     (:mod:`tomd.lib.pdf.page_tables`): a table a vision model read from the
-    page image is added where no selected table overlaps it, with only the
-    page's own words. A paper tomd skips (slide deck, standards draft) emits
+    page image, with only the page's own words, is added where no selected
+    table overlaps it; where tables overlap, the group is a judge request and a
+    confident answer for the model's reading swaps it in. A paper tomd skips (slide deck, standards draft) emits
     those tables instead when it has answers.
     labels inside vector figures render as pixels alongside body text.
     """
@@ -7325,6 +7356,7 @@ class MarkdownWriter:
 - `collect_text_emoji_bboxes`: [`lib/pdf/glyphs.py`](#lib-pdf-glyphs-py)
 - `column_coherence`: [`lib/pdf/checks/coherence.py`](#lib-pdf-checks-coherence-py)
 - `column_type`: [`lib/pdf/checks/plausible.py`](#lib-pdf-checks-plausible-py)
+- `combine`: [`lib/pdf/page_tables.py`](#lib-pdf-page-tables-py)
 - `comment`: [`lib/pdf/levels.py`](#lib-pdf-levels-py)
 - `COMMON_LAYOUTS`: [`lib/pdf/summary.py`](#lib-pdf-summary-py)
 - `compare`: [`lib/golden_compare.py`](#lib-golden-compare-py)
@@ -7468,6 +7500,8 @@ class MarkdownWriter:
 - `GlyphCandidate`: [`lib/pdf/glyphs.py`](#lib-pdf-glyphs-py)
 - `GlyphPassStats`: [`domain/diagnostics.py`](#domain-diagnostics-py)
 - `grid_of`: [`lib/pdf/fit.py`](#lib-pdf-fit-py)
+- `group_request`: [`lib/pdf/page_tables.py`](#lib-pdf-page-tables-py)
+- `GROUP_VERSION`: [`lib/pdf/page_tables.py`](#lib-pdf-page-tables-py)
 - `gutter_regions`: [`lib/pdf/flag.py`](#lib-pdf-flag-py)
 - `gutters`: [`lib/pdf/content.py`](#lib-pdf-content-py)
 - `has_caption`: [`lib/pdf/checks/caption.py`](#lib-pdf-checks-caption-py)
@@ -7538,6 +7572,7 @@ class MarkdownWriter:
 - `MAX_EDGE`: [`lib/pdf/judge.py`](#lib-pdf-judge-py)
 - `MAX_EDGE`: [`lib/pdf/page_tables.py`](#lib-pdf-page-tables-py)
 - `MAX_FILL`: [`lib/pdf/rowbands.py`](#lib-pdf-rowbands-py)
+- `MAX_GROUP_PAGES`: [`lib/pdf/page_tables.py`](#lib-pdf-page-tables-py)
 - `MAX_PAGES`: [`lib/pdf/judge.py`](#lib-pdf-judge-py)
 - `MAX_WORDS`: [`lib/pdf/airepair.py`](#lib-pdf-airepair-py)
 - `maybe_normalize_code_line`: [`lib/pdf/code_format.py`](#lib-pdf-code-format-py)
@@ -7553,6 +7588,7 @@ class MarkdownWriter:
 - `MIXED_TABLE_MARKER`: [`lib/tables.py`](#lib-tables-py)
 - `MODEL`: [`lib/pdf/dvf_model.py`](#lib-pdf-dvf-model-py)
 - `MODEL`: [`lib/pdf/scan_model.py`](#lib-pdf-scan-model-py)
+- `model_sections`: [`lib/pdf/page_tables.py`](#lib-pdf-page-tables-py)
 - `model_tables`: [`lib/pdf/page_tables.py`](#lib-pdf-page-tables-py)
 - `NAMES`: [`lib/pdf/levels.py`](#lib-pdf-levels-py)
 - `NEAR`: [`lib/pdf/continuation.py`](#lib-pdf-continuation-py)
@@ -7677,6 +7713,7 @@ class MarkdownWriter:
 - `SECTION_NUM_RE`: [`lib/pdf/types.py`](#lib-pdf-types-py)
 - `SectionKind`: [`lib/pdf/types.py`](#lib-pdf-types-py)
 - `select_tables`: [`lib/pdf/select.py`](#lib-pdf-select-py)
+- `SEP`: [`lib/pdf/judge.py`](#lib-pdf-judge-py)
 - `sequence_order`: [`lib/pdf/checks/plausible.py`](#lib-pdf-checks-plausible-py)
 - `set_lexicon`: [`lib/pdf/emit.py`](#lib-pdf-emit-py)
 - `shape`: [`lib/pdf/checks/coherence.py`](#lib-pdf-checks-coherence-py)

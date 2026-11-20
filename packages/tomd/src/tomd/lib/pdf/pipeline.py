@@ -100,7 +100,7 @@ from .docling_backend import (
 from ._fitz_lock import _FITZ_LOCK
 from .runctx import current, run_scope
 from .table_gate import gate_requests, inside_vetoed, veto_tables, vetoed_boxes
-from .page_tables import model_tables
+from .page_tables import combine, model_sections, model_tables
 from .select import _is_bad, _to_section, page_furniture, remove_table_regions, select_tables, stitch_pages
 from .tagged import extract_tagged_tables
 from .ruled import extract_ruled_tables, page_hrules
@@ -1222,13 +1222,14 @@ def _deck_tables(doc, answers) -> "PipelineResult | None":
     return PipelineResult(md=md, sections=secs, page_count=doc.page_count)
 
 
-def _page_model_tables(path, answers, existing, skip_pages=()):
-    """Table sections from outside page-image answers (page_tables.model_tables)."""
+def _page_model_tables(path, answers, existing, skip_pages=(), judge_answers=None, judge_requests=None):
+    """(model tables to add, selected tables to drop) from outside page-image answers
+    (page_tables.combine): judged groups swap only on a confident answer."""
     with _FITZ_LOCK:  # see _fitz_lock.py for why this lock is required
         doc, raw = fitz.open(str(path)), fitz.open(str(path))
         hide_recorded(doc)
         try:
-            return model_tables(doc, raw, answers, existing, skip_pages)
+            return combine(model_sections(doc, raw, answers, skip_pages), existing, judge_answers, judge_requests)
         finally:
             doc.close()
             raw.close()
@@ -2190,8 +2191,9 @@ def run_pipeline(
 
     ``page_tables`` holds outside answers keyed by page request id
     (:mod:`tomd.lib.pdf.page_tables`): a table a vision model read from the
-    page image is added where no selected table overlaps it, with only the
-    page's own words. A paper tomd skips (slide deck, standards draft) emits
+    page image, with only the page's own words, is added where no selected
+    table overlaps it; where tables overlap, the group is a judge request and a
+    confident answer for the model's reading swaps it in. A paper tomd skips (slide deck, standards draft) emits
     those tables instead when it has answers.
     labels inside vector figures render as pixels alongside body text.
     """
@@ -2678,7 +2680,10 @@ def run_pipeline(
     # selected table sits, and only with the page's own words.
     if page_tables:
         try:
-            added = _page_model_tables(path, page_tables, table_sections, page_rotations)
+            added, dropped_tables = _page_model_tables(path, page_tables, table_sections, page_rotations,
+                                                       reading_judge, judge_reqs)
+            if dropped_tables:
+                table_sections = [s for s in table_sections if not any(s is d for d in dropped_tables)]
             if added:
                 table_sections += added
                 all_mupdf_blocks = remove_table_regions(all_mupdf_blocks, added)

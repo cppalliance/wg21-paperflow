@@ -12,11 +12,11 @@ table sections:
 - Pieces the model marks as continuing are joined across consecutive pages
   when their column counts agree. A header repeated at the top of the next
   piece is dropped.
-- A model table is used only where no table tomd selected overlaps it (the
-  caller passes those). Measured on 23 dev-side papers and one slide deck
-  (2026-11-20): this adds tables where tomd had none, with no key table worse.
-  Letting the model replace tomd's tables lost as often as it won, so it never
-  does (docs/plans/tomd-tables-port/page-tables.md).
+- A model table no table tomd selected overlaps is added. Where they overlap,
+  the tomd and model tables form groups (:func:`combine`); each group whose
+  readings differ becomes a reading-judge request, and only a confident answer
+  for the model's reading swaps the group's tables. Replacing without the judge
+  lost as often as it won (docs/plans/tomd-tables-port/page-tables.md).
 
 Request: ``{"id", "page"}``. The id hashes the prompt version and the rendered
 page PNG, so an answer applies only to the page image it was given for.
@@ -34,6 +34,7 @@ import fitz
 
 from tomd.domain.elements import Confidence
 
+from .judge import ID_ROUND, SEP, _digest, answer_pick
 from .select import _to_section
 from .types import Line, Section, Span, TableCandidate
 
@@ -41,6 +42,8 @@ PROMPT_VERSION = "page-tables-1"
 RENDER_DPI = 150
 MAX_EDGE = 1568          # pixels: larger pages are scaled down
 SOURCE = "page-model"
+MAX_GROUP_PAGES = 8      # a group of overlapping tables over more pages keeps tomd's tables
+GROUP_VERSION = "group-2"  # group requests: judge prompt with the table definition (2026-11-21)
 
 INSTRUCTIONS = """This is one page of a C++ standards committee paper. Transcribe every table on this page.
 
@@ -114,17 +117,33 @@ def _valid(ans) -> list[dict]:
 
 
 def _piece(table: Mapping, words: list[tuple[str, str, Box]], pool: dict, page_text: str, pg: int):
-    """A model table on page pg as cells of verbatim page words, or None when no word is the page's."""
+    """A model table on page pg as cells of verbatim page words, or None when no word is the page's.
+
+    Each token takes an unused page word with its text. A word that occurs once
+    on the page anchors the table's area; every other token takes the occurrence
+    nearest that area, so a common word ("the", a number) is not taken from the
+    header or another table and the table's box stays its own."""
+    toks = [[[t for t in _norm(c).split(" ") if t] for c in r] for r in table["rows"]]
+    anchors = [words[pool[t][0]][2] for r in toks for c in r for t in c if len(pool.get(t, ())) == 1]
+    seed = ((min(b[0] for b in anchors), min(b[1] for b in anchors), max(b[2] for b in anchors),
+             max(b[3] for b in anchors)) if anchors else None)
+
+    def dist(b: Box) -> float:
+        if seed is None:
+            return 0.0
+        dx = max(seed[0] - b[2], b[0] - seed[2], 0.0)
+        dy = max(seed[1] - b[3], b[1] - seed[3], 0.0)
+        return dx + dy
+
     rows, boxes = [], []
-    for r in table["rows"]:
+    for r in toks:
         row = []
         for c in r:
             cell: list[tuple[str, Box | None]] = []
-            for tok in _norm(c).split(" "):
-                if not tok:
-                    continue
+            for tok in c:
                 if pool.get(tok):
-                    i = pool[tok].pop(0)
+                    k = min(range(len(pool[tok])), key=lambda k: (dist(words[pool[tok][k]][2]), k))
+                    i = pool[tok].pop(k)
                     cell.append((words[i][1], words[i][2]))
                     boxes.append(words[i][2])
                 elif tok in page_text:
@@ -174,19 +193,28 @@ def section_boxes(sec: Section) -> dict[int, Box]:
     return out
 
 
-def model_tables(doc, render_doc, answers: Mapping[str, Mapping] | None, existing: list[Section],
-                 skip_pages=()) -> list[Section]:
-    """Table sections from the answers, where no existing table overlaps.
+def _section(c: dict) -> Section:
+    cells = [r for pg, rows, box in c["parts"] for r in _cells(rows, pg, box)]
+    cand = TableCandidate(source=SOURCE, rows=cells, bboxes=dict(c["boxes"]))
+    sec = _to_section(cand, Confidence.UNCERTAIN, [])
+    first = cand.pages[0]
+    sec.metadata["region_bbox"] = (first, tuple(cand.bboxes[first]))
+    if len(cand.pages) > 1:
+        sec.metadata["page_bboxes"] = dict(cand.bboxes)
+    sec.metadata["uncertain_reasons"] = ["single-source", "page-model"]
+    sec.metadata["table_note"] = ("No reader kept a table here; a vision model read the page image and "
+                                  "tomd kept only the page's own words.")
+    return sec
+
+
+def model_sections(doc, render_doc, answers: Mapping[str, Mapping] | None, skip_pages=()) -> list[Section]:
+    """Every table in the answers as a section, in page order.
 
     ``doc`` gives the words (hidden text already removed); ``render_doc`` is
     the unmodified document whose page images the ids were made from.
     """
     if not answers:
         return []
-    taken: dict[int, list[Box]] = {}
-    for sec in existing:
-        for pg, b in section_boxes(sec).items():
-            taken.setdefault(pg, []).append(b)
     cands: list[dict] = []
     for pg in range(doc.page_count):
         if pg in skip_pages:
@@ -218,19 +246,91 @@ def model_tables(doc, render_doc, answers: Mapping[str, Mapping] | None, existin
             else:
                 cands.append({"rows": list(rows), "boxes": {pg: box}, "parts": [(pg, rows, box)],
                               "to_next": bool(t.get("continues_on_next_page")) and ti == len(tables) - 1})
-    out = []
-    for c in cands:
-        if any(_overlaps(b, o) for pg, b in c["boxes"].items() for o in taken.get(pg, [])):
+    return [_section(c) for c in cands]
+
+
+def _meets(a: Section, b: Section) -> bool:
+    ba, bb = section_boxes(a), section_boxes(b)
+    return any(_overlaps(box, bb[pg]) for pg, box in ba.items() if pg in bb)
+
+
+def _rows(sec: Section) -> list[list[str]]:
+    if sec.columns:
+        return [[_norm("".join(sp.text for sp in cell).replace("\n", " ")) for cell in row] for row in sec.columns]
+    return [[_norm(c) for c in line.split(" | ")] for line in (sec.text or "").splitlines()]
+
+
+def _reading(secs: list[Section]) -> list[list[str]]:
+    rows: list[list[str]] = []
+    for k, sec in enumerate(secs):
+        rows += ([list(SEP)] if k else []) + _rows(sec)
+    return rows
+
+
+def group_request(tomd: list[Section], model: list[Section]) -> dict | None:
+    """The judge request for a group of overlapping tomd and model tables, or None when their
+    readings agree or the group spreads over more than MAX_GROUP_PAGES pages."""
+    readings = {"tomd": _reading(tomd), SOURCE: _reading(model)}
+    if readings["tomd"] == readings[SOURCE]:
+        return None
+    boxes: dict[int, Box] = {}
+    for sec in tomd + model:
+        for pg, b in section_boxes(sec).items():
+            a = boxes.get(pg)
+            boxes[pg] = b if a is None else (min(a[0], b[0]), min(a[1], b[1]), max(a[2], b[2]), max(a[3], b[3]))
+    if not boxes or len(boxes) > MAX_GROUP_PAGES:
+        return None
+    pieces = [[pg, [round(v, 1) for v in boxes[pg]]] for pg in sorted(boxes)]
+    order = sorted(readings, key=lambda k: _digest(readings[k]))
+    rid = "g" + _digest([GROUP_VERSION, PROMPT_VERSION, [[pg, [round(v / ID_ROUND) for v in bb]] for pg, bb in pieces],
+                         [readings[k] for k in order]])[:15]
+    return {"id": rid, "pieces": pieces, "readings": [readings[k] for k in order], "sources": order,
+            "today": order.index("tomd")}
+
+
+def combine(model: list[Section], existing: list[Section], judge_answers: Mapping[str, Mapping] | None = None,
+            judge_requests: list[dict] | None = None) -> tuple[list[Section], list[Section]]:
+    """(model tables to add, existing tables to drop).
+
+    A model table no existing table overlaps is added. Overlapping tables form
+    groups (connected through overlaps): each group whose readings differ is a
+    judge request (appended to ``judge_requests``), and a confident answer for
+    the model's reading swaps the group's tables for the model's.
+    """
+    add = [m for m in model if not any(_meets(m, e) for e in existing)]
+    drop: list[Section] = []
+    linked = [m for m in model if m not in add]
+    seen: set[int] = set()
+    for m0 in linked:
+        if id(m0) in seen:
             continue
-        cells = [r for pg, rows, box in c["parts"] for r in _cells(rows, pg, box)]
-        cand = TableCandidate(source=SOURCE, rows=cells, bboxes=dict(c["boxes"]))
-        sec = _to_section(cand, Confidence.UNCERTAIN, [])
-        first = cand.pages[0]
-        sec.metadata["region_bbox"] = (first, tuple(cand.bboxes[first]))
-        if len(cand.pages) > 1:
-            sec.metadata["page_bboxes"] = dict(cand.bboxes)
-        sec.metadata["uncertain_reasons"] = ["single-source", "page-model"]
-        sec.metadata["table_note"] = ("No reader kept a table here; a vision model read the page image and "
-                                      "tomd kept only the page's own words.")
-        out.append(sec)
-    return out
+        ms, es, todo = [], [], [("m", m0)]
+        while todo:
+            kind, x = todo.pop()
+            if id(x) in seen:
+                continue
+            seen.add(id(x))
+            (ms if kind == "m" else es).append(x)
+            others = existing if kind == "m" else linked
+            todo += [("e" if kind == "m" else "m", y) for y in others if id(y) not in seen and _meets(x, y)]
+        key = lambda s: (s.page_num, section_boxes(s).get(s.page_num, (0, 0))[1])  # noqa: E731
+        ms.sort(key=key)
+        es.sort(key=key)
+        req = group_request(es, ms)
+        if req is None:
+            continue
+        if judge_requests is not None:
+            judge_requests.append(req)
+        ans = answer_pick(req, judge_answers)
+        if ans is not None and req["sources"][ans[0]] == SOURCE:
+            for m in ms:
+                m.metadata["judged"] = f"{SOURCE}/{ans[1]}"
+            add += ms
+            drop += es
+    return add, drop
+
+
+def model_tables(doc, render_doc, answers: Mapping[str, Mapping] | None, existing: list[Section],
+                 skip_pages=()) -> list[Section]:
+    """The model tables no existing table overlaps (no judging)."""
+    return combine(model_sections(doc, render_doc, answers, skip_pages), existing)[0]

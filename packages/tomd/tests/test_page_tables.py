@@ -5,8 +5,9 @@
 """Tables read from page images by an outside model: requests out, tables in (tomd.lib.pdf.page_tables)."""
 import fitz
 
-from tomd.lib.pdf.page_tables import (INSTRUCTIONS, SCHEMA, model_tables, page_table_requests, render_page,
-                                      request_id)
+from tomd.lib.pdf.judge import prompt_text
+from tomd.lib.pdf.page_tables import (INSTRUCTIONS, SCHEMA, combine, model_sections, model_tables,
+                                      page_table_requests, render_page, request_id)
 from tomd.lib.pdf.pipeline import _deck_tables, run_pipeline
 from tomd.lib.pdf.types import Line, Section, SectionKind, Span
 
@@ -106,3 +107,55 @@ def test_pipeline_adds_a_model_table_only_with_answers(tmp_path):
     ans = _answers(doc, {0: [_table([["strongly for", "against"], ["5,", "2."]])]})
     md = run_pipeline(path, page_tables=ans).md
     assert md != base and "| strongly for | against |" in md
+
+
+def _tomd_table(rows, y0=100):
+    """a selected tomd table section over the grid's area"""
+    lines = [Line(spans=[Span(text=t, bbox=(x, y - 9, x + 40, y + 2))], bbox=(x, y - 9, x + 40, y + 2), page_num=0)
+             for x, y, t in _grid(rows, y0)]
+    return Section(kind=SectionKind.TABLE, text="\n".join(" | ".join(r) for r in rows), lines=lines, page_num=0)
+
+
+def _group_setup(model_rows):
+    doc = _doc([_grid(_ROWS)])
+    model = model_sections(doc, doc, _answers(doc, {0: [_table(r) for r in model_rows]}))
+    return model, [_tomd_table([["Name Value"], ["alpha 1"], ["beta 2"]])]
+
+
+def test_overlapping_tables_become_a_judge_request_and_swap_only_on_a_confident_model_answer():
+    model, tomd = _group_setup([_ROWS])
+    reqs = []
+    add, drop = combine(model, tomd, None, reqs)
+    assert add == [] and drop == [] and len(reqs) == 1
+    req = reqs[0]
+    assert sorted(req["sources"]) == ["page-model", "tomd"] and req["id"].startswith("g")
+    m = req["sources"].index("page-model")
+    for conf in ("low",):
+        assert combine(model, tomd, {req["id"]: {"pick": m, "confidence": conf}})[1] == []
+    assert combine(model, tomd, {req["id"]: {"pick": 1 - m, "confidence": "high"}})[1] == []
+    add, drop = combine(model, tomd, {req["id"]: {"pick": m, "confidence": "medium"}})
+    assert add == model and drop == tomd and model[0].metadata["judged"] == "page-model/medium"
+    # the same reading on both sides needs no judge
+    same, reqs2 = [_tomd_table(_ROWS)], []
+    same[0].columns = None
+    assert combine(model, same, None, reqs2) == ([], []) and reqs2 == []
+
+
+def test_a_group_may_hold_several_tables_and_the_prompt_says_so():
+    model, tomd = _group_setup([_ROWS[:2], _ROWS[2:]])
+    reqs = []
+    combine(model, tomd, None, reqs)
+    assert len(reqs) == 1 and len(model) == 2
+    readings = reqs[0]["readings"][reqs[0]["sources"].index("page-model")]
+    assert ["=== next table ==="] in readings
+    assert "may hold several tables" in prompt_text(reqs[0])
+    single = {"readings": [[["a", "b"]], [["a b"]]]}
+    assert "may hold several tables" not in prompt_text(single)
+
+
+def test_a_common_word_is_taken_near_the_table_not_from_the_header():
+    # "1" and "Value" also appear in the page header; the table's box stays its own
+    doc = _doc([[(72, 40, "Value 1 header")] + _grid(_ROWS, y0=400)])
+    secs = model_sections(doc, doc, _answers(doc, {0: [_table(_ROWS)]}))
+    box = secs[0].metadata["region_bbox"][1]
+    assert box[1] > 300
